@@ -34,6 +34,7 @@ import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWo
 import { decideReloadOnBuild } from './server-build-core.mjs';
 import { applyTheme } from './theme.js';
 import { getActiveView, getDismissedUpdate, getThemeId, isSoundEnabled, setActiveView, setDismissedUpdate, setSoundEnabled } from './ui-prefs.js';
+import { uiState } from './ui-state-core.mjs';
 import { acknowledgeUsageAttention, applyPlanLimits, applyUsageReport, applyUsageSessions, mountUsageView, refreshUsageView, requestUsageReport, setUsageActivityCallback, setUsageRequestSender } from './usage-panel.js';
 
 // ── Apply saved theme ─────────────────────────────────────────
@@ -251,7 +252,7 @@ setMillRequestSender(sendControlMsg);
 
 function isUsageSurfaceVisible() {
   if (isPhoneShellActive()) return isPhoneScreenActive('usage');
-  return _activeView === 'usage';
+  return uiState.snapshot().activeView === 'usage';
 }
 
 function requestUsageReportIfVisible() {
@@ -283,7 +284,7 @@ const messageHandlers = {
   'mill-report':        (msg) => {
     applyMillReport(msg);
     applySettingsProjectReport(msg);
-    const shouldResolve = _activeView === 'settings' || shouldResolveSettingsHashOnMillReport;
+    const shouldResolve = uiState.snapshot().activeView === 'settings' || shouldResolveSettingsHashOnMillReport;
     shouldResolveSettingsHashOnMillReport = false;
     if (shouldResolve) activateSettingsHash();
   },
@@ -578,7 +579,6 @@ const VIEW_TABS = [
   { view: 'settings', tab: tabSettings, el: viewSettingsEl },
 ];
 
-let _activeView = 'focus';
 let shouldPersistActiveView = true;
 
 // Looking at a surface is what clears its dot, on either layout: a desktop tab activation and a phone
@@ -594,8 +594,8 @@ function acknowledgeViewAttention(view) {
 }
 
 function activateView(view, { section, setting, persist = true } = {}) {
-  const prev = _activeView;
-  _activeView = view;
+  const prev = uiState.snapshot().activeView;
+  uiState.dispatch('setActiveView', view);
   shouldPersistActiveView = persist;
   // Mirror the active view onto the body: terminal.js reads document.body.dataset.activeView to decide
   // whether a focused xterm releases Alt+W to the chrome triage handler (Focus) or treats it as a real
@@ -700,7 +700,7 @@ function applyFormFactorLayout(layout) {
   }
   const carriedSessionId = getPhoneSessionId();
   deactivatePhoneShell();
-  activateView(_activeView, { persist: shouldPersistActiveView }); // re-activates the saved view now that the desktop DOM is whole
+  activateView(uiState.snapshot().activeView, { persist: shouldPersistActiveView }); // re-activates the saved view now that the desktop DOM is whole
   // Quietly, NOT via the pill-activation path: that one is the operator making a selection, so it
   // sends start-session for a DORMANT target and dismiss for a COMPLETE one. A rotation is a layout event,
   // and treating it as a selection would respawn a session the operator just killed or acknowledge away
@@ -733,6 +733,7 @@ document.getElementById('btn-restart').addEventListener('click', () => {
 // shuts the server down has no way to start it again, so that item is not offered there. Restart
 // stays: production respawns the process detached and the dashboard reconnects on its own.
 function applyClientTrust(trust) {
+  uiState.dispatch('setClientTrust', trust);
   const showShutdown = shouldShowServerAction('shutdown', trust);
   document.getElementById('btn-shutdown').hidden = !showShutdown;
   document.getElementById('menu-divider-shutdown').hidden = !showShutdown;

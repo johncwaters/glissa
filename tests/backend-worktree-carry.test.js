@@ -22,10 +22,14 @@ function fakeOldSession({ path: projectPath = 'C:/proj', worktreeDir = 'C:/wts/p
     calls,
     path: projectPath,
     worktreeDir,
-    _workspace: workspace === undefined
+    worktreeCarry: workspace === undefined
       ? { cwd: worktreeDir, isGit: true, branch: 'glissa/session/sess-1', base: 'develop' }
       : workspace,
     _killReap: killReap,
+    getWorktreeCarry() {
+      if (!worktreeDir || !this.worktreeCarry) return null;
+      return { worktreeDir, branch: this.worktreeCarry.branch, base: this.worktreeCarry.base };
+    },
     // Mirrors Session.discardWorktreeIfClean's contract: any unmerged work -> kept (false), an empty
     // worktree -> discarded (true).
     async discardWorktreeIfClean() {

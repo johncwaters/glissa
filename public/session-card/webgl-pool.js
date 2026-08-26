@@ -5,6 +5,7 @@
 // pure eviction policy lives in webgl-core.mjs.
 
 import { WebglAddon } from '@xterm/addon-webgl';
+import { uiState } from '../ui-state-core.mjs';
 import { sessionUIs } from './card-registry.js';
 import { pickEvictionVictims } from './webgl-core.mjs';
 
@@ -13,12 +14,6 @@ import { pickEvictionVictims } from './webgl-core.mjs';
 // be a constant for the LRU policy to be predictable.
 const MAX_WEBGL_CONTEXTS = window.matchMedia?.('(pointer: coarse)').matches ? 4 : 12;
 const _webglLru = new Map(); // ui -> true; insertion order = LRU, oldest first
-let getBorrowedWebglCardId = () => null;
-
-// Injected by card-host.js, which already imports this module; importing it back would cycle.
-export function setBorrowedWebglCardIdProvider(provider) {
-  getBorrowedWebglCardId = typeof provider === 'function' ? provider : () => null;
-}
 
 export function releaseWebgl(ui) {
   _webglLru.delete(ui);
@@ -30,7 +25,7 @@ export function releaseWebgl(ui) {
 
 function evictWebglIfNeeded(exceptUi) {
   const protectedUis = [exceptUi];
-  const borrowedUi = sessionUIs.get(getBorrowedWebglCardId());
+  const borrowedUi = sessionUIs.get(uiState.snapshot().borrowedCardId);
   if (borrowedUi) protectedUis.push(borrowedUi);
   for (const victim of pickEvictionVictims([..._webglLru.keys()], MAX_WEBGL_CONTEXTS, protectedUis)) {
     releaseWebgl(victim);

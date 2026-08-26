@@ -7,6 +7,8 @@ const path = require('node:path');
 
 const CHECKED_INCLUDE_GLOBS = [
   'server/core/**/*.js',
+  'session/core/snapshot-projection.js',
+  'session/core/worktree-state.js',
   'shared/contracts/**/*.js',
   'shared/*.js',
   'shared/**/*.d.ts',

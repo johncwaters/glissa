@@ -50,10 +50,16 @@ function makeSession({ engine, sig = signature(), state = STATES.IDLE, autoRebas
     integrationBranch: 'develop',
     ...(autoRebase === undefined ? {} : { autoRebase }),
   });
-  s.worktreeDir = '/wt';
-  s._workspace = { cwd: '/wt', isGit: true, branch: 'glissa/session/ar-sess', base: 'develop' };
+  s.worktreeLifecycle.adoptWorktree({
+    worktreeDir: '/wt',
+    branch: 'glissa/session/ar-sess',
+    base: 'develop',
+    hasUnmergedWork: false,
+    watch: false,
+    emit: false,
+  });
   s.state = state;
-  s._computeWorktreeSignature = async () => sig;
+  s.worktreeLifecycle.computeWorktreeSignature = async () => sig;
   return s;
 }
 
@@ -66,7 +72,9 @@ test('fires on a clean, idle worktree that fell behind the integration branch', 
     await s.checkWorktreeChange();
     assert.equal(engine.calls.length, 1, 'the engine was asked to rebase');
     assert.deepEqual(engine.calls[0], {
-      projectPath: s.path, workspace: s._workspace, targetBranch: 'develop',
+      projectPath: s.path,
+      workspace: engine.calls[0].workspace,
+      targetBranch: 'develop',
     });
     const entries = rebaseEntries(s);
     assert.equal(entries.length, 1);
@@ -75,7 +83,7 @@ test('fires on a clean, idle worktree that fell behind the integration branch', 
     assert.equal(entries[0].to, 'newhead');
     assert.equal(entries[0].rerereReplayed, true, 'the trace records that rerere carried the rebase');
     assert.equal(s.baseSha, 'newbase', 'the session tracks the tip it now sits on');
-    assert.equal(s._workspace.baseSha, 'newbase', 'and so does the workspace handed to the merge engine');
+    assert.equal(engine.calls[0].workspace.baseSha, 'newbase', 'and so does the workspace handed to the merge engine');
   } finally { s.destroy(); }
 });
 
@@ -84,7 +92,7 @@ test('a successful rebase schedules a recheck so the signature and broadcast ref
   const s = makeSession({ engine });
   try {
     await s.checkWorktreeChange();
-    assert.ok(s._worktreeCheckTimer, 'a follow-up worktree check is armed');
+    assert.equal(s.worktreeLifecycle.snapshot().hasPendingCheck, true, 'a follow-up worktree check is armed');
   } finally { s.destroy(); }
 });
 
@@ -121,7 +129,7 @@ test('never fires while the session is working, waiting, dirty, parked, merging,
     const engine = fakeEngine();
     const s = makeSession({ engine });
     try {
-      s.mergeStatus = mergeStatus;
+      s.worktreeLifecycle.setMergeStatus(mergeStatus, {}, { emit: false });
       await s.checkWorktreeChange();
       assert.equal(engine.calls.length, 0, `${mergeStatus}: the engine is never called`);
     } finally { s.destroy(); }
@@ -155,10 +163,10 @@ test('a moved integration branch clears the cooldown and the rebase is attempted
   try {
     await s.checkWorktreeChange();
     assert.equal(engine.calls.length, 1);
-    s._computeWorktreeSignature = async () => signature({ targetSha: 'moved' });
+    s.worktreeLifecycle.computeWorktreeSignature = async () => signature({ targetSha: 'moved' });
     await s.checkWorktreeChange();
     assert.equal(engine.calls.length, 2, 'a new target sha is worth another attempt');
-    assert.equal(s._rebaseConflictKey, null, 'and a success clears the cooldown');
+    assert.equal(s.worktreeLifecycle.snapshot().hasConflictCooldown, false, 'and a success clears the cooldown');
   } finally { s.destroy(); }
 });
 
@@ -195,21 +203,21 @@ test('the funnel is suppressed while a rebase runs, and one recheck always close
   };
   const s = makeSession({ engine });
   try {
-    s.mergeStatus = 'pending-review';
+    s.worktreeLifecycle.setMergeStatus('pending-review', {}, { emit: false });
     const inFlight = s.checkWorktreeChange();
     await new Promise((r) => setImmediate(r));
     assert.equal(engine.calls.length, 1, 'the rebase is in flight');
 
     // A concurrent nudge (the reflog fan-out re-checking every sibling) lands mid-rebase.
-    s._computeWorktreeSignature = async () => signature({ ahead: '0', behind: '0', headSha: 'detached' });
+    s.worktreeLifecycle.computeWorktreeSignature = async () => signature({ ahead: '0', behind: '0', headSha: 'detached' });
     await s.checkWorktreeChange();
     assert.equal(engine.calls.length, 1, 'the concurrent check did not start a second rebase');
     assert.equal(s.mergeStatus, 'pending-review', 'and never demoted the review gate off a mid-rebase read');
 
     releaseRebase();
     await inFlight;
-    assert.equal(s._autoRebasing, false, 'the mutex is released');
-    assert.ok(s._worktreeCheckTimer, 'the suppressed window ends in a recheck');
+    assert.equal(s.worktreeLifecycle.snapshot().isAutoRebasing, false, 'the mutex is released');
+    assert.equal(s.worktreeLifecycle.snapshot().hasPendingCheck, true, 'the suppressed window ends in a recheck');
   } finally { s.destroy(); }
 });
 
@@ -221,8 +229,8 @@ test('a conflict and an engine throw each still close the suppressed window with
     const s = makeSession({ engine });
     try {
       await s.checkWorktreeChange();
-      assert.equal(s._autoRebasing, false);
-      assert.ok(s._worktreeCheckTimer, `${result === 'throw' ? 'a throw' : 'a conflict'} still schedules a recheck`);
+      assert.equal(s.worktreeLifecycle.snapshot().isAutoRebasing, false);
+      assert.equal(s.worktreeLifecycle.snapshot().hasPendingCheck, true, `${result === 'throw' ? 'a throw' : 'a conflict'} still schedules a recheck`);
     } finally { s.destroy(); }
   }
 });
@@ -235,7 +243,7 @@ test('a rebase that never started is retried, not cooled down', async () => {
   try {
     await s.checkWorktreeChange();
     assert.equal(engine.calls.length, 1);
-    assert.equal(s._rebaseConflictKey, null, 'no cooldown armed');
+    assert.equal(s.worktreeLifecycle.snapshot().hasConflictCooldown, false, 'no cooldown armed');
     assert.deepEqual(rebaseEntries(s), [], 'and nothing traced: it is not a decision, it is a hiccup');
     await s.checkWorktreeChange();
     assert.equal(engine.calls.length, 2, 'the same signature is tried again');

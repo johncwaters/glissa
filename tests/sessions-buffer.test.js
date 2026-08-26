@@ -13,6 +13,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { Session } = require('../session/sessions');
+const { createOutputRing } = require('../session/core/output-ring');
 
 function fakePty() {
   return {
@@ -66,13 +67,12 @@ test('getBufferSince: evicted branch (offset < base) returns full replay + evict
 });
 
 test('getBufferSince: tolerates a null hole in the retained range (defensive)', () => {
-  const s = newSession();
-  s._handlePtyData('aaaa');
-  s._handlePtyData('bbbb');
-  // Inject a defensive null between retained chunks (mirrors a transient eviction state).
-  s._outputRing.chunks.splice(1, 0, null); // ['aaaa', null, 'bbbb'], size/total unchanged
-  assert.equal(s.getBufferSince(0).data, 'aaaabbbb', 'null entry skipped; slice correct');
-  assert.equal(s.getBufferSince(4).data, 'bbbb');
+  const outputRing = createOutputRing(1024);
+  outputRing.push('aaaa');
+  outputRing.push('bbbb');
+  outputRing.chunks.splice(1, 0, null);
+  assert.equal(outputRing.since(0).data, 'aaaabbbb', 'null entry skipped; slice correct');
+  assert.equal(outputRing.since(4).data, 'bbbb');
 });
 
 test('getBufferSince: offset on a chunk boundary never splits a surrogate pair', () => {

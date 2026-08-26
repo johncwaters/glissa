@@ -210,7 +210,8 @@ function shouldStartAfterModify(previousState) {
 }
 
 function carryWorktreeAcrossRecreate(oldSess, newSess) {
-  if (!oldSess || !oldSess.worktreeDir || !oldSess._workspace) return;
+  const carry = oldSess?.getWorktreeCarry?.();
+  if (!carry) return;
   if (isSameDirectoryPath(newSess.path, oldSess.path)) {
     // adoptWorktree is synchronous by contract: the caller's newSess.start() right after this relies
     // on worktreeDir being set before it provisions. Best-effort like the provision fallback - a
@@ -218,9 +219,9 @@ function carryWorktreeAcrossRecreate(oldSess, newSess) {
     // config-reload handler.
     try {
       newSess.adoptWorktree({
-        worktreeDir: oldSess.worktreeDir,
-        branch: oldSess._workspace.branch,
-        base: oldSess._workspace.base,
+        worktreeDir: carry.worktreeDir,
+        branch: carry.branch,
+        base: carry.base,
       });
     } catch (err) {
       console.warn(`[config] worktree carry-over adopt failed for ${newSess.name}: ${err.message}`);

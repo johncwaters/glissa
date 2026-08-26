@@ -52,8 +52,8 @@ test.before(async () => {
 
   session = backend.getSession(SESSION_ID);
   assert.ok(session, 'the boot loop created the configured session');
-  session._injectHooks();
-  token = session._hookToken;
+  session._hooks.inject();
+  token = session._hooks.token();
   assert.ok(token, 'hook injection produced a token');
 });
 

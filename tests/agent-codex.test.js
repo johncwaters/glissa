@@ -299,8 +299,8 @@ test('a codex spawn carries the hook argv and the ingress URL in the env, never 
   assert.equal(args.includes('--settings'), false, 'the settings-file form is Claude Code only');
   const hookUrl = env.GLISSA_HOOK_URL;
   assert.match(hookUrl, /^http:\/\/127\.0\.0\.1:4321\/hook\/codex-session\?t=[0-9a-f]{64}$/);
-  assert.equal(hookUrl.includes(session._hookToken), true);
-  assert.equal(args.some((a) => a.includes(session._hookToken)), false, 'the token stays off the argv');
+  assert.equal(hookUrl.includes(session._hooks.token()), true);
+  assert.equal(args.some((a) => a.includes(session._hooks.token())), false, 'the token stays off the argv');
   assert.equal(args.filter((a) => a.includes('hook-relay.js')).length, 5);
   session.destroy();
 });
@@ -335,7 +335,7 @@ test('a hook callback posted by the relay drives the codex session exactly as an
   const { hookRouter, getHookPort } = hookRouterFor();
   const { session } = makeCodexSession({ id: 'codex-hooks', hookRouter, getHookPort });
   await session.start();
-  const token = session._hookToken;
+  const token = session._hooks.token();
   const post = (event, payload) => hookRouter.handle({ glissaId: 'codex-hooks', event, token, payload });
 
   assert.equal(post('userpromptsubmit', { session_id: CODEX_SESSION_ID, prompt: 'go' }).signal, 'resume');
@@ -358,7 +358,7 @@ test('a forged hook payload cannot turn the next spawn into a permissionless one
   hookRouter.handle({
     glissaId: 'codex-forge',
     event: 'stop',
-    token: session._hookToken,
+    token: session._hooks.token(),
     payload: { session_id: '--dangerously-bypass-approvals-and-sandbox' },
   });
   assert.equal(session._resumeSessionId, null, 'the id was refused, so nothing is persisted');
@@ -375,7 +375,7 @@ test('the completion gate is off for codex: a would-be background signal changes
   assert.equal(session._can('backgroundAgents'), false);
   assert.equal(session._detectBackgroundAgents, false);
   await session.start();
-  hookRouter.handle({ glissaId: 'codex-gate', event: 'subagentstart', token: session._hookToken, payload: { agent_id: 'a1' } });
+  hookRouter.handle({ glissaId: 'codex-gate', event: 'subagentstart', token: session._hooks.token(), payload: { agent_id: 'a1' } });
   assert.equal(session.toSnapshot().activeAgents, 0, 'codex declares no background work, so nothing may gate a Stop');
   session.destroy();
 });
@@ -483,7 +483,7 @@ test('the deadline does NOT open the latch on a session whose hooks are flowing'
   const { hookRouter, getHookPort } = hookRouterFor();
   const { session } = makeCodexSession({ id: 'codex-latch-live', hookRouter, getHookPort, titleQuietFallbackMs: 25 });
   await session.start();
-  hookRouter.handle({ glissaId: 'codex-latch-live', event: 'sessionstart', token: session._hookToken, payload: { session_id: CODEX_SESSION_ID } });
+  hookRouter.handle({ glissaId: 'codex-latch-live', event: 'sessionstart', token: session._hooks.token(), payload: { session_id: CODEX_SESSION_ID } });
   await new Promise((resolve) => setTimeout(resolve, 60));
   // A SessionStart is not a prompt, so the latch is still the right answer; the deadline must not
   // second-guess it once callbacks are demonstrably arriving.
@@ -496,7 +496,7 @@ test('the boot spinner cannot complete a card: titles stay latched quiet until t
   const { session } = makeCodexSession({ id: 'codex-quiet', hookRouter, getHookPort });
   await session.start();
   assert.equal(session._titleQuiet, true);
-  hookRouter.handle({ glissaId: 'codex-quiet', event: 'userpromptsubmit', token: session._hookToken, payload: { session_id: CODEX_SESSION_ID } });
+  hookRouter.handle({ glissaId: 'codex-quiet', event: 'userpromptsubmit', token: session._hooks.token(), payload: { session_id: CODEX_SESSION_ID } });
   assert.equal(session._titleQuiet, false, 'an authoritative UserPromptSubmit opens the title tier');
   session.destroy();
 });
@@ -504,7 +504,7 @@ test('the boot spinner cannot complete a card: titles stay latched quiet until t
 test('a codex session with no hook router is NOT title-latched, since nothing would ever un-latch it', async () => {
   const { session } = makeCodexSession({ id: 'codex-no-hooks' });
   await session.start();
-  assert.equal(session._hookToken, null);
+  assert.equal(session._hooks.token(), null);
   assert.equal(session._titleQuiet, false);
   session.destroy();
 });
@@ -548,7 +548,7 @@ test('no settings file is written for a codex session', async () => {
   const { hookRouter, getHookPort } = hookRouterFor();
   const { session } = makeCodexSession({ id: 'codex-nofile', hookRouter, getHookPort, hooksBaseDir });
   await session.start();
-  assert.equal(session._settingsHandle, null);
+  assert.equal(session._hooks.hasSettings(), false);
   assert.equal(fs.existsSync(path.join(hooksBaseDir, 'codex-nofile')), false);
   session.destroy();
   fs.rmSync(hooksBaseDir, { recursive: true, force: true });

@@ -21,6 +21,7 @@ import { setActivityRenderer } from '../session-card/activity.js';
 import { sessionUIs } from '../session-card/card-registry.js';
 import { setSelectedId } from '../sidebar/selection.js';
 import { getLastFocusedSessionId, getRailWidth, setLastFocusedSessionId, setRailWidth } from '../ui-prefs.js';
+import { uiState } from '../ui-state-core.mjs';
 import { attentionSummaryText, countSessionsNeedingAttention, needsAttention, orderRoster, pickAdjacent, pickNextAttention } from './attention-core.mjs';
 import { groupRoster, NO_PATH_KEY, visibleOrder } from './roster-groups.mjs';
 
@@ -40,7 +41,6 @@ let emptyTitleEl = null;
 let emptyDescEl = null;
 
 let active = false;
-let focusedId = null;
 let attnCursorId = null;            // round-robin cursor for the Alt+W attention queue
 const mergeStatusById = new Map(); // id -> 'none'|'pending-review'|'merging'|'parked'|'merged'
 const pillById = new Map();        // id -> rail pill element
@@ -53,9 +53,9 @@ const pillById = new Map();        // id -> rail pill element
 const groupListById = new Map();   // project key (path) -> its <div role=listbox> sublist element
 const groupHeaderById = new Map(); // project key (path) -> its header <div>
 
-// railTabStopId is the rail's single roving / selected option, DECOUPLED from focusedId (which is
-// "which session is centered"). They coincide in steady state. paintPill derives tabIndex/aria-selected
-// from this scalar (not focusedId), so it SURVIVES the per-signal refreshFocusRoster repaint - the
+// railTabStopId is the rail's single roving / selected option, DECOUPLED from the store's focused
+// session (which is "which session is centered"). They coincide in steady state. paintPill derives
+// tabIndex/aria-selected from this scalar, so it SURVIVES the per-signal refreshFocusRoster repaint - the
 // single selection invariant is structural, not a one-shot DOM poke.
 let railTabStopId = null;
 
@@ -150,7 +150,7 @@ export function isFocusActive() { return active; }
 
 // Which session the center currently holds, or null. Read when handing the layout over to the phone
 // shell so the same session is already open on its Terminal screen.
-export function getFocusedSessionId() { return focusedId; }
+export function getFocusedSessionId() { return uiState.snapshot().focusedSessionId; }
 
 export function mountFocusView({ rail, center, resizer }) {
   railEl = rail;
@@ -403,9 +403,9 @@ function paintPill(pill, id, ui) {
   // Mirror the working heartbeat flag so a re-render keeps the breathe/quiet treatment without
   // waiting for the next signal (activity.js parks the live value on ui._activity).
   pill.dataset.activity = ui._activity || '';
-  // .focused (the centered session highlight) stays on focusedId; the roving tab stop / aria-selected
-  // option is railTabStopId (decoupled from focusedId, refresh-stable via this scalar).
-  pill.classList.toggle('focused', id === focusedId);
+  // .focused (the centered session highlight) follows the store's focused session; the roving tab stop
+  // / aria-selected option is railTabStopId, refresh-stable via that separate scalar.
+  pill.classList.toggle('focused', id === getFocusedSessionId());
   const isTabStop = id === railTabStopId;
   pill.setAttribute('aria-selected', String(isTabStop));
   pill.tabIndex = isTabStop ? 0 : -1;
@@ -496,17 +496,19 @@ export function refreshFocusRoster() {
   }
   // Resolve the center: a vanished focus re-targets the top of the roster; a focused card that was
   // displaced or REBUILT (e.g. a session-modified rebuild) is re-borrowed back into the center.
-  if (focusedId && !sessionUIs.has(focusedId)) {
-    focusedId = null;
+  const staleFocusedId = getFocusedSessionId();
+  if (staleFocusedId && !sessionUIs.has(staleFocusedId)) {
+    uiState.dispatch('focusSession', null);
     railTabStopId = null;
     const next = order.find((o) => sessionUIs.has(o.id));
     if (next) { focusSession(next.id); return; } // focusSession re-syncs both scalars
   }
   // Center before borrow: the empty placeholder is a flex sibling, left up it shorts the borrow fit.
   updateCenter();
-  if (focusedId) {
-    const ui = sessionUIs.get(focusedId);
-    if (ui && ui.card.parentElement !== cardSlotEl) borrowToCenter(ui, focusedId);
+  const centeredId = getFocusedSessionId();
+  if (centeredId) {
+    const ui = sessionUIs.get(centeredId);
+    if (ui && ui.card.parentElement !== cardSlotEl) borrowToCenter(ui, centeredId);
   }
   updateRailHead();
 }
@@ -565,7 +567,7 @@ export function focusNextAttention() {
   // The round-robin can resolve to the session already in the center (it COMPLETEd while centered, so
   // it joined the queue in place, or it is the only thing needing you). focusSession no-ops on that,
   // which made the press feel dead; flash the pill + center so the jump always reads as a response.
-  const alreadyCentered = nextId === focusedId;
+  const alreadyCentered = nextId === getFocusedSessionId();
   dismissIfComplete(nextId);
   focusSession(nextId);
   pillById.get(nextId)?.scrollIntoView({ block: 'nearest' });
@@ -581,7 +583,7 @@ export function focusNextAttention() {
 function focusTerminalAfterSettle(ui, id) {
   if (!ui) return;
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    if (active && focusedId === id) ui.term?.focus();
+    if (active && getFocusedSessionId() === id) ui.term?.focus();
   }));
 }
 
@@ -617,19 +619,20 @@ function borrowToCenter(ui, id) {
 }
 
 function releaseCenter() {
-  if (!focusedId) return;
-  if (getBorrowedCardId() === focusedId) releaseCard();
-  focusedId = null;
+  const centeredId = getFocusedSessionId();
+  if (!centeredId) return;
+  if (getBorrowedCardId() === centeredId) releaseCard();
+  uiState.dispatch('focusSession', null);
 }
 
 function focusSession(id) {
-  if (!active || !sessionUIs.has(id) || id === focusedId) return;
+  if (!active || !sessionUIs.has(id) || id === getFocusedSessionId()) return;
   releaseCenter();
-  focusedId = id;
+  uiState.dispatch('focusSession', id);
   railTabStopId = id; // sync: the centered session is also the rail's roving option
   // Remember the last session the operator centered so a tab switch or page reload can return to it
   // (consumed by restoreFocusedSession). Persist ONLY here, the one place a real selection lands, so
-  // the value stays sticky across the releaseCenter/deactivate mechanics that null focusedId.
+  // the value stays sticky across the releaseCenter/deactivate mechanics that null the focused session.
   setLastFocusedSessionId(id);
   // Acknowledge a finished-turn pill: focusing it clears the unseen flag so it stops announcing
   // (paintPill leaves a cleared flag alone while the state stays COMPLETE).
@@ -640,7 +643,8 @@ function focusSession(id) {
 }
 
 function updateCenter() {
-  const has = !!(focusedId && sessionUIs.has(focusedId));
+  const centeredId = getFocusedSessionId();
+  const has = !!(centeredId && sessionUIs.has(centeredId));
   emptyEl.hidden = has;
   if (has) return;
   // Two empty states: sessions exist but none is selected yet (the default on every open), vs. no
@@ -698,7 +702,7 @@ export function focusAdjacentInRail(dir) {
 export function activateFocusView() {
   if (!railEl) return;
   active = true;
-  // releaseCenter returns any stray centered card home and clears focusedId, so this is always a clean
+  // releaseCenter returns any stray centered card home and clears the focused session, so this is a clean
   // start. We then restore the last session the operator had open (restoreFocusedSession), so switching
   // away to Radar and back returns to it. When nothing valid is saved the center stays on the
   // intentional empty placeholder and the operator picks from the rail.
@@ -718,7 +722,7 @@ export function activateFocusView() {
 // activation, so the no-op here is re-attempted from app.js handleSnapshot once the snapshot has
 // populated the cards (with their state).
 export function restoreFocusedSession() {
-  if (!active || focusedId) return;
+  if (!active || getFocusedSessionId()) return;
   const id = getLastFocusedSessionId();
   const ui = id && sessionUIs.get(id);
   if (!ui) return;

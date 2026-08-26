@@ -45,8 +45,8 @@ function postHook(event, hookToken = token) {
 // Stands in for a spawn: _resolvePacks records what the PTY was launched with, and launching a real
 // `claude` here is not an option. Spawn-time resolution itself is covered by tests/session-packs.test.js.
 function pretendSpawnedWith(deliveredPacks) {
-  session._deliveredPacks = deliveredPacks.map((pack) => ({ ...pack }));
-  session._clearPackNotice();
+  session._packDelivery.replaceDelivered(deliveredPacks.map((pack) => ({ ...pack })));
+  session._packDelivery.clearNotice();
 }
 
 test.before(async () => {
@@ -73,13 +73,13 @@ test.before(async () => {
   assert.ok(session, 'the boot loop created the configured session');
   // Register the session's bearer token with the shared HookRouter without spawning a PTY: this is
   // exactly what the spawn path does, minus node-pty.
-  session._injectHooks();
-  token = session._hookToken;
+  session._hooks.inject();
+  token = session._hooks.token();
   assert.ok(token, 'hook injection produced a token');
 });
 
 test.after(async () => {
-  if (session) session._cleanupHooks();
+  if (session) session._hooks.cleanup();
   if (backend) backend.shutdown();
   if (server) server.closeAllConnections();
   if (server) await new Promise((resolve) => server.close(resolve));

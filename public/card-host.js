@@ -1,25 +1,23 @@
 // THE re-parenting seam for a live session card. A session owns exactly one xterm, so the
 // single-borrower invariant is GLOBAL, not per-surface: borrowCard releases whoever holds a card before
-// taking one, which is what lets a layout flip hand the card across without coordination.
+// taking one, which is what lets a layout flip hand the card across without coordination. The borrowed
+// id lives in the cross-cutting UI store, so the WebGL pool can read it without an injected provider.
 
 import { adoptElement, releaseElement } from './dom-helpers.js';
 import { container, sessionUIs } from './session-card/card-registry.js';
 import { activateTerminalViewer } from './session-card/terminal.js';
-import { setBorrowedWebglCardIdProvider } from './session-card/webgl-pool.js';
-
-let borrowedId = null;
+import { uiState } from './ui-state-core.mjs';
 
 export function getBorrowedCardId() {
-  return borrowedId;
+  return uiState.snapshot().borrowedCardId;
 }
-
-setBorrowedWebglCardIdProvider(getBorrowedCardId);
 
 // Move `ui.card` into `slotEl` and make its terminal live and correctly sized there. `className` is the
 // surface's own marker class (the Focus center and the phone Terminal screen style the borrowed card
 // differently); it is removed again on release, and swapping surfaces swaps the class.
 export function borrowCard(ui, sessionId, slotEl, { className } = {}) {
   if (!ui?.card || !slotEl) return;
+  const borrowedId = getBorrowedCardId();
   if (borrowedId && borrowedId !== sessionId) releaseCard();
 
   const card = ui.card;
@@ -28,7 +26,7 @@ export function borrowCard(ui, sessionId, slotEl, { className } = {}) {
   if (className) card.classList.add(className);
 
   adoptElement(card, slotEl);
-  borrowedId = sessionId;
+  uiState.dispatch('borrowCard', sessionId);
 
   activateTerminalViewer(ui, sessionId);
 }
@@ -36,8 +34,8 @@ export function borrowCard(ui, sessionId, slotEl, { className } = {}) {
 // Return the borrowed card to its home slot. Safe to call when nothing is borrowed. Returns the id that
 // was released (or null), so a caller can reconcile its own bookkeeping.
 export function releaseCard() {
-  const releasedId = borrowedId;
-  borrowedId = null;
+  const releasedId = getBorrowedCardId();
+  uiState.dispatch('borrowCard', null);
   if (!releasedId) return null;
 
   const ui = sessionUIs.get(releasedId);

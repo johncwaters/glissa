@@ -12,6 +12,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { Session } = require('../session/sessions');
+const { createSessionPackDelivery } = require('../session/session-pack-delivery');
 const codex = require('../session/adapters/codex');
 
 const CLAUDE_MD_ENV = 'CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD';
@@ -377,34 +378,32 @@ test('a missing codex pack is skipped without a carrier token or Claude env flag
 });
 
 test('a pack update between lookups still arms a notice before the delivered list swaps', async () => {
-  const s = new Session({
-    id: 'atomic-packs',
-    name: 'atomic-packs',
-    path: process.cwd(),
-    agent: 'codex',
-    packs: ['alpha', 'beta'],
-    packsBuiltRoot: '/packs',
-    spawnCommand: { path: process.execPath, kind: 'exe' },
-    ptySpawn: () => fakePty(),
-  });
   const previousDeliveries = [
     { name: 'alpha', version: 'v1', dir: '/packs/alpha/current' },
     { name: 'beta', version: 'v1', dir: '/packs/beta/current' },
   ];
-  s._deliveredPacks = previousDeliveries;
-  s._resolvePackVariant = async (name) => {
-    assert.equal(s._deliveredPacks, previousDeliveries);
-    if (name === 'beta') assert.equal(s.notePackUpdate('alpha', 'v2'), true);
-    return { name, version: 'v1', dir: `/packs/${name}/current` };
-  };
-  try {
-    const delivery = await s._resolvePacks();
-    assert.deepEqual(delivery.packs.map((pack) => pack.name), ['alpha', 'beta']);
-    assert.notEqual(s._deliveredPacks, previousDeliveries);
-    assert.match(s.takePackNoticeContext(), /"alpha" \(version v1 is now v2\)/);
-  } finally {
-    s.destroy();
-  }
+  let packDelivery = null;
+  packDelivery = createSessionPackDelivery({
+    configuredPacks: ['alpha', 'beta'],
+    builtRoot: '/packs',
+    variantSlug: null,
+    projectPath: process.cwd(),
+    sessionName: 'atomic-packs',
+    agentId: 'codex',
+    canDeliver: () => true,
+    canNotify: () => true,
+    renderArgs: () => [],
+    recordDecision: () => {},
+    resolvePack: async (name) => {
+      assert.deepEqual(packDelivery.delivered(), previousDeliveries.map(({ name: packName, version }) => ({ name: packName, version })));
+      if (name === 'beta') assert.equal(packDelivery.noteUpdate('alpha', 'v2'), true);
+      return { name, version: 'v1', dir: `/packs/${name}/current` };
+    },
+  });
+  packDelivery.replaceDelivered(previousDeliveries);
+  const delivery = await packDelivery.resolve();
+  assert.deepEqual(delivery.packs.map((pack) => pack.name), ['alpha', 'beta']);
+  assert.match(packDelivery.takeNotice(), /"alpha" \(version v1 is now v2\)/);
 });
 
 test('a pack built out of the project\'s own files is skipped as self-referential', async () => {

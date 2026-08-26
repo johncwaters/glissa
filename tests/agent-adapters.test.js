@@ -186,7 +186,7 @@ test('a rejected spawn cleans before PTY exit without double-cleaning on a late 
     spawnCommand: { path: process.execPath, kind: 'exe' },
     platform: 'linux',
     ptySpawn: () => {
-      session._deliveredPacks = [{ name: 'rules', version: 'v1' }];
+      session._packDelivery.replaceDelivered([{ name: 'rules', version: 'v1' }]);
       fs.rmSync(projectDir, { recursive: true, force: true });
       return fakePty();
     },
@@ -199,9 +199,9 @@ test('a rejected spawn cleans before PTY exit without double-cleaning on a late 
   try {
     await session.start();
     assert.equal(session.state, STATES.FAILED);
-    assert.equal(session._hookToken, null);
-    assert.equal(session._settingsHandle, null);
-    assert.deepEqual(session._deliveredPacks, []);
+    assert.equal(session._hooks.token(), null);
+    assert.equal(session._hooks.hasSettings(), false);
+    assert.deepEqual(session._packDelivery.delivered(), []);
     assert.equal(unregisterCalls, 1);
     assert.equal(fs.existsSync(path.join(hooksBaseDir, 'rejected-spawn')), false);
     await session._handlePtyExit(1, null);

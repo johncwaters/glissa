@@ -233,7 +233,7 @@ test("the live fixture holds a notice-carrying Stop and completes once on the fo
   const hookRouter = new HookRouter();
   const { session } = makeGrokSession({ hookRouter, statusConflictMs: 20, statusDedupMs: 10 });
   session.state = "RUNNING";
-  session._deliveredPacks = [{ name: "alpha", version: "v1" }];
+  session._packDelivery.replaceDelivered([{ name: "alpha", version: "v1" }]);
   assert.equal(session.notePackUpdate("alpha", "v2"), true);
   const completes = [];
   session.on("state-change", (event) => {
@@ -458,8 +458,8 @@ test("a validated home hook file mints a token and camelCase payloads capture th
     assert.deepEqual(calls[0].args, ["--no-auto-update"]);
     assert.equal(calls[0].env.GROK_CLAUDE_HOOKS_ENABLED, "false");
     assert.match(calls[0].env.GLISSA_HOOK_URL, /^http:\/\/127\.0\.0\.1:4321\/hook\/grok-session\?t=[0-9a-f]{64}$/);
-    assert.equal(calls[0].args.some((arg) => arg.includes(session._hookToken)), false);
-    const token = session._hookToken;
+    assert.equal(calls[0].args.some((arg) => arg.includes(session._hooks.token())), false);
+    const token = session._hooks.token();
     assert.equal(hookRouter.handle({
       glissaId: "grok-session",
       event: "userpromptsubmit",
@@ -489,7 +489,7 @@ test("Claude home settings refuse relay hooks only when they could contribute ho
         getHookPort: () => 4321,
       });
       await refused.session.start();
-      assert.equal(refused.session._hookToken, null);
+      assert.equal(refused.session._hooks.token(), null);
       assert.equal(refused.calls[0].env.GLISSA_HOOK_URL, undefined);
       const refusal = refused.session.getDebugState().decisions.find((decision) => decision.decision === "injection-refused");
       assert.equal(refusal.reason, "Claude compatibility settings could contribute hooks");
@@ -507,7 +507,7 @@ test("Claude home settings refuse relay hooks only when they could contribute ho
     });
     await allowed.session.start();
     assert.match(allowed.calls[0].env.GLISSA_HOOK_URL, /^http:\/\/127\.0\.0\.1:4321\/hook\/grok-home-benign\?t=[0-9a-f]{64}$/);
-    assert.notEqual(allowed.session._hookToken, null);
+    assert.notEqual(allowed.session._hooks.token(), null);
     allowed.session.destroy();
   });
 });
@@ -522,13 +522,13 @@ test("a missing or foreign home hook file never mints a token", async () => {
     try {
       const missing = makeGrokSession({ id: "grok-missing", path: projectDirectory, hookRouter: new HookRouter(), getHookPort: () => 4321 });
       await missing.session.start();
-      assert.equal(missing.session._hookToken, null);
+      assert.equal(missing.session._hooks.token(), null);
       assert.equal(missing.calls[0].env.GLISSA_HOOK_URL, undefined);
       missing.session.destroy();
       writeHooks(grokHome, '{"hooks":{"Stop":[]}}');
       const foreign = makeGrokSession({ id: "grok-foreign", path: projectDirectory, hookRouter: new HookRouter(), getHookPort: () => 4321 });
       await foreign.session.start();
-      assert.equal(foreign.session._hookToken, null);
+      assert.equal(foreign.session._hooks.token(), null);
       assert.equal(foreign.calls[0].env.GLISSA_HOOK_URL, undefined);
       foreign.session.destroy();
     } finally {

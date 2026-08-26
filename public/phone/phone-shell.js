@@ -25,6 +25,7 @@ import { adoptElement, el, releaseElement } from '../dom-helpers.js';
 import { sessionUIs } from '../session-card/card-registry.js';
 import { reparentReviewPanel } from '../sidebar/review-sidebar.js';
 import { setSelectedId } from '../sidebar/selection.js';
+import { uiState } from '../ui-state-core.mjs';
 import { closeSettingsSectionPicker } from '../settings-panel.js';
 import { getLastFocusedSessionId, setLastFocusedSessionId } from '../ui-prefs.js';
 import { createBoardScreen } from './board-screen.js';
@@ -69,7 +70,6 @@ let moreButtonEl = null;
 let moreMenuEl = null;
 const menuButtonById = new Map();
 let hooks = {};
-let activeScreen = BOARD;
 let active = false;
 const SOFT_KEYBOARD_OPEN_DELTA_PX = 120;
 // Tallest visual viewport seen at the current width, which is by construction its keyboard-closed
@@ -374,7 +374,7 @@ function syncCurrent(buttonById, screenId) {
 }
 
 function applyScreen(screenId) {
-  activeScreen = screenId;
+  uiState.dispatch('setPhoneScreen', screenId);
   setMoreMenuOpen(false);
   // A screen that pulls its own data (Usage requests a report) is told it became visible; every other
   // screen is fed by broadcasts and ignores this.
@@ -400,7 +400,7 @@ function applyScreen(screenId) {
 
 function showScreen(screenId) {
   if (!shellEl || !screenElById.has(screenId)) return;
-  if (screenId !== activeScreen) pushHistoryFor(screenId);
+  if (screenId !== uiState.snapshot().phoneScreen) pushHistoryFor(screenId);
   applyScreen(screenId);
 }
 
@@ -482,7 +482,7 @@ export function isPhoneShellActive() {
 // Whether a given screen is the one on display. The peer of the desktop's active-view check, for a
 // panel that only fetches while the operator is actually looking at it.
 export function isPhoneScreenActive(screenId) {
-  return active && activeScreen === screenId;
+  return active && uiState.snapshot().phoneScreen === screenId;
 }
 
 // The session the Terminal screen is showing, so the app can keep the desktop Focus center pointed at
@@ -503,7 +503,7 @@ export function refreshPhoneBoard() {
   // gone, so the screen's job is over; hand the operator back to the Board. Keyed on the ACTIVE
   // screen so a removal never yanks the operator off Review/Radar/etc, where the Terminal screen is
   // hidden and its empty state costs nothing.
-  if (activeScreen === 'terminal' && !terminalScreen.getSessionId()) showScreen(BOARD);
+  if (uiState.snapshot().phoneScreen === 'terminal' && !terminalScreen.getSessionId()) showScreen(BOARD);
   const dot = dotOf(navButtonById.get(BOARD));
   if (dot) dot.hidden = boardScreen.getAttentionCount() === 0;
 }

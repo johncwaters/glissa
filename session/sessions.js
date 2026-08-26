@@ -1,31 +1,15 @@
 // @ts-nocheck
 const fs = require("node:fs");
 const path = require("node:path");
-const crypto = require("node:crypto");
 const pty = require("node-pty");
 const { EventEmitter } = require("node:events");
-const { execFileSync, execFile } = require("../server/child-process-safe");
-const { STATES, MERGEABLE_LIVE_STATES, KILLABLE_STATES, RESTARTABLE_STATES } = require("../shared/states");
-const { isSameDirectoryPath } = require("../shared/paths");
+const { execFile } = require("../server/child-process-safe");
+const { STATES, KILLABLE_STATES, RESTARTABLE_STATES } = require("../shared/states");
 const { createOscTitleSource } = require("../detection/osc-title-source");
 const { createStatusSource } = require("../detection/status-source");
-const { createWorktreeWatcher, readWorktreeGitdirPointer } = require("../detection/worktree-watch");
-const { createIntegrationRefWatcher } = require("../detection/integration-ref-watch");
-const { createRerereWatcher } = require("../detection/rerere-watch");
-const { writeSessionSettings, generateToken } = require("../detection/settings-injector");
-const { HOOK_URL_ENV } = require("./core/hook-relay-core");
-const { RTK_PATH_ENV } = require("./core/rtk-hook-core");
 const { classifyClaudeKind, buildSpawnCommand } = require("./core/spawn-command");
 const { DEFAULT_AGENT_ID, resolveAdapter, commandFor } = require("./adapters");
 
-// The one shape _injectHooks returns when nothing was wired, frozen so a caller cannot mutate the
-// shared empties into a live injection.
-const NO_HOOK_INJECTION = Object.freeze({ args: Object.freeze([]), env: Object.freeze({}) });
-
-// How far up the cwd's ancestry a project-scoped agent config is looked for (see
-// Session._findProjectAgentConfig). Deep enough for a worktree nested under a repo root, bounded so a
-// spawn cannot walk an arbitrarily deep tree.
-const MAX_PROJECT_CONFIG_DEPTH = 12;
 const {
   TRANSITIONS,
   GUARDS,
@@ -34,25 +18,17 @@ const {
 } = require("./core/state-machine");
 const { mapSignalToEvent } = require("./core/status-mapper");
 const { decideExitTransition } = require("./core/exit-transition");
-const { buildMergePrompt } = require("./core/merge-prompt");
-const { createOutputRing } = require("./core/output-ring");
-const { decideSignatureDemotion, decideDiffSelfHeal } = require("./core/merge-gate");
-const { decideAutoRebase, decideRerereCooldownClear, AUTO_REBASE_STATES } = require("./core/rebase-gate");
-const {
-  parseLeftRightCount,
-  decideBranchSyncState,
-  parseRemoteFromUpstream,
-  decideResyncAction,
-  firstGitErrorLine,
-} = require("../server/core/branch-sync-core");
-const { decidePackDelivery, normalizePackNames, variantPackName } = require("../server/core/pack-core");
-const { DEFAULT_PACKS_DIR, defaultBuiltRoot, resolveBuiltPack } = require("../server/pack-builder");
-const { buildPackNotice, listStalePacks, shouldHoldTerminalStopForNotice } = require("./core/pack-notice");
+const { shouldHoldTerminalStopForNotice } = require("./core/pack-notice");
 const agentTracker = require("./core/agent-tracker");
 const { decideGateRelease, DEFAULT_GATE_RELEASE_SETTLE_MS } = require("./core/gate-release");
-const { pushDecision } = require("./core/decision-log");
 const wakeupTracker = require("./core/wakeup-tracker");
 const { RESUME_ID_RE } = require("./core/auto-resume");
+const { projectSessionSnapshots } = require("./core/snapshot-projection");
+const { createSessionObservability } = require("./session-observability");
+const { createSessionOutput } = require("./session-output");
+const { createSessionPackDelivery } = require("./session-pack-delivery");
+const { createSessionHookLifecycle } = require("./session-hook-lifecycle");
+const { createSessionWorktreeLifecycle } = require("./session-worktree-lifecycle");
 
 const KILL_POLL_INTERVAL_MS = 200;
 const KILL_MAX_WAIT_MS = 3000;
@@ -74,64 +50,8 @@ function signalablePid(pid) {
   return parsed;
 }
 
-// States in which Claude's TUI is up and reading input, so a bracketed paste actually lands. A
-// deferred paste (pasteTextWhenReady) waits for the session to enter one of these; INITIALIZING and
-// STARTING deliberately are not here (bytes written before first_output are read by nothing).
-const PASTE_READY_STATES = new Set([
-  STATES.IDLE, STATES.RUNNING, STATES.WAITING, STATES.COMPLETE,
-]);
-
 // The two states an operator can dismiss a card out of: an unanswered prompt and an unopened result.
 const DISMISSIBLE_STATES = new Set([STATES.WAITING, STATES.COMPLETE]);
-
-// Trailing debounce for the worktree-change funnel: a single `git commit` touches
-// several gitdir files and a turn-end can race the fs.watch, so collapse a burst
-// into one signature recompute. The triggers are all event-driven (no poll): the per-worktree gitdir
-// fs.watch, the turn-end hook, and the integration-branch reflog fs.watch.
-const WORKTREE_CHECK_DEBOUNCE_MS = 400;
-// Transitions kept per session for the debug overlay. Bounded because a session lives for days.
-const AUDIT_LOG_MAX = 200;
-
-// Stop one fs.watch listener and hand back the null its field should hold. Best-effort: a watcher whose
-// directory already vanished throws from close(), which must never break a teardown.
-function stopWatcher(watcher) {
-  if (watcher) {
-    try { watcher.stop(); } catch { /* already gone */ }
-  }
-  return null;
-}
-
-// Async git. The review-gate probes (signature, diff) run on hot, recurring paths
-// (every turn-end, every gitdir fs.watch nudge, and every integration-branch reflog
-// nudge). The synchronous execFileSync they used to call BLOCKS the single Node
-// event loop for the whole subprocess - on a slower machine, with several sessions,
-// that stalls every session's PTY streaming and keystroke handling at once. execFile
-// runs git in a child process while the loop keeps pumping that I/O.
-//
-// gitOut resolves stdout on success AND on a non-zero exit (git diff prints to stdout
-// even when it exits non-zero), mirroring the old getDiff helper that returned
-// e.stdout from its catch. gitStrict rejects on a non-zero exit / spawn error so a
-// caller's try/catch can treat an unreadable worktree as UNKNOWN, mirroring the old
-// signature helper whose throw was caught into a null signature.
-function gitOut(args, opts) {
-  return new Promise((resolve) => {
-    execFile("git", args, opts, (_err, stdout) => resolve(stdout != null ? String(stdout) : ""));
-  });
-}
-function gitStrict(args, opts) {
-  return new Promise((resolve, reject) => {
-    execFile("git", args, opts, (err, stdout) => (err ? reject(err) : resolve(stdout != null ? String(stdout) : "")));
-  });
-}
-
-// Table-driven mapping from a resyncBranch decision (decideResyncAction's return) to the concrete git
-// command + past-tense outcome label. 'none' has no entry (the caller's lookup misses and mutates
-// nothing), so a diverged branch can never fall through to a command by construction.
-const RESYNC_COMMANDS = {
-  "ff-merge": ({ upstream, opts }) => ({ args: ["merge", "--ff-only", upstream], opts, successAction: "fast-forwarded" }),
-  "ff-fetch": ({ branch, remote, opts }) => ({ args: ["fetch", "--quiet", remote, `${branch}:${branch}`], opts: { ...opts, timeout: 8000 }, successAction: "fast-forwarded" }),
-  push: ({ branch, remote, opts }) => ({ args: ["push", remote, branch], opts: { ...opts, timeout: 15000 }, successAction: "pushed" }),
-};
 
 // ---------------------------------------------------------------------------
 // State machine. Status is driven by structural signals from StatusSource
@@ -141,16 +61,6 @@ const RESYNC_COMMANDS = {
 // (TRANSITIONS, GUARDS, ENTRY_HOOKS, EXIT_HOOKS) live in
 // session/core/state-machine.js; the transition() engine below consumes them.
 // ---------------------------------------------------------------------------
-
-// The card marker only asks whether this cwd IS a linked worktree, so a pointer at all is the whole
-// answer (unlike the watch target, which must also still exist on disk).
-function detectLinkedWorktree(dir) {
-  return readWorktreeGitdirPointer(dir) !== null;
-}
-
-function isOwnRemoteCopy(upstream, branch) {
-  return upstream.replace(/^[^/]+\//, "") === branch;
-}
 
 class Session extends EventEmitter {
   constructor({
@@ -278,18 +188,11 @@ class Session extends EventEmitter {
     this.id = id;
     this.name = name;
     this.path = path;
-    // Whether this session's cwd is a linked git worktree (vs a normal checkout).
-    // Surfaced to the dashboard as a small card marker; refreshed on the health tick.
-    this.isWorktree = detectLinkedWorktree(this.path);
     this.dangerouslySkipPermissions = dangerouslySkipPermissions;
     this.ptyProcess = null;
     this.state = STATES.DORMANT;
     this.stateSince = Date.now();
-    this.auditLog = [];
     this._receivedFirstOutput = false;
-    // Ring buffer of recent PTY chunks (see session/core/output-ring.js for the
-    // eviction, monotonic-total, and offset semantics).
-    this._outputRing = createOutputRing(replayBufferKB * 1024);
     this._killPollTimer = null;
     this._killReapTimer = null;
     // Settles the in-flight POSIX reap below, so a destroy() (or a second kill) can never strand it.
@@ -303,8 +206,6 @@ class Session extends EventEmitter {
     this._sleepKillTimer = null;
     this._autoKilled = false;
     this._destroyed = false;
-    // A paste waiting for this session's TUI to come up (see pasteTextWhenReady). At most one.
-    this._pendingPaste = null;
     this._pendingRestart = false;
     // True between a "Merge & finish" on a live session and its post-exit merge, so a double-click
     // cannot kick off a second merge against a worktree whose PTY is still tearing down.
@@ -313,17 +214,28 @@ class Session extends EventEmitter {
     // write() so we never push input into a pty whose console pipe is already
     // dead (see write() and the conin-socket guard in start()).
     this._ptyAlive = false;
-    // Last cols/rows pushed from the browser. A restarted PTY respawns at these
-    // (not the 80x24 default) so Claude initializes its TUI at the correct size
-    // instead of relying on a single post-reconnect resize that races startup.
-    this._lastCols = null;
-    this._lastRows = null;
     this._recorder = null; // Set via setRecorder() after construction
+    this._output = createSessionOutput({
+      maxBytes: replayBufferKB * 1024,
+      getState: () => this.state,
+      isDestroyed: () => this._destroyed,
+      hasLivePty: () => this.hasLivePty,
+      write: (text) => this.write(text),
+      start: () => this.start(),
+      restart: () => this.restart(),
+      on: (event, listener) => this.on(event, listener),
+      once: (event, listener) => this.once(event, listener),
+      off: (event, listener) => this.off(event, listener),
+    });
 
     // Resolved first, because the capability gates below read it: every CC-only feature this session
     // could run is asked of the adapter rather than assumed (M2 of docs/plan-agent-adapters.md).
     this._adapter = adapter || resolveAdapter(agent, { label: `session:${name}` });
     this.agentId = this._adapter.id;
+    this._observability = createSessionObservability({
+      agentId: this.agentId,
+      getRecorder: () => this._recorder,
+    });
     // The usage lane's vendor namespace for this agent (claude/codex/grok), never the adapter id. It
     // rides the claude-session-id event and keys both the lane ledger and the per-card usage chip.
     this.usageVendor = this._adapter.usageVendor || "claude";
@@ -332,11 +244,6 @@ class Session extends EventEmitter {
     this._titleQuietFallbackTimer = null;
 
     // -- Detection: structural signal sources --
-    this._hookRouter = hookRouter;
-    this._getHookPort = getHookPort;
-    this._hooksBaseDir = hooksBaseDir;
-    this._hookToken = null;
-    this._settingsHandle = null;
     this._hookSeen = false;
     this._lastSignal = null;
     // Advisory: which flavor of "waiting on you" a WAITING session is parked on (null | 'permission' |
@@ -383,10 +290,6 @@ class Session extends EventEmitter {
     // session/core/gate-release.js). Sequence rather than clock: signals share milliseconds.
     this._signalSeq = 0;
     this._lastActivitySeq = 0;
-    // Decision trace: why each detection/gate/notification decision came out the way it did. Pure
-    // observability (session/core/decision-log.js owns the ring), read by getDebugState and mirrored
-    // into the recorder; nothing in the detection path reads it back.
-    this._decisionLog = [];
     // Components behind the last _activeAgentCount() result, so a trace entry can say WHICH source
     // gated a ready (counted sub-agents vs a declared background_tasks snapshot) instead of a total.
     this._agentBreakdown = { counted: 0, declared: 0, idleNames: 0, idleTasks: 0 };
@@ -408,24 +311,39 @@ class Session extends EventEmitter {
     this._suppressResumeCapture = false;
     this._antiSlopPrompt = !!antiSlopPrompt && this._can("antiSlop");
     this.ephemeral = !!ephemeral;
-    this._settingsPermissions = settingsPermissions;
     this._spawnEnv = spawnEnv;
-    this._enableProjectMcp = !!enableProjectMcp;
     this._rtkPath = (this._can("rtk") && rtkPath) || null;
-    // Configured pack names, and the versions actually delivered by the last spawn (empty until one
-    // resolves; a configured-but-unbuilt pack never appears here, only in the decision trace).
-    const packNames = normalizePackNames(packs);
-    for (const warning of packNames.warnings) console.warn(`[session:${name}] ${warning}`);
-    this._packs = packNames.names;
-    this._packsBuiltRoot = packsBuiltRoot;
-    this._packVariantSlug = typeof packVariantSlug === "string" && packVariantSlug ? packVariantSlug : null;
-    this._deliveredPacks = [];
-    // Live pack-notice channel: latest built version per pack the backend pushed after a rebuild, and
-    // whether the resulting staleness still owes this session one notice on its adapter-declared
-    // hook response (see notePackUpdate / takePackNoticeContext).
-    this._latestPackVersions = new Map();
-    this._packNoticePending = false;
+    this._packDelivery = createSessionPackDelivery({
+      configuredPacks: packs,
+      builtRoot: packsBuiltRoot,
+      variantSlug: typeof packVariantSlug === "string" && packVariantSlug ? packVariantSlug : null,
+      projectPath: this.path,
+      sessionName: this.name,
+      agentId: this.agentId,
+      canDeliver: () => this._can("packs"),
+      canNotify: () => this._can("packNotice"),
+      renderArgs: (deliveredPacks, builtRoot) => this._adapter.renderPackArgs(deliveredPacks, builtRoot),
+      recordDecision: (entry) => this._recordDecision(entry),
+    });
     this._planLimits = planLimits === true && this._can("statusLine");
+    this._hooks = createSessionHookLifecycle({
+      id: this.id,
+      name: this.name,
+      agentId: this.agentId,
+      adapter: this._adapter,
+      hookRouter,
+      getHookPort,
+      hooksBaseDir,
+      settingsPermissions,
+      detectScheduledWakeups: this._detectScheduledWakeups,
+      enableProjectMcp: !!enableProjectMcp,
+      rtkPath: this._rtkPath,
+      planLimits: this._planLimits,
+      bypassHookTrust: this.bypassHookTrust,
+      effectiveCwd: () => this.effectiveCwd(),
+      ingestSignal: (raw) => this.ingestHookSignal(raw),
+      recordDecision: (entry) => this._recordDecision(entry),
+    });
     this._ptySpawn = ptySpawn || ((file, args, opts) => pty.spawn(file, args, opts));
     // Async kill executor (taskkill). Default wraps execFile; the callback form keeps the call truly
     // non-blocking. Injected in tests to assert the kill without spawning a real process.
@@ -433,37 +351,29 @@ class Session extends EventEmitter {
     this._signalProc = signalProc || ((pid, signal) => process.kill(pid, signal));
     this._platform = platform;
 
-    // -- Worktree isolation state (see _provisionWorktree / _settleWorktreeOnExit) --
-    this._gitWorkspace = gitWorkspace;
-    this._integrationBranch = integrationBranch;
-    this._autoRebase = autoRebase !== false;
-    this._liveWorktreeReview = liveWorktreeReview !== false;
-    this._autoRebasing = false;    // re-entry mutex: one auto-rebase per session at a time
-    this._rebaseConflictKey = null; // head::target the last auto-rebase conflicted on (see _maybeAutoRebase)
-    this._effectiveBase = null;    // cached result of _resolveEffectiveBase(); null until first diff
-    this._resyncPromise = null;    // in-flight resyncBranch() call, so a second click rides the same one
-    this._worktreeRoot = worktreeRoot;
-    this._worktreeShare = worktreeShare;
-    this.worktreeDir = null;     // active session worktree cwd (null = in-place at this.path)
     this._startPending = null;   // in-flight start() promise (single-flight; see start())
-    this.commonGitDir = null;    // shared gitdir all linked worktrees write refs into (git rev-parse
-                                 // --git-common-dir); where the integration branch's reflog is watched
-    this.baseSha = null;         // integration-branch SHA the worktree forked from
-    this._workspace = null;      // opaque git-workspace handle for merge/discard
-    this.mergeStatus = 'none';   // none | pending-review | merging | parked | merged
-    // Park context (set only while mergeStatus === 'parked'): why the auto-merge could not complete and
-    // which files conflict. Feeds the manual-merge handoff prompt (pasteMergePrompt); cleared otherwise.
-    this.mergeReason = null;
-    this.mergeConflicts = [];
-    this.worktreeNotice = null;  // operator-facing blocker (e.g. integration branch missing)
-    // Live worktree-change detection (see checkWorktreeChange / _startWorktreeWatcher). The watcher
-    // is the fast fs.watch nudge; _lastWorktreeSig dedups the cheap signature so only real deltas
-    // broadcast; the debounce timer coalesces a write/turn-end burst into one recompute.
-    this._worktreeWatcher = null;
-    this._integrationWatcher = null;
-    this._rerereWatcher = null;
-    this._worktreeCheckTimer = null;
-    this._lastWorktreeSig = null;
+    this.worktreeLifecycle = createSessionWorktreeLifecycle({
+      id: this.id,
+      projectPath: this.path,
+      integrationBranch,
+      gitWorkspace,
+      autoRebase,
+      liveWorktreeReview,
+      worktreeRoot,
+      worktreeShare,
+      port: {
+        projectPath: () => this.path,
+        state: () => ({
+          state: this.state,
+          isDestroyed: this._destroyed,
+          isTeardownPending: this._teardownPending(),
+          hasLivePty: this.hasLivePty,
+        }),
+        emit: (event, detail) => this.emit(event, detail),
+        recordDecision: (entry) => this._recordDecision(entry),
+        pasteText: (text) => this.pasteText(text),
+      },
+    });
 
     this._titleSource = createOscTitleSource({
       stabilizationMs: titleStabilizationMs,
@@ -484,6 +394,10 @@ class Session extends EventEmitter {
 
   setRecorder(recorder) {
     this._recorder = recorder;
+  }
+
+  get auditLog() {
+    return this._observability.auditLog;
   }
 
   // THE capability read. Every CC-only feature asks this rather than branching on the adapter id, and
@@ -585,7 +499,7 @@ class Session extends EventEmitter {
     if (shouldHoldTerminalStopForNotice({
       event: raw?.event,
       signal: raw?.signal,
-      isNoticePending: this._packNoticePending,
+      isNoticePending: this._packDelivery.hasPendingNotice(),
       packNoticeHookEvent: this.packNoticeHookEvent,
     })) return;
     this._statusSource.ingest(raw);
@@ -735,21 +649,14 @@ class Session extends EventEmitter {
    * review pass.
    */
   _pushAuditEntry(entry) {
-    this.auditLog.push(entry);
-    if (this.auditLog.length > AUDIT_LOG_MAX) {
-      this.auditLog.splice(0, this.auditLog.length - AUDIT_LOG_MAX);
-    }
+    this._observability.pushAuditEntry(entry);
   }
 
   // Append one decision-trace entry. Mirrored to the forensic recorder only when it is genuinely
   // new: a collapsed repeat (an unchanged gate verdict re-evaluated on a TTL tick) already has a
   // line on disk.
   _recordDecision(entry) {
-    // The recording header already names the agent, and a Claude Code recording is pinned byte-identical
-    // apart from that one field, so only a non-default agent stamps its id on the entry itself.
-    const stamped = this.agentId === DEFAULT_AGENT_ID ? entry : { ...entry, agent: this.agentId };
-    const outcome = pushDecision(this._decisionLog, stamped);
-    if (outcome === "appended" && this._recorder) this._recorder.writeDecision(stamped);
+    this._observability.recordDecision(entry);
   }
 
   // Push a decision the BACKEND made for this session (notification category + reason, and the
@@ -1002,7 +909,7 @@ class Session extends EventEmitter {
     if (gateHeld) this._stashGateHeldReady(s);
     // A turn end (`ready`) is the precise moment a batch of edits/commits has settled, so refresh the
     // review diff right then (debounced). The signature dedup makes a no-change turn a cheap no-op.
-    if (s.signal === "ready") this._scheduleWorktreeCheck();
+    if (s.signal === "ready") this.worktreeLifecycle.scheduleCheck();
   }
 
   _onMeta(m) {
@@ -1062,40 +969,21 @@ class Session extends EventEmitter {
   // Normalized pack names this session would deliver on its next spawn. Public so the backend can
   // compare a reloaded project record against the live session without reaching into the private field.
   get packNames() {
-    return [...this._packs];
+    return this._packDelivery.names();
   }
 
   // Record the version a pack was just rebuilt to (the backend's pack-updated fan-out). Only a pack
   // this session actually SPAWNED against can arm a notice: a session that never delivered the pack
   // has no stale context to warn about. Returns whether this call armed one, for the caller's logs.
   notePackUpdate(name, version) {
-    if (!this._can("packNotice")) return false;
-    if (typeof name !== "string" || typeof version !== "string" || version.length === 0) return false;
-    const delivered = this._deliveredPacks.find((pack) => pack.name === name);
-    if (!delivered) return false;
-    if (this._latestPackVersions.get(name) === version) return false;
-    this._latestPackVersions.set(name, version);
-    // A rebuild that landed back on the version this session runs on leaves nothing to say.
-    if (delivered.version === version) return false;
-    this._packNoticePending = true;
-    return true;
+    return this._packDelivery.noteUpdate(name, version);
   }
 
   // The pack-staleness notice this session owes its next turn, or null. Consumed on read (the hook
   // route injects it into ONE adapter-declared response), and re-armed only when a newer version
   // arrives through notePackUpdate - never once per turn for the same staleness.
   takePackNoticeContext() {
-    // Not redundant with the arming gate: this is the response boundary, so the guarantee that a
-    // non-Claude session's hook reply is `{ ok, reason }` and nothing else is checked where it is made.
-    if (!this._can("packNotice")) return null;
-    if (!this._packNoticePending) return null;
-    this._packNoticePending = false;
-    const notice = buildPackNotice(this._deliveredPacks, this._latestPackVersions);
-    if (!notice) return null;
-    const names = listStalePacks(this._deliveredPacks, this._latestPackVersions).map((pack) => pack.name);
-    const ts = Date.now();
-    this._recordDecision({ kind: "pack", ts, decision: "notice", names });
-    return notice;
+    return this._packDelivery.takeNotice();
   }
 
   get packNoticeHookEvent() {
@@ -1105,816 +993,74 @@ class Session extends EventEmitter {
 
   // A spawn re-resolves what is delivered, so notices owed by the previous spawn are void.
   _clearPackNotice() {
-    this._latestPackVersions.clear();
-    this._packNoticePending = false;
+    this._packDelivery.clearNotice();
   }
 
   toSnapshot() {
-    return {
-      id: this.id,
-      name: this.name,
-      path: this.path,
-      agent: this.agentId,
-      state: this.state,
-      stateSince: this.stateSince,
-      sleeping: this._sleeping,
-      dangerouslySkipPermissions: this.dangerouslySkipPermissions,
-      ephemeral: this.ephemeral,
-      isWorktree: this.isWorktree,
-      resumeSessionId: this._resumeSessionId,
-      activeAgents: this._activeAgentCount(),
-      // The resolved dir stays server-side because paired clients do not need local paths.
-      packs: this._deliveredPacks.map(({ name, version }) => ({ name, version })),
-      pendingWakeup: this._pendingWakeup(),
-      pendingPromptKind: this._pendingPromptKind,
-      mergeStatus: this.mergeStatus,
-      worktreeNotice: this.worktreeNotice,
-      effectiveBase: (this._effectiveBase || this._integrationBranch || null)
-        ?.replace(/^[^/]+\//, "") ?? null,
-      auditLog: this.auditLog.slice(-100),
-    };
+    return this._projectSnapshots().wire;
   }
 
-  // Recompute worktree status (a cwd can be turned into, or removed as, a linked
-  // worktree mid-session). Returns true when the value changed so the caller can
-  // rebroadcast just the delta instead of recreating the card.
-  refreshGitContext() {
-    const next = detectLinkedWorktree(this.worktreeDir || this.path);
-    if (next === this.isWorktree) return false;
-    this.isWorktree = next;
-    return true;
-  }
+  get worktreeDir() { return this.worktreeLifecycle.snapshot().worktreeDir; }
 
-  // The directory the PTY actually runs in: the isolated worktree when provisioned, else the repo
-  // root / in-place path. Single source of truth for cwd, worktree detection, and the review diff.
-  effectiveCwd() {
-    return this.worktreeDir || this.path;
-  }
+  get commonGitDir() { return this.worktreeLifecycle.snapshot().commonGitDir; }
 
-  // Resolve the SHARED gitdir (git rev-parse --git-common-dir) of this session's worktree: the dir every
-  // linked worktree writes refs/reflogs into, and where this session watches its integration branch's reflog.
-  // One-shot on the cold provision/adopt path, so sync git is fine (MEMORY single-event-loop-no-sync-git:
-  // keep one-shot cold paths sync). Absolute-ized against the worktree; null off a worktree / on failure.
-  _resolveCommonGitDir() {
-    if (!this.worktreeDir) return null;
-    try {
-      const out = execFileSync("git", ["rev-parse", "--git-common-dir"], {
-        cwd: this.worktreeDir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 10000,
-      });
-      return path.resolve(this.worktreeDir, out.trim());
-    } catch { return null; }
-  }
+  get baseSha() { return this.worktreeLifecycle.snapshot().baseSha; }
 
-  // Create (or reuse) this session's isolated worktree off the integration branch. A missing local
-  // integration branch is auto-created by git-workspace.js (from origin/<branch>, then main/master, then
-  // HEAD); this method returns false ONLY when that creation itself FAILED (reason:'no-base-branch'):
-  // the session then stays put with a surfaced notice and never runs in the operator's real tree.
-  // Isolation disabled (no injected gitWorkspace/integrationBranch) or a non-git path -> runs in place
-  // (returns true, worktreeDir null).
-  async _provisionWorktree() {
-    if (!this._gitWorkspace || !this._integrationBranch) return true;
-    if (this.worktreeDir && fs.existsSync(this.worktreeDir)) return true; // reuse across restart/wake
-    let ws;
-    try {
-      ws = await this._gitWorkspace.create({
-        projectPath: this.path,
-        teamId: "session",
-        label: this.id,
-        baseBranch: this._integrationBranch,
-        worktreeBase: this._worktreeRoot,
-        shareList: this._worktreeShare,
-      });
-    } catch (err) {
-      console.warn(`[session ${this.id}] worktree create failed: ${err.message} - running in place`);
-      return true;
-    }
-    if (ws && ws.reason === "no-base-branch") {
-      this.worktreeNotice = `Integration branch "${this._integrationBranch}" not found. Create it, then start this session.`;
-      this.emit("worktree-blocked", { id: this.id, branch: this._integrationBranch, notice: this.worktreeNotice });
-      return false;
-    }
-    if (ws && ws.reason === "branch-in-use") {
-      // The conflicting branch is this session's UNIQUE branch (it embeds the session id), so the
-      // worktree holding it is this session's own survivor: a boot-reconcile removal or an exit-time
-      // discard that failed on a locked dir (Windows: an orphaned Claude process keeps the cwd alive),
-      // or a missed recreate carry. Re-adopt and run in it instead of degrading to the operator's real
-      // tree. The one unsafe target is the main checkout itself (an operator `git checkout` of the
-      // session branch): adopting that would treat the real tree as disposable, so it stays in place.
-      let adopted = false;
-      if (ws.branch && ws.conflictPath && fs.existsSync(ws.conflictPath)
-          && !isSameDirectoryPath(ws.conflictPath, this.path)) {
-        try {
-          this.adoptWorktree({ worktreeDir: ws.conflictPath, branch: ws.branch });
-          adopted = true;
-        } catch (err) {
-          // Survivor vanished mid-adopt (concurrent reconcile) or the adopt itself failed; log it so
-          // an unrelated adopt bug is diagnosable, then fall through to the in-place notice.
-          console.warn(`[session ${this.id}] survivor adopt failed: ${err.message} - running in place`);
-        }
-      }
-      if (adopted && this.worktreeDir) {
-        this.worktreeNotice = null;
-        // The failed removal that left this survivor stripped its junctions first (removeWorktreeLinks
-        // runs before `worktree remove`), so re-share the gitignored context (node_modules, .claude,
-        // ...) before the PTY spawns into a checkout with no dependencies. Idempotent: entries already
-        // present are skipped. Promise.resolve: a sync fake engine's populate would otherwise make the
-        // bare .catch throw and reject _startBody unhandled. (The self-heal check for the adopted
-        // pending-review is armed in _startBody AFTER _startWorktreeWatcher, which would cancel one
-        // scheduled here.)
-        await Promise.resolve(
-          this._gitWorkspace.populate({ projectPath: this.path, wtDir: this.worktreeDir, shareList: this._worktreeShare }),
-        ).catch(() => { /* best-effort: the session runs without the shared context */ });
-        this.emit("worktree-ready", { id: this.id, worktreeDir: this.worktreeDir, branch: ws.branch });
-        return true;
-      }
-      this.worktreeNotice = `session branch already checked out at ${ws.conflictPath}; running in place`;
-      this.emit("worktree-blocked", { id: this.id, branch: this._integrationBranch, notice: this.worktreeNotice });
-    }
-    if (!ws || !ws.isGit) { // non-git path (including an unadoptable branch-in-use): the ONLY in-place fallback
-      this.worktreeDir = null;
-      this.isWorktree = false;
-      return true;
-    }
-    this._workspace = ws;
-    this.worktreeDir = ws.cwd;
-    this.commonGitDir = this._resolveCommonGitDir();
-    this.baseSha = ws.baseSha || null;
-    this.worktreeNotice = null;
-    this.mergeStatus = "none";
-    this.isWorktree = true;
-    this.emit("worktree-ready", { id: this.id, worktreeDir: ws.cwd, branch: ws.branch });
-    return true;
-  }
+  get mergeStatus() { return this.worktreeLifecycle.snapshot().mergeStatus; }
 
-  // On a real PTY exit (DONE/FAILED) decide the review gate: a worktree holding work (edited OR
-  // committed) becomes pending-review (the operator merges/discards); one holding nothing at all
-  // (chat/research) is discarded silently so it leaves no branch. Transient COMPLETE never reaches
-  // here (it has no PTY exit).
-  //
-  // A DESTROYED session's PTY exit is not the operator ending the work: it is a server shutdown or a
-  // config-driven recreate, where the tree must SURVIVE so the next boot re-adopts it and auto-resume
-  // lands back in the same worktree (the boot reconcile adopts a clean claimed tree; the recreate carry
-  // settles it explicitly). Discarding here would delete the worktree merely because the process closed.
-  async _settleWorktreeOnExit() {
-    if (this._destroyed) return;
-    if (!this._gitWorkspace || !this._workspace) return;
-    if (!RESTARTABLE_STATES.includes(this.state)) return;
-    if (await this.discardWorktreeIfClean()) return;
-    // Keep watching the kept-for-review worktree: a post-exit CLI merge/clean still self-heals fast.
-    this._setMergeStatus("pending-review");
-  }
+  get mergeReason() { return this.worktreeLifecycle.snapshot().mergeReason; }
 
-  // Shared keep-if-unmerged/discard-if-empty settle: discard the worktree (junction-safe) only when it
-  // holds no work at all, and report which way it went. Used by the exit settle above and the backend's
-  // config-modify carry-over, so both apply the same never-destroy-work test.
-  async discardWorktreeIfClean() {
-    if (!this.worktreeDir) return false;
-    if (await this.hasUnmergedWork()) return false; // unmerged work is never destroyed
-    await this.discardWorktree();
-    return true;
-  }
+  get mergeConflicts() { return this.worktreeLifecycle.snapshot().mergeConflicts; }
 
-  _setMergeStatus(status, extra = {}) {
-    this.mergeStatus = status;
-    // Retain the park context only while parked; clear it on any other status so a stale conflict list
-    // never rides a later clean/merged state.
-    const isParked = status === "parked";
-    this.mergeReason = isParked ? (extra.reason || null) : null;
-    this.mergeConflicts = isParked && Array.isArray(extra.conflicts) ? extra.conflicts : [];
-    this.emit("merge-status", { id: this.id, mergeStatus: status, ...extra });
-  }
+  get worktreeNotice() { return this.worktreeLifecycle.snapshot().worktreeNotice; }
 
-  // Hand a parked merge back to the Claude agent running in this session's worktree: build a context-rich
-  // prompt (why it parked + the conflicting files + how to rebase/resolve) and PASTE it into the live PTY.
-  // Bracketed paste keeps the multi-line prompt one input (raw newlines would submit each line); no
-  // trailing CR, so the operator reviews then sends. No-op unless parked with a live PTY.
-  pasteMergePrompt() {
-    if (this._destroyed) return { ok: false, reason: "destroyed" };
-    if (this.mergeStatus !== "parked") return { ok: false, reason: "not-parked" };
-    if (!this.ptyProcess || !this._ptyAlive) return { ok: false, reason: "no-pty" };
-    const prompt = buildMergePrompt({
-      branch: this._workspace ? this._workspace.branch : null,
-      target: this._integrationBranch,
-      reason: this.mergeReason,
-      conflicts: this.mergeConflicts,
-      worktreeDir: this.worktreeDir,
-    });
-    return this.pasteText(prompt);
-  }
+  get isWorktree() { return this.worktreeLifecycle.snapshot().isWorktree; }
 
-  // THE bracketed-paste seam for a multi-line prompt: one input the terminal takes literally (raw
-  // newlines would submit each line) with no trailing CR, so the operator reviews it and presses
-  // Enter. Every caller that hands a session a prompt to review goes through here.
-  pasteText(text) {
-    if (!this.hasLivePty) return { ok: false, reason: "no-pty" };
-    this.write(`\x1b[200~${text}\x1b[201~`);
-    return { ok: true };
-  }
+  getWorktreeCarry() { return this.worktreeLifecycle.getCarry(); }
 
-  /*
-   * Paste as soon as this session can receive it, starting it first when it is DORMANT.
-   *
-   * A spawn is not a terminal: bytes written between pty.spawn and Claude's TUI coming up are read by
-   * whatever is on stdin at the time and are simply lost. The structural signal for "the TUI is up"
-   * already exists - STARTING -> IDLE on first_output - so the paste waits on that state-change
-   * rather than on a sleep. It is dropped if the session dies on the way up or a newer deferred paste
-   * replaces it; only one can be pending at a time.
-   */
+  refreshGitContext() { return this.worktreeLifecycle.refreshGitContext(); }
+
+  effectiveCwd() { return this.worktreeLifecycle.effectiveCwd(); }
+
+  _provisionWorktree() { return this.worktreeLifecycle.provision(); }
+
+  _settleWorktreeOnExit() { return this.worktreeLifecycle.settleOnExit(); }
+
+  discardWorktreeIfClean() { return this.worktreeLifecycle.discardIfClean(); }
+
+  pasteMergePrompt() { return this.worktreeLifecycle.pasteMergePrompt(); }
+
+  pasteText(text) { return this._output.pasteText(text); }
+
   pasteTextWhenReady(text, { timeoutMs = 120000 } = {}) {
-    if (this._destroyed) return { ok: false, reason: "destroyed" };
-    if (this.hasLivePty && PASTE_READY_STATES.has(this.state)) return this.pasteText(text);
-    // Read before the listener is armed: a spawn that fails lands in FAILED, and re-reading the state
-    // after start() would then take the restart branch and respawn in a loop.
-    const stateBeforeWaiting = this.state;
-    this._clearPendingPaste();
-    const onStateChange = ({ to }) => {
-      if (!PASTE_READY_STATES.has(to)) return;
-      this._clearPendingPaste();
-      this.pasteText(text);
-    };
-    const onExit = () => this._clearPendingPaste();
-    const timer = setTimeout(() => this._clearPendingPaste(), timeoutMs);
-    if (typeof timer.unref === "function") timer.unref();
-    this._pendingPaste = { timer, onStateChange, onExit };
-    this.on("state-change", onStateChange);
-    this.once("exit", onExit);
-    if (stateBeforeWaiting === STATES.DORMANT) this.start();
-    // A finished or failed card is the ordinary resting state of a project session, so opening an
-    // issue against one respawns it exactly as the dashboard's Restart button would.
-    if (RESTARTABLE_STATES.includes(stateBeforeWaiting)) this.restart();
-    return { ok: true, deferred: true };
+    return this._output.pasteTextWhenReady(text, { timeoutMs });
   }
 
-  _clearPendingPaste() {
-    const pending = this._pendingPaste;
-    if (!pending) return;
-    this._pendingPaste = null;
-    clearTimeout(pending.timer);
-    this.off("state-change", pending.onStateChange);
-    this.off("exit", pending.onExit);
-  }
+  _clearPendingPaste() { this._output.clearPendingPaste(); }
 
-  // True when a discard would destroy work (uncommitted changes OR commits the integration branch lacks); git-workspace.js owns the rule, and an unreachable or throwing seam reads as work.
-  async hasUnmergedWork() {
-    if (!this.worktreeDir) return false;
-    if (!this._gitWorkspace || !this._workspace) return true;
-    try {
-      return await this._gitWorkspace.hasUnmergedWork({
-        projectPath: this.path,
-        workspace: this._workspace,
-        integrationBranch: this._integrationBranch,
-      });
-    } catch { return true; }
-  }
+  hasUnmergedWork() { return this.worktreeLifecycle.hasUnmergedWork(); }
 
-  // Two diffs the review sidebar draws a hard line between: COMMITTED changes (the commits a merge would
-  // move into the integration branch) and still-UNCOMMITTED working-tree changes (vs HEAD, shown for
-  // awareness but never merged until committed). `hasCommits` is the merge gate: nothing committed means
-  // nothing to merge. NEW files are made visible in the uncommitted diff via intent-to-add. The committed
-  // range and the gate are taken from the LIVE relationship to the integration branch, so they reset
-  // themselves once the work lands on it (whether merged via Glissa or out-of-band).
-  async getDiff() {
-    const empty = { stat: "", diff: "" };
-    if (!this.worktreeDir) return { committed: empty, uncommitted: empty, hasCommits: false };
-    // maxBuffer is generous: a review diff can be large, and unlike execFileSync (which threw on
-    // overflow and we recovered partial e.stdout) execFile would error and gitOut would yield "".
-    const opts = { cwd: this.worktreeDir, encoding: "utf8", timeout: 15000, maxBuffer: 64 * 1024 * 1024 };
-    const g = (args) => gitOut(args, opts); // awaited serially below: order matters (intent-to-add before the diffs)
-    await g(["add", "-N", "--", "."]); // intent-to-add so new files appear in the uncommitted diff
-    // What a merge would actually move is the commits on HEAD that the integration branch does NOT already
-    // have. Derive both the committed range (merge-base..HEAD) and the gate (integrationBranch..HEAD) from
-    // the LIVE relationship to the integration branch, NOT the stored fork SHA: baseSha is captured at fork
-    // and goes stale once the integration branch advances or this branch is merged out-of-band (e.g. a CLI
-    // rebase-then-FF), which would otherwise keep phantom-showing already-merged commits as "needs merge".
-    // Fall back to baseSha (then to nothing) only when no integration branch is known - unit tests and
-    // in-place, non-isolated sessions, where baseSha (or the worktree-vs-HEAD diff) is all we have.
-    let base = "";
-    let aheadCount = "0";
-    const { ref: baseRef, verified } = await this._resolveVerifiedBaseRef(g, opts);
-    if (verified) {
-      base = (await g(["merge-base", baseRef, "HEAD"])).trim();
-      aheadCount = (await g(["rev-list", "--count", `${baseRef}..HEAD`])).trim();
-    }
-    if (!verified && baseRef) {
-      base = baseRef;
-      aheadCount = (await g(["rev-list", "--count", `${base}..HEAD`])).trim();
-    }
-    const committed = base
-      ? { stat: (await g(["diff", "--stat", `${base}..HEAD`])).trim(), diff: await g(["diff", `${base}..HEAD`]) }
-      : empty;
-    const uncommitted = { stat: (await g(["diff", "--stat", "HEAD"])).trim(), diff: await g(["diff", "HEAD"]) };
-    const hasCommits = aheadCount !== "" && aheadCount !== "0";
-    // Self-heal a stranded review gate. mergeStatus is set at PTY exit / boot re-adoption, but the
-    // operator can commit-and-merge or clean the worktree inside the still-live PTY (the design is
-    // "commit as you go"), which leaves the gate stuck at pending-review/parked over an empty diff - a
-    // phantom "1" on the review badge with "No changes in this worktree" below it. getDiff is the one
-    // place that re-derives what is actually reviewable, so when nothing is, drop the gate to 'none'
-    // (broadcast via the merge-status event, which clears the badge and the note).
-    const healed = decideDiffSelfHeal(this.mergeStatus, committed.diff, uncommitted.diff);
-    if (healed) this._setMergeStatus(healed);
-    return { committed, uncommitted, hasCommits };
-  }
+  getDiff() { return this.worktreeLifecycle.getDiff(); }
 
-  // A session branch pushed with `-u` tracks its OWN remote copy, which is no integration base: its
-  // merge-base with HEAD walks back to the pre-rebase fork and reports every develop commit since.
-  // Resolve the best git base ref for diff computation. Tries HEAD@{upstream} first so a
-  // session whose branch has an upstream (e.g. Claude Code ran `git push --set-upstream`)
-  // uses the tracked remote ref rather than the globally configured _integrationBranch. Falls
-  // back to _integrationBranch when no upstream is configured. Caches in _effectiveBase so
-  // toSnapshot() can read a display-ready value synchronously.
-  async _resolveEffectiveBase(opts) {
-    const upstream = (await gitOut(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "HEAD@{upstream}"], opts)).trim();
-    const hasUpstream = Boolean(upstream) && !upstream.includes("@{");
-    const branch = hasUpstream ? (await gitOut(["rev-parse", "--abbrev-ref", "HEAD"], opts)).trim() : "";
-    if (hasUpstream && !isOwnRemoteCopy(upstream, branch)) {
-      this._effectiveBase = upstream; // e.g. "origin/main"
-      return upstream;
-    }
-    this._effectiveBase = this._integrationBranch || null;
-    return this._integrationBranch || null;
-  }
+  getBranchSync() { return this.worktreeLifecycle.getBranchSync(); }
 
-  // The base ref both git probes measure against: the effective base above once it actually resolves
-  // in this worktree, otherwise the stored fork SHA, otherwise null. `verified` says which of the two
-  // the caller got, since only a resolved REF is worth a merge-base. `swallowResolveError` is the
-  // signature probe's: a missing integration branch is EXPECTED there and must not be mistaken for
-  // the unreadable worktree its outer catch reports as UNKNOWN.
-  async _resolveVerifiedBaseRef(run, opts, { swallowResolveError = false } = {}) {
-    let verifiedRef = null;
-    try {
-      const candidate = await this._resolveEffectiveBase(opts);
-      if (candidate && (await run(["rev-parse", "--verify", "--quiet", candidate])).trim()) verifiedRef = candidate;
-    } catch (err) {
-      if (!swallowResolveError) throw err;
-    }
-    if (verifiedRef) return { ref: verifiedRef, verified: true };
-    return { ref: this.baseSha || null, verified: false };
-  }
+  resyncBranch() { return this.worktreeLifecycle.resyncBranch(); }
 
-  // Ahead/behind of the project's LOCAL base branch (this._integrationBranch, e.g. develop) against
-  // its remote upstream tracking branch. Distinct from getDiff()'s worktree-vs-integration-branch
-  // gate: this answers "did the operator's agents commit to local develop without pushing, or did
-  // origin move while they worked", neither of which the worktree diff surfaces. Runs in `this.path`
-  // (the main checkout, never a session worktree) and touches only refs - no checkout - so it never
-  // disturbs whatever the operator has checked out there. The freshness fetch is best-effort and
-  // timeout-bounded: a failure (offline, slow remote) still returns the (possibly stale) counts,
-  // flagged `fetched: false` so the UI can hint the "behind" number may be outdated. Only called on an
-  // explicit sidebar open/refresh request - never on a recurring timer.
-  async getBranchSync() {
-    const branch = this._integrationBranch;
-    if (!branch || !this.path) return this._branchSyncNoUpstream(branch);
-    const opts = { cwd: this.path, encoding: "utf8", timeout: 10000 };
-    const upstream = await this._branchSyncUpstream(branch, opts);
-    if (!upstream) return this._branchSyncNoUpstream(branch);
+  checkWorktreeChange(signature) { return this.worktreeLifecycle.checkWorktreeChange(signature); }
 
-    const fetched = await this._branchSyncFetch(parseRemoteFromUpstream(upstream), branch, opts);
-    const counts = await this._branchSyncCounts(upstream, branch, opts);
-    return { branch, upstream, fetched, ...counts };
-  }
+  mergeWorktree() { return this.worktreeLifecycle.mergeWorktree(); }
 
-  // On-demand resync: fetch, then RESOLVE the drift rather than just report it. behind-only fast-
-  // forwards the local base branch (never a rebase); ahead-only pushes it; every other state (diverged,
-  // in-sync, no-upstream, unknown) mutates nothing - decideResyncAction is the single place that
-  // decision is made, and it never returns anything but 'none' for a diverged branch, so this method
-  // can never rebase or force-push no matter what future state values are added. Only called on an
-  // explicit operator action (the sidebar's Resync button or its alt+r shortcut) - never on a timer.
-  // Concurrency: a second call while one is still running rides the SAME in-flight promise instead of
-  // starting a fresh git mutation (this._resyncPromise), so two clicks can never race two `git push`es.
-  async resyncBranch() {
-    if (this._resyncPromise) return this._resyncPromise;
-    this._resyncPromise = this._resyncBranchBody().finally(() => { this._resyncPromise = null; });
-    return this._resyncPromise;
-  }
+  mergeAndContinue(options = {}) { return this.worktreeLifecycle.mergeAndContinue(options); }
 
-  async _resyncBranchBody() {
-    const branch = this._integrationBranch;
-    if (!branch || !this.path) return { ...this._branchSyncNoUpstream(branch), action: "none", error: null };
-    const opts = { cwd: this.path, encoding: "utf8", timeout: 10000 };
-    const upstream = await this._branchSyncUpstream(branch, opts);
-    if (!upstream) return { ...this._branchSyncNoUpstream(branch), action: "none", error: null };
+  adoptWorktree(options) { return this.worktreeLifecycle.adoptWorktree(options); }
 
-    const remote = parseRemoteFromUpstream(upstream);
-    const fetched = await this._branchSyncFetch(remote, branch, opts);
-    const before = await this._branchSyncCounts(upstream, branch, opts);
-
-    const checkedOut = (await gitOut(["rev-parse", "--abbrev-ref", "HEAD"], opts)).trim();
-    const decision = decideResyncAction(before.state, checkedOut === branch);
-
-    let action = "none";
-    let error = null;
-    const cmd = RESYNC_COMMANDS[decision]?.({ upstream, branch, remote, opts });
-    if (cmd) {
-      try {
-        await gitStrict(cmd.args, cmd.opts);
-        action = cmd.successAction;
-      } catch (err) {
-        error = firstGitErrorLine(err);
-      }
-    }
-
-    // Recompute AFTER the mutation (no re-fetch: the remote has not moved further, only the local ref
-    // may have) so the UI lands on the post-resync truth, not the pre-mutation snapshot.
-    const after = await this._branchSyncCounts(upstream, branch, opts);
-    return { branch, upstream, fetched, ...after, action, error };
-  }
-
-  // fetched: null means no fetch was ever attempted (there is no upstream to fetch from), which the UI
-  // must not render as a failed/stale fetch - distinct from fetched: false (a real fetch that failed).
-  _branchSyncNoUpstream(branch) {
-    return { branch: branch || null, upstream: null, state: decideBranchSyncState({ hasUpstream: false }), ahead: 0, behind: 0, fetched: null };
-  }
-
-  // The branch's upstream tracking ref (e.g. "origin/develop"), or null when none is configured.
-  // gitOut (not gitStrict): "no upstream configured for branch" is an EXPECTED outcome here, not an
-  // error to reject on, so it must resolve to empty stdout rather than throw.
-  async _branchSyncUpstream(branch, opts) {
-    const upstream = (await gitOut(["rev-parse", "--abbrev-ref", "--symbolic-full-name", `${branch}@{upstream}`], opts)).trim();
-    return upstream && !upstream.includes("@{") ? upstream : null;
-  }
-
-  // Best-effort freshness fetch, bounded so an offline/slow remote never stalls the caller for long.
-  // Returns whether it actually succeeded; the caller reports counts either way (possibly stale).
-  async _branchSyncFetch(remote, branch, opts) {
-    try {
-      await gitStrict(["fetch", "--quiet", remote, branch], { ...opts, timeout: 8000 });
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  // Ahead/behind + display state for an already-resolved upstream, shared by getBranchSync (called
-  // once, after its own fetch) and resyncBranch (called twice: before and after its mutation, without
-  // fetching again in between - the remote has not moved, only the local ref may have).
-  async _branchSyncCounts(upstream, branch, opts) {
-    const counts = parseLeftRightCount(await gitOut(["rev-list", "--left-right", "--count", `${upstream}...${branch}`], opts));
-    return {
-      ahead: counts ? counts.ahead : 0,
-      behind: counts ? counts.behind : 0,
-      state: decideBranchSyncState({ hasUpstream: true, ahead: counts?.ahead, behind: counts?.behind }),
-    };
-  }
-
-  // A CHEAP fingerprint of the worktree's reviewable state: uncommitted+untracked (porcelain), the
-  // HEAD sha (commits), and how far HEAD is ahead of the integration branch (the merge gate, which a
-  // cross-session merge into develop can move WITHOUT touching this worktree). One `git status` + a
-  // couple of rev-parses, all timeout-bounded. Returns { sig, dirty, ahead, behind, rebaseInProgress,
-  // headSha, targetSha } or null with no worktree.
-  // This is the funnel's truth; the heavy getDiff() is only fetched for the selected session.
-  async _computeWorktreeSignature() {
-    if (!this.worktreeDir) return null;
-    const opts = { cwd: this.worktreeDir, encoding: "utf8", timeout: 10000, maxBuffer: 16 * 1024 * 1024 };
-    // --no-optional-locks: this runs on background event nudges (watchers / turn-end), so it must NEVER
-    // take git's index lock and contend with the session's own `git add` / `git commit` in the worktree.
-    const run = (args) => gitStrict(["--no-optional-locks", ...args], opts);
-    let status, head, ahead = "0", behind = "0", rebaseInProgress = false, targetSha = null;
-    try {
-      status = await run(["status", "--porcelain"]);
-      head = (await run(["rev-parse", "HEAD"])).trim();
-      const { ref: baseRef } = await this._resolveVerifiedBaseRef(run, opts, { swallowResolveError: true });
-      if (baseRef) ahead = (await run(["rev-list", "--count", `${baseRef}..HEAD`])).trim();
-      // `behind` is measured against the MERGE TARGET (the local branch the merge engine fast-forwards),
-      // NOT the effective/display base above: HEAD@{upstream} can sit at a stale commit while the local
-      // integration branch moved, and the parked->pending-review demotion must mirror what an actual
-      // merge would do. The two counts deliberately use different bases.
-      try {
-        const mergeTarget = this._integrationBranch || (this._workspace?.base) || this.baseSha;
-        // The verify probe already RESOLVES the target, so the auto-rebase cooldown key gets its half
-        // of the fingerprint for free rather than costing another rev-parse on this recurring path.
-        const resolvedTarget = mergeTarget ? (await run(["rev-parse", "--verify", "--quiet", mergeTarget])).trim() : "";
-        if (resolvedTarget) {
-          targetSha = resolvedTarget;
-          behind = (await run(["rev-list", "--count", `HEAD..${mergeTarget}`])).trim();
-        }
-      } catch { /* no merge target; behind stays "0" */ }
-      // In-progress rebase probe: a rebase can pause on a clean tree, which must never look mergeable.
-      // The rev-parse calls stay async; the trailing fs.existsSync is a deliberate sync stat on an
-      // already-resolved path (no git subprocess, no repo walk), cheap enough for this recurring path.
-      const rebaseMerge = (await run(["rev-parse", "--git-path", "rebase-merge"])).trim();
-      const rebaseApply = (await run(["rev-parse", "--git-path", "rebase-apply"])).trim();
-      const resolveGitPath = (p) => (path.isAbsolute(p) ? p : path.resolve(this.worktreeDir, p));
-      rebaseInProgress = fs.existsSync(resolveGitPath(rebaseMerge)) || fs.existsSync(resolveGitPath(rebaseApply));
-    } catch {
-      // Worktree momentarily unreadable (mid-rebase, lock contention, pruned dir). Return UNKNOWN, never
-      // a false-empty signature: that would wrongly self-heal a real pending-review gate to 'none'.
-      return null;
-    }
-    // behind/rebaseInProgress are demotion-condition inputs only; the change-detection hash is unchanged.
-    const sig = crypto.createHash("sha1").update(`${status} ${head} ${ahead}`).digest("hex");
-    return { sig, dirty: status.trim() !== "", ahead, behind, rebaseInProgress, headSha: head, targetSha };
-  }
-
-  // The funnel every change TRIGGER converges on (turn-end hook, gitdir fs.watch, integration-ref watcher):
-  // recompute the cheap signature, run the gate demotions (empty worktree -> 'none'; resolved parked
-  // rebase -> 'pending-review' so Merge comes back), and emit `worktree-changed` so the dashboard
-  // auto-refreshes the SELECTED session's diff. The emit dedups on the signature EXCEPT when a demotion
-  // fired (a demotion must always broadcast). Suppressed mid-merge (the index is being rewritten) so a
-  // transient never broadcasts.
-  async checkWorktreeChange() {
-    if (this._destroyed || !this.worktreeDir) return;
-    if (this.mergeStatus === "merging") return;
-    // Same reason as the merging guard: mid-rebase the worktree reads clean and detached with ahead 0,
-    // which decideSignatureDemotion would self-heal a real pending-review/parked gate to 'none' on, with
-    // nothing left to re-arm it. _maybeAutoRebase always ends its window with one final recheck.
-    if (this._autoRebasing) return;
-    const sig = await this._computeWorktreeSignature();
-    // Re-check liveness after the await: the session may have been destroyed or entered a merge while
-    // the git probe ran, in which case a stale broadcast/demotion must not fire.
-    if (this._destroyed || this.mergeStatus === "merging") return;
-    if (!sig) return;
-    // Gate demotions run BEFORE the signature dedup: a park can leave the worktree byte-identical to the
-    // established baseline (a lost fast-forward does not abort the no-op rebase, and the merge flow never
-    // resets _lastWorktreeSig), so a dedup-gated demotion would never fire and 'parked' would stick forever.
-    // The decision matrix itself is pure (session/core/merge-gate.js).
-    const next = decideSignatureDemotion(this.mergeStatus, sig);
-    const demoted = next !== null;
-    if (demoted) this._setMergeStatus(next);
-    // Evaluated BEFORE the signature dedup, because the trigger it exists for leaves the signature
-    // byte-identical: `behind` is not part of the hash, so an integration branch that moved under an
-    // otherwise untouched worktree would never get past the early return below.
-    await this._maybeAutoRebase(sig);
-    if (this._destroyed || this.mergeStatus === "merging") return;
-    if (sig.sig === this._lastWorktreeSig && !demoted) return;
-    this._lastWorktreeSig = sig.sig;
-    this.emit("worktree-changed", { id: this.id, sig: sig.sig });
-  }
-
-  // Eager conflict avoidance: when the integration branch has moved ahead of a worktree that is clean,
-  // quiescent and not mid-anything, replay this session's commits on top of it right now. Paying the
-  // drift off in small pieces as it appears is what keeps a long-lived session from meeting one large
-  // conflict at merge time. The decision itself is pure (session/core/rebase-gate.js); this is the thin
-  // shell that runs it, holds the re-entry mutex, and records what happened.
-  //
-  // A conflict is NOT escalated: the status gate, the notification and the operator handoff all stay
-  // where they were, on the eventual Merge click, which hits the same conflict and parks exactly as it
-  // does today. All this records is a cooldown key, so the same doomed rebase is not retried on every
-  // watcher nudge; head or target moving is what makes it worth another attempt.
-  async _maybeAutoRebase(sig) {
-    if (this._autoRebasing) return;
-    const currentKey = `${sig.headSha || ""}::${sig.targetSha || ""}`;
-    const verdict = decideAutoRebase({
-      enabled: this._autoRebase && Boolean(this._gitWorkspace && this._workspace),
-      state: this.state,
-      mergeStatus: this.mergeStatus,
-      dirty: sig.dirty,
-      behind: sig.behind,
-      rebaseInProgress: sig.rebaseInProgress,
-      teardownPending: this._teardownPending(),
-      currentKey,
-      lastConflictKey: this._rebaseConflictKey,
-    });
-    if (verdict.action !== "rebase") return;
-    this._autoRebasing = true;
-    try {
-      const r = await this._gitWorkspace.rebaseOnly({
-        projectPath: this.path,
-        workspace: this._workspace,
-        targetBranch: this._integrationBranch,
-      });
-      // The gate cleared this rebase against a quiescent session, but a turn can start while it runs.
-      // Nothing can be undone at this point, so record it: an agent that comes back confused about its
-      // own files has the rewrite and the state it landed in sitting next to each other in the trace.
-      if (!AUTO_REBASE_STATES.includes(this.state)) {
-        this._recordDecision({ kind: "rebase", ts: Date.now(), decision: "state-moved", state: this.state });
-      }
-      if (r?.ok && r.rebased) {
-        this._rebaseConflictKey = null;
-        if (r.baseSha) { this.baseSha = r.baseSha; this._workspace.baseSha = r.baseSha; }
-        this._recordDecision({
-          kind: "rebase", ts: Date.now(), decision: "auto-rebased",
-          from: sig.headSha || null, to: r.headSha || null, rerereReplayed: r.rerereReplayed === true,
-        });
-        return;
-      }
-      // 'rebase-failed' (a rebase that never started) is deliberately NOT cooled down: it is transient,
-      // and the debounce already bounds how often a later event can retry it.
-      if (r?.reason === "rebase-conflict") {
-        this._rebaseConflictKey = currentKey;
-        this._recordDecision({
-          kind: "rebase", ts: Date.now(), decision: "conflict", conflicts: r.conflicts || [],
-        });
-      }
-    } catch (err) {
-      // Additive hygiene: an engine failure must never break the change funnel it rides on.
-      console.warn(`[session ${this.id}] auto-rebase failed: ${err.message}`);
-    } finally {
-      this._autoRebasing = false;
-      // Every outcome, including a conflict and a throw: this method suppressed the funnel while it ran,
-      // so it owes it one recheck to re-establish the signature and the gate it may have skipped.
-      this._scheduleWorktreeCheck();
-    }
-  }
-
-  /*
-   * A resolution just landed in the shared rerere cache. The conflict cooldown is keyed on a sha pair
-   * and expires when one of them moves, which misses the case this exists for: a SIBLING session
-   * resolved the same conflict, so this worktree could now replay that resolution and finish, while
-   * nothing about this worktree changed. Treating the recorded resolution as the retry trigger is what
-   * makes that happen now rather than eventually.
-   */
-  _onRerereRecorded() {
-    const verdict = decideRerereCooldownClear({
-      enabled: this._autoRebase && Boolean(this._gitWorkspace && this._workspace),
-      hasCooldown: Boolean(this._rebaseConflictKey),
-      teardownPending: this._teardownPending(),
-    });
-    if (!verdict.clear) return;
-    this._recordDecision({
-      kind: "rebase", ts: Date.now(), decision: "cooldown-cleared", reason: verdict.reason,
-    });
-    this._rebaseConflictKey = null;
-    this._scheduleWorktreeCheck();
-  }
-
-  // Debounced entry for the IMMEDIATE triggers (fs.watch onChange + the `ready` turn-end). Collapses a
-  // burst (a commit touches several gitdir files; a turn-end can race the watch) into one check. The
-  // backend's integration-ref watcher fan-out calls checkWorktreeChange() directly (its nudge is coarse).
-  _scheduleWorktreeCheck() {
-    if (this._destroyed || !this.worktreeDir || this._worktreeCheckTimer) return;
-    // Fire-and-forget: checkWorktreeChange catches its own git errors (returns a null signature), so
-    // the only thing to guard is an unexpected rejection becoming an unhandledRejection.
-    this._armTimer("_worktreeCheckTimer", WORKTREE_CHECK_DEBOUNCE_MS, () => {
-      this.checkWorktreeChange().catch(() => { /* best-effort; the watch + a later nudge retry */ });
-    }, { unref: true });
-  }
-
-  // (Re)start the two fs.watches this session's review gate rides on. Idempotent: fresh watchers replace
-  // any prior ones, so it is safe to call on every provision/adopt/restart. A non-worktree (in-place)
-  // session has no gitdir, so both decline; it has no review worktree to track anyway.
-  // _lastWorktreeSig is reset so the first post-(re)start check re-establishes the baseline.
-  //
-  //   - this worktree's OWN gitdir: a commit/stage/reset inside it.
-  //   - the integration branch's REFLOG in the shared gitdir: the branch moving WITHOUT this worktree
-  //     changing (a sibling session merged, or the operator merged out-of-band), which shifts this
-  //     session's merge gate with no local event. Both funnel into the same debounced recheck.
-  _startWorktreeWatcher() {
-    this._stopWorktreeWatcher();
-    if (this._destroyed || !this.worktreeDir) return;
-    const onChange = () => this._scheduleWorktreeCheck();
-    this._worktreeWatcher = createWorktreeWatcher({ worktreeDir: this.worktreeDir, onChange });
-    this._worktreeWatcher.start();
-    if (!this._liveWorktreeReview || !this.commonGitDir || !this._integrationBranch) return;
-    this._integrationWatcher = createIntegrationRefWatcher({
-      commonGitDir: this.commonGitDir,
-      branch: this._integrationBranch,
-      onChange,
-    });
-    this._integrationWatcher.start();
-    // The rr-cache lives in the SHARED gitdir, so a sibling's recorded resolution reaches this session
-    // through its own watcher; no registry, same shape as the integration-ref watch.
-    this._rerereWatcher = createRerereWatcher({
-      commonGitDir: this.commonGitDir,
-      onChange: () => this._onRerereRecorded(),
-    });
-    this._rerereWatcher.start();
-  }
-
-  _stopWorktreeWatcher() {
-    this._worktreeWatcher = stopWatcher(this._worktreeWatcher);
-    this._integrationWatcher = stopWatcher(this._integrationWatcher);
-    this._rerereWatcher = stopWatcher(this._rerereWatcher);
-    this._clearTimer("_worktreeCheckTimer");
-    this._lastWorktreeSig = null;
-  }
-
-  // The half both merge entry points share: arm the 'merging' gate, run one engine method against this
-  // session's workspace, and turn a thrown engine into the pending-review fallback. Returns { result }
-  // or { failure }, the caller's own return value, so a throw needs no second catch at each call site.
-  async _runMergeEngine(method) {
-    this._setMergeStatus("merging");
-    try {
-      const result = await this._gitWorkspace[method]({
-        projectPath: this.path,
-        workspace: this._workspace,
-        targetBranch: this._integrationBranch,
-      });
-      return { result };
-    } catch (err) {
-      this._setMergeStatus("pending-review", { reason: err.message });
-      return { failure: { merged: false, reason: err.message } };
-    }
-  }
-
-  // Forget the worktree this session was running in and report the gate it lands on. The caller stops
-  // the watchers first: an fs.watch on a dir the engine is about to remove would ENOENT.
-  _clearWorktreeState(status) {
-    this._workspace = null;
-    this.worktreeDir = null;
-    this.commonGitDir = null;
-    this.isWorktree = false;
-    this._setMergeStatus(status);
-  }
-
-  // The tail both merge paths share once the merge itself did not succeed: a conflicted/lost-FF rebase
-  // PARKS with its context, anything else falls back to pending-review.
-  _applyParkedOrPending(r) {
-    if (r.parked) {
-      this._setMergeStatus("parked", { reason: r.reason || null, conflicts: r.conflicts || [] });
-      return r;
-    }
-    this._setMergeStatus("pending-review", { reason: r.reason || null });
-    return r;
-  }
-
-  // Operator action: rebase-then-FF merge the session's worktree into the integration branch, then
-  // tear it down. On a conflict/lost-FF the branch PARKS (worktree preserved). Returns the engine result.
-  // `refused: true` on the early returns here (and in mergeAndContinue) marks a guard that fired BEFORE
-  // any merge-status change: nothing is broadcast for these, so the control handler is the one that must
-  // surface them to the operator (see reportMergeRefusal in server/control-handlers.js). Without that
-  // flag a refused merge is invisible: the click does nothing and no feedback ever reaches the dashboard.
-  async mergeWorktree() {
-    if (!this._gitWorkspace || !this._workspace) return { merged: false, refused: true, reason: "no-worktree" };
-    // Re-entry guard: a second merge click while a merge is already in flight would race the engine on
-    // the same worktree. Keyed STRICTLY on 'merging' so it never blocks the legitimate finish path, which
-    // calls mergeWorktree while mergeStatus is 'pending-review' (settled-on-exit) or 'none'.
-    if (this.mergeStatus === "merging") return { merged: false, refused: true, reason: "merge-in-progress" };
-    const { result: r, failure } = await this._runMergeEngine("mergeBack");
-    if (failure) return failure;
-    if (r.merged) {
-      this._stopWorktreeWatcher();
-      this._clearWorktreeState("merged");
-      return r;
-    }
-    return this._applyParkedOrPending(r);
-  }
-
-  // Operator action behind the sidebar's "Merge" on a LIVE quiescent session (WAITING/IDLE/COMPLETE):
-  // commit the worktree's changes, merge them into the integration branch, and rebase this worktree onto
-  // it, KEEPING the session running on the same worktree (now on top of develop) so the operator commits
-  // as they go. Unlike finishAndMerge it never ends the session or tears the worktree down. Refused only
-  // while the PTY is actively working (RUNNING: we must not rewrite a worktree mid-edit); a session that
-  // paused awaiting the operator (WAITING) is quiescent and mergeable, same as IDLE/COMPLETE. A rebase
-  // conflict / lost FF PARKS (worktree preserved). Returns the engine result.
-  //
-  // force is the operator's explicit "merge anyway" for a card stuck WORKING (e.g. a background-agent
-  // gate that never drained): it additionally allows RUNNING, but still refuses every other non-live
-  // state (DORMANT/INITIALIZING/STARTING/DONE/FAILED all mean there is no live worktree to merge from).
-  async mergeAndContinue({ force = false } = {}) {
-    // refused: true = a pre-merge guard fired with NO merge-status side effect; the control handler
-    // surfaces it (see the mergeWorktree header note).
-    if (this._destroyed) return { merged: false, refused: true, reason: "destroyed" };
-    if (!this._gitWorkspace || !this._workspace) return { merged: false, refused: true, reason: "no-worktree" };
-    const runningOverride = force && this.state === STATES.RUNNING;
-    if (!MERGEABLE_LIVE_STATES.includes(this.state) && !runningOverride) {
-      return { merged: false, refused: true, reason: "not-continuable" };
-    }
-    // Re-entry guard (see mergeWorktree): refuse a second concurrent merge on the same worktree.
-    if (this.mergeStatus === "merging") return { merged: false, refused: true, reason: "merge-in-progress" };
-    const { result: r, failure } = await this._runMergeEngine("mergeKeep");
-    if (failure) return failure;
-    if (r.merged) {
-      // Worktree kept alive on its branch (now == the integration tip); track the new base it sits on.
-      if (r.baseSha) { this.baseSha = r.baseSha; this._workspace.baseSha = r.baseSha; }
-      // Committed work merged out, so the gate normally returns to 'none'. But if the stashed uncommitted
-      // work reapplied WITH conflicts, the worktree now holds conflict markers the operator must resolve -
-      // surface that as pending-review instead of silently reporting clean.
-      if (!r.restoreConflict) {
-        this._setMergeStatus("none");
-        return r;
-      }
-      this._setMergeStatus("pending-review", { reason: "restore-conflict" });
-      return r;
-    }
-    if (!r.parked && r.reason === "nothing-to-commit") {
-      this._setMergeStatus("none");
-      return r;
-    }
-    return this._applyParkedOrPending(r);
-  }
-
-  // Re-adopt an existing on-disk session worktree at boot (e.g. a pending-review/parked session that
-  // survived a server restart), so its unreviewed work is resurfaced as pending-review instead of
-  // stranded. The session stays DORMANT; the operator can then review/merge it, or starting it reuses
-  // this same worktree (_provisionWorktree early-returns on an existing worktreeDir).
-  // `hasUnmergedWork: false` adopts WITHOUT the review gate: a tree that survived a shutdown with
-  // nothing uncommitted has nothing to review, so gating it would put a stale review banner on the card.
-  // Callers that know (or cannot cheaply tell) the tree holds work keep the pending-review default.
-  adoptWorktree({ worktreeDir, branch, base, hasUnmergedWork = true }) {
-    if (!worktreeDir) return;
-    this._workspace = { cwd: worktreeDir, isGit: true, branch, base: base || this._integrationBranch };
-    this.worktreeDir = worktreeDir;
-    this.commonGitDir = this._resolveCommonGitDir();
-    this.isWorktree = true;
-    this._setMergeStatus(hasUnmergedWork ? "pending-review" : "none");
-    // Watch the re-adopted worktree too: an operator who merges/cleans it from the CLI then sees the
-    // stranded gate self-heal fast, without starting the session.
-    this._startWorktreeWatcher();
-  }
-
-  // Operator action: throw the worktree away unmerged (junction-safe), reset to no-worktree.
-  async discardWorktree() {
-    this._stopWorktreeWatcher(); // stop before the dir is removed (fs.watch would ENOENT)
-    if (this._gitWorkspace && this._workspace) {
-      try { await this._gitWorkspace.discard({ projectPath: this.path, workspace: this._workspace }); } catch { /* best-effort */ }
-    }
-    this._clearWorktreeState("none");
-  }
+  discardWorktree() { return this.worktreeLifecycle.discardWorktree(); }
 
   getDetectionStats() {
     return {
       lastSignal: this._lastSignal,
       hookSeen: this._hookSeen,
-      hooksInjected: this._hookToken !== null,
+      hooksInjected: this._hooks.hasInjection(),
       titleState: this._titleSource.getState(),
     };
   }
@@ -1930,9 +1076,9 @@ class Session extends EventEmitter {
       pendingRestart: this._pendingRestart,
       hasPty: this.ptyProcess !== null,
       ptyPid: this.ptyProcess ? this.ptyProcess.pid : null,
-      outputBufferEntries: this._outputRing.stats().entries,
-      outputBufferBytes: this._outputRing.size,
-      outputBufferTotal: this._outputRing.total,
+      outputBufferEntries: this._output.stats().entries,
+      outputBufferBytes: this._output.stats().bytes,
+      outputBufferTotal: this._output.stats().total,
       auditLogLength: this.auditLog.length,
       dataListenerCount: this.listenerCount("data"),
       hookSeen: this._hookSeen,
@@ -1944,18 +1090,32 @@ class Session extends EventEmitter {
   }
 
   getDebugState() {
-    // Also refreshes _agentBreakdown (and prunes), so the breakdown below describes this instant.
+    return this._projectSnapshots().debug;
+  }
+
+  _projectSnapshots() {
     const active = this._activeAgentCount();
     const held = this._gateHeldReady;
-    return {
+    return projectSessionSnapshots({
+      id: this.id,
+      name: this.name,
+      path: this.path,
+      agent: this.agentId,
       state: this.state,
-      transitions: this.auditLog.slice(-5).map((e) => ({
-        from: e.from,
-        to: e.to,
-        event: e.event,
-        timestamp: e.timestamp,
-        detail: e.detail,
-      })),
+      stateSince: this.stateSince,
+      sleeping: this._sleeping,
+      dangerouslySkipPermissions: this.dangerouslySkipPermissions,
+      ephemeral: this.ephemeral,
+      isWorktree: this.isWorktree,
+      resumeSessionId: this._resumeSessionId,
+      activeAgents: active,
+      packs: this._packDelivery.delivered(),
+      pendingWakeup: this._pendingWakeup(),
+      pendingPromptKind: this._pendingPromptKind,
+      mergeStatus: this.mergeStatus,
+      worktreeNotice: this.worktreeNotice,
+      effectiveBase: this.worktreeLifecycle.snapshot().effectiveBase,
+      auditLog: this.auditLog,
       detection: {
         ...this.getDetectionStats(),
         agents: { ...this._agentBreakdown, active },
@@ -1963,9 +1123,8 @@ class Session extends EventEmitter {
           ? { heldForMs: Date.now() - held.ts, seq: held.seq, lastActivitySeq: this._lastActivitySeq }
           : null,
       },
-      packs: this._deliveredPacks.map(({ name, version }) => ({ name, version })),
-      decisions: this._decisionLog.slice(-15),
-    };
+      decisions: this._observability.decisionTail(15),
+    });
   }
 
   transition(event, detail) {
@@ -2099,10 +1258,10 @@ class Session extends EventEmitter {
     // Listen for changes in the (isolated) worktree so the review diff stays live without a manual
     // refresh. Idempotent across restart-reuse; a non-git in-place session has no worktreeDir to watch.
     if (this.worktreeDir) {
-      this._startWorktreeWatcher();
+      this.worktreeLifecycle.startWatching();
       // Armed AFTER the watcher (re)start, which cancels any pending check timer: an adopted clean
       // survivor carries a provisional pending-review that this first check demotes to none.
-      if (this.mergeStatus === "pending-review") this._scheduleWorktreeCheck();
+      if (this.mergeStatus === "pending-review") this.worktreeLifecycle.scheduleCheck();
     }
     if (this.state === STATES.DORMANT) {
       this.transition("user_start");
@@ -2112,7 +1271,7 @@ class Session extends EventEmitter {
     // A (re)started PTY begins with no live background sub-agents; drop any stale ids from a prior run.
     this._clearDetectionTracking();
     this._autoKilled = false;
-    this._outputRing.reset();
+    this._output.reset();
     // A restarted PTY re-bases its monotonic output offset at 0. Signal the backend so
     // it force-closes any LIVE data-WS client (whose ws-sender.sentOffset is now
     // stale-high relative to the reset total) and lets it reconnect + re-baseline.
@@ -2125,13 +1284,13 @@ class Session extends EventEmitter {
     // Hooks are wired BEFORE the env is built: a relay-based agent carries its ingress URL (bearer
     // token included) in the spawn env, which is what keeps that token off a world-listable command
     // line and makes an installed hook inert for the operator's own unsupervised runs.
-    const hookInjection = this._injectHooks();
+    const hookInjection = this._hooks.inject();
     const settingsArgs = hookInjection.args;
     // An agent whose title spins through its own boot (codex) would otherwise open and close a fake
     // work cycle before the operator typed anything, so its titles stay latched quiet until the first
     // authoritative UserPromptSubmit clears the latch. Only with hooks wired, since nothing else
     // would ever un-latch it and the title tier is all a hook-less session has.
-    this._titleQuiet = this._adapter.titleProfile.quietUntilFirstPrompt === true && this._hookToken !== null;
+    this._titleQuiet = this._adapter.titleProfile.quietUntilFirstPrompt === true && this._hooks.hasInjection();
     this._armTitleQuietFallback();
     // The title tier reads codex's idle title by comparing it against the cwd basename, so the source
     // is told which directory this spawn actually runs in (a worktree changes it).
@@ -2171,19 +1330,18 @@ class Session extends EventEmitter {
 
     // Reuse the last browser-pushed size so a restart spawns at the card's real
     // dimensions; fall back to 80x24 on the very first spawn (no size known yet).
-    const spawnCols = this._lastCols ?? 80;
-    const spawnRows = this._lastRows ?? 24;
+    const spawnSize = this._output.spawnSize();
     try {
       this.ptyProcess = this._ptySpawn(file, args, {
         name: "xterm-256color",
-        cols: spawnCols,
-        rows: spawnRows,
+        cols: spawnSize.cols,
+        rows: spawnSize.rows,
         cwd: this.effectiveCwd(),
         env,
       });
     } catch (err) {
-      this._cleanupHooks();
-      this._deliveredPacks = [];
+      this._hooks.cleanup();
+      this._packDelivery.replaceDelivered([]);
       this.transition("spawn_fail", { error: err.message });
       this.emit("error", err);
       return;
@@ -2197,8 +1355,8 @@ class Session extends EventEmitter {
       this.ptyProcess.onExit(({ exitCode, signal }) =>
         this._handlePtyExit(exitCode, signal),
       );
-      this._cleanupHooks();
-      this._deliveredPacks = [];
+      this._hooks.cleanup();
+      this._packDelivery.replaceDelivered([]);
       this.transition("spawn_fail", { reason: "spawn_cwd_missing" });
       this.kill();
       return;
@@ -2216,9 +1374,9 @@ class Session extends EventEmitter {
     if (this._recorder) {
       this._recorder.writeHeader({
         agent: this.agentId,
-        hooksInjected: this._hookToken !== null,
-        cols: spawnCols,
-        rows: spawnRows,
+        hooksInjected: this._hooks.hasInjection(),
+        cols: spawnSize.cols,
+        rows: spawnSize.rows,
       });
     }
 
@@ -2276,48 +1434,6 @@ class Session extends EventEmitter {
     this.kill();
   }
 
-  // Wire this session's hook callbacks and register with the shared HookRouter. Returns
-  // { args, env }: the spawn argv group and the spawn env additions injection needs, both empty when
-  // hooks are unavailable, so a session degrades to the title tier rather than failing to start.
-  _injectHooks() {
-    if (!this._hookRouter || !this._getHookPort) return NO_HOOK_INJECTION;
-    let port;
-    try {
-      port = this._getHookPort();
-    } catch {
-      port = null;
-    }
-    if (!port) {
-      console.warn(`[session:${this.name}] hook injection skipped: HTTP listener port unavailable - hooks were not injected`);
-      return NO_HOOK_INJECTION;
-    }
-    if (this._adapter.hooks.injection?.kind === "argv-config") return this._injectRelayHooks(port);
-    if (this._adapter.hooks.injection?.kind === "home-hooks-file") return this._injectHomeRelayHooks(port);
-    try {
-      this._settingsHandle = writeSessionSettings({
-        port,
-        glissaId: this.id,
-        baseDir: this._hooksBaseDir,
-        permissions: this._settingsPermissions,
-        detectScheduledWakeups: this._detectScheduledWakeups,
-        enableProjectMcp: this._enableProjectMcp,
-        rtkPath: this._rtkPath,
-        planLimits: this._planLimits,
-      });
-      this._hookToken = this._settingsHandle.token;
-      this._hookRouter.register(this.id, {
-        token: this._hookToken,
-        onSignal: (raw) => this.ingestHookSignal(raw),
-        hooks: this._adapter.hooks,
-      });
-      return { args: this._adapter.settingsArgs(this._settingsHandle.settingsPath), env: {} };
-    } catch (err) {
-      console.warn(`[session:${this.name}] hook injection failed: ${err.message} - falling back to OSC title only`);
-      this._cleanupHooks();
-      return NO_HOOK_INJECTION;
-    }
-  }
-
   /*
    * Hooks wired is not hooks ARRIVING: codex silently skips an untrusted hook, so a session whose
    * callbacks never come would sit title-quiet for its whole life and report nothing at all. The
@@ -2337,213 +1453,9 @@ class Session extends EventEmitter {
     }, { unref: true });
   }
 
-  /*
-   * Whether this spawn may pass its agent's hook-trust bypass. Off unless the project opted in, and
-   * refused even then once a project-scoped agent config in the cwd's ancestry could contribute hooks
-   * of its own: the bypass turns review off for EVERY hook the invocation loads, and a repository (or
-   * the supervised agent, writing into its own workspace for the NEXT spawn) can put one there. The
-   * cost of refusing is the title tier for that session, which is what an untrusted install already
-   * gets, so the refusal is the cheap side of the trade.
-   */
-  _decideHookTrustBypass() {
-    if (!this.bypassHookTrust) return false;
-    const injection = this._adapter.hooks.injection || {};
-    const candidates = injection.projectConfigCandidates;
-    if (!Array.isArray(candidates) || candidates.length === 0) return true;
-    const found = this._findProjectAgentConfig(candidates, injection.mayContributeHooks);
-    if (!found) return true;
-    console.warn(`[session:${this.name}] hook-trust bypass refused: ${found} could contribute hooks Glissa did not write - falling back to OSC title only`);
-    this._recordDecision({ kind: "hook-trust", ts: Date.now(), decision: "bypass-refused", reason: "project agent config could contribute hooks" });
-    return false;
-  }
-
-  /*
-   * Walk the cwd's ancestry for a project-scoped agent config that could contribute hooks, returning
-   * the first path that could. A candidate is either PARSED (a general config file, which only counts
-   * when it declares hooks) or counted on PRESENCE alone (a dedicated hooks file, whose whole purpose
-   * at that path is declaring them). Sync on purpose: a one-shot cold path inside spawn, not one of the
-   * recurring paths every session shares an event loop over. Depth-bounded, and an unreadable file
-   * counts as a hit, since "cannot read it" is not "vouched for it".
-   */
-  _findProjectAgentConfig(candidates, mayContributeHooks) {
-    let dir = this.effectiveCwd();
-    for (let depth = 0; depth < MAX_PROJECT_CONFIG_DEPTH; depth += 1) {
-      for (const { relPath, presenceIsHit } of candidates) {
-        const candidate = path.join(dir, relPath);
-        if (presenceIsHit) {
-          if (fs.existsSync(candidate)) return candidate;
-          continue;
-        }
-        let text = null;
-        try {
-          text = fs.readFileSync(candidate, "utf8");
-        } catch (err) {
-          if (err.code !== "ENOENT" && err.code !== "ENOTDIR") return candidate;
-          continue;
-        }
-        if (typeof mayContributeHooks === "function" && mayContributeHooks(text)) return candidate;
-      }
-      const parent = path.dirname(dir);
-      if (parent === dir) return null;
-      dir = parent;
-    }
-    return null;
-  }
-
-  /*
-   * The relay form (codex today): the agent runs session/hook-relay.js as a command-type hook, so the
-   * subscription is argv and the ingress URL is env. The token is minted here rather than by a
-   * settings file, and it is the SAME per-session bearer the router validates, so the trust boundary
-   * is unchanged: the ingress, its token check and its body cap are byte-identical for both forms.
-   */
-  _injectRelayHooks(port) {
-    const args = this._adapter.hooks.injection.buildHookArgs({
-      bypassHookTrust: this._decideHookTrustBypass(),
-      rtkRewrites: this._rtkPath !== null,
-    });
-    if (!args) {
-      console.warn(`[session:${this.name}] hook injection skipped: the relay path cannot be expressed for ${this.agentId} - falling back to OSC title only`);
-      return NO_HOOK_INJECTION;
-    }
-    return this._registerRelayHooks(port, args, this._rtkPath ? { [RTK_PATH_ENV]: this._rtkPath } : null);
-  }
-
-  _injectHomeRelayHooks(port) {
-    const injection = this._adapter.hooks.injection;
-    const contributingConfig = this._findProjectAgentConfig(
-      injection.projectConfigCandidates,
-      injection.mayContributeHooks,
-    );
-    if (contributingConfig) {
-      console.warn(`[session:${this.name}] home hook injection refused: ${contributingConfig} could contribute hooks Glissa did not write - falling back to OSC title only`);
-      this._recordDecision({
-        kind: "hook-trust",
-        ts: Date.now(),
-        decision: "injection-refused",
-        reason: "Claude compatibility settings could contribute hooks",
-      });
-      return NO_HOOK_INJECTION;
-    }
-    let hooksPath = null;
-    let contents = null;
-    try {
-      hooksPath = injection.filePath(process.env);
-      contents = fs.readFileSync(hooksPath, "utf8");
-    } catch (error) {
-      const reason = error.code === "ENOENT" ? "not installed" : error.message;
-      console.warn(`[session:${this.name}] Grok hook injection skipped: ${reason}; run "glissa agent setup grok"`);
-      return NO_HOOK_INJECTION;
-    }
-    const classification = injection.classifyContents(contents);
-    if (classification !== "current") {
-      console.warn(`[session:${this.name}] Grok hook injection skipped: ${hooksPath} is ${classification}; run "glissa agent setup grok"`);
-      return NO_HOOK_INJECTION;
-    }
-    return this._registerRelayHooks(port, []);
-  }
-
-  _registerRelayHooks(port, args, relayEnv = null) {
-    const token = generateToken();
-    const hookUrl = `http://127.0.0.1:${port}/hook/${encodeURIComponent(this.id)}?t=${encodeURIComponent(token)}`;
-    try {
-      this._hookToken = token;
-      this._hookRouter.register(this.id, {
-        token,
-        onSignal: (raw) => this.ingestHookSignal(raw),
-        hooks: this._adapter.hooks,
-      });
-      return { args, env: { [HOOK_URL_ENV]: hookUrl, ...(relayEnv || {}) } };
-    } catch (err) {
-      console.warn(`[session:${this.name}] hook injection failed: ${err.message} - falling back to OSC title only`);
-      this._cleanupHooks();
-      return NO_HOOK_INJECTION;
-    }
-  }
-
-  _cleanupHooks() {
-    if (!this._hookToken && !this._settingsHandle) return;
-    if (this._hookRouter) {
-      try { this._hookRouter.unregister(this.id); } catch { /* ignore */ }
-    }
-    if (this._settingsHandle) {
-      try { this._settingsHandle.cleanup(); } catch { /* ignore */ }
-      this._settingsHandle = null;
-    }
-    this._hookToken = null;
-  }
-
   // Pack delivery is additive, so resolution and rendering failures never block spawn.
   async _resolvePacks() {
-    this._clearPackNotice();
-    if (this._packs.length === 0) {
-      this._deliveredPacks = [];
-      return { args: [], packs: [] };
-    }
-    if (!this._can("packs")) {
-      const ts = Date.now();
-      for (const name of this._packs) {
-        this._recordDecision({ kind: "pack", ts, name, decision: "unsupported", reason: `agent ${this.agentId} does not deliver context packs` });
-      }
-      this._deliveredPacks = [];
-      return { args: [], packs: [] };
-    }
-
-    const builtRoot = this._packsBuiltRoot || defaultBuiltRoot();
-    const deliveredPacks = [];
-    for (const name of this._packs) {
-      const resolved = await this._resolvePackVariant(name, builtRoot);
-      const ts = Date.now();
-      if (!resolved.dir) {
-        console.warn(`[session:${this.name}] context pack "${name}" skipped: ${resolved.reason}`);
-        this._recordDecision({ kind: "pack", ts, name, decision: "skipped", reason: resolved.reason });
-        continue;
-      }
-      // Two gates on a pack that built fine but must not reach THIS project (server/core/pack-core.js).
-      const verdict = decidePackDelivery({ manifest: resolved.manifest, projectPath: this.path, packsDir: DEFAULT_PACKS_DIR });
-      if (!verdict.deliver) {
-        console.warn(`[session:${this.name}] context pack "${name}" skipped: ${verdict.reason}, ${verdict.detail}`);
-        this._recordDecision({ kind: "pack", ts, name, decision: "skipped", reason: verdict.reason, detail: verdict.detail });
-        continue;
-      }
-      deliveredPacks.push({ name: resolved.name, version: resolved.version, dir: resolved.dir });
-    }
-    const args = this._adapter.renderPackArgs(deliveredPacks, builtRoot);
-    if (!args) {
-      const ts = Date.now();
-      for (const pack of deliveredPacks) {
-        this._recordDecision({ kind: "pack", ts, name: pack.name, decision: "skipped", reason: `agent ${this.agentId} refused the pack carrier path` });
-      }
-      this._deliveredPacks = [];
-      return { args: [], packs: [] };
-    }
-    this._deliveredPacks = deliveredPacks;
-    const ts = Date.now();
-    for (const pack of deliveredPacks) {
-      this._recordDecision({ kind: "pack", ts, name: pack.name, decision: "delivered", version: pack.version });
-    }
-    return { args, packs: deliveredPacks };
-  }
-
-  /*
-   * A pack whose spec declares per-project variants is FLATTENED into independent packs at build time
-   * (`<group>-<projectSlug>`), so delivery is one extra lookup and no version arithmetic: this
-   * project's variant when it is built, the group's base build otherwise. A project with nothing
-   * recorded yet, or a variant a rebuild has not published, is delivered the base rather than nothing.
-   */
-  async _resolvePackVariant(name, builtRoot) {
-    const base = await resolveBuiltPack(name, { builtRoot });
-    if (!this._packVariantSlug || !base.perProjectVariants) return base;
-    const variantName = variantPackName(name, this._packVariantSlug);
-    const variant = variantName ? await resolveBuiltPack(variantName, { builtRoot }) : null;
-    if (variant?.dir) return variant;
-    this._recordDecision({
-      kind: "pack",
-      ts: Date.now(),
-      name,
-      decision: "variant-fallback",
-      reason: variant ? variant.reason : "no valid variant name for this project",
-    });
-    return base;
+    return this._packDelivery.resolve();
   }
 
   _buildSpawnEnv({ extraEnv = this._spawnEnv, ...options } = {}) {
@@ -2580,7 +1492,7 @@ class Session extends EventEmitter {
     // from inside the "data" listener and relies on the just-arrived chunk already
     // being retained and counted (see ws-sender.js maybeBackfill). Reordering would
     // make a backfill miss the in-flight chunk.
-    this._outputRing.push(data);
+    this._output.push(data);
     if (this.listenerCount("data") > 0) {
       this.emit("data", data);
     }
@@ -2591,7 +1503,7 @@ class Session extends EventEmitter {
     this._resetDetectionSources({ quiet: false, clearTracking: true });
     // The next spawn re-resolves its packs, so a notice owed by the dead one has no turn to ride.
     this._clearPackNotice();
-    this._cleanupHooks();
+    this._hooks.cleanup();
     this._ptyAlive = false;
     this.ptyProcess = null;
 
@@ -2632,19 +1544,19 @@ class Session extends EventEmitter {
   }
 
   getReplayBuffer() {
-    return this._outputRing.replay();
+    return this._output.replay();
   }
 
   // Current monotonic output offset (== total bytes ever produced). A data-WS client
   // captures this at connect as its live baseline (startOffset).
   getOutputOffset() {
-    return this._outputRing.total;
+    return this._output.stats().total;
   }
 
   // Slice of output produced at or after `offset`; full offset/eviction semantics
   // documented on session/core/output-ring.js since().
   getBufferSince(offset) {
-    return this._outputRing.since(offset);
+    return this._output.since(offset);
   }
 
   write(text) {
@@ -2660,15 +1572,11 @@ class Session extends EventEmitter {
   }
 
   resize(cols, rows) {
-    const isUnchangedSize = this._lastCols === cols && this._lastRows === rows;
-    // Remember the latest size so a restart respawns the PTY at this dimension
-    // (see start()), rather than the 80x24 default that leaves Claude cramped.
-    this._lastCols = cols;
-    this._lastRows = rows;
+    const didSizeChange = this._output.rememberSize(cols, rows);
     if (this._recorder) {
       this._recorder.writeResize(cols, rows);
     }
-    if (isUnchangedSize || !this.ptyProcess) return;
+    if (!didSizeChange || !this.ptyProcess) return;
     // Apply immediately, even when quiescent (IDLE/COMPLETE/WAITING), so Claude
     // gets SIGWINCH and reflows to fit.
     try {
@@ -2898,7 +1806,7 @@ class Session extends EventEmitter {
   resetToDormant() {
     if (this._destroyed) return false;
     const did = this.transition("user_reset");
-    if (did) this.mergeStatus = "none";
+    if (did) this.worktreeLifecycle.setMergeStatus("none", {}, { emit: false });
     return did;
   }
 
@@ -2965,7 +1873,7 @@ class Session extends EventEmitter {
 
   updateSettings(cfg) {
     if (cfg.replayBufferKB != null)
-      this._outputRing.setMax(cfg.replayBufferKB * 1024);
+      this._output.setMax(cfg.replayBufferKB * 1024);
   }
 
   destroy() {
@@ -2976,7 +1884,7 @@ class Session extends EventEmitter {
 
     this._clearPendingPaste();
 
-    this._cleanupHooks();
+    this._hooks.cleanup();
 
     this.kill();
 
@@ -2991,7 +1899,7 @@ class Session extends EventEmitter {
     if (this._recorder) {
       this._recorder.close(); // Idempotent - safe if already closed by _handlePtyExit
     }
-    this._stopWorktreeWatcher();
+    this.worktreeLifecycle.stopWatching();
     this._titleSource.destroy();
     this._statusSource.destroy();
     this.removeAllListeners();

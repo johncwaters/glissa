@@ -79,8 +79,8 @@ test.before(async () => {
   assert.ok(session, 'the boot loop created the configured session');
   // Registers the bearer token with the shared HookRouter without spawning a PTY: exactly what the
   // spawn path does, minus node-pty.
-  session._injectHooks();
-  token = session._hookToken;
+  session._hooks.inject();
+  token = session._hooks.token();
   assert.ok(token, 'hook injection produced a token');
 });
 
