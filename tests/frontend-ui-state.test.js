@@ -195,13 +195,3 @@ test('an unrelated field moving leaves the others untouched and out of changedKe
   assert.equal(store.snapshot().focusedSessionId, 'session-a');
   assert.equal(store.snapshot().selectedSessionId, 'session-a');
 });
-
-test('client trust is stored as pushed and cleared to null', async () => {
-  const { createUiStateStore } = await importCore();
-  const store = createUiStateStore();
-  const trust = { level: 'full' };
-  store.dispatch('setClientTrust', trust);
-  assert.equal(store.snapshot().clientTrust, trust);
-  store.dispatch('setClientTrust', undefined);
-  assert.equal(store.snapshot().clientTrust, null);
-});

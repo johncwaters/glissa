@@ -382,8 +382,7 @@ test('a pack update between lookups still arms a notice before the delivered lis
     { name: 'alpha', version: 'v1', dir: '/packs/alpha/current' },
     { name: 'beta', version: 'v1', dir: '/packs/beta/current' },
   ];
-  let packDelivery = null;
-  packDelivery = createSessionPackDelivery({
+  const packDelivery = createSessionPackDelivery({
     configuredPacks: ['alpha', 'beta'],
     builtRoot: '/packs',
     variantSlug: null,

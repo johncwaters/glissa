@@ -10,7 +10,6 @@ export const INITIAL_UI_STATE = Object.freeze({
   focusedSessionId: null,
   selectedSessionId: null,
   borrowedCardId: null,
-  clientTrust: null,
 });
 
 const asId = (value) => value || null;
@@ -24,7 +23,6 @@ export const UI_ACTIONS = Object.freeze({
   focusSession: (id) => ({ focusedSessionId: asId(id) }),
   selectSession: (id) => ({ selectedSessionId: asId(id) }),
   borrowCard: (id) => ({ borrowedCardId: asId(id) }),
-  setClientTrust: (trust) => ({ clientTrust: trust || null }),
 });
 
 export function createUiStateStore(initialState) {
@@ -70,3 +68,5 @@ export function createUiStateStore(initialState) {
 }
 
 export const uiState = createUiStateStore();
+
+export const getActiveView = () => uiState.snapshot().activeView;

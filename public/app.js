@@ -33,8 +33,8 @@ import { activateSettingsSection, applySettingsBroadcast, applySettingsProjectRe
 import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar, resolveSelectedSession, resyncSelectedSession, setReviewBranchSync } from './sidebar/review-sidebar.js';
 import { decideReloadOnBuild } from './server-build-core.mjs';
 import { applyTheme } from './theme.js';
-import { getActiveView, getDismissedUpdate, getThemeId, isSoundEnabled, setActiveView, setDismissedUpdate, setSoundEnabled } from './ui-prefs.js';
-import { uiState } from './ui-state-core.mjs';
+import { getActiveView as getSavedActiveView, getDismissedUpdate, getThemeId, isSoundEnabled, setActiveView, setDismissedUpdate, setSoundEnabled } from './ui-prefs.js';
+import { getActiveView, uiState } from './ui-state-core.mjs';
 import { acknowledgeUsageAttention, applyPlanLimits, applyUsageReport, applyUsageSessions, mountUsageView, refreshUsageView, requestUsageReport, setUsageActivityCallback, setUsageRequestSender } from './usage-panel.js';
 
 // ── Apply saved theme ─────────────────────────────────────────
@@ -252,7 +252,7 @@ setMillRequestSender(sendControlMsg);
 
 function isUsageSurfaceVisible() {
   if (isPhoneShellActive()) return isPhoneScreenActive('usage');
-  return uiState.snapshot().activeView === 'usage';
+  return getActiveView() === 'usage';
 }
 
 function requestUsageReportIfVisible() {
@@ -284,7 +284,7 @@ const messageHandlers = {
   'mill-report':        (msg) => {
     applyMillReport(msg);
     applySettingsProjectReport(msg);
-    const shouldResolve = uiState.snapshot().activeView === 'settings' || shouldResolveSettingsHashOnMillReport;
+    const shouldResolve = getActiveView() === 'settings' || shouldResolveSettingsHashOnMillReport;
     shouldResolveSettingsHashOnMillReport = false;
     if (shouldResolve) activateSettingsHash();
   },
@@ -594,7 +594,7 @@ function acknowledgeViewAttention(view) {
 }
 
 function activateView(view, { section, setting, persist = true } = {}) {
-  const prev = uiState.snapshot().activeView;
+  const prev = getActiveView();
   uiState.dispatch('setActiveView', view);
   shouldPersistActiveView = persist;
   // Mirror the active view onto the body: terminal.js reads document.body.dataset.activeView to decide
@@ -646,7 +646,7 @@ for (let i = 0; i < VIEW_TABS.length; i++) {
 // stale id (e.g. the removed "sessions" grid) falls back to Focus. Call activateView (not a bare
 // dataset set) so the view module activates; the snapshot that arrives later refreshes it and restores
 // the centered session (see handleSnapshot).
-const savedView = getActiveView();
+const savedView = getSavedActiveView();
 const initialSettingsTarget = resolveSettingsTarget(location.hash);
 if (initialSettingsTarget) {
   shouldResolveSettingsHashOnMillReport = false;
@@ -700,7 +700,7 @@ function applyFormFactorLayout(layout) {
   }
   const carriedSessionId = getPhoneSessionId();
   deactivatePhoneShell();
-  activateView(uiState.snapshot().activeView, { persist: shouldPersistActiveView }); // re-activates the saved view now that the desktop DOM is whole
+  activateView(getActiveView(), { persist: shouldPersistActiveView }); // re-activates the saved view now that the desktop DOM is whole
   // Quietly, NOT via the pill-activation path: that one is the operator making a selection, so it
   // sends start-session for a DORMANT target and dismiss for a COMPLETE one. A rotation is a layout event,
   // and treating it as a selection would respawn a session the operator just killed or acknowledge away
@@ -733,7 +733,6 @@ document.getElementById('btn-restart').addEventListener('click', () => {
 // shuts the server down has no way to start it again, so that item is not offered there. Restart
 // stays: production respawns the process detached and the dashboard reconnects on its own.
 function applyClientTrust(trust) {
-  uiState.dispatch('setClientTrust', trust);
   const showShutdown = shouldShowServerAction('shutdown', trust);
   document.getElementById('btn-shutdown').hidden = !showShutdown;
   document.getElementById('menu-divider-shutdown').hidden = !showShutdown;

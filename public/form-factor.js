@@ -18,6 +18,7 @@ function evaluateLayout() {
 }
 
 function stampLayout(layout) {
+  if (document.documentElement.dataset.layout === layout) return;
   document.documentElement.dataset.layout = layout;
 }
 
