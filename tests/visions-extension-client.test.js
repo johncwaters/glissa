@@ -7,11 +7,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const Module = require('node:module');
+const fs = require('node:fs');
 const path = require('node:path');
 const { once } = require('node:events');
 const { WebSocketServer } = require('ws');
 
 const vscode = require('./helpers/vscode-stub');
+const { ACTIVITY_METHOD } = require('../server/core/ingest-editor-core');
 
 const STUB_PATH = require.resolve('./helpers/vscode-stub');
 // The framing module is COPIED beside the extension when the vsix is packed (server/visions-cli.js), so
@@ -187,7 +189,7 @@ test('a non-markdown buffer reports a marker instead of its text', async (t) => 
   vscode.__test.fire('save', code);
 
   const marker = (method) => daemon.waitFor(
-    (message) => message.type === 'lsp' && message.method === 'visions/editorActivity' && message.params.method === method,
+    (message) => message.type === 'lsp' && message.method === ACTIVITY_METHOD && message.params.method === method,
     `no ${method} marker reached the daemon`,
   );
 
@@ -231,6 +233,13 @@ test('an absent relay reports itself instead of spawning anything', () => {
   extension.activate(context);
   assert.equal(context.subscriptions.length, 2);
   assert.match(vscode.__test.state.errors[0], /glissa visions install/);
+});
+
+// The extension is packed into a .vsix and cannot require anything inside this package, so its copy of
+// the wire constant is pinned here instead.
+test('the packed extension names the same activity method the daemon answers', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'tools', 'vscode-visions', 'extension.js'), 'utf8');
+  assert.match(source, new RegExp(`const ACTIVITY_METHOD = '${ACTIVITY_METHOD}';`));
 });
 
 test('the relay port rides argv only when one was configured', () => {

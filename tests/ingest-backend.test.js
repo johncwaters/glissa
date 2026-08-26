@@ -27,6 +27,7 @@ const WebSocket = require('ws');
 const { createBackend } = require('../server/backend');
 const { dashboardClient } = require('./helpers/dashboard-ws');
 const { createReplayLog } = require('../server/control-replay-core');
+const { ACTIVITY_METHOD } = require('../server/core/ingest-editor-core');
 const { registerEphemeralSession } = require('../server/ephemeral-session');
 const { hasGit, git } = require('./helpers/git-fixture');
 
@@ -504,7 +505,7 @@ test('a file the lane never mirrors still reports its save as a marker', withBac
     const connection = backend.getVisionsLane().openConnection({ send: () => {} });
     connection.handleFrame(JSON.stringify({
       type: 'lsp',
-      method: 'visions/editorActivity',
+      method: ACTIVITY_METHOD,
       params: { uri, method: 'textDocument/didSave' },
     }));
 

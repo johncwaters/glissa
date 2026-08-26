@@ -231,7 +231,7 @@ function createRelay({
     const message = daemonMessage(method, params);
     if (sendWsJson(ws, message)) return true;
     pendingForwards.push(message);
-    while (pendingForwards.length > MAX_PENDING_FORWARDS) pendingForwards.shift();
+    if (pendingForwards.length > MAX_PENDING_FORWARDS) pendingForwards.shift();
     return false;
   }
 
