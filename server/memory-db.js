@@ -57,7 +57,7 @@ const SCHEMA = Object.freeze([
 
 const LAST_APPEND_KEY = 'memory.lastAppendAt';
 const PROJECT_TAG_SCHEMA_KEY = 'memory.schema.projectTags';
-const PROJECT_TAG_SCHEMA_VERSION = 1;
+const PROJECT_TAG_SCHEMA_VERSION = 2;
 const DISTILL_CURSOR_KEY = 'memory.distill.cursorSeq';
 const DISTILL_FAILURE_KEY = 'memory.distill.failures';
 // A high water mark prevents a forgotten newest row from letting a new record fall behind the cursor.

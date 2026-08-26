@@ -278,7 +278,7 @@ test('store open remaps worktree project tags once and publishes the configured 
   assert.equal(secondLogs.some((line) => line.includes('project tag migration')), false);
   withRawDb(dir, (raw) => {
     const meta = raw.prepare('SELECT value FROM memory_meta WHERE key = ?').get('memory.schema.projectTags');
-    assert.equal(meta.value, '1');
+    assert.equal(meta.value, '2');
   });
   await second.stop();
   fs.rmSync(dir, { recursive: true, force: true });
@@ -1071,4 +1071,30 @@ test('the distill cursor and its failure counter survive a store reopen', async 
   const second = openStore(dir);
   assert.equal(second.distillCursorSeq(), 17);
   assert.equal(second.distillFailures(), 2);
+});
+
+test('a project tag migration stamped by an older schema version reruns on the next open', async () => {
+  const dir = tempDir();
+  const projectPath = '/repos/glissa';
+  const worktreePath = '/repos/.glissa-worktrees/glissa-abc123';
+  const signingKey = 'c'.repeat(64);
+  const tagged = withSignature(durableRecord({ project: worktreePath }), signingKey);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'hmac-key'), `${signingKey}\n`, { mode: 0o600 });
+  const seededDb = createMemoryDb({ dbPath: dbPathFor(dir) });
+  seededDb.insertRecord(tagged);
+  seededDb.close();
+  withRawDb(dir, (raw) => {
+    raw.prepare('INSERT OR REPLACE INTO memory_meta (key, value) VALUES (?, ?)').run('memory.schema.projectTags', '1');
+  });
+
+  const logs = [];
+  const store = openStore(dir, {
+    logger: { log: (line) => logs.push(line), warn: (line) => logs.push(line) },
+    extra: { knownProjects: () => [{ path: projectPath }] },
+  });
+  assert.equal(store.records().find((record) => record.id === tagged.id).project, projectPath);
+  assert.equal(logs.some((line) => line.includes('remapped 1 of 1 tagged record(s)')), true);
+  await store.stop();
+  fs.rmSync(dir, { recursive: true, force: true });
 });
