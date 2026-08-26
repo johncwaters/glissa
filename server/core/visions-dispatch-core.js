@@ -273,6 +273,22 @@ function isLintDomainDiagnostic({ rule = '', message = '' }) {
   return LINT_MESSAGE_PREFIX_PATTERNS.some((pattern) => pattern.test(leadingMessage));
 }
 
+// Whole-line range: the model answers per line, so a narrower span would be a guessed word boundary.
+function lineDiagnostic({ lines, line, severity, code, message }) {
+  const lineIndex = line - 1;
+  const lineText = lines[lineIndex] || '';
+  return {
+    range: {
+      start: { line: lineIndex, character: 0 },
+      end: { line: lineIndex, character: Math.max(lineText.length, 1) },
+    },
+    severity,
+    source: 'glissa-visions',
+    code,
+    message,
+  };
+}
+
 function sanitizeModelDiagnostics(raw, { text = '', lineCount = countLines(text) } = {}) {
   const lines = lineTextsOf(text);
   const entries = Array.isArray(raw) ? raw : [];
@@ -287,18 +303,9 @@ function sanitizeModelDiagnostics(raw, { text = '', lineCount = countLines(text)
       lintDomainDropped += 1;
       continue;
     }
-    const lineIndex = sanitized.line - 1;
-    const lineText = lines[lineIndex] || '';
-    diagnostics.push({
-      range: {
-        start: { line: lineIndex, character: 0 },
-        end: { line: lineIndex, character: Math.max(lineText.length, 1) },
-      },
-      severity: MODEL_DIAGNOSTIC_SEVERITY_HINT,
-      source: 'glissa-visions',
-      code: 'model',
-      message: sanitized.message,
-    });
+    diagnostics.push(lineDiagnostic({
+      lines, line: sanitized.line, severity: MODEL_DIAGNOSTIC_SEVERITY_HINT, code: 'model', message: sanitized.message,
+    }));
   }
   return { diagnostics, lintDomainDropped };
 }
@@ -322,21 +329,13 @@ function commentsToLsp(comments, { text = '' } = {}) {
   const entries = Array.isArray(comments) ? comments : [];
   const diagnostics = [];
   for (const entry of entries) {
-    const lineIndex = Number(entry?.line) - 1;
-    if (!Number.isInteger(lineIndex) || lineIndex < 0) continue;
+    const line = Number(entry?.line);
+    if (!Number.isInteger(line) || line < 1) continue;
     const message = typeof entry?.message === 'string' ? entry.message : '';
     if (!message) continue;
-    const lineText = lines[lineIndex] || '';
-    diagnostics.push({
-      range: {
-        start: { line: lineIndex, character: 0 },
-        end: { line: lineIndex, character: Math.max(lineText.length, 1) },
-      },
-      severity: COMMENT_SEVERITY_INFORMATION,
-      source: 'glissa-visions',
-      code: 'comment',
-      message,
-    });
+    diagnostics.push(lineDiagnostic({
+      lines, line, severity: COMMENT_SEVERITY_INFORMATION, code: 'comment', message,
+    }));
   }
   return diagnostics;
 }
