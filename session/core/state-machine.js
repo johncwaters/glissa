@@ -1,4 +1,3 @@
-const fs = require("node:fs");
 const { STATES } = require("../../shared/states");
 
 // Pure state-machine tables for the Session lifecycle, extracted from sessions.js
@@ -14,6 +13,7 @@ const TRANSITIONS = Object.freeze({
   [STATES.INITIALIZING]: {
     spawn_success: STATES.STARTING,
     spawn_fail: STATES.FAILED,
+    user_kill: STATES.DONE,
   },
   [STATES.STARTING]: {
     // First PTY output means Claude's TUI is up, NOT that it is working. A freshly
@@ -24,6 +24,7 @@ const TRANSITIONS = Object.freeze({
     // _hasSeenSpinner guard keeps the startup idle glyph from arming a spurious `ready`.
     first_output: STATES.IDLE,
     process_exit: STATES.FAILED,
+    user_kill: STATES.DONE,
   },
   [STATES.RUNNING]: {
     prompt_detected: STATES.WAITING,
@@ -68,15 +69,15 @@ const TRANSITIONS = Object.freeze({
   [STATES.FAILED]: {
     user_restart: STATES.INITIALIZING,
     user_reset: STATES.DORMANT,
+    process_exit_ok: STATES.FAILED,
     process_exit_fail: STATES.FAILED,
   },
 });
 
 // Guards: return true if transition is allowed, false otherwise
 const GUARDS = {
-  spawn_success(session) {
-    // Verify the dir the PTY was spawned in actually exists - the worktree when isolated, else path.
-    return fs.existsSync(session.worktreeDir || session.path);
+  spawn_success(_session, detail) {
+    return detail?.spawnCwdExists === true;
   },
   user_restart(session) {
     return session.state === STATES.DONE || session.state === STATES.FAILED;

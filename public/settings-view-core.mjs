@@ -2,6 +2,17 @@ import { unionProjectSelection } from './settings-projects-core.mjs';
 
 const payloadByHydratedValues = new WeakMap();
 
+export const SECRET_PRESENCE_SUFFIX = 'Configured';
+export const STORED_SECRET_MASK = '\u2022'.repeat(12);
+
+function isSecretSetting(setting) {
+  return setting.control === 'password';
+}
+
+function secretPresencePath(setting) {
+  return `${setting.path}${SECRET_PRESENCE_SUFFIX}`;
+}
+
 function cloneValue(value) {
   if (Array.isArray(value)) return value.map(cloneValue);
   if (!value || typeof value !== 'object') return value;
@@ -15,6 +26,16 @@ function valueAtPath(source, path) {
     value = value[part];
   }
   return value;
+}
+
+function deleteValueAtPath(target, path) {
+  const parts = path.split('.');
+  let cursor = target;
+  for (const part of parts.slice(0, -1)) {
+    if (!cursor || typeof cursor !== 'object') return;
+    cursor = cursor[part];
+  }
+  if (cursor && typeof cursor === 'object') delete cursor[parts.at(-1)];
 }
 
 function setValueAtPath(target, path, value) {
@@ -93,6 +114,11 @@ export function hydrateFromSettings(map, settingsPayload = {}) {
       values[setting.path] = displayValue(setting, preferenceValue ?? setting.defaultValue);
       continue;
     }
+    if (isSecretSetting(setting)) {
+      const isStored = valueAtPath(settingsPayload, secretPresencePath(setting)) === true;
+      values[setting.path] = isStored ? STORED_SECRET_MASK : '';
+      continue;
+    }
     let value = valueAtPath(settingsPayload, setting.path);
     if (setting.path === 'memory.retainDays') {
       value = valueAtPath(settingsPayload, 'memory.memoryRetainDays') ?? value;
@@ -133,6 +159,7 @@ export function collectDirtyBlocks(map, original, edited) {
   const changedSettings = settingsOf(map).filter((setting) => {
     if (isReadOnlySetting(setting)) return false;
     if (setting.path.startsWith('pref:')) return false;
+    if (isSecretSetting(setting) && edited[setting.path] === STORED_SECRET_MASK) return false;
     return !valuesEqual(original[setting.path], edited[setting.path]);
   });
   if (changedSettings.length === 0) return {};
@@ -168,6 +195,10 @@ export function collectDirtyBlocks(map, original, edited) {
     if (setting.path === 'memory.retainDays' && valueAtPath(originalPayload, 'memory.memoryRetainDays') != null) {
       setValueAtPath(payload, 'memory.memoryRetainDays', value);
     }
+  }
+  for (const setting of settingsOf(map)) {
+    if (!isSecretSetting(setting)) continue;
+    deleteValueAtPath(payload, secretPresencePath(setting));
   }
   return payload;
 }

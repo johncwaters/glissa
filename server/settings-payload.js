@@ -1,6 +1,6 @@
 'use strict';
 
-const { getRtkPath } = require('../session/core/rtk-command');
+const { getRtkPath } = require('./rtk-resolver');
 
 // One shape, two publishers: control-handlers answers get-settings/update-settings with it, and the
 // backend rebroadcasts it when an rtk install finishes long after the save that started it.

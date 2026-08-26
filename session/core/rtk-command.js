@@ -1,13 +1,10 @@
 'use strict';
 
-const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
-const { execSync } = require('../../server/child-process-safe');
 const { resolvePathCommandMatches } = require('./spawn-command');
 
-function firstExistingFile(candidates, fsApi = fs) {
+function firstExistingFile(candidates, fsApi) {
   for (const candidate of candidates) {
     try {
       if (fsApi.statSync(candidate).isFile()) return path.resolve(candidate);
@@ -19,10 +16,10 @@ function firstExistingFile(candidates, fsApi = fs) {
 }
 
 function resolveRtkPath({
-  homeDir = os.homedir(),
-  platform = process.platform,
-  exec = execSync,
-  fsApi = fs,
+  homeDir,
+  platform,
+  exec,
+  fsApi,
 } = {}) {
   const bundledCandidates = [
     path.join(homeDir, '.glissa', 'bin', 'rtk.exe'),
@@ -54,16 +51,7 @@ function buildRtkHookEntry(rtkPath) {
   };
 }
 
-// Lazy, success-only memo: nothing is probed until rtk is actually consulted (settings dialog or an
-// rtk-enabled spawn), and a miss is re-probed so installing rtk later needs no server restart.
-let cachedRtkPath = null;
-function getRtkPath() {
-  if (!cachedRtkPath) cachedRtkPath = resolveRtkPath();
-  return cachedRtkPath;
-}
-
 module.exports = {
   resolveRtkPath,
   buildRtkHookEntry,
-  getRtkPath,
 };

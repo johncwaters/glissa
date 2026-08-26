@@ -26,13 +26,7 @@
 // "Resume" on a card), so synchronous fs reads are fine; the only subprocess
 // (`git worktree list`) is async so a large repo never stalls the event loop.
 
-const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
-const { promisify } = require('node:util');
-const { execFile } = require('../../server/child-process-safe');
-
-const execFileP = promisify(execFile);
 
 // Reproduce Claude Code's project-dir encoding: every non-alphanumeric char -> '-'.
 // Drive-letter case is preserved (only non-alnum is touched), matching the store.
@@ -42,22 +36,16 @@ function encodeProjectDir(cwd) {
 
 // Root of Claude Code's per-project transcript store. CLAUDE_CONFIG_DIR relocates
 // the whole ~/.claude home; honor it so a relocated config still resolves.
-function claudeProjectsDir(env = process.env) {
+function claudeProjectsDir(env, homeDir) {
   const override = env && typeof env.CLAUDE_CONFIG_DIR === 'string' ? env.CLAUDE_CONFIG_DIR.trim() : '';
-  const home = override || path.join(os.homedir(), '.claude');
+  const home = override || path.join(homeDir, '.claude');
   return path.join(home, 'projects');
-}
-
-// Default git runner: async, returns stdout. Injected in tests.
-async function defaultGit(args, cwd) {
-  const { stdout } = await execFileP('git', args, { cwd, encoding: 'utf8', timeout: 20000 });
-  return stdout;
 }
 
 // Every working tree attached to `repoPath`'s repository (the main checkout plus
 // every linked worktree), as printed by `git worktree list --porcelain`. Falls
 // back to just [repoPath] for a non-git path or any git failure.
-async function listRepoWorktreePaths(repoPath, git = defaultGit) {
+async function listRepoWorktreePaths(repoPath, git) {
   let out;
   try {
     out = await git(['worktree', 'list', '--porcelain'], repoPath);
@@ -109,7 +97,7 @@ function cleanTitle(raw, max = 100) {
 // lines. The first user turn and the cwd/branch metadata sit near the top, so a
 // bounded read avoids loading multi-MB transcripts in full. A trailing partial
 // line (when truncated) is dropped so JSON.parse never sees a half line.
-function readHeadLines(filePath, fsMod = fs, maxBytes = 262144) {
+function readHeadLines(filePath, fsMod, maxBytes = 262144) {
   const fd = fsMod.openSync(filePath, 'r');
   try {
     const size = fsMod.fstatSync(fd).size;
@@ -155,9 +143,9 @@ function extractMeta(lines) {
 //     -> [{ id, title, cwd, worktreePath, worktreeName, gitBranch, mtime, sizeBytes }]
 async function listRepoConversations({
   repoPath,
-  projectsDir = claudeProjectsDir(),
-  git = defaultGit,
-  fsMod = fs,
+  projectsDir,
+  git,
+  fsMod,
   limit = 60,
 } = {}) {
   if (!repoPath) return [];

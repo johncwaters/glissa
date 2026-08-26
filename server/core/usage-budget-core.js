@@ -12,7 +12,7 @@ function normalizeBudgetConfig(raw) {
   };
 }
 
-function evaluateBudget({ budget, todayUsd, monthUsd, todayKey, monthKey } = {}, firedState = {}) {
+function evaluateBudget({ budget, todayUsd, monthUsd, todayKey, monthKey } = /** @type {any} */ ({}), firedState = {}) {
   const normalizedBudget = normalizeBudgetConfig(budget);
   const nextFiredState = prunedFiredState(firedState, { todayKey, monthKey });
   const alerts = [];
@@ -35,7 +35,7 @@ function evaluateBudget({ budget, todayUsd, monthUsd, todayKey, monthKey } = {},
   return { alerts, firedState: nextFiredState };
 }
 
-function budgetStanding({ budget, todayUsd, monthUsd } = {}) {
+function budgetStanding({ budget, todayUsd, monthUsd } = /** @type {any} */ ({})) {
   const normalizedBudget = normalizeBudgetConfig(budget);
   const rows = [];
   const daily = standingRow('daily', todayUsd, normalizedBudget.dailyUsd);

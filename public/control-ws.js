@@ -5,6 +5,9 @@ import { nextReconnectDelayMs } from './reconnect-backoff.mjs';
 import { decideLivenessAction } from './connection-liveness-core.mjs';
 import { buildWebSocketUrl } from './ws-url-core.mjs';
 import { clearPageToken, loadPageToken, pageToken, withPageToken } from './ws-token.js';
+import controlContracts from '/shared/control-messages.mjs';
+
+const { ServerMessage } = controlContracts;
 
 let controlWs = null;
 let controlRetryTimer = null;
@@ -97,8 +100,15 @@ export function connectControl() {
     try {
       msg = JSON.parse(event.data);
     } catch {
+      console.warn('[control] Dropped malformed server JSON message');
       return;
     }
+    const parsedMessage = ServerMessage.safeParse(msg);
+    if (!parsedMessage.success) {
+      console.warn(`[control] Dropped invalid server message: ${parsedMessage.error.issues[0]?.message || 'invalid payload'}`);
+      return;
+    }
+    msg = parsedMessage.data;
 
     // A server restart resets its replay log's seq counter back to 1, so a stale lastSeq
     // carried over from before the restart would otherwise dedupe away every live broadcast

@@ -1,3 +1,4 @@
+// @ts-nocheck
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
@@ -1975,7 +1976,7 @@ class Session extends EventEmitter {
 
     // Run guard if one exists for this event
     const guard = GUARDS[event];
-    if (guard && !guard(this)) {
+    if (guard && !guard(this, detail)) {
       return false;
     }
 
@@ -2191,7 +2192,17 @@ class Session extends EventEmitter {
     this._guardPtyInputSocket();
     this._guardUnixPtySocket();
 
-    this.transition("spawn_success");
+    const spawnCwdExists = fs.existsSync(this.effectiveCwd());
+    if (!this.transition("spawn_success", { spawnCwdExists })) {
+      this.ptyProcess.onExit(({ exitCode, signal }) =>
+        this._handlePtyExit(exitCode, signal),
+      );
+      this._cleanupHooks();
+      this._deliveredPacks = [];
+      this.transition("spawn_fail", { reason: "spawn_cwd_missing" });
+      this.kill();
+      return;
+    }
 
     // Redact a positional initialPrompt (headless lanes) from the spawn log - it can be a multi-KB
     // context block that does not belong in the console.
@@ -2450,6 +2461,7 @@ class Session extends EventEmitter {
   }
 
   _cleanupHooks() {
+    if (!this._hookToken && !this._settingsHandle) return;
     if (this._hookRouter) {
       try { this._hookRouter.unregister(this.id); } catch { /* ignore */ }
     }

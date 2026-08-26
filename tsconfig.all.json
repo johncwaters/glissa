@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "server/**/*.js",
+    "session/**/*.js",
+    "detection/**/*.js",
+    "notifications/**/*.js",
+    "shared/**/*.js",
+    "shared/**/*.d.ts"
+  ]
+}

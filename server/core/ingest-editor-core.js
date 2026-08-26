@@ -13,6 +13,8 @@ const KIND_BY_METHOD = Object.freeze({
 });
 const VERB_BY_KIND = Object.freeze({ 'doc-open': 'opened', 'doc-save': 'saved', 'doc-close': 'closed' });
 
+/** @typedef {{ method?: string, uri?: string, roots?: string[], now?: number }} EditorNotification */
+
 function createEditorState() {
   return { openUris: new Set() };
 }
@@ -24,6 +26,10 @@ function relativeTo(root, normalizedPath) {
 
 // A relay replays every open document on each reconnect, so a repeat open is not an event; a save is,
 // every time, because it is the operator acting.
+/**
+ * @param {{ openUris: Set<string> }} state
+ * @param {EditorNotification} notification
+ */
 function applyEditorNotification(state, { method, uri, roots = [], now = 0 } = {}) {
   const kind = KIND_BY_METHOD[method];
   if (!kind) return { state, event: null };

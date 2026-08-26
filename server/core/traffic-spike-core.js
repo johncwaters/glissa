@@ -77,7 +77,7 @@ function formatMultiple(multiple) {
 }
 
 /** The one-line body of a traffic ping. Every number the operator needs to judge it, no prose. */
-function spikeSummaryLine({ currentUsers, baseline, multiple } = {}) {
+function spikeSummaryLine({ currentUsers, baseline, multiple } = /** @type {any} */ ({})) {
   const ratio = multiple === undefined ? spikeMultiple(currentUsers, baseline) : multiple;
   return `${toCount(currentUsers, 0)} users in the last hour, ~${formatMultiple(ratio)} normal (p90 ${toCount(baseline?.p90, 0)})`;
 }
@@ -91,7 +91,7 @@ function nextTrafficState(state, users, overrides = {}) {
 }
 
 // The clear action is silent downstream: it only re-arms future spike pings.
-function decideTrafficSpike({ currentUsers, baseline, prev, now, cfg } = {}) {
+function decideTrafficSpike({ currentUsers, baseline, prev, now, cfg } = /** @type {any} */ ({})) {
   const options = cfg && typeof cfg === 'object' ? cfg : {};
   const multiplier = toCount(options.multiplier, DEFAULT_TRAFFIC_SPIKE_MULTIPLIER);
   const minUsers = toCount(options.minUsers, DEFAULT_TRAFFIC_SPIKE_MIN_USERS);

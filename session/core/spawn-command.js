@@ -1,7 +1,5 @@
 const path = require("node:path");
 
-const { execSync } = require("../../server/child-process-safe");
-
 // Pure/stateless spawn-command mechanics, extracted from sessions.js (behavior-preserving) and
 // generalized over the agent binary in M1 of docs/plan-agent-adapters.md: the "claude" name, its
 // flag spellings and its log wording now live in session/adapters/claude-code.js, and what stays
@@ -75,7 +73,8 @@ function resolvePathCommandMatches(name, { platform, exec }) {
 // Resolve an agent binary on PATH, so a Bun shim shadowing claude.exe surfaces in the log instead of
 // at runtime; the .exe/shim spawn split lives in buildAgentSpawnCommand below. Called once per agent
 // through the adapter registry's lazy cache (session/adapters/index.js), never at module load.
-function resolveAgentCommand({ name, platform = process.platform, exec = execSync }) {
+function resolveAgentCommand({ name, platform = process.platform, exec }) {
+  if (typeof exec !== "function") throw new TypeError("resolveAgentCommand requires an exec function");
   const matches = resolvePathCommandMatches(name, { platform, exec });
   if (matches.length === 0) {
     console.warn(`[glissa] could not resolve '${name}' on PATH`);

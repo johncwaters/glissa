@@ -69,6 +69,29 @@ test('dedup collapses rapid duplicate resolved signals', (t) => {
   src.destroy();
 });
 
+test('a high-confidence duplicate supersedes a recent low-confidence signal', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const src = createStatusSource({ sessionId: 's1', dedupWindowMs: 500 });
+  const out = collect(src);
+  src.ingest({ signal: 'awaiting-input', source: 'title', ts: 0 });
+  src.ingest({ signal: 'awaiting-input', source: 'hook', ts: 20 });
+  assert.deepEqual(out.map(({ source, confidence, ts }) => ({ source, confidence, ts })), [
+    { source: 'title', confidence: 'low', ts: 0 },
+    { source: 'hook', confidence: 'high', ts: 20 },
+  ]);
+  src.destroy();
+});
+
+test('a lower-confidence duplicate cannot supersede an authoritative signal', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const src = createStatusSource({ sessionId: 's1', dedupWindowMs: 500 });
+  const out = collect(src);
+  src.ingest({ signal: 'awaiting-input', source: 'hook', ts: 100 });
+  src.ingest({ signal: 'awaiting-input', source: 'title', ts: 120 });
+  assert.deepEqual(out.map((status) => status.source), ['hook']);
+  src.destroy();
+});
+
 test('title ready and hook ready collapse (precedence/dedup)', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const src = createStatusSource({ sessionId: 's1', conflictWindowMs: 40, dedupWindowMs: 200 });
@@ -133,13 +156,24 @@ test('a high-confidence duplicate upgrades a held low-confidence ready', (t) => 
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const src = createStatusSource({ sessionId: 's1', conflictWindowMs: 60 });
   const out = collect(src);
-  src.ingest({ signal: 'ready', source: 'title' }); // low, held
+  src.ingest({ signal: 'ready', source: 'title', ts: 0 });
   t.mock.timers.tick(10);
-  src.ingest({ signal: 'ready', source: 'hook' }); // authoritative Stop lands in the window
+  src.ingest({ signal: 'ready', source: 'hook', ts: 10 });
   t.mock.timers.tick(90);
   assert.equal(out.length, 1);
   assert.equal(out[0].confidence, 'high');
   assert.equal(out[0].source, 'hook');
+  assert.equal(out[0].ts, 10);
+  src.destroy();
+});
+
+test('a held ready retains its originating timestamp', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const src = createStatusSource({ sessionId: 's1', conflictWindowMs: 60 });
+  const out = collect(src);
+  src.ingest({ signal: 'ready', source: 'hook', ts: 42 });
+  t.mock.timers.tick(90);
+  assert.equal(out[0].ts, 42);
   src.destroy();
 });
 

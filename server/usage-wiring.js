@@ -16,6 +16,7 @@
 
 const path = require('node:path');
 const { USAGE_INTEGER_RANGES } = require('../shared/settings-ranges');
+const { USAGE_COST_MODES, USAGE_VENDOR_KEYS, USAGE_BUDGET_KEYS } = require('../shared/usage-config');
 const { createUsageScanner } = require('./usage-scanner');
 const { loadPricing } = require('./usage-pricing');
 const { execFileAsync: defaultExecFileAsync } = require('./child-process-safe');
@@ -52,11 +53,6 @@ const DEFAULT_USAGE_CONFIG = Object.freeze({
   vendors: { codex: true, grok: true },
 });
 
-const USAGE_VENDOR_KEYS = Object.freeze(['codex', 'grok']);
-// Shared with control-handlers' validateUsage, like the ranges and vendor keys: one source of truth for
-// which budget fields exist.
-const USAGE_BUDGET_KEYS = Object.freeze(['dailyUsd', 'monthlyUsd']);
-
 /*
  * Claude session ids seen in statusLine payloads, capped. Claude assigns a NEW id on every resume, so
  * an uncapped map would grow for the life of the process on a machine that resumes often.
@@ -90,11 +86,8 @@ const RTK_UNAVAILABLE = Object.freeze({ available: false });
 // Required lazily: session/core/rtk-command.js pulls in spawn-command, which resolves `claude` at module
 // load, and control-handlers.js requires this module on a path that has no business probing for it.
 function defaultRtkPath() {
-  return require('../session/core/rtk-command').getRtkPath();
+  return require('./rtk-resolver').getRtkPath();
 }
-// Shared with control-handlers' validateUsage/sanitizeUsage: one source of truth for the ranges the
-// wire validator enforces and the fallback resolver tolerates, so the two cannot drift apart.
-const USAGE_COST_MODES = Object.freeze(['auto', 'calculate', 'display']);
 const COST_MODES = new Set(USAGE_COST_MODES);
 const INTEGER_RANGES = USAGE_INTEGER_RANGES;
 

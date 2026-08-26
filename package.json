@@ -29,6 +29,7 @@
     "shared/client-trust.esm.js",
     "shared/notification-states.js",
     "shared/settings-ranges.js",
+    "shared/contracts/",
     "shared/paths.js"
   ],
   "engines": {
@@ -58,6 +59,8 @@
     "start": "node server.js",
     "lint": "biome check .",
     "test": "node --test \"tests/**/*.test.js\"",
+    "typecheck": "tsc --project tsconfig.json",
+    "typecheck:all": "tsc --project tsconfig.all.json",
     "test:container": "docker build -f test/container/Dockerfile -t glissa-remote-test . && docker run --rm glissa-remote-test",
     "dev": "vite",
     "dev:server-only": "node server.js",
@@ -74,12 +77,15 @@
     "@xterm/xterm": "^6.0.0",
     "express": "^4.18.2",
     "node-pty": "^1.1.0",
-    "ws": "^8.16.0"
+    "ws": "^8.16.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.5",
     "@tailwindcss/vite": "^4.2.1",
+    "@types/node": "^26.3.0",
     "tailwindcss": "^4.2.1",
+    "typescript": "^7.0.2",
     "vite": "^7.3.2"
   }
 }

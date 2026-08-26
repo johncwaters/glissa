@@ -1,0 +1,29 @@
+'use strict';
+
+const fs = require('node:fs');
+const os = require('node:os');
+
+const { resolveRtkPath } = require('../session/core/rtk-command');
+const { execSync } = require('./child-process-safe');
+
+function resolveRtkPathFromSystem() {
+  return resolveRtkPath({
+    homeDir: os.homedir(),
+    platform: process.platform,
+    exec: execSync,
+    fsApi: fs,
+  });
+}
+
+let cachedRtkPath = null;
+
+function getRtkPath(resolve = resolveRtkPathFromSystem) {
+  if (!cachedRtkPath) cachedRtkPath = resolve();
+  return cachedRtkPath;
+}
+
+function resetRtkPathCache() {
+  cachedRtkPath = null;
+}
+
+module.exports = { getRtkPath, resetRtkPathCache };

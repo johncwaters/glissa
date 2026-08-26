@@ -376,7 +376,8 @@ const MAPPERS = Object.freeze({ claude: mapClaudeLine, codex: mapCodexLine, grok
  * an unknown vendor, and a line the vendor's mapper has no interest in all resolve to no events and an
  * unchanged context, so the shell never has to branch on any of those.
  */
-function mapAgentLine({ vendor, rawLine, ctx = {}, vendorState = null, includeUserPrompts = false } = {}) {
+/** @param {any} options */
+function mapAgentLine({ vendor, rawLine, ctx = {}, vendorState = null, includeUserPrompts = false } = /** @type {any} */ ({})) {
   const root = ctx.root == null ? null : ctx.root;
   const sessionId = ctx.sessionId == null ? null : ctx.sessionId;
   const unchanged = result([], root, sessionId, vendorState);

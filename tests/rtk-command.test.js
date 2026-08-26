@@ -4,7 +4,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 
-const { buildRtkHookEntry, resolveRtkPath } = require('../session/core/rtk-command');
+const {
+  buildRtkHookEntry,
+  resolveRtkPath,
+} = require('../session/core/rtk-command');
+const { getRtkPath, resetRtkPathCache } = require('../server/rtk-resolver');
 const { MAX_RTK_STDOUT_BYTES, normalizeRtkHookResponse } = require('../session/core/rtk-hook-core');
 
 function fsWithFiles(files) {
@@ -115,6 +119,27 @@ test('resolveRtkPath returns null when neither managed bin nor PATH resolves', (
     },
   });
   assert.equal(resolved, null);
+});
+
+test('the RTK resolution cache has an explicit invalidation path', () => {
+  let calls = 0;
+  resetRtkPathCache();
+  assert.equal(getRtkPath(() => {
+    calls += 1;
+    return '/first/rtk';
+  }), '/first/rtk');
+  assert.equal(getRtkPath(() => {
+    calls += 1;
+    return '/ignored/rtk';
+  }), '/first/rtk');
+  assert.equal(calls, 1);
+  resetRtkPathCache();
+  assert.equal(getRtkPath(() => {
+    calls += 1;
+    return '/second/rtk';
+  }), '/second/rtk');
+  assert.equal(calls, 2);
+  resetRtkPathCache();
 });
 
 test('a rewrite missing permissionDecision is completed with allow', () => {

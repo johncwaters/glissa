@@ -32,7 +32,7 @@ function parseJsonLine(line, requiredSubstring) {
   return parsed;
 }
 
-function parseUsageLine(line, { versionPrefix } = {}) {
+function parseUsageLine(line, { versionPrefix } = /** @type {any} */ ({})) {
   const parsed = parseJsonLine(line, '"usage":{');
   if (!parsed) return null;
   if (hasExplicitNull(parsed)) return null;

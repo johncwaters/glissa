@@ -122,7 +122,7 @@ function workspaceEdit(fixes, { uri, version }) {
   };
 }
 
-function buildCodeActions(fixes, { uri, version } = {}) {
+function buildCodeActions(fixes, { uri, version } = /** @type {any} */ ({})) {
   return listOf(fixes).map((fix) => ({
     title: fixTitle(fix),
     kind: QUICKFIX_KIND,
@@ -135,7 +135,7 @@ function applyEditLabel(count) {
   return count === 1 ? 'Visions: 1 silent fix' : `Visions: ${count} silent fixes`;
 }
 
-function buildApplyEditParams(fixes, { uri, version } = {}) {
+function buildApplyEditParams(fixes, { uri, version } = /** @type {any} */ ({})) {
   const batch = listOf(fixes);
   return { label: applyEditLabel(batch.length), edit: workspaceEdit(batch, { uri, version }) };
 }

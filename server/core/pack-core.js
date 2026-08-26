@@ -967,15 +967,15 @@ function templateStubErrors(outputs) {
 /**
  * Plan one pack build.
  *
- * @param {object} spec parsed pack spec
+ * @param {any} spec parsed pack spec
  * @param {Array<{relPath: string, content: string, sourceIndex?: number, skillIndex?: number}>} files
  *   files the shell already read: `sourceIndex` names the spec source that matched it, `skillIndex`
  *   the skill dir it came from (and then `relPath` is relative to that dir).
- * @param {{ builtAt: string, sourceRoots?: string[] }} options build stamp, supplied by the caller so
+ * @param {{ builtAt: string, variant?: any, sourceRoots?: string[] }} options build stamp, supplied by the caller so
  *   this stays clock-free, plus the absolute roots the shell resolved the spec's patterns to.
  * @returns {{ ok: boolean, outputs: Array<{relPath: string, content: string}>, manifest: object|null, errors: string[] }}
  */
-function planPackBuild(spec, files, { builtAt, variant = null, sourceRoots = [] } = {}) {
+function planPackBuild(spec, files, { builtAt, variant = null, sourceRoots = [] } = /** @type {any} */ ({})) {
   const specCheck = validatePackSpec(spec);
   if (!specCheck.ok) return { ok: false, outputs: [], manifest: null, errors: specCheck.errors };
 

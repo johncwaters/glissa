@@ -112,10 +112,12 @@ if (!isPackCommand && !isMemoryCommand && !isAgentCommand && !isVisionsCommand) 
 // so `glissa doctor` stays safe to run.
 function resolveConfigPathReadOnly() {
   const fs = require('node:fs');
+  const os = require('node:os');
   const path = require('node:path');
-  const { decideConfigPath } = require('../server/core/config-path-core');
+  const { decideConfigPath, glissaHomeDir } = require('../server/core/config-path-core');
   const decided = decideConfigPath({
     env: process.env,
+    homeDir: glissaHomeDir(os.homedir()),
     packageRoot: path.join(__dirname, '..'),
   }, (candidate) => fs.existsSync(candidate));
   if (decided.path) return decided.path;
@@ -185,7 +187,7 @@ function runDoctor() {
 
   console.log('\nrtk');
   try {
-    const { getRtkPath } = require('../session/core/rtk-command');
+    const { getRtkPath } = require('../server/rtk-resolver');
     const rtkPath = getRtkPath();
     line('rtk', rtkPath || 'not installed (Glissa installs it when the rtk setting is on)');
   } catch (err) {

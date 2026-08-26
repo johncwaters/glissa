@@ -8,26 +8,24 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 
 ## Architecture Map
 
-What each entry owns, not how it works. A directory with its own `AGENTS.md` gets one row; read that file before working inside it.
-
 | Path | Role |
 |------|------|
-| `server.js`, `vite.config.js` | Prod entry (wraps `server/backend.js`); frontend build plus dev attach plugin |
-| `config.json`, `package.json`, `biome.json`, `socket.yml` | Dev config (installed: `~/.glissa/config.json`); package (`files` bounds the tarball), lint, scan policy |
-| `DESIGN.md`, `DESIGN.json`, `PRODUCT.md` | Visual design system; product definition |
-| `docs/`, `bin/` | Design docs, plans, postmortems; npm CLI entry |
-| `server/` | Backend runtime: Express/WS wiring, control plane, config, every lane (`server/AGENTS.md` names the files) |
+| `server.js`, `vite.config.js` | Production entry; frontend build and dev wiring |
+| `config.json`, `package.json`, `biome.json`, `socket.yml` | Runtime/dev config; package, lint and scan policy |
+| `DESIGN.md`, `DESIGN.json`, `PRODUCT.md` | Visual system and product definition |
+| `docs/`, `bin/` | Design records and npm CLI |
+| `server/` | Backend runtime and lanes (`server/AGENTS.md`) |
 | `server/child-process-safe.js` | The ONLY importer of `node:child_process`, bar the extension packed outside it |
 | `server/git-workspace.js` | The ONLY module allowed to run `git worktree` |
 | `server/core/` | Pure decision modules for everything in `server/`, no IO |
-| `session/` | Session domain: Session class, recorder, standalone relays (`session/AGENTS.md`) |
-| `session/sessions.js` | Session class: lifecycle, PTY spawn/kill, timers, hooks, StatusSource |
-| `session/adapters/`, `session/core/` | Per-agent adapters plus registry; pure cores from `sessions.js` |
-| `detection/`, `notifications/` | Hook and title sources, settings injector, watchers, replay; notification lifecycle, outbox, channels |
-| `packs/`, `shared/` | Version-controlled pack specs and sources; state constants shared by server (CJS) and browser (ESM) |
-| `public/` | Browser dashboard, ES modules bundled by Vite (`public/AGENTS.md`) |
-| `scripts/`, `tests/`, `test/` | Release scripts; the `node --test` suite; manual and container tests |
-| `tools/`, `assets/`, `dist/` | Dev tooling with the Visions editor extension; static assets; build output (gitignored, never edit) |
+| `session/` | Session domain (`session/AGENTS.md`) |
+| `session/sessions.js` | Session lifecycle and PTY ownership |
+| `session/adapters/`, `session/core/` | Agent adapters and pure session cores |
+| `detection/`, `notifications/` | Status signals and notification lifecycle |
+| `packs/`, `shared/` | Pack sources and shared constants |
+| `public/` | Browser dashboard (`public/AGENTS.md`) |
+| `scripts/`, `tests/`, `test/` | Release scripts and tests |
+| `tools/`, `assets/`, `dist/` | Dev tools, static assets and generated build output |
 
 ## For AI Agents
 
@@ -45,6 +43,8 @@ What each entry owns, not how it works. A directory with its own `AGENTS.md` get
 - Prefer the seam pattern: pure logic in `session/core/` or a `*-core` module, thin IO shells around it. A pure core imports no Session and reads no clock.
 - Inter-module communication via Node `EventEmitter`, not globals or direct coupling.
 - Sessions are keyed by stable UUID `id`; `name` is display-only.
+- Wire and persisted shapes are Zod schemas in `shared/contracts/`; boundaries parse and fail closed (`tests/contracts-*.test.js`).
+- `npm run typecheck` gates `server/core/` and `shared/`.
 
 ### Testing Requirements
 

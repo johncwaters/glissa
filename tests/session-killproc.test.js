@@ -130,6 +130,25 @@ test('kill() flips _ptyAlive to false synchronously BEFORE invoking the killer',
   });
 });
 
+test('killSession reaps live PTYs from INITIALIZING and STARTING', async () => {
+  for (const state of [STATES.INITIALIZING, STATES.STARTING]) {
+    const signals = [];
+    const s = makePosixSession({ signals });
+    try {
+      s.state = state;
+      s.ptyProcess = fakePty();
+      s._ptyAlive = true;
+      assert.equal(s.killSession(), true);
+      assert.equal(s.state, STATES.DONE);
+      assert.equal(s._ptyAlive, false);
+      assert.deepEqual(signals[0], { pid: -FAKE_PID, signal: 'SIGKILL' });
+      await s._killReap;
+    } finally {
+      cleanup(s);
+    }
+  }
+});
+
 test('_handlePtyExit reap is fire-and-forget: the exit emit is not delayed by the killer', async () => {
   await asWin32(async () => {
     const killCalls = [];

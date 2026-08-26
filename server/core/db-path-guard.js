@@ -34,7 +34,7 @@ function decideDbOpenRefusal({ dbPath, homeDir, tmpDir, isTestRunner }) {
 }
 
 function homeDbRefusedError(message) {
-  const error = new Error(message);
+  const error = /** @type {Error & { code: string }} */ (new Error(message));
   error.name = HOME_DB_REFUSED_NAME;
   error.code = HOME_DB_REFUSED_CODE;
   return error;

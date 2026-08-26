@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
+const { PACK_NAME_RE } = require("../../server/core/pack-core");
 const { buildAgentEnv } = require("../core/spawn-env");
 const { renderGrokHooksFile, classifyGrokHooksFile } = require("../core/grok-hooks-file-core");
 const { PACK_DIRECTIVE, renderPackPointerText } = require("../core/pack-pointer-core");
@@ -223,7 +224,7 @@ const hooks = {
 };
 
 function renderPackArgs(deliveries, builtRoot) {
-  const pointerText = renderPackPointerText(deliveries, builtRoot);
+  const pointerText = renderPackPointerText(deliveries, builtRoot, (name) => PACK_NAME_RE.test(name));
   if (pointerText === "") return [];
   if (pointerText == null) return null;
   return ["--rules", pointerText];

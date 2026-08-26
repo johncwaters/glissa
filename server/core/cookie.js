@@ -59,7 +59,8 @@ function readDeviceCookie(header, cookieName = COOKIE_NAME) {
  * serves plain http in both the loopback and the insecure-bind case, so Secure is off either way -
  * which is why the bind mode is not an input here at all.
  */
-function decideCookieFlags({ forwardedProto } = {}) {
+/** @param {any} options */
+function decideCookieFlags({ forwardedProto } = /** @type {any} */ ({})) {
   const first = typeof forwardedProto === 'string' ? forwardedProto.split(',')[0].trim().toLowerCase() : '';
   return { secure: first === 'https', sameSite: 'Lax' };
 }

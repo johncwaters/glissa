@@ -126,7 +126,7 @@ test('a save that leaves both configs alone rebuilds nothing', withBackend({
 }, async ({ backend, dash, track }) => {
   const laneBefore = backend.getVisionsLane();
   const { received, ws } = await openControl(dash, track);
-  saveSettings(ws, { scrollback: 12345 });
+  saveSettings(ws, { cursorBlink: true });
   await until(() => received.some((message) => message.type === 'settings-updated'), 'no settings-updated frame');
   assert.equal(backend.getVisionsLane(), laneBefore);
 }));

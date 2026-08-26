@@ -102,7 +102,8 @@ function highestTrustRank(kinds) {
 }
 
 // Lineage can only fall, so a model claim quoted back and re-observed can never climb above model rank.
-function computeLineage({ sourceKind, ancestorLineages = [] } = {}) {
+/** @param {any} record */
+function computeLineage({ sourceKind, ancestorLineages = [] } = /** @type {any} */ ({})) {
   const own = SOURCE_KINDS.includes(sourceKind) ? sourceKind : 'model';
   const best = highestTrustRank(ancestorLineages);
   if (best === null) return own;
@@ -185,7 +186,7 @@ function isoDay(ts) {
   return new Date(ts).toISOString().slice(0, 10);
 }
 
-function absolutizeDates(text, { now } = {}) {
+function absolutizeDates(text, { now } = /** @type {any} */ ({})) {
   const value = typeof text === 'string' ? text : '';
   const at = finiteNumber(now);
   if (!value || at === null) return value;
@@ -303,7 +304,7 @@ function normalizeSource(raw) {
  * drops. Outside the window the record is stamped with the clock instead, which costs the observed time
  * and, for that record only, the stable id a re-read would otherwise derive.
  */
-function clampObservedTs(observed, { now, retainDays = DEFAULT_MEMORY_RETAIN_DAYS, skewMs = MAX_OBSERVED_TS_SKEW_MS } = {}) {
+function clampObservedTs(observed, { now, retainDays = DEFAULT_MEMORY_RETAIN_DAYS, skewMs = MAX_OBSERVED_TS_SKEW_MS } = /** @type {any} */ ({})) {
   const at = finiteNumber(now);
   if (at === null) return null;
   const candidate = finiteNumber(observed);
@@ -318,7 +319,7 @@ function makeRecordId({ ts, kind, sourceKind, project, text }) {
   return `m-${sha256Hex(JSON.stringify([ts, kind, sourceKind, project, text])).slice(0, 16)}`;
 }
 
-function buildMemoryRecord(input, { now, maxChars = MAX_RECORD_CHARS, retainDays = DEFAULT_MEMORY_RETAIN_DAYS } = {}) {
+function buildMemoryRecord(input, { now, maxChars = MAX_RECORD_CHARS, retainDays = DEFAULT_MEMORY_RETAIN_DAYS } = /** @type {any} */ ({})) {
   const raw = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
   // An observed record is stamped with the moment it describes (clamped, since that moment is untrusted
   // input), which is also what makes a re-ingest of the same transcript line derive the same id.
@@ -461,14 +462,15 @@ function isValidAt(record, at) {
   return true;
 }
 
-function selectValidRecords(records, { now } = {}) {
+function selectValidRecords(records, { now } = /** @type {any} */ ({})) {
   const at = finiteNumber(now);
   if (at === null) return [];
   return (Array.isArray(records) ? records : []).filter((record) => isValidAt(record, at));
 }
 
 // Only an operator mutation clears a lock; a model or reported record can never close a locked one.
-function decideSupersession({ candidate, target, now } = {}) {
+/** @param {any} options */
+function decideSupersession({ candidate, target, now } = /** @type {any} */ ({})) {
   if (!candidate || !target) return { allowed: false, reason: 'unknown-target', validTo: null };
   if (candidate.id === target.id) return { allowed: false, reason: 'self', validTo: null };
   if (finiteNumber(target.validTo) !== null) return { allowed: false, reason: 'already-closed', validTo: null };
@@ -557,7 +559,7 @@ function segmentEndMs(key) {
 }
 
 // Whole segments only: that is how append-only storage and pruning coexist.
-function expiredSegmentKeys(keys, { now, retainDays = DEFAULT_MEMORY_RETAIN_DAYS } = {}) {
+function expiredSegmentKeys(keys, { now, retainDays = DEFAULT_MEMORY_RETAIN_DAYS } = /** @type {any} */ ({})) {
   const at = finiteNumber(now);
   if (at === null) return [];
   const cutoff = at - retainDays * MS_PER_DAY;
@@ -730,6 +732,7 @@ function parseProjectionBullets(text) {
   return bullets;
 }
 
+/** @type {Map<string, any>} */
 const KIND_BY_HEADING = new Map(Object.entries(KIND_HEADINGS).map(([kind, heading]) => [heading, kind]));
 const PROJECTION_HEADING_RE = /^## (.+)$/;
 const PROJECTION_PROJECT_RE = /^Project: (.+)$/;
@@ -752,9 +755,9 @@ function parsePublishedClaims(text) {
     }
     const bullet = parseProjectionBullet(line);
     if (!bullet || !kind) continue;
-    claims.push({
+    claims.push(/** @type {any} */ ({
       kind, project, rank: bullet.rank, ids: bullet.ids, locked: bullet.locked, text: bullet.text,
-    });
+    }));
   }
   return claims;
 }

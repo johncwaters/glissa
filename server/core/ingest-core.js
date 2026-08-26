@@ -399,7 +399,7 @@ function matchesScopes(event, scopes) {
  * noisy source cannot starve the rest, and a hard char budget. Empty rings produce an empty string,
  * which every consumer renders as absent.
  */
-function buildContextDigest(store, { scopes = null, budgetChars = DEFAULT_DIGEST_BUDGET_CHARS, now } = {}) {
+function buildContextDigest(store, { scopes = null, budgetChars = DEFAULT_DIGEST_BUDGET_CHARS, now } = /** @type {any} */ ({})) {
   const budget = positiveInt(budgetChars, DEFAULT_DIGEST_BUDGET_CHARS);
   const candidates = [];
   const takenBySource = new Map();

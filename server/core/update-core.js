@@ -77,7 +77,7 @@ function parseLsRemoteTags(stdout) {
 // file alone. Precedence is by reliability: the hidden global lockfile records the exact commit npm
 // resolved, package.json `gitHead` is npm's own stamp on the packed tarball, and a `.git` directory means
 // a clone whose HEAD the shell reads with a git call.
-function decideInstallFlavor({ lockfileSha, gitHeadSha, hasGitDir } = {}) {
+function decideInstallFlavor({ lockfileSha, gitHeadSha, hasGitDir } = /** @type {any} */ ({})) {
   const fromLockfile = normalizeSha(lockfileSha);
   if (fromLockfile) return { flavor: 'npm-global', installedSha: fromLockfile };
   const fromGitHead = normalizeSha(gitHeadSha);
@@ -148,7 +148,7 @@ function normalizeFlavor(flavor) {
   return 'unknown';
 }
 
-function decideUpdateStatus({ installedSha, latestSha: remoteSha, currentVersion, latestVersion, flavor } = {}) {
+function decideUpdateStatus({ installedSha, latestSha: remoteSha, currentVersion, latestVersion, flavor } = /** @type {any} */ ({})) {
   const currentSha = normalizeSha(installedSha);
   const latestSha = normalizeSha(remoteSha);
   const current = textOrNull(currentVersion);

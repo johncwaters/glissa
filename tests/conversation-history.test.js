@@ -72,7 +72,7 @@ test('listRepoConversations walks the repo worktree set, newest-first, with extr
   // A non-jsonl sibling must be ignored.
   fs.writeFileSync(path.join(dirMain, 'notes.txt'), 'ignore me');
 
-  const convs = await listRepoConversations({ repoPath: wtMain, projectsDir, git: gitFake });
+  const convs = await listRepoConversations({ repoPath: wtMain, projectsDir, git: gitFake, fsMod: fs });
 
   assert.equal(convs.length, 3, 'all three transcripts discovered');
   assert.deepEqual(convs.map((c) => c.id), [
@@ -98,7 +98,7 @@ test('listRepoConversations de-dups a session id across worktrees, keeping the n
   writeTranscript(path.join(projectsDir, encodeProjectDir(wtA)), id, { title: 'older copy', cwd: wtA, mtimeMs: 1000 });
   writeTranscript(path.join(projectsDir, encodeProjectDir(wtB)), id, { title: 'newer copy', cwd: wtB, mtimeMs: 9000 });
 
-  const convs = await listRepoConversations({ repoPath: wtA, projectsDir, git: gitFake });
+  const convs = await listRepoConversations({ repoPath: wtA, projectsDir, git: gitFake, fsMod: fs });
   assert.equal(convs.length, 1, 'duplicate id collapsed to one entry');
   assert.equal(convs[0].title, 'newer copy', 'kept the newest of the duplicates');
 
@@ -109,7 +109,12 @@ test('listRepoConversations returns [] when no project dirs exist for the repo',
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-convnone-'));
   const projectsDir = path.join(root, 'projects');
   fs.mkdirSync(projectsDir, { recursive: true });
-  const convs = await listRepoConversations({ repoPath: 'C:/nope', projectsDir, git: async () => 'worktree C:/nope\n' });
+  const convs = await listRepoConversations({
+    repoPath: 'C:/nope',
+    projectsDir,
+    git: async () => 'worktree C:/nope\n',
+    fsMod: fs,
+  });
   assert.deepEqual(convs, []);
   fs.rmSync(root, { recursive: true, force: true });
 });

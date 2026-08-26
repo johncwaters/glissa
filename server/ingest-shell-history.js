@@ -20,6 +20,7 @@
 'use strict';
 
 const fsNode = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const { canonicalizePath } = require('../shared/paths');
@@ -58,6 +59,7 @@ function createShellHistoryIngest({
   sourceConfig = {},
   logger = console,
   env = process.env,
+  homeDir = os.homedir(),
   platform = process.platform,
   fsPromises = fsNode.promises,
   watchFn = fsNode.watch,
@@ -78,7 +80,7 @@ function createShellHistoryIngest({
   const pollMs = positiveInt(sourceConfig.pollMs, DEFAULT_POLL_MS);
   // Ahead of the rejected-shell check below, which warns during construction.
   const { note, warn } = createLaneLog({ prefix: '[ingest]', logger });
-  const locations = historyLocations({ shells: sourceConfig.shells, env, platform });
+  const locations = historyLocations({ shells: sourceConfig.shells, env, platform, homeDir });
   /*
    * A configured name that matches no known shell is a typo in the one source that must be asked for
    * explicitly, so it is reported rather than absorbed. Said once, at construction: it is a fact about

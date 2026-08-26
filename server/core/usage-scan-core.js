@@ -1,6 +1,5 @@
 'use strict';
 
-const os = require('node:os');
 const path = require('node:path');
 const { stringOrNull } = require('./usage-number-core');
 
@@ -20,25 +19,26 @@ function splitLines(carry, chunkText) {
   return { lines: lines.filter((line) => line.length > 0), carry: nextCarry || '' };
 }
 
-function resolveProjectsDirs(env = process.env, extraDirs = [], isDirectory) {
+function resolveProjectsDirs(env = process.env, extraDirs = [], isDirectory, homeDir = null) {
   if (typeof isDirectory !== 'function') throw new TypeError('resolveProjectsDirs requires an isDirectory function');
-  const surviving = projectDirCandidates(env, extraDirs).filter(isDirectory);
+  const surviving = projectDirCandidates(env, extraDirs, homeDir).filter(isDirectory);
   if (!configDirOverride(env)) return surviving;
-  const overrideSurvivors = projectDirCandidates(env, []).filter(isDirectory);
+  const overrideSurvivors = projectDirCandidates(env, [], homeDir).filter(isDirectory);
   if (overrideSurvivors.length === 0) throw new Error('CLAUDE_CONFIG_DIR is set but no projects directory exists');
   return surviving;
 }
 
-function projectDirCandidates(env = process.env, extraDirs = []) {
+function projectDirCandidates(env = process.env, extraDirs = [], homeDir = null) {
   const override = configDirOverride(env);
-  const extraHomes = normalizeHomeCandidates(extraDirs, env);
+  const extraHomes = normalizeHomeCandidates(extraDirs, env, homeDir);
   if (override) {
-    const overrideHomes = normalizeHomeCandidates(override.split(','), env);
+    const overrideHomes = normalizeHomeCandidates(override.split(','), env, homeDir);
     return uniqueStrings([...projectsDirsFromHomes(overrideHomes), ...projectsDirsFromHomes(extraHomes)]);
   }
 
-  const xdgConfigHome = stringOrNull(env.XDG_CONFIG_HOME) || path.join(homeDir(env), '.config');
-  const defaultHomes = [path.join(xdgConfigHome, 'claude'), path.join(homeDir(env), '.claude')];
+  const resolvedHomeDir = resolveHomeDir(env, homeDir);
+  const xdgConfigHome = stringOrNull(env.XDG_CONFIG_HOME) || path.join(resolvedHomeDir, '.config');
+  const defaultHomes = [path.join(xdgConfigHome, 'claude'), path.join(resolvedHomeDir, '.claude')];
   return uniqueStrings([...projectsDirsFromHomes(defaultHomes), ...projectsDirsFromHomes(extraHomes)]);
 }
 
@@ -57,21 +57,21 @@ function projectsDirsFromHomes(homes) {
   return projectsDirs;
 }
 
-function normalizeHomeCandidates(candidates, env) {
+function normalizeHomeCandidates(candidates, env, homeDir) {
   if (!Array.isArray(candidates)) return [];
   return candidates
-    .map((candidate) => expandTilde(String(candidate || '').trim(), env))
+    .map((candidate) => expandTilde(String(candidate || '').trim(), env, homeDir))
     .filter(Boolean);
 }
 
-function expandTilde(candidate, env) {
-  if (candidate === '~') return homeDir(env);
+function expandTilde(candidate, env, homeDir) {
+  if (candidate === '~') return resolveHomeDir(env, homeDir);
   if (!candidate.startsWith(`~${path.sep}`) && !candidate.startsWith('~/')) return candidate;
-  return path.join(homeDir(env), candidate.slice(2));
+  return path.join(resolveHomeDir(env, homeDir), candidate.slice(2));
 }
 
-function homeDir(env) {
-  return stringOrNull(env.HOME) || stringOrNull(env.USERPROFILE) || os.homedir();
+function resolveHomeDir(env, homeDir) {
+  return stringOrNull(env.HOME) || stringOrNull(env.USERPROFILE) || homeDir;
 }
 
 function uniqueStrings(values) {
@@ -84,18 +84,18 @@ function uniqueStrings(values) {
 // nothing rather than erroring (unlike CLAUDE_CONFIG_DIR, which is an explicit claim that a dir exists).
 
 // The env override is comma-split like CLAUDE_CONFIG_DIR, so several homes can be scanned.
-function vendorHomes(env, varName, defaultDirName) {
+function vendorHomes(env, varName, defaultDirName, homeDir) {
   const override = typeof env?.[varName] === 'string' ? env[varName].trim() : '';
-  if (override) return normalizeHomeCandidates(override.split(','), env);
-  return [path.join(homeDir(env), defaultDirName)];
+  if (override) return normalizeHomeCandidates(override.split(','), env, homeDir);
+  return [path.join(resolveHomeDir(env, homeDir), defaultDirName)];
 }
 
-function codexHomes(env = process.env) {
-  return vendorHomes(env, 'CODEX_HOME', '.codex');
+function codexHomes(env = process.env, homeDir = null) {
+  return vendorHomes(env, 'CODEX_HOME', '.codex', homeDir);
 }
 
-function grokHomes(env = process.env) {
-  return vendorHomes(env, 'GROK_HOME', '.grok');
+function grokHomes(env = process.env, homeDir = null) {
+  return vendorHomes(env, 'GROK_HOME', '.grok', homeDir);
 }
 
 // ccusage's Codex root rule: sessions/ and archived_sessions/ when present, else the home itself as

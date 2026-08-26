@@ -17,7 +17,7 @@ function rollupFromReport(daily) {
   return records;
 }
 
-function mergeWarehouse(existingRecords, freshRecords, { liveDays } = {}) {
+function mergeWarehouse(existingRecords, freshRecords, { liveDays } = /** @type {any} */ ({})) {
   const liveDaySet = new Set((liveDays || []).filter((day) => stringOrNull(day)));
   const freshByKey = new Map();
   for (const freshRecord of freshRecords || []) {
@@ -42,7 +42,7 @@ function mergeWarehouse(existingRecords, freshRecords, { liveDays } = {}) {
   return Array.from(mergedByKey.values()).sort(compareRecords);
 }
 
-function pruneWarehouse(records, { retainDays, todayKey } = {}) {
+function pruneWarehouse(records, { retainDays, todayKey } = /** @type {any} */ ({})) {
   const cutoffDay = cutoffDayKey(todayKey, retainDays);
   // An uncomputable cutoff must fail safe: dropping durable history is the one unrecoverable outcome.
   if (!cutoffDay) {

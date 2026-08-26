@@ -64,7 +64,7 @@ function normalizeLedger(entries) {
 
 // Retention matches the warehouse's, so a lane row can still be explained for as long as the day it came
 // from is still on the daily series.
-function pruneLedger(entries, { now, retainDays } = {}) {
+function pruneLedger(entries, { now, retainDays } = /** @type {any} */ ({})) {
   const normalized = normalizeLedger(entries);
   const days = Number.isInteger(retainDays) && retainDays > 0 ? retainDays : null;
   const nowMs = safeNumber(now);

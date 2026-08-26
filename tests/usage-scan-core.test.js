@@ -78,3 +78,10 @@ test('projectDirCandidates matches resolver probes and filters blank override se
     path.join(root, 'extra', 'projects'),
   ]);
 });
+
+test('home directory fallback is supplied by the IO caller', () => {
+  assert.deepEqual(projectDirCandidates({}, [], '/fallback/home'), [
+    path.join('/fallback/home', '.config', 'claude', 'projects'),
+    path.join('/fallback/home', '.claude', 'projects'),
+  ]);
+});

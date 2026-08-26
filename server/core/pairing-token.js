@@ -38,11 +38,9 @@ function mintDeviceCredential({ randomBytes = crypto.randomBytes } = {}) {
 }
 
 /**
- * @param {object} args
- * @param {object|null} args.record device record from the pairings snapshot
- * @param {boolean} args.secretMatches result of the shell's timing-safe hash compare
+ * @param {any} args
  */
-function decideDeviceAuth({ record, now = Date.now(), maxAgeMs = DEFAULT_DEVICE_MAX_AGE_MS, secretMatches }) {
+function decideDeviceAuth({ record, now = Date.now(), maxAgeMs = DEFAULT_DEVICE_MAX_AGE_MS, secretMatches } = /** @type {any} */ ({})) {
   if (!record) return { ok: false, reason: 'unknown' };
   if (record.revokedAt) return { ok: false, reason: 'revoked' };
   if (typeof record.createdAt === 'number' && maxAgeMs > 0 && now - record.createdAt > maxAgeMs) {
@@ -52,6 +50,7 @@ function decideDeviceAuth({ record, now = Date.now(), maxAgeMs = DEFAULT_DEVICE_
   return { ok: true, reason: null };
 }
 
+/** @type {Array<[RegExp, string]>} */
 const UA_PATTERNS = [
   [/iphone/i, 'iPhone'],
   [/ipad/i, 'iPad'],

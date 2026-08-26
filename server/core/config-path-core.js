@@ -3,20 +3,21 @@
 
 'use strict';
 
-const os = require('node:os');
 const path = require('node:path');
 
-/** The one spelling of the directory Glissa keeps runtime state in (config, pairings, recordings, built packs). */
-function glissaHomeDir() {
-  return path.join(os.homedir(), '.glissa');
+/** @param {string} homeDirectory */
+function glissaHomeDir(homeDirectory) {
+  return path.join(homeDirectory, '.glissa');
 }
 
 /**
+ * @param {{ env?: { GLISSA_CONFIG?: string }, homeDir: string, packageRoot: string }} options
+ * @param {(candidate: string) => boolean} exists
  * @returns {{ path: string|null, source: 'env'|'local'|'home'|'none', homePath: string, envPath: string|null }}
  * `source: 'env'` with a null path means GLISSA_CONFIG named a file that is not there, which is an
  * operator error rather than a reason to fall through to another config.
  */
-function decideConfigPath({ env = {}, homeDir = glissaHomeDir(), packageRoot }, exists) {
+function decideConfigPath({ env = {}, homeDir, packageRoot }, exists) {
   const homePath = path.join(homeDir, 'config.json');
   if (env.GLISSA_CONFIG) {
     const envPath = path.resolve(env.GLISSA_CONFIG);

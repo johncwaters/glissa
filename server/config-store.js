@@ -6,13 +6,13 @@ const path = require('node:path');
 const os = require('node:os');
 
 const { canonicalizePath, equalsIgnoringCaseOnWindows } = require('../shared/paths');
-const { decideConfigPath, glissaHomeDir } = require('./core/config-path-core');
+const { decideConfigPath, glissaHomeDir: resolveGlissaHomeDir } = require('./core/config-path-core');
+const { Config, RUNTIME_CONFIG_SCALAR_KEYS } = require('../shared/contracts');
 const { isPlainObject } = require('./core/usage-number-core');
 const {
   INGEST_SPEC, MEMORY_SPEC, PACK_DISTILLER_SPEC, pickMillBlock,
 } = require('./core/settings-mill-core');
 const { writeJsonAtomicSync, writeTextAtomicSync } = require('./json-file');
-const { isKnownAgentId, listAgentIds } = require('../session/adapters');
 
 const DEFAULT_CONFIG = {
   port: 3000,
@@ -125,51 +125,16 @@ const DEFAULT_CONFIG = {
   projects: []
 };
 
-// Single source of truth for numeric setting field names
-const TIMEOUT_KEYS = [
-  'autoRecoverSeconds',
-  'inputGraceSeconds',
-  'promptDetectionMs',
-  'notifyDebounceMs',
-  'phoneEscalationMs',
-  'replayBufferKB',
-];
-
-// Boolean settings persisted to config.json
-const BOOLEAN_KEYS = [
-  'cursorBlink',
-  'debugMode',
-  'detectBackgroundAgents',
-  'recordSignals',
-  'antiSlopPrompt',
-  'rtk',
-  'checkForUpdates',
-  'autoResume',
-  'telegramNotifications',
-  // The service reads this at boot, so changes apply from the next restart.
-  'packsAutoRebuild',
-  // Both worktree conflict-avoidance switches, absent from getSettings for the same reason
-  // (precedent: usage.rtkSavings). Validated and reloadable; each takes effect on the next session
-  // construction / server restart respectively.
-  'worktreeAutoRebase',
-  'worktreeRerere',
-];
-
-// Free-text settings persisted to config.json.
-// `remote` appears in NEITHER key list, is not echoed by getSettings, and is not read by
-// applySettings: the control WebSocket is unauthenticated on localhost, so a settable remote block
-// would let any local process open the machine to the network. See AGENTS.md "Remote Mode".
-const STRING_KEYS = [
-  'integrationBranch',
-  'worktreeRoot',
-];
-
 // config.json carries the telegram bot token and the PostHog API key, and its .bak siblings carry the
 // same bytes, so on a multi-user POSIX host they take the 0700/0600 discipline the pairings store and
 // the hook settings file already use rather than whatever the umask happens to be. Advisory on Windows,
 // where the ACL is what matters and node ignores the mode.
 const CONFIG_DIR_MODE = 0o700;
 const CONFIG_FILE_MODE = 0o600;
+
+function glissaHomeDir() {
+  return resolveGlissaHomeDir(os.homedir());
+}
 
 // A mode passed to writeFileSync only applies to a file it CREATES, so an existing config or backup
 // keeps whatever mode it had; the chmod is what makes the 0600 claim true either way.
@@ -209,66 +174,42 @@ function generateProjectId() {
 }
 
 function validateConfig(candidate) {
-  const errors = [];
-  if (!isPlainObject(candidate)) {
-    return { ok: false, errors: ['config must be a plain object'] };
-  }
-  if (!Array.isArray(candidate.projects)) {
-    errors.push('projects must be an array');
-  }
-  if (Array.isArray(candidate.projects)) {
-    candidate.projects.forEach((project, index) => {
-      if (!isPlainObject(project)) {
-        errors.push(`projects[${index}] must be a plain object`);
-        return;
+  if (!isPlainObject(candidate)) return { ok: false, errors: ['config must be a plain object'] };
+  const parsedConfig = Config.safeParse(candidate);
+  if (!parsedConfig.success) {
+    const errors = parsedConfig.error.issues.map((issue) => {
+      const [root, index, field] = issue.path;
+      if (root === 'port') return 'port must be an integer from 0 to 65535';
+      if (root === 'repoRoots' || root === 'worktreeShare') return `${root} must be an array of strings`;
+      if (root === 'remote') return 'remote must be a plain object';
+      if (root !== 'projects' && typeof DEFAULT_CONFIG[root] === 'number') {
+        return `${String(root)} must be a finite number greater than or equal to 0`;
       }
-      if (typeof project.path !== 'string') errors.push(`projects[${index}].path must be a string`);
-      if (project.id != null && typeof project.id !== 'string') errors.push(`projects[${index}].id must be a string`);
-      // Which agent CLI supervises this project's card. Absent = the default adapter; an unknown id
-      // is refused here (the reload path) rather than silently supervising with the wrong vocabulary.
-      if (project.agent != null && !isKnownAgentId(project.agent)) {
-        errors.push(`projects[${index}].agent must be one of: ${listAgentIds().join(', ')}`);
-      }
-      // Opt-in to the supervised agent's hook-trust bypass (codex). File-only and default false: the
-      // bypass runs every hook the invocation loads, repository-supplied ones included, so it is a
-      // decision the operator makes per project rather than one a dashboard control can flip.
-      if (project.codexBypassHookTrust != null && typeof project.codexBypassHookTrust !== 'boolean') {
-        errors.push(`projects[${index}].codexBypassHookTrust must be a boolean`);
-      }
+      if (root !== 'projects') return issue.message;
+      if (typeof index !== 'number') return 'projects must be an array';
+      if (!field) return `projects[${index}] must be a plain object`;
+      if (field === 'agent') return `projects[${index}].agent must be one of: claude-code, codex, grok`;
+      if (field === 'codexBypassHookTrust') return `projects[${index}].codexBypassHookTrust must be a boolean`;
+      return `projects[${index}].${String(field)} must be a string`;
     });
+    return { ok: false, errors };
   }
-  if (candidate.port != null && (!Number.isInteger(candidate.port) || candidate.port < 1 || candidate.port > 65535)) {
-    errors.push('port must be an integer from 1 to 65535');
-  }
-  for (const key of TIMEOUT_KEYS) {
-    if (candidate[key] == null) continue;
-    if (typeof candidate[key] !== 'number' || !Number.isFinite(candidate[key]) || candidate[key] < 0) {
-      errors.push(`${key} must be a finite number greater than or equal to 0`);
-    }
-  }
-  for (const key of BOOLEAN_KEYS) {
-    if (candidate[key] == null) continue;
-    if (typeof candidate[key] !== 'boolean') errors.push(`${key} must be a boolean`);
-  }
-  for (const key of STRING_KEYS) {
-    if (candidate[key] == null) continue;
-    if (typeof candidate[key] !== 'string') errors.push(`${key} must be a string`);
-  }
-  for (const key of ['repoRoots', 'worktreeShare']) {
-    if (candidate[key] == null) continue;
-    if (!Array.isArray(candidate[key])) {
-      errors.push(`${key} must be an array of strings`);
-      continue;
-    }
-    if (candidate[key].some((entry) => typeof entry !== 'string')) {
-      errors.push(`${key} must be an array of strings`);
-    }
-  }
-  if (candidate.remote != null && !isPlainObject(candidate.remote)) {
-    errors.push('remote must be a plain object');
-  }
-  if (errors.length > 0) return { ok: false, errors };
   return { ok: true };
+}
+
+function normalizeConfigFile(candidate) {
+  if (!isPlainObject(candidate)) throw new Error('config must be a plain object');
+  for (const [key, fallback] of Object.entries(DEFAULT_CONFIG)) {
+    if (fallback === null || typeof fallback === 'object') continue;
+    if (!Object.hasOwn(candidate, key)) continue;
+    const fieldSchema = Config.shape[key];
+    if (!fieldSchema || fieldSchema.safeParse(candidate[key]).success) continue;
+    console.warn(`[config] ${key} value ${JSON.stringify(candidate[key])} is invalid; using ${JSON.stringify(fallback)}`);
+    candidate[key] = fallback;
+  }
+  const validation = validateConfig(candidate);
+  if (!validation.ok) throw new Error(`validation failed: ${validation.errors.join('; ')}`);
+  return candidate;
 }
 
 function writeBackupContent(backupPath, content) {
@@ -283,7 +224,7 @@ function writeBackupContent(backupPath, content) {
 function loadConfigFile(configPath, { exitOnError = true } = {}) {
   const loadedContent = fs.readFileSync(configPath, 'utf8');
   try {
-    const parsed = JSON.parse(loadedContent);
+    const parsed = normalizeConfigFile(JSON.parse(loadedContent));
     return { config: parsed, loadedContent };
   } catch (err) {
     const invalidBackupPath = `${configPath}.invalid.bak`;
@@ -293,7 +234,7 @@ function loadConfigFile(configPath, { exitOnError = true } = {}) {
     } catch (backupErr) {
       console.warn(`[config] Failed to save invalid config copy ${invalidBackupPath}:`, backupErr.code || backupErr.message);
     }
-    const message = `[config] Could not parse ${configPath}: ${err.message}. The broken file was copied to ${invalidBackupPath} when possible. Restore from ${configPath}.boot.bak or ${configPath}.bak, then restart Glissa.`;
+    const message = `[config] Could not load ${configPath}: ${err.message}. The broken file was copied to ${invalidBackupPath} when possible. Restore from ${configPath}.boot.bak or ${configPath}.bak, then restart Glissa.`;
     if (!exitOnError) return { error: err, message, invalidBackupPath };
     console.error(message);
     process.exit(1);
@@ -347,6 +288,33 @@ function resolveBranchGc(branchGc) {
  *   raw (absent) value; and applySettings deliberately declines to materialize an incoming value
  *   equal to the launch default, so a hand-edit to exactly that value never lands in config either.
  */
+// config.json carries telegram.botToken and posthog.apiKey, and this payload reaches every
+// control-WS client (unauthenticated on localhost, plus paired remote devices), so both blocks are
+// projected through allow-lists and each secret is answered as a presence flag, never as its value.
+const POSTHOG_SETTINGS_KEYS = Object.freeze([
+  'enabled', 'recurrenceDedupe', 'trafficSpikeEnabled', 'autoFix',
+  'host', 'repoPath', 'projects', 'projectMap',
+  'intervalMinutes', 'maxConcurrentInvestigations', 'investigationTimeoutSeconds', 'fixTimeoutSeconds',
+  'minUsersToInvestigate', 'userEscalationThreshold', 'recurrenceWindowDays', 'transientRecurrenceLimit',
+  'trafficSpikeMultiplier', 'trafficSpikeMinUsers', 'trafficSpikeCooldownMinutes', 'trafficSpikeBaselineDays',
+]);
+const POSTHOG_SECRET_KEYS = Object.freeze(['apiKey']);
+const TELEGRAM_SETTINGS_KEYS = Object.freeze(['chatId']);
+const TELEGRAM_SECRET_KEYS = Object.freeze(['botToken']);
+const SECRET_PRESENCE_SUFFIX = 'Configured';
+
+function pickRedactedBlock(stored, allowedKeys, secretKeys) {
+  if (!isPlainObject(stored)) return null;
+  const redacted = {};
+  for (const key of allowedKeys) {
+    if (stored[key] !== undefined) redacted[key] = stored[key];
+  }
+  for (const secretKey of secretKeys) {
+    redacted[`${secretKey}${SECRET_PRESENCE_SUFFIX}`] = typeof stored[secretKey] === 'string' && stored[secretKey].length > 0;
+  }
+  return redacted;
+}
+
 function createConfigStore({ settingsDefaults } = {}) {
   const configPath = resolveConfigPath();
   const effectiveDefaults = { ...DEFAULT_CONFIG, ...(settingsDefaults || {}) };
@@ -484,11 +452,11 @@ function createConfigStore({ settingsDefaults } = {}) {
       visions: config.visions ? { ...config.visions } : null,
       // Opt-in PostHog monitoring lane (see AGENTS.md). Same null-when-unconfigured rule as
       // prReview, so a user who never enables it gets a byte-identical config.
-      posthog: config.posthog ? { ...config.posthog } : null,
+      posthog: pickRedactedBlock(config.posthog, POSTHOG_SETTINGS_KEYS, POSTHOG_SECRET_KEYS),
       // Usage tracking (see AGENTS.md). Same null-when-unconfigured rule, but unlike the two opt-in
       // lanes an absent block means ENABLED with defaults, not off.
       usage: config.usage ? { ...config.usage } : null,
-      telegram: config.telegram ? { ...config.telegram } : null,
+      telegram: pickRedactedBlock(config.telegram, TELEGRAM_SETTINGS_KEYS, TELEGRAM_SECRET_KEYS),
       // Projected through their allow-lists in BOTH directions: a file-only key (a watched root, a
       // shell list) is no more echoable than it is settable.
       packDistiller: pickMillBlock(config.packDistiller, PACK_DISTILLER_SPEC),
@@ -514,18 +482,13 @@ function createConfigStore({ settingsDefaults } = {}) {
 
   /** Apply settings from a new config object into the in-memory config. */
   function applySettings(newConfig) {
-    for (const key of TIMEOUT_KEYS) {
-      if (newConfig[key] != null) config[key] = newConfig[key];
-    }
-    for (const key of BOOLEAN_KEYS) {
+    for (const key of RUNTIME_CONFIG_SCALAR_KEYS) {
       if (newConfig[key] == null) continue;
-      // Keeping the key absent in memory too, so the getSettings fallback (and therefore a later
-      // hand-edit of config.json) keeps describing the file rather than a phantom value.
-      if (isUnchosenLaunchDefault(config, key, !!newConfig[key])) continue;
-      config[key] = !!newConfig[key];
-    }
-    for (const key of STRING_KEYS) {
-      if (newConfig[key] != null) config[key] = String(newConfig[key]);
+      let nextValue = newConfig[key];
+      if (typeof DEFAULT_CONFIG[key] === 'boolean') nextValue = !!nextValue;
+      if (typeof DEFAULT_CONFIG[key] === 'string') nextValue = String(nextValue);
+      if (typeof nextValue === 'boolean' && isUnchosenLaunchDefault(config, key, nextValue)) continue;
+      config[key] = nextValue;
     }
     config.repoRoots = newConfig.repoRoots || [];
     // Object passthrough: the scalar KEY-lists above don't cover nested objects.
@@ -565,17 +528,12 @@ function createConfigStore({ settingsDefaults } = {}) {
       if (_lastAppliedContent !== null && data === _lastAppliedContent) return;
       let newConfig;
       try {
-        newConfig = JSON.parse(data);
+        newConfig = normalizeConfigFile(JSON.parse(data));
       } catch (parseErr) {
-        console.warn('[config] Invalid JSON in config.json:', parseErr.message);
+        console.warn('[config] Invalid config.json:', parseErr.message);
         return;
       }
       newConfig.branchGc = resolveBranchGc(newConfig.branchGc);
-      const validation = validateConfig(newConfig);
-      if (!validation.ok) {
-        warnInvalidConfig('reload config.json', validation);
-        return;
-      }
       if (isSuspectedExternalWipe(newConfig, config)) {
         warnSuspectedWipe('reload config.json');
         return;
@@ -626,12 +584,11 @@ function createConfigStore({ settingsDefaults } = {}) {
     applySettings,
     isUnchosenLaunchDefault,
     watchForChanges,
-    TIMEOUT_KEYS,
     DEFAULT_CONFIG,
   };
 }
 
 module.exports = {
   createConfigStore, resolveConfigPath, glissaHomeDir, generateProjectId, ensureProjectIds, validateConfig, loadConfigFile,
-  TIMEOUT_KEYS, BOOLEAN_KEYS, STRING_KEYS, DEFAULT_CONFIG, CONFIG_DIR_MODE, CONFIG_FILE_MODE,
+  DEFAULT_CONFIG, CONFIG_DIR_MODE, CONFIG_FILE_MODE, SECRET_PRESENCE_SUFFIX,
 };

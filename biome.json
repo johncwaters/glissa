@@ -3,8 +3,10 @@
   "files": {
     "includes": [
       "**",
+      "!!**/.claude",
       "!!**/dist",
       "!!**/node_modules",
+      "!**/*.d.ts",
       "!**/*.esm.js",
       "!vite.config.js"
     ]
@@ -46,5 +48,29 @@
         }
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["server/core/**/*.js", "session/core/**/*.js"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "node:fs": "Pure cores receive filesystem operations from IO callers.",
+                  "node:child_process": "Pure cores receive process operations from IO callers.",
+                  "node:os": "Pure cores receive operating system values from IO callers.",
+                  "node:http": "Pure cores receive network operations from IO callers.",
+                  "node:https": "Pure cores receive network operations from IO callers.",
+                  "node:net": "Pure cores receive network operations from IO callers."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

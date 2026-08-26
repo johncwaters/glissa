@@ -48,7 +48,7 @@ function decideRtkInstall({
   lastFailureAt = null,
   nowMs = 0,
   cooldownMs = INSTALL_FAILURE_COOLDOWN_MS,
-} = {}) {
+} = /** @type {any} */ ({})) {
   if (!rtkEnabled) return { action: 'skip', reason: 'rtk-disabled' };
   if (resolvedPath) return { action: 'skip', reason: 'already-resolved' };
   if (inFlight) return { action: 'skip', reason: 'install-in-flight' };

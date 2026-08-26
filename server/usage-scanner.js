@@ -1,6 +1,7 @@
 'use strict';
 
 const path = require('node:path');
+const os = require('node:os');
 const { StringDecoder } = require('node:string_decoder');
 const {
   dedupKeys,
@@ -54,6 +55,7 @@ function createUsageScanner(deps = {}) {
   const {
     fsPromises = require('node:fs/promises'),
     env = process.env,
+    homeDir = os.homedir(),
     nowFn = Date.now,
     pricingTable,
     aliases = {},
@@ -142,10 +144,10 @@ function createUsageScanner(deps = {}) {
     let partial = false;
     let bytesReadThisPass = 0;
     if (force) resetStore();
-    const resolved = await resolveProjectsDirsAsync({ fsPromises, env, extraProjectsDirs, logger });
+    const resolved = await resolveProjectsDirsAsync({ fsPromises, env, extraProjectsDirs, homeDir, logger });
     claudeDirs = resolved.dirs;
     resolutionError = resolved.error;
-    const vendorRoots = await resolveVendorRootsAsync({ fsPromises, env, vendors });
+    const vendorRoots = await resolveVendorRootsAsync({ fsPromises, env, homeDir, vendors });
     const roots = [
       ...claudeDirs.map((dir) => ({ vendor: 'claude', dir, kind: 'active' })),
       ...vendorRoots,
@@ -685,8 +687,8 @@ function createUsageScanner(deps = {}) {
   return api;
 }
 
-async function resolveProjectsDirsAsync({ fsPromises, env, extraProjectsDirs, logger }) {
-  const candidates = projectDirCandidates(env, extraProjectsDirs);
+async function resolveProjectsDirsAsync({ fsPromises, env, extraProjectsDirs, homeDir, logger }) {
+  const candidates = projectDirCandidates(env, extraProjectsDirs, homeDir);
   const existing = new Set();
   await Promise.all(candidates.map(async (candidate) => {
     try {
@@ -698,7 +700,10 @@ async function resolveProjectsDirsAsync({ fsPromises, env, extraProjectsDirs, lo
     return null;
   }));
   try {
-    return { dirs: resolveProjectsDirs(env, extraProjectsDirs, (candidate) => existing.has(candidate)), error: null };
+    return {
+      dirs: resolveProjectsDirs(env, extraProjectsDirs, (candidate) => existing.has(candidate), homeDir),
+      error: null,
+    };
   } catch (error) {
     warn(logger, `usage scan project dir resolution failed: ${error.message}`);
     return { dirs: [], error: error.message };
@@ -710,10 +715,10 @@ async function resolveProjectsDirsAsync({ fsPromises, env, extraProjectsDirs, lo
  * CLAUDE_CONFIG_DIR (an explicit claim that a directory is there), these are opportunistic. A vendor
  * switched off in config contributes no candidates at all, so its tree is never even stat'ed.
  */
-async function resolveVendorRootsAsync({ fsPromises, env, vendors }) {
+async function resolveVendorRootsAsync({ fsPromises, env, homeDir, vendors }) {
   const roots = [];
   if (vendors?.codex !== false) {
-    const homes = codexHomes(env);
+    const homes = codexHomes(env, homeDir);
     const surviving = await existingRoots(codexRootCandidates(homes), fsPromises);
     // Only when neither sessions/ nor archived_sessions/ exists does the home itself count as a flat
     // JSONL dir; a real ~/.codex also holds history.jsonl and plugin fixtures, which are not usage.
@@ -721,7 +726,7 @@ async function resolveVendorRootsAsync({ fsPromises, env, vendors }) {
     for (const root of [...surviving, ...fallback]) roots.push({ vendor: 'codex', dir: root.dir, kind: root.kind });
   }
   if (vendors?.grok !== false) {
-    const surviving = await existingRoots(grokRootCandidates(grokHomes(env)), fsPromises);
+    const surviving = await existingRoots(grokRootCandidates(grokHomes(env, homeDir)), fsPromises);
     for (const root of surviving) roots.push({ vendor: 'grok', dir: root.dir, kind: root.kind });
   }
   return roots;

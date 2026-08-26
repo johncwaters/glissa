@@ -42,7 +42,14 @@ const STATE_GLYPHS = Object.freeze({
   [STATES.COMPLETE]:     '\u25c7',
 });
 
-const KILLABLE_STATES = Object.freeze([STATES.RUNNING, STATES.WAITING, STATES.IDLE, STATES.COMPLETE]);
+const KILLABLE_STATES = Object.freeze([
+  STATES.INITIALIZING,
+  STATES.STARTING,
+  STATES.RUNNING,
+  STATES.WAITING,
+  STATES.IDLE,
+  STATES.COMPLETE,
+]);
 const RESTARTABLE_STATES = Object.freeze([STATES.DONE, STATES.FAILED]);
 // A live-PTY session that is quiescent (parked between turns), so merging its worktree and rebasing it
 // underneath the session is safe. The single source of truth for the merge-as-you-go gate, shared by the

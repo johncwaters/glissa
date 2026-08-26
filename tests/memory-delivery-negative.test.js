@@ -14,7 +14,8 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { registerControlHandlers } = require('../server/control-handlers');
-const { createConfigStore, BOOLEAN_KEYS, STRING_KEYS, TIMEOUT_KEYS } = require('../server/config-store');
+const { createConfigStore } = require('../server/config-store');
+const { CONFIG_SCALAR_KEYS, ConfigUpdate } = require('../shared/contracts');
 const { REPLAYABLE_EXACT, isReplayable } = require('../server/control-replay-core');
 const { createMemoryStore } = require('../server/memory-store');
 const { resolveMemoryConfig } = require('../server/core/memory-core');
@@ -121,9 +122,8 @@ test('a file-only key of any Mill block is dropped from the settings echo', () =
 });
 
 test('memory is a block, never a scalar settings key, so no key list can carry a path into the config', () => {
-  assert.equal(BOOLEAN_KEYS.includes('memory'), false);
-  assert.equal(STRING_KEYS.includes('memory'), false);
-  assert.equal(TIMEOUT_KEYS.includes('memory'), false);
+  assert.equal(CONFIG_SCALAR_KEYS.includes('memory'), false);
+  assert.equal('memory' in ConfigUpdate.shape, true);
 });
 
 test('a memory toggle is settable over the control WS and lands in the config', () => {

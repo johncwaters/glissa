@@ -89,7 +89,7 @@ function planUploadRetention(filenames, { keep = UPLOAD_RETAIN_FILES, justWritte
 function extensionIsUpload(name) {
   if (typeof name !== 'string') return false;
   const ext = path.extname(name).toLowerCase();
-  return Object.values(IMAGE_EXTENSION_BY_MIME).includes(ext);
+  return Object.values(IMAGE_EXTENSION_BY_MIME).some((extension) => extension === ext);
 }
 
 module.exports = {

@@ -41,5 +41,5 @@ test('a package-local config beats the home one, and the home one beats nothing'
 });
 
 test('the home directory has one spelling', () => {
-  assert.equal(path.basename(glissaHomeDir()), '.glissa');
+  assert.equal(path.basename(glissaHomeDir('/home/operator')), '.glissa');
 });

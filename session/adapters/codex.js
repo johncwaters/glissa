@@ -9,6 +9,8 @@
 
 const path = require("node:path");
 
+const { execSync } = require("../../server/child-process-safe");
+const { PACK_NAME_RE } = require("../../server/core/pack-core");
 const { resolveAgentCommand, buildAgentSpawnCommand } = require("../core/spawn-command");
 const { buildAgentEnv } = require("../core/spawn-env");
 const { buildHookCommand } = require("../core/hook-command-core");
@@ -229,7 +231,7 @@ const hooks = {
 };
 
 // -- Spawn ------------------------------------------------------------------
-function resolveCommand({ platform, exec } = {}) {
+function resolveCommand({ platform, exec = execSync } = {}) {
   return resolveAgentCommand({
     name: COMMAND_NAME,
     ...(platform ? { platform } : {}),
@@ -251,7 +253,7 @@ function buildEnv(baseEnv, extraEnv, options) {
 }
 
 function renderPackArgs(deliveries, builtRoot) {
-  const pointerText = renderPackPointerText(deliveries, builtRoot);
+  const pointerText = renderPackPointerText(deliveries, builtRoot, (name) => PACK_NAME_RE.test(name));
   if (pointerText === "") return [];
   if (pointerText == null) return null;
   return ["-c", `developer_instructions='''${pointerText}'''`];

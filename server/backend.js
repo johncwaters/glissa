@@ -1,3 +1,4 @@
+// @ts-nocheck
 /*
  * Glissa Backend - Express + WebSocket server factory
  *
@@ -48,7 +49,7 @@ const { createRecorder } = require('../session/session-recorder');
 const { createWsSender } = require('./ws-sender');
 const { HookRouter } = require('../detection/hook-source');
 const { sweepOrphans } = require('../detection/settings-injector');
-const { getRtkPath } = require('../session/core/rtk-command');
+const { getRtkPath } = require('./rtk-resolver');
 const { createRtkInstallWiring } = require('./rtk-install-wiring');
 const { buildSettingsPayload } = require('./settings-payload');
 const { checkForUpdate: defaultCheckForUpdate } = require('./update-check');
@@ -79,6 +80,7 @@ const { INTERACTIVE_LANE } = require('./core/usage-lane-core');
 const { normalizeRemoteConfig, validateRemoteConfig, decideBindHost } = require('./core/remote-config');
 const { createClientPresence } = require('./core/client-presence');
 const { decideControlSend } = require('./core/control-send-core');
+const { renderSharedCjsEsm } = require('./core/shared-cjs-esm-core');
 const { createHeartbeat } = require('./ws-heartbeat');
 const { consumedPackNames, normalizePackNames, packVariantProjects, projectVariantSlug } = require('./core/pack-core');
 const { createPackService } = require('./pack-service');
@@ -2447,6 +2449,17 @@ function createBackend(httpServer, options = {}) {
  * directly from node_modules. Only used in production when dist/ doesn't exist.
  */
 function mountDevRoutes(app) {
+  const sharedContractSources = new Map([
+    ['/shared/control-messages.mjs', path.join(__dirname, '..', 'shared/contracts/control-messages.js')],
+    ['/shared/session.mjs', path.join(__dirname, '..', 'shared/contracts/session.js')],
+  ]);
+  const sharedContractSpecifier = (specifier) => {
+    if (specifier === 'zod') return '/zod/index.js';
+    if (specifier === './session') return '/shared/session.mjs';
+    if (specifier === '../states') return '/shared/states.mjs';
+    throw new Error(`Unsupported shared contract import ${specifier}`);
+  };
+
   app.get('/xterm/xterm.css', (_req, res) => {
     res.sendFile(path.join(__dirname, '..', 'node_modules/@xterm/xterm/css/xterm.css'));
   });
@@ -2462,6 +2475,16 @@ function mountDevRoutes(app) {
     res.type('application/javascript');
     res.sendFile(path.join(__dirname, '..', 'node_modules/@xterm/addon-webgl/lib/addon-webgl.mjs'));
   });
+
+  app.use('/zod', express.static(path.join(__dirname, '..', 'node_modules/zod')));
+
+  for (const [route, sourcePath] of sharedContractSources) {
+    app.get(route, (_req, res) => {
+      const source = fs.readFileSync(sourcePath, 'utf8');
+      res.type('application/javascript');
+      res.send(renderSharedCjsEsm(source, sharedContractSpecifier));
+    });
+  }
 
   app.get('/shared/states.mjs', (_req, res) => {
     const states = require('../shared/states');

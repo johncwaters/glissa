@@ -8,6 +8,7 @@
 const { buildAntiSlopArgs } = require("../core/anti-slop-prompt");
 const { resolveAgentCommand, buildAgentSpawnCommand } = require("../core/spawn-command");
 const { buildAgentEnv } = require("../core/spawn-env");
+const { execSync } = require("../../server/child-process-safe");
 
 const ID = "claude-code";
 const COMMAND_NAME = "claude";
@@ -173,7 +174,7 @@ const hooks = {
 };
 
 // -- Spawn ------------------------------------------------------------------
-function resolveCommand({ platform, exec } = {}) {
+function resolveCommand({ platform, exec = execSync } = {}) {
   return resolveAgentCommand({
     name: COMMAND_NAME,
     ...(platform ? { platform } : {}),

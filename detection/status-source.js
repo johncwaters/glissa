@@ -30,6 +30,7 @@ const DEFAULT_CONFLICT_WINDOW_MS = 750;
 const DEFAULT_DEDUP_WINDOW_MS = 500;
 
 const CONFIDENCE = { hook: 'high', title: 'low' };
+const CONFIDENCE_RANK = { low: 0, high: 1 };
 
 // Signals that take effect immediately (no buffering).
 const IMMEDIATE = new Set(['working', 'awaiting-input', 'resume', 'session-start', 'session-end']);
@@ -46,7 +47,8 @@ class StatusSource extends EventEmitter {
     this._pendingReadyTimer = null;
     this._pendingReadySource = null;
     this._pendingReadyConfidence = null;
-    this._last = null; // { signal, ts }
+    this._pendingReadyTs = null;
+    this._last = null;
     this._destroyed = false;
   }
 
@@ -54,7 +56,7 @@ class StatusSource extends EventEmitter {
   ingest(raw) {
     if (this._destroyed || !raw || !raw.signal) return;
     const { signal, source } = raw;
-    const ts = raw.ts || Date.now();
+    const ts = raw.ts ?? Date.now();
     const confidence = raw.confidence || CONFIDENCE[source] || 'low';
 
     // Telemetry-only signals never drive transitions.
@@ -78,19 +80,23 @@ class StatusSource extends EventEmitter {
         if (confidence === 'high' && this._pendingReadyConfidence !== 'high') {
           this._pendingReadySource = source;
           this._pendingReadyConfidence = confidence;
+          this._pendingReadyTs = ts;
         }
         return;
       }
       this._pendingReadySource = source;
       this._pendingReadyConfidence = confidence;
+      this._pendingReadyTs = ts;
       this._pendingReadyTimer = setTimeout(() => {
         this._pendingReadyTimer = null;
         const src = this._pendingReadySource;
         const conf = this._pendingReadyConfidence;
+        const originTs = this._pendingReadyTs;
         this._pendingReadySource = null;
         this._pendingReadyConfidence = null;
+        this._pendingReadyTs = null;
         if (this._destroyed) return;
-        this._resolve('ready', src, conf, Date.now());
+        this._resolve('ready', src, conf, originTs);
       }, this._conflictWindowMs);
       return;
     }
@@ -105,11 +111,15 @@ class StatusSource extends EventEmitter {
   }
 
   _resolve(signal, source, confidence, ts) {
-    // Dedup rapid duplicates of the same resolved signal.
-    if (this._last && this._last.signal === signal && ts - this._last.ts < this._dedupWindowMs) {
+    const isRapidDuplicate = this._last
+      && this._last.signal === signal
+      && ts - this._last.ts < this._dedupWindowMs;
+    const isHigherConfidence = (CONFIDENCE_RANK[confidence] ?? 0)
+      > (CONFIDENCE_RANK[this._last?.confidence] ?? 0);
+    if (isRapidDuplicate && !isHigherConfidence) {
       return;
     }
-    this._last = { signal, ts };
+    this._last = { signal, confidence, ts };
     this.emit('status', {
       sessionId: this._sessionId,
       signal,
@@ -125,6 +135,7 @@ class StatusSource extends EventEmitter {
       this._pendingReadyTimer = null;
       this._pendingReadySource = null;
       this._pendingReadyConfidence = null;
+      this._pendingReadyTs = null;
     }
   }
 

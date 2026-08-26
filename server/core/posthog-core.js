@@ -214,7 +214,7 @@ function normalizeJobMode(mode) {
 }
 
 // Refuses a diff touching .github/workflows/ (CI changes are a carbon unit's call) and errors a FIXED verdict that committed nothing.
-function decideFixHandoff({ changedFiles, commitsAhead } = {}) {
+function decideFixHandoff({ changedFiles, commitsAhead } = /** @type {any} */ ({})) {
   const files = Array.isArray(changedFiles)
     ? changedFiles.map((file) => String(file ?? '').trim()).filter(Boolean)
     : [];
@@ -357,7 +357,7 @@ function normalizeInvestigations(log) {
  */
 function buildInvestigationRecord({
   key, projectId, projectName, host, issueId, title, url, verdict, summaryLine, at, mode, prUrl,
-} = {}) {
+} = /** @type {any} */ ({})) {
   const stamp = stampOf(at);
   return {
     id: investigationId(issueId, stamp),
@@ -463,7 +463,7 @@ function decideVanishedEntry(entry, nowTs, opts = {}) {
  * Validate one operator-driven per-issue request from the control WS. Both fields are required and
  * the issue id is charset-checked before it can reach a URL path or a pasted prompt.
  */
-function validateIssueRef({ projectId, issueId } = {}) {
+function validateIssueRef({ projectId, issueId } = /** @type {any} */ ({})) {
   const project = String(projectId ?? '').trim();
   const issue = String(issueId ?? '').trim();
   if (!project) return { ok: false, error: 'projectId is required' };
@@ -621,7 +621,7 @@ function scrubForPaste(text, maxChars = MAX_PING_TITLE_CHARS) {
  * untrusted. Double quotes are safe here: this is pasted into a terminal, never re-parsed by cmd.exe
  * the way a spawn argument is (session/core/anti-slop-prompt.js).
  */
-function buildIssueSessionPrompt({ issue, projectName, host, url } = {}) {
+function buildIssueSessionPrompt({ issue, projectName, host, url } = /** @type {any} */ ({})) {
   const facts = issue && typeof issue === 'object' ? issue : {};
   const where = host ? ` at ${scrubForPaste(host, 120)}` : '';
   const lines = [

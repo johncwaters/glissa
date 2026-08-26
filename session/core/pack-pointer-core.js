@@ -3,7 +3,6 @@
 const path = require("node:path");
 
 const { SAFE_PATH_RE } = require("./hook-command-core");
-const { PACK_NAME_RE } = require("../../server/core/pack-core");
 
 const PACK_DIRECTIVE = "Glissa context packs are available at these index files. Read each relevant CLAUDE.md before working";
 const CURRENT_POINTER_DIRECTORY = "current";
@@ -34,11 +33,12 @@ function isInsideBuiltRoot(packDirectory, builtRoot) {
   return path.resolve(packDirectory).startsWith(builtRootPrefix);
 }
 
-function renderPackPointerText(deliveries, builtRoot) {
+function renderPackPointerText(deliveries, builtRoot, isPackName) {
   if (!Array.isArray(deliveries) || deliveries.length === 0) return "";
+  if (typeof isPackName !== "function") return null;
   const pointers = [];
   for (const delivery of deliveries) {
-    if (!delivery || !PACK_NAME_RE.test(delivery.name)) return null;
+    if (!delivery || !isPackName(delivery.name)) return null;
     const packDirectory = String(delivery.dir || "");
     const indexPath = path.join(packDirectory, "CLAUDE.md");
     const isAbsolute = path.isAbsolute(packDirectory) || path.win32.isAbsolute(packDirectory);

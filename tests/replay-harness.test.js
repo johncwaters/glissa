@@ -87,6 +87,10 @@ test('grok fixture replays the live approval race from title WAITING to hook COM
   assert.ok(awaitingAt >= 0, 'the approval reaches the card');
   assert.ok(readyAt > awaitingAt, 'Stop(end_turn) completes after approval');
   assert.equal(signals[awaitingAt].source, 'title');
+  const authoritativeAwaiting = signals.find((signal, index) =>
+    index > awaitingAt && signal.signal === 'awaiting-input' && signal.source === 'hook');
+  assert.ok(authoritativeAwaiting, 'the hook supersedes the duplicate title signal');
+  assert.equal(authoritativeAwaiting.confidence, 'high');
   assert.equal(signals[readyAt].source, 'hook');
 });
 

@@ -156,7 +156,8 @@ function isActiveMtime(mtimeMs, { now, withinMs }) {
   return finiteOr(mtimeMs, 0) >= finiteOr(now, 0) - Math.max(0, finiteOr(withinMs, 0));
 }
 
-function canTrustCachedListing({ mtimeMs, listedAtMs } = {}) {
+/** @param {any} listing */
+function canTrustCachedListing({ mtimeMs, listedAtMs } = /** @type {any} */ ({})) {
   return finiteOr(listedAtMs, 0) - finiteOr(mtimeMs, 0) >= LISTING_SETTLE_MS;
 }
 

@@ -15,7 +15,6 @@
 
 'use strict';
 
-const os = require('node:os');
 const path = require('node:path');
 
 const { stringOrNull } = require('./usage-number-core');
@@ -84,38 +83,38 @@ function normalizeShells(raw) {
 
 // --- Discovery ------------------------------------------------------------
 
-function homeDir(env) {
-  return stringOrNull(env?.HOME) || stringOrNull(env?.USERPROFILE) || os.homedir();
+function resolveHomeDir(env, homeDir) {
+  return stringOrNull(env?.HOME) || stringOrNull(env?.USERPROFILE) || homeDir;
 }
 
-function dataHome(env) {
-  return stringOrNull(env?.XDG_DATA_HOME) || path.join(homeDir(env), '.local', 'share');
+function dataHome(env, homeDir) {
+  return stringOrNull(env?.XDG_DATA_HOME) || path.join(resolveHomeDir(env, homeDir), '.local', 'share');
 }
 
-function configHome(env) {
-  return stringOrNull(env?.XDG_CONFIG_HOME) || path.join(homeDir(env), '.config');
+function configHome(env, homeDir) {
+  return stringOrNull(env?.XDG_CONFIG_HOME) || path.join(resolveHomeDir(env, homeDir), '.config');
 }
 
 /*
  * Windows PowerShell 5.1 and pwsh 7 share this path exactly, which is why the location list is deduped
  * rather than one entry per host executable: tailing it twice would publish every command twice.
  */
-function powershellLocations(env, platform) {
+function powershellLocations(env, platform, homeDir) {
   if (platform === 'win32') {
-    const appData = stringOrNull(env?.APPDATA) || path.join(homeDir(env), 'AppData', 'Roaming');
+    const appData = stringOrNull(env?.APPDATA) || path.join(resolveHomeDir(env, homeDir), 'AppData', 'Roaming');
     const dir = path.join(appData, 'Microsoft', 'Windows', 'PowerShell', 'PSReadLine');
     return [{ shell: 'powershell', dir, suffix: PSREADLINE_SUFFIX, name: null }];
   }
   // PSReadLine on non-Windows resolves LocalApplicationData, which .NET maps to XDG_DATA_HOME.
-  const dir = path.join(dataHome(env), 'powershell', 'PSReadLine');
+  const dir = path.join(dataHome(env, homeDir), 'powershell', 'PSReadLine');
   return [{ shell: 'powershell', dir, suffix: PSREADLINE_SUFFIX, name: null }];
 }
 
-function fishLocations(env) {
+function fishLocations(env, homeDir) {
   return [
-    { shell: 'fish', dir: path.join(dataHome(env), 'fish'), suffix: null, name: 'fish_history' },
+    { shell: 'fish', dir: path.join(dataHome(env, homeDir), 'fish'), suffix: null, name: 'fish_history' },
     // fish before 3.0 kept history beside the config, and a machine upgraded in place still has it.
-    { shell: 'fish', dir: path.join(configHome(env), 'fish'), suffix: null, name: 'fish_history' },
+    { shell: 'fish', dir: path.join(configHome(env, homeDir), 'fish'), suffix: null, name: 'fish_history' },
   ];
 }
 
@@ -136,8 +135,8 @@ function histFileLocation(wanted, env) {
   return [fileLocation(posixShells[0], histFile)];
 }
 
-function defaultHistFiles(shell, env) {
-  const home = homeDir(env);
+function defaultHistFiles(shell, env, homeDir) {
+  const home = resolveHomeDir(env, homeDir);
   if (shell === 'bash') return [fileLocation('bash', path.join(home, '.bash_history'))];
   // zsh has no default HISTFILE at all; these are the two names every distributed zshrc actually sets.
   return [
@@ -159,13 +158,13 @@ function locationKey(location) {
  * tracked, which is the vendor-home rule the usage lane already follows: an absent shell is absent,
  * never an error.
  */
-function historyLocations({ shells = null, env = {}, platform = process.platform } = {}) {
+function historyLocations({ shells = null, env = {}, platform = process.platform, homeDir = null } = {}) {
   const wanted = normalizeShells(shells).shells;
   const locations = [...histFileLocation(wanted, env)];
   for (const shell of wanted) {
-    if (shell === 'powershell') locations.push(...powershellLocations(env, platform));
-    if (shell === 'fish') locations.push(...fishLocations(env));
-    if (shell === 'bash' || shell === 'zsh') locations.push(...defaultHistFiles(shell, env));
+    if (shell === 'powershell') locations.push(...powershellLocations(env, platform, homeDir));
+    if (shell === 'fish') locations.push(...fishLocations(env, homeDir));
+    if (shell === 'bash' || shell === 'zsh') locations.push(...defaultHistFiles(shell, env, homeDir));
   }
   const seen = new Set();
   const deduped = [];
@@ -333,7 +332,8 @@ const PARSERS = Object.freeze({
  * continues from. Nothing is mutated: the state goes in and a fresh one comes back, so the IO shell owns
  * every piece of mutable state and this file owns none.
  */
-function parseHistoryLines({ shell, lines = [], state = null } = {}) {
+/** @param {any} options */
+function parseHistoryLines({ shell, lines = [], state = null } = /** @type {any} */ ({})) {
   const current = state || createParseState();
   const parser = PARSERS[shell];
   if (!parser || !Array.isArray(lines) || lines.length === 0) return { commands: [], state: current };
@@ -371,7 +371,8 @@ function isTrivialCommand(text) {
  * The scope is machine, always. A history file records no cwd, no exit code and no duration, so nothing
  * here can name a project, and `buildContextDigest` renders a null root as machine scope.
  */
-function decideCommandEvent({ shell, command = null, previous = null, now = 0 } = {}) {
+/** @param {any} options */
+function decideCommandEvent({ shell, command = null, previous = null, now = 0 } = /** @type {any} */ ({})) {
   const text = typeof command?.text === 'string' ? command.text : '';
   // Compared UNSLICED, so two long commands that first differ past some prefix stay two commands.
   const compared = foldForCompare(text);

@@ -205,3 +205,37 @@ test('two card records on one Mill project use the checkout name and list both c
   assert.equal(sections[0].caption, 'Cards: glissa, glissa (2)');
   assert.equal(sections[0].settings[1].value, 'codex');
 });
+
+test('a stored secret hydrates as a mask and an untouched section sends nothing', async () => {
+  const { SETTINGS_MAP, collectDirtyBlocks, hydrateFromSettings, STORED_SECRET_MASK } = await load();
+  const payload = { telegram: { chatId: '123', botTokenConfigured: true }, posthog: { enabled: true, apiKeyConfigured: false } };
+  const original = hydrateFromSettings(SETTINGS_MAP, payload);
+  const edited = hydrateFromSettings(SETTINGS_MAP, payload);
+
+  assert.equal(original['telegram.botToken'], STORED_SECRET_MASK);
+  assert.equal(original['posthog.apiKey'], '', 'nothing stored means an empty field');
+  assert.deepEqual(collectDirtyBlocks(SETTINGS_MAP, original, edited), {});
+});
+
+test('a sibling edit never carries the mask or the presence flag to the server', async () => {
+  const { SETTINGS_MAP, collectDirtyBlocks, hydrateFromSettings } = await load();
+  const payload = { telegram: { chatId: '123', botTokenConfigured: true } };
+  const original = hydrateFromSettings(SETTINGS_MAP, payload);
+  const edited = hydrateFromSettings(SETTINGS_MAP, payload);
+  edited['telegram.chatId'] = '456';
+
+  assert.deepEqual(collectDirtyBlocks(SETTINGS_MAP, original, edited), { telegram: { chatId: '456' } });
+});
+
+test('a typed secret is sent and an emptied one is sent as a clear', async () => {
+  const { SETTINGS_MAP, collectDirtyBlocks, hydrateFromSettings } = await load();
+  const payload = { telegram: { chatId: '123', botTokenConfigured: true } };
+  const original = hydrateFromSettings(SETTINGS_MAP, payload);
+  const typed = hydrateFromSettings(SETTINGS_MAP, payload);
+  typed['telegram.botToken'] = 'fresh-tok';
+  assert.deepEqual(collectDirtyBlocks(SETTINGS_MAP, original, typed), { telegram: { chatId: '123', botToken: 'fresh-tok' } });
+
+  const emptied = hydrateFromSettings(SETTINGS_MAP, payload);
+  emptied['telegram.botToken'] = '';
+  assert.deepEqual(collectDirtyBlocks(SETTINGS_MAP, original, emptied), { telegram: { chatId: '123', botToken: '' } });
+});

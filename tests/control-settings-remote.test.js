@@ -16,7 +16,8 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { registerControlHandlers } = require('../server/control-handlers');
-const { createConfigStore, BOOLEAN_KEYS, STRING_KEYS, TIMEOUT_KEYS } = require('../server/config-store');
+const { createConfigStore } = require('../server/config-store');
+const { ConfigUpdate, HIDDEN_CONFIG_KEYS } = require('../shared/contracts');
 
 function harness(cfg, store) {
   const controlWss = new EventEmitter();
@@ -55,9 +56,8 @@ function withRealStore(cfg, fn) {
 const LIVE_REMOTE = { enabled: true, port: 3001, publicHost: 'glissa.test', allowedOrigins: ['https://glissa.test'] };
 
 test('remote appears in none of the settable key lists', () => {
-  assert.equal(BOOLEAN_KEYS.includes('remote'), false);
-  assert.equal(STRING_KEYS.includes('remote'), false);
-  assert.equal(TIMEOUT_KEYS.includes('remote'), false);
+  assert.equal(HIDDEN_CONFIG_KEYS.includes('remote'), true);
+  assert.equal('remote' in ConfigUpdate.shape, false);
 });
 
 test('getSettings never echoes the remote block to a control client', () => {
@@ -66,7 +66,7 @@ test('getSettings never echoes the remote block to a control client', () => {
   });
 });
 
-test('an update-settings carrying a remote key leaves config.remote untouched on disk and in memory', () => {
+test('an update-settings carrying a remote key is rejected by name without a partial write', () => {
   withRealStore({ projects: [], teams: [], remote: LIVE_REMOTE }, (h, store, readDisk) => {
     h.send({
       type: 'update-settings',
@@ -78,7 +78,8 @@ test('an update-settings carrying a remote key leaves config.remote untouched on
 
     assert.deepEqual(readDisk().remote, LIVE_REMOTE, 'the file keeps the operator-set remote block');
     assert.deepEqual(store.config.remote, LIVE_REMOTE, 'and so does the in-memory config');
-    assert.equal(readDisk().cursorBlink, true, 'the legitimate part of the save still landed');
+    assert.equal(readDisk().cursorBlink, undefined, 'the rejected update writes nothing');
+    assert.match(h.sent.find((message) => message.type === 'settings-error').message, /remote/);
   });
 });
 
@@ -89,6 +90,7 @@ test('a save cannot introduce a remote block where the config had none', () => {
       settings: { remote: { enabled: true, port: 4444 } },
     });
     assert.equal('remote' in readDisk(), false);
+    assert.match(h.sent.find((message) => message.type === 'settings-error').message, /remote/);
   });
 });
 

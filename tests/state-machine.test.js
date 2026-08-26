@@ -6,7 +6,6 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const os = require('node:os');
 
 const {
   TRANSITIONS,
@@ -14,7 +13,7 @@ const {
   ENTRY_HOOKS,
   EXIT_HOOKS,
 } = require('../session/core/state-machine');
-const { STATES } = require('../shared/states');
+const { STATES, KILLABLE_STATES } = require('../shared/states');
 
 test('TRANSITIONS matrix is frozen and matches the lifecycle shape', () => {
   assert.ok(Object.isFrozen(TRANSITIONS), 'TRANSITIONS must be frozen');
@@ -23,10 +22,12 @@ test('TRANSITIONS matrix is frozen and matches the lifecycle shape', () => {
     [STATES.INITIALIZING]: {
       spawn_success: STATES.STARTING,
       spawn_fail: STATES.FAILED,
+      user_kill: STATES.DONE,
     },
     [STATES.STARTING]: {
       first_output: STATES.IDLE,
       process_exit: STATES.FAILED,
+      user_kill: STATES.DONE,
     },
     [STATES.RUNNING]: {
       prompt_detected: STATES.WAITING,
@@ -66,6 +67,7 @@ test('TRANSITIONS matrix is frozen and matches the lifecycle shape', () => {
     [STATES.FAILED]: {
       user_restart: STATES.INITIALIZING,
       user_reset: STATES.DORMANT,
+      process_exit_ok: STATES.FAILED,
       process_exit_fail: STATES.FAILED,
     },
   });
@@ -80,9 +82,21 @@ test('every transition target is a known state', () => {
   }
 });
 
-test('GUARDS.spawn_success requires the session path to exist', () => {
-  assert.equal(GUARDS.spawn_success({ path: os.tmpdir() }), true);
-  assert.equal(GUARDS.spawn_success({ path: `${os.tmpdir()}/no-such-dir-xyz-123` }), false);
+test('GUARDS.spawn_success accepts only a caller-probed spawn cwd', () => {
+  assert.equal(GUARDS.spawn_success({}, { spawnCwdExists: true }), true);
+  assert.equal(GUARDS.spawn_success({}, { spawnCwdExists: false }), false);
+  assert.equal(GUARDS.spawn_success({}, {}), false);
+});
+
+test('INITIALIZING and STARTING accept user_kill, and FAILED accepts a clean exit', () => {
+  assert.equal(TRANSITIONS[STATES.INITIALIZING].user_kill, STATES.DONE);
+  assert.equal(TRANSITIONS[STATES.STARTING].user_kill, STATES.DONE);
+  assert.equal(TRANSITIONS[STATES.FAILED].process_exit_ok, STATES.FAILED);
+});
+
+test('KILLABLE_STATES matches every state with a user_kill transition', () => {
+  const transitionKillableStates = Object.values(STATES).filter((state) => TRANSITIONS[state]?.user_kill);
+  assert.deepEqual(KILLABLE_STATES, transitionKillableStates);
 });
 
 test('GUARDS.user_restart only allows from DONE or FAILED', () => {

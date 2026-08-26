@@ -58,6 +58,17 @@ test('a self-transition leaves stateSince alone', async () => {
   }
 });
 
+test('a clean process exit from FAILED is accepted as a terminal self-transition', () => {
+  const s = makeSession(STATES.FAILED);
+  try {
+    assert.equal(s.transition('process_exit_ok', { exitCode: 0 }), true);
+    assert.equal(s.state, STATES.FAILED);
+    assert.equal(s.auditLog.at(-1).selfTransition, true);
+  } finally {
+    s.destroy();
+  }
+});
+
 test('a refused transition leaves stateSince alone', async () => {
   const s = makeSession(STATES.IDLE);
   try {

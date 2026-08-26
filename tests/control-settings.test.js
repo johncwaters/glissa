@@ -114,15 +114,28 @@ test('a non-object telegram is rejected with settings-error', () => {
   assert.ok(h.sent.find((m) => m.type === 'settings-error' && /telegram/.test(m.message)));
 });
 
-test('a stray projectChoices field in the payload is never persisted', () => {
+test('a stray projectChoices field is rejected by name without a partial write', () => {
   const h = harness({ projects: [], teams: [] });
   h.send({
     type: 'update-settings',
     settings: { prReview: { enabled: false }, projectChoices: [{ id: 'x', name: 'y' }] },
   });
 
-  assert.deepEqual(h.cfg.prReview, { enabled: false });
+  assert.equal(h.cfg.prReview, undefined);
   assert.equal(h.cfg.projectChoices, undefined, 'projectChoices is derived read-only, never written to cfg');
+  assert.match(h.sent.find((message) => message.type === 'settings-error').message, /projectChoices/);
+});
+
+test('worktree conflict switches remain settable while withheld from settings', () => {
+  const h = harness({ projects: [], teams: [] });
+  h.send({
+    type: 'update-settings',
+    settings: { worktreeAutoRebase: false, worktreeRerere: false },
+  });
+
+  assert.equal(h.cfg.worktreeAutoRebase, false);
+  assert.equal(h.cfg.worktreeRerere, false);
+  assert.equal(h.sent.some((message) => message.type === 'settings-error'), false);
 });
 
 test('a valid branchGc payload is sanitized, persisted, and echoed', () => {
@@ -158,6 +171,27 @@ test('empty telegram strings persist as-is (means unset), key is not deleted', (
   h.send({ type: 'update-settings', settings: { telegram: { botToken: '', chatId: '' } } });
 
   assert.deepEqual(h.cfg.telegram, { botToken: '', chatId: '' });
+});
+
+test('a telegram update without the bot token leaves the stored token intact', () => {
+  const h = harness({ telegram: { botToken: 'stored-tok', chatId: '123' }, projects: [], teams: [] });
+  h.send({ type: 'update-settings', settings: { telegram: { chatId: '456' } } });
+
+  assert.deepEqual(h.cfg.telegram, { botToken: 'stored-tok', chatId: '456' });
+});
+
+test('a telegram update carrying a new bot token replaces the stored one', () => {
+  const h = harness({ telegram: { botToken: 'stored-tok', chatId: '123' }, projects: [], teams: [] });
+  h.send({ type: 'update-settings', settings: { telegram: { botToken: 'fresh-tok', chatId: '123' } } });
+
+  assert.deepEqual(h.cfg.telegram, { botToken: 'fresh-tok', chatId: '123' });
+});
+
+test('an explicitly emptied bot token clears the stored one', () => {
+  const h = harness({ telegram: { botToken: 'stored-tok', chatId: '123' }, projects: [], teams: [] });
+  h.send({ type: 'update-settings', settings: { telegram: { botToken: '', chatId: '123' } } });
+
+  assert.deepEqual(h.cfg.telegram, { botToken: '', chatId: '123' });
 });
 
 test('a valid visions payload persists and echoes in settings-updated', () => {
@@ -265,6 +299,22 @@ test('a valid posthog payload persists, echoes in settings-updated, and hot-appl
   assert.deepEqual(updated.settings.posthog, payload);
   assert.equal(h.reloadCalls.length, 1, 'applySettingsReload invoked once (hot-applies the poller)');
   assert.ok(h.broadcasts.some((m) => m.type === 'settings-updated'));
+});
+
+test('a posthog update without the api key leaves the stored key intact', () => {
+  const h = harness({ posthog: { enabled: false, apiKey: 'phx_stored', host: 'https://us.posthog.com' }, projects: [], teams: [] });
+  const { apiKey, ...withoutApiKey } = posthogPayload();
+  h.send({ type: 'update-settings', settings: { posthog: withoutApiKey } });
+
+  assert.equal(h.cfg.posthog.apiKey, 'phx_stored');
+  assert.equal(h.cfg.posthog.enabled, true, 'the rest of the block still applied');
+});
+
+test('a posthog update carrying a new api key replaces the stored one', () => {
+  const h = harness({ posthog: { enabled: false, apiKey: 'phx_stored' }, projects: [], teams: [] });
+  h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ apiKey: 'phx_fresh' }) } });
+
+  assert.equal(h.cfg.posthog.apiKey, 'phx_fresh');
 });
 
 test('posthog projects accepts the "all" sentinel', () => {
@@ -555,5 +605,45 @@ test('with no launch defaults (production) every boolean persists exactly as bef
     assert.equal(onDisk.debugMode, true, 'no overlay means no guard');
     assert.equal(onDisk.cursorBlink, true);
     assert.equal(store.getSettings().debugMode, true);
+  });
+});
+
+test('the browser round trip never sees a credential and never blanks one', async () => {
+  const [{ SETTINGS_MAP }, view] = await Promise.all([
+    import('../public/settings-map.mjs'),
+    import('../public/settings-view-core.mjs'),
+  ]);
+  const telegramSection = SETTINGS_MAP.filter((section) => section.id === 'machine-telegram');
+  const stored = {
+    telegram: { botToken: 'stored-tok', chatId: '123' },
+    posthog: { enabled: true, apiKey: 'phx_stored' },
+    projects: [],
+    teams: [],
+  };
+
+  withRealStore(stored, undefined, (h, store, readDisk) => {
+    const firstPayload = store.getSettings();
+    assert.equal(JSON.stringify(firstPayload).includes('stored-tok'), false, 'the connect snapshot carries no token');
+    assert.equal(JSON.stringify(firstPayload).includes('phx_stored'), false, 'nor the api key');
+
+    const original = view.hydrateFromSettings(telegramSection, firstPayload);
+    const edited = view.hydrateFromSettings(telegramSection, firstPayload);
+    edited['telegram.chatId'] = '456';
+    const settings = view.collectDirtyBlocks(telegramSection, original, edited);
+    assert.deepEqual(settings, { telegram: { chatId: '456' } }, 'the mask never leaves the browser');
+
+    h.send({ type: 'update-settings', settings });
+
+    assert.equal(readDisk().telegram.botToken, 'stored-tok', 'the stored token survives a chat-id save');
+    assert.equal(readDisk().telegram.chatId, '456');
+    assert.equal(store.getSettings().telegram.botTokenConfigured, true);
+
+    const replaced = view.hydrateFromSettings(telegramSection, store.getSettings());
+    replaced['telegram.botToken'] = 'fresh-tok';
+    h.send({
+      type: 'update-settings',
+      settings: view.collectDirtyBlocks(telegramSection, original, replaced),
+    });
+    assert.equal(readDisk().telegram.botToken, 'fresh-tok', 'a pasted token still writes through');
   });
 });

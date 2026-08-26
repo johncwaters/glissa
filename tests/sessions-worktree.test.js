@@ -113,8 +113,46 @@ function makeSession(extra = {}) {
     ptySpawn: extra.ptySpawn,
     gitWorkspace: extra.gitWorkspace,
     integrationBranch: extra.integrationBranch,
+    platform: extra.platform,
+    signalProc: extra.signalProc,
   });
 }
+
+test('a vanished spawn cwd fails terminally and reaps the live PTY', async () => {
+  const missingWorktree = path.join(os.tmpdir(), `glissa-missing-${crypto.randomUUID()}`);
+  const gw = fakeGitWorkspace({ worktreeDir: missingWorktree });
+  const signals = [];
+  let exitHandler = null;
+  const s = makeSession({
+    gitWorkspace: gw,
+    integrationBranch: 'develop',
+    platform: 'linux',
+    signalProc(pid, signal) {
+      signals.push({ pid, signal });
+      const error = new Error('missing process');
+      error.code = 'ESRCH';
+      throw error;
+    },
+    ptySpawn: () => ({
+      ...fakePty(),
+      onExit(handler) {
+        exitHandler = handler;
+      },
+    }),
+  });
+  try {
+    await s.start();
+    assert.equal(s.state, STATES.FAILED);
+    assert.equal(s._ptyAlive, false);
+    assert.deepEqual(signals[0], { pid: -2147483646, signal: 'SIGKILL' });
+    assert.equal(typeof exitHandler, 'function');
+    await exitHandler({ exitCode: 0, signal: null });
+    assert.equal(s.state, STATES.FAILED);
+    assert.equal(s.ptyProcess, null);
+  } finally {
+    s.destroy();
+  }
+});
 
 test('start() provisions a worktree off the integration branch and spawns the PTY in it', async () => {
   const wt = realWorktreeDir();
@@ -1723,4 +1761,3 @@ test('finishAndMerge settled-branch: a throwing reset clears the flag and never 
   });
   assert.deepEqual(reasons, [], 'no unhandledRejection escaped the settled-branch reset');
 });
-

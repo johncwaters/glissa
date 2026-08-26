@@ -19,6 +19,7 @@ const { writeSessionSettings } = require('../detection/settings-injector');
 const claudeCode = require('../session/adapters/claude-code');
 const adapters = require('../session/adapters');
 const { validateConfig } = require('../server/config-store');
+const { STATES } = require('../shared/states');
 
 const REPO_ROOT = path.join(__dirname, '..');
 const RESUME_ID = '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5';
@@ -164,6 +165,53 @@ test('the settings file a session injects is byte-identical to the injector run 
     session.destroy();
     fs.rmSync(hooksBaseDir, { recursive: true, force: true });
     fs.rmSync(expectedBaseDir, { recursive: true, force: true });
+  }
+});
+
+test('a rejected spawn cleans before PTY exit without double-cleaning on a late exit', async () => {
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-rejected-spawn-'));
+  const hooksBaseDir = tmpHooksDir();
+  let unregisterCalls = 0;
+  const hookRouter = {
+    register() {},
+    unregister() { unregisterCalls += 1; },
+  };
+  const session = new Session({
+    id: 'rejected-spawn',
+    name: 'rejected-spawn',
+    path: projectDir,
+    hookRouter,
+    getHookPort: () => 41234,
+    hooksBaseDir,
+    spawnCommand: { path: process.execPath, kind: 'exe' },
+    platform: 'linux',
+    ptySpawn: () => {
+      session._deliveredPacks = [{ name: 'rules', version: 'v1' }];
+      fs.rmSync(projectDir, { recursive: true, force: true });
+      return fakePty();
+    },
+    signalProc: () => {
+      const error = new Error('gone');
+      error.code = 'ESRCH';
+      throw error;
+    },
+  });
+  try {
+    await session.start();
+    assert.equal(session.state, STATES.FAILED);
+    assert.equal(session._hookToken, null);
+    assert.equal(session._settingsHandle, null);
+    assert.deepEqual(session._deliveredPacks, []);
+    assert.equal(unregisterCalls, 1);
+    assert.equal(fs.existsSync(path.join(hooksBaseDir, 'rejected-spawn')), false);
+    await session._handlePtyExit(1, null);
+    assert.equal(unregisterCalls, 1);
+    session.destroy();
+    assert.equal(unregisterCalls, 1);
+  } finally {
+    session.destroy();
+    fs.rmSync(projectDir, { recursive: true, force: true });
+    fs.rmSync(hooksBaseDir, { recursive: true, force: true });
   }
 });
 

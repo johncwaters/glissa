@@ -21,6 +21,7 @@
 'use strict';
 
 const fsNode = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const { canonicalizePath } = require('../shared/paths');
@@ -108,10 +109,10 @@ async function readCodexRoot(filePath, fsPromises = fsNode.promises) {
  * two lanes can never disagree about where a vendor keeps its sessions. Pure: it names candidates, and
  * the caller decides which of them exist.
  */
-function transcriptRootCandidates(env = process.env, wanted = {}) {
+function transcriptRootCandidates(env = process.env, wanted = {}, homeDir = os.homedir()) {
   const candidates = [];
   if (wanted.claude !== false) {
-    candidates.push({ vendor: 'claude', dir: claudeProjectsDir(env), maxDepth: 1 });
+    candidates.push({ vendor: 'claude', dir: claudeProjectsDir(env, homeDir), maxDepth: 1 });
   }
   if (wanted.codex !== false) {
     /*
@@ -119,13 +120,13 @@ function transcriptRootCandidates(env = process.env, wanted = {}) {
      * away, so it can never append, and skipping it also removes the active-over-archived dedupe the
      * usage lane needs and this one does not.
      */
-    for (const candidate of codexRootCandidates(codexHomes(env))) {
+    for (const candidate of codexRootCandidates(codexHomes(env, homeDir))) {
       if (candidate.kind !== 'active') continue;
       candidates.push({ vendor: 'codex', dir: candidate.dir, home: candidate.home, maxDepth: 3 });
     }
   }
   if (wanted.grok !== false) {
-    for (const candidate of grokRootCandidates(grokHomes(env))) {
+    for (const candidate of grokRootCandidates(grokHomes(env, homeDir))) {
       candidates.push({ vendor: 'grok', dir: candidate.dir, maxDepth: 2 });
     }
   }
@@ -140,6 +141,7 @@ function createAgentLogIngest({
   laneMap = null,
   logger = console,
   env = process.env,
+  homeDir = os.homedir(),
   fsPromises = fsNode.promises,
   watchFn = fsNode.watch,
   nowFn = Date.now,
@@ -267,7 +269,7 @@ function createAgentLogIngest({
   async function resolveRoots() {
     const roots = [];
     const codexHomesCovered = new Set();
-    for (const candidate of transcriptRootCandidates(env, wanted)) {
+    for (const candidate of transcriptRootCandidates(env, wanted, homeDir)) {
       const stat = await statOrNull(candidate.dir);
       if (!alive()) return roots;
       if (!stat || !stat.isDirectory()) continue;
@@ -276,7 +278,7 @@ function createAgentLogIngest({
     }
     if (wanted.codex === false) return roots;
     // ccusage's own fallback: a Codex home with no sessions/ directory keeps its rollouts flat.
-    for (const home of codexHomes(env)) {
+    for (const home of codexHomes(env, homeDir)) {
       if (codexHomesCovered.has(home)) continue;
       const stat = await statOrNull(home);
       if (!alive()) return roots;

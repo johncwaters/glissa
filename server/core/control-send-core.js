@@ -49,9 +49,7 @@ function classifyControlMessage(type) {
 }
 
 /**
- * @param {object} args
- * @param {number} args.bufferedAmount the socket's currently queued bytes
- * @param {string} args.type the control message type
+ * @param {any} args
  * @returns {{ action: 'send'|'drop'|'close', reason: string|null }}
  */
 function decideControlSend({

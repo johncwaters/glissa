@@ -242,7 +242,8 @@ function relativeWithin(root, absolutePath) {
  * handles (defense in depth, and the one place a platform whose glob matching differs still lands right);
  * the daemon rules cover the state files glissa writes into whichever directory its config resolved to.
  */
-function isIgnoredChange({ relPath, absolutePath = null, daemonRules = null } = {}) {
+/** @param {any} change */
+function isIgnoredChange({ relPath, absolutePath = null, daemonRules = null } = /** @type {any} */ ({})) {
   const relative = nonEmptyString(relPath);
   if (!relative) return true;
   if (hasIgnoredSegment(relative)) return true;

@@ -15,6 +15,7 @@
 // == can read the PTY. See docs/postmortem-terminal-detection.md.
 
 const claudeCode = require('../session/adapters/claude-code');
+const { HookEnvelope } = require('../shared/contracts');
 
 const { mapHookToSignal, mapHookConfidence, mapHookPromptKind } = claudeCode;
 
@@ -36,7 +37,13 @@ class HookRouter {
 
   // Handle one inbound hook callback. Returns { status, signal, reason }.
   // status: HTTP status to reply with. Never throws.
-  handle({ glissaId, event, token, payload }) {
+  handle(envelope) {
+    const parsedEnvelope = HookEnvelope.safeParse(envelope);
+    if (!parsedEnvelope.success) {
+      console.warn(`[hook-source] Dropped invalid hook envelope: ${parsedEnvelope.error.issues[0]?.message || 'invalid payload'}`);
+      return { status: 400, signal: null, reason: 'invalid-envelope' };
+    }
+    const { glissaId, event, token, payload } = parsedEnvelope.data;
     const entry = this._sessions.get(glissaId);
     if (!entry) {
       return { status: 404, signal: null, reason: 'unknown-session' };

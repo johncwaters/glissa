@@ -61,7 +61,7 @@ test('a mixed stream of self and real transitions stays at the cap', () => {
       s.transition('process_exit_fail'); // already FAILED: a self-transition
       s.transition('user_reset');     // FAILED -> DORMANT
       s.transition('user_start');     // DORMANT -> INITIALIZING
-      s.transition('spawn_success');  // INITIALIZING -> STARTING
+      s.transition('spawn_success', { spawnCwdExists: true });  // INITIALIZING -> STARTING
       s.transition('first_output');   // STARTING -> IDLE
     }
     assert.equal(s.auditLog.length, CAP);

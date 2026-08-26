@@ -1,12 +1,15 @@
 'use strict';
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
-const { TIMEOUT_KEYS, BOOLEAN_KEYS, STRING_KEYS } = require('./config-store');
+const { promisify } = require('node:util');
+const {
+  ClientMessage, RUNTIME_CONFIG_SCALAR_KEYS, ConfigUpdate, configIssueMessage,
+} = require('../shared/contracts');
 const { STATES } = require('../shared/states');
-const { listRepoConversations } = require('../session/core/conversation-history');
+const { claudeProjectsDir, listRepoConversations } = require('../session/core/conversation-history');
 const { normalizeClientTrust } = require('./core/request-trust');
-const { isPlainObject } = require('./core/usage-number-core');
 const { PACK_NAME_RE, applyPackDelta, isSelfReferentialPack, sameProjectRecords } = require('./core/pack-core');
 const {
   INGEST_SPEC, MEMORY_SPEC, PACK_DISTILLER_SPEC, mergeMillBlock, validateMillBlock,
@@ -15,6 +18,7 @@ const { readPosthogReport } = require('./posthog-report');
 const posthogCore = require('./core/posthog-core');
 const { buildSettingsPayload: buildSettingsPayloadFrom } = require('./settings-payload');
 const { RESUME_ID_RE } = require('../session/core/auto-resume');
+const { execFile } = require('./child-process-safe');
 const { DEFAULT_AGENT_ID, isKnownAgentId, listAgentIds, getAdapter, commandFor } = require('../session/adapters');
 const {
   BRANCH_GC_INTERVAL_MS_RANGE,
@@ -39,7 +43,9 @@ const {
   VISIONS_DISPATCH_TIMEOUT_RANGE,
   VISIONS_MAX_PER_HOUR_RANGE,
   VISIONS_QUIET_MS_RANGE,
+  USAGE_INTEGER_RANGES,
 } = require('../shared/settings-ranges');
+const { USAGE_VENDOR_KEYS, USAGE_BUDGET_KEYS } = require('../shared/usage-config');
 
 function scanRepoRoots(roots) {
   const results = [];
@@ -71,7 +77,6 @@ const PR_REVIEW_NUMERIC_RANGES = Object.freeze({
   maxConcurrentReviews: PR_REVIEW_MAX_CONCURRENT_RANGE,
   reviewTimeoutSeconds: PR_REVIEW_TIMEOUT_RANGE,
 });
-const PR_REVIEW_MERGE_METHODS = new Set(['rebase', 'squash', 'merge']);
 const BRANCH_GC_BOOLEAN_KEYS = Object.freeze(['enabled']);
 const BRANCH_GC_NUMERIC_KEYS = Object.freeze(['staleDays', 'intervalMs']);
 const BRANCH_GC_NUMERIC_RANGES = Object.freeze({
@@ -131,9 +136,17 @@ const POSTHOG_VALUE_KEYS = Object.freeze(['projects', 'projectMap']);
 const USAGE_BOOLEAN_KEYS = Object.freeze(['enabled', 'fetchPricing', 'planLimits', 'rtkSavings']);
 const USAGE_VALUE_KEYS = Object.freeze(['costMode', 'extraProjectsDirs']);
 const TELEGRAM_STRING_KEYS = Object.freeze(['botToken', 'chatId']);
-// Ranges and modes come from the lane itself so the wire validator and resolveUsageConfig's fallback
-// logic cannot drift apart.
-const { USAGE_INTEGER_RANGES, USAGE_COST_MODES, USAGE_VENDOR_KEYS, USAGE_BUDGET_KEYS } = require('./usage-wiring');
+
+// A settings payload never echoes a stored secret (server/config-store.js redacts both blocks), so an
+// absent key here means "left alone", not "cleared"; only an explicit value, '' included, rewrites one.
+function mergeSettingsBlockOverStored(stored, incoming) {
+  const merged = stored && typeof stored === 'object' && !Array.isArray(stored) ? { ...stored } : {};
+  for (const [key, value] of Object.entries(incoming)) {
+    if (value === undefined) continue;
+    merged[key] = value;
+  }
+  return merged;
+}
 const DASHBOARD_SETTING_PATHS = Object.freeze([
   ...PR_REVIEW_BOOLEAN_KEYS.map((key) => `prReview.${key}`),
   ...PR_REVIEW_VALUE_KEYS.map((key) => `prReview.${key}`),
@@ -158,6 +171,12 @@ const DASHBOARD_SETTING_PATHS = Object.freeze([
 ]);
 // Max days a client may ask a usage report to cover, matching the retainDays ceiling.
 const USAGE_REPORT_MAX_DAYS = 3650;
+const execFileAsync = promisify(execFile);
+
+async function runGitForConversationHistory(args, cwd) {
+  const { stdout } = await execFileAsync('git', args, { cwd, encoding: 'utf8', timeout: 20000 });
+  return stdout;
+}
 
 // Single wire-format builder for every 'error'/'settings-error' reply, so all call sites agree on the
 // shape. `requestId` is omitted from the payload entirely when not passed (matches every call site that
@@ -167,288 +186,37 @@ function sendError(ws, message, { type = 'error', requestId } = {}) {
   ws.send(JSON.stringify(payload));
 }
 
-// One data-driven pass over the three settings key-lists instead of three structurally identical loops.
-const SETTINGS_VALIDATORS = [
-  { keys: TIMEOUT_KEYS, isValid: (v) => typeof v === 'number' && v > 0, label: 'a positive number' },
-  { keys: BOOLEAN_KEYS, isValid: (v) => typeof v === 'boolean', label: 'a boolean' },
-  { keys: STRING_KEYS, isValid: (v) => typeof v === 'string', label: 'a string' },
-];
-
-/*
- * Every optional nested settings block (prReview, posthog, usage, telegram) is validated the same way:
- * a missing/null block is valid (its tab was never touched), a non-object is rejected by name, then an
- * ORDERED rule list runs and the first message wins. A wrong type is REJECTED rather than coerced, so a
- * checkbox that somehow sends the string 'no' cannot silently enable a lane. The order is part of the
- * contract: the messages are asserted verbatim by tests/control-settings-*.test.js.
- */
-const blockRules = {
-  booleans: (keys) => (block, name) => {
-    for (const key of keys) {
-      if (block[key] != null && typeof block[key] !== 'boolean') return `${name}.${key} must be a boolean`;
-    }
-    return null;
-  },
-  strings: (keys) => (block, name) => {
-    for (const key of keys) {
-      if (block[key] != null && typeof block[key] !== 'string') return `${name}.${key} must be a string`;
-    }
-    return null;
-  },
-  positiveNumbers: (keys, label = 'a positive number') => (block, name) => {
-    for (const key of keys) {
-      const value = block[key];
-      if (value == null) continue;
-      if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
-        return `${name}.${key} must be ${label}`;
-      }
-    }
-    return null;
-  },
-  // A listed range overrides the default positive floor and supplies its own wording.
-  rangedNumbers: (keys, ranges) => (block, name) => {
-    for (const key of keys) {
-      const value = block[key];
-      if (value == null) continue;
-      if (typeof value !== 'number' || !Number.isFinite(value)) return `${name}.${key} must be a positive number`;
-      const range = ranges[key];
-      if (!range) {
-        if (value <= 0) return `${name}.${key} must be a positive number`;
-        continue;
-      }
-      if (range.exclusiveMin && value <= range.min) return `${name}.${key} must be ${range.label}`;
-      if (!range.exclusiveMin && value < range.min) return `${name}.${key} must be ${range.label}`;
-      if (range.max != null && value > range.max) return `${name}.${key} must be ${range.label}`;
-    }
-    return null;
-  },
-  integerRanges: (ranges) => (block, name) => {
-    for (const [key, range] of Object.entries(ranges)) {
-      const value = block[key];
-      if (value == null) continue;
-      if (!Number.isInteger(value) || value < range.min || value > range.max) {
-        return `${name}.${key} must be an integer between ${range.min} and ${range.max}`;
-      }
-    }
-    return null;
-  },
-};
-
-function validateBlock(block, schema) {
-  if (block == null) return null;
-  if (!isPlainObject(block)) return `${schema.name} must be an object`;
-  for (const rule of schema.rules) {
-    const error = rule(block, schema.name);
-    if (error) return error;
-  }
+function requestValidationErrorReply(msg, message) {
+  const requestId = typeof msg?.requestId === 'string' ? msg.requestId : null;
+  const builders = {
+    'list-conversations': () => ({ type: 'conversations', requestId, id: typeof msg.id === 'string' ? msg.id : null, conversations: [], error: message }),
+    'resume-conversation': () => ({ type: 'resume-conversation-ack', id: typeof msg.id === 'string' ? msg.id : undefined, ok: false, error: message }),
+    'ping': () => ({ type: 'pong', requestId, error: message }),
+    'get-settings': () => ({ type: 'settings-error', requestId, message }),
+    'update-settings': () => ({ type: 'settings-error', requestId, message }),
+    'scan-repo-roots': () => ({ type: 'repo-roots-scanned', requestId, directories: [], error: message }),
+    'list-agents': () => ({ type: 'agents-listed', requestId, agents: [], error: message }),
+    'get-posthog-report': () => ({ type: 'posthog-report', requestId, ok: false, found: false, issueId: null, error: message }),
+    'posthog-open-session': () => ({ type: 'posthog-open-session-result', requestId, ok: false, error: message }),
+    'posthog-issue-action': () => ({ type: 'posthog-issue-action-result', requestId, ok: false, error: message }),
+    'posthog-archive-investigation': () => ({ type: 'posthog-archive-investigation-result', requestId, ok: false, error: message }),
+    'request-usage-report': () => ({ type: 'usage-report', requestId, error: message }),
+    'request-mill-report': () => ({ type: 'mill-report', requestId, error: message }),
+    'set-project-packs': () => ({ type: 'set-project-packs-result', requestId, ok: false, error: message }),
+  };
+  if (Object.hasOwn(builders, msg?.type)) return builders[msg.type]();
+  const genericErrorRequests = new Set([
+    'request-session-diff',
+    'request-branch-sync',
+    'resync-branch',
+    'debug-state',
+    'request-health-snapshot',
+  ]);
+  if (genericErrorRequests.has(msg?.type)) return { type: 'error', message };
   return null;
 }
 
-function isValidPosthogProjects(projects) {
-  if (projects === 'all') return true;
-  if (!Array.isArray(projects)) return false;
-  return projects.every((id) => typeof id === 'number' && Number.isInteger(id) && id > 0);
-}
-
-/*
- * extraProjectsDirs must be ABSOLUTE: the scanner walks whatever it is given, and a relative entry
- * would resolve against the server's cwd, which is not a directory the operator picked.
- */
-function validateExtraProjectsDirs(u) {
-  if (u.extraProjectsDirs == null) return null;
-  if (!Array.isArray(u.extraProjectsDirs)) return 'usage.extraProjectsDirs must be an array of absolute paths';
-  for (const dir of u.extraProjectsDirs) {
-    if (typeof dir !== 'string' || !dir.trim()) return 'usage.extraProjectsDirs must be an array of absolute paths';
-    if (!path.isAbsolute(dir.trim())) return `usage.extraProjectsDirs entries must be absolute paths: ${dir}`;
-  }
-  return null;
-}
-
-const USAGE_VENDORS_SCHEMA = {
-  name: 'usage.vendors',
-  rules: [blockRules.booleans(USAGE_VENDOR_KEYS)],
-};
-
-const USAGE_BUDGET_SCHEMA = {
-  name: 'usage.budget',
-  // Null and absent both mean "no ceiling"; a present value has to be a real positive amount, because a
-  // zero or negative budget would put every surface permanently over its limit.
-  rules: [blockRules.positiveNumbers(USAGE_BUDGET_KEYS, 'a positive number or null')],
-};
-
-const PR_REVIEW_SCHEMA = {
-  name: 'prReview',
-  rules: [
-    blockRules.booleans(PR_REVIEW_BOOLEAN_KEYS),
-    (pr) => (pr.projects != null && (!Array.isArray(pr.projects) || !pr.projects.every(p => typeof p === 'string'))
-      ? 'prReview.projects must be an array of strings'
-      : null),
-    blockRules.rangedNumbers(PR_REVIEW_NUMERIC_KEYS, PR_REVIEW_NUMERIC_RANGES),
-    (pr) => (pr.mergeMethod != null && !PR_REVIEW_MERGE_METHODS.has(pr.mergeMethod)
-      ? 'prReview.mergeMethod must be one of rebase, squash, merge'
-      : null),
-  ],
-};
-
-const BRANCH_GC_SCHEMA = {
-  name: 'branchGc',
-  rules: [
-    blockRules.booleans(BRANCH_GC_BOOLEAN_KEYS),
-    blockRules.rangedNumbers(BRANCH_GC_NUMERIC_KEYS, BRANCH_GC_NUMERIC_RANGES),
-  ],
-};
-
-const VISIONS_DISPATCH_SCHEMA = {
-  name: 'visions.dispatch',
-  rules: [
-    blockRules.booleans(VISIONS_DISPATCH_BOOLEAN_KEYS),
-    blockRules.strings(VISIONS_DISPATCH_STRING_KEYS),
-    blockRules.rangedNumbers(VISIONS_DISPATCH_NUMERIC_KEYS, VISIONS_DISPATCH_NUMERIC_RANGES),
-  ],
-};
-
-const VISIONS_SCHEMA = {
-  name: 'visions',
-  rules: [
-    blockRules.booleans(VISIONS_BOOLEAN_KEYS),
-    (visions) => (visions.projects != null && (!Array.isArray(visions.projects) || !visions.projects.every(p => typeof p === 'string'))
-      ? 'visions.projects must be an array of strings'
-      : null),
-    (visions) => validateBlock(visions.dispatch, VISIONS_DISPATCH_SCHEMA),
-  ],
-};
-
-const POSTHOG_SCHEMA = {
-  name: 'posthog',
-  rules: [
-    blockRules.booleans(POSTHOG_BOOLEAN_KEYS),
-    blockRules.strings(['host']),
-    // Empty means unset (same rule as telegram's credentials), so only a non-empty host is URL-checked.
-    (ph) => (typeof ph.host === 'string' && ph.host.trim() && !/^https?:\/\//i.test(ph.host.trim())
-      ? 'posthog.host must be an http(s) URL'
-      : null),
-    blockRules.strings(['apiKey', 'repoPath']),
-    (ph) => (ph.projects != null && !isValidPosthogProjects(ph.projects)
-      ? 'posthog.projects must be "all" or an array of positive integer project ids'
-      : null),
-    blockRules.rangedNumbers(POSTHOG_NUMERIC_KEYS, POSTHOG_NUMERIC_RANGES),
-    (ph) => (ph.projectMap != null && !isPlainObject(ph.projectMap) ? 'posthog.projectMap must be an object' : null),
-  ],
-};
-
-// An absent usage block means enabled-with-defaults in server/usage-wiring.js resolveUsageConfig.
-const USAGE_SCHEMA = {
-  name: 'usage',
-  rules: [
-    blockRules.booleans(USAGE_BOOLEAN_KEYS),
-    blockRules.integerRanges(USAGE_INTEGER_RANGES),
-    (u) => (u.costMode != null && !USAGE_COST_MODES.includes(u.costMode)
-      ? `usage.costMode must be one of ${USAGE_COST_MODES.join(', ')}`
-      : null),
-    (u) => validateBlock(u.vendors, USAGE_VENDORS_SCHEMA),
-    (u) => validateBlock(u.budget, USAGE_BUDGET_SCHEMA),
-    validateExtraProjectsDirs,
-  ],
-};
-
-const TELEGRAM_SCHEMA = {
-  name: 'telegram',
-  rules: [blockRules.strings(TELEGRAM_STRING_KEYS)],
-};
-
-/*
- * The Mill blocks validate against an ALLOW-LIST instead of a rule list: memory is settable only as
- * toggles, so an unrecognized key (a path, a record) has to be refused by name rather than dropped.
- */
 const MILL_SPECS = [MEMORY_SPEC, PACK_DISTILLER_SPEC, INGEST_SPEC];
-
-const validatePrReview = (pr) => validateBlock(pr, PR_REVIEW_SCHEMA);
-const validateBranchGc = (branchGc) => validateBlock(branchGc, BRANCH_GC_SCHEMA);
-const validateVisions = (visions) => validateBlock(visions, VISIONS_SCHEMA);
-const validatePosthog = (ph) => validateBlock(ph, POSTHOG_SCHEMA);
-const validateUsage = (u) => validateBlock(u, USAGE_SCHEMA);
-const validateTelegram = (t) => validateBlock(t, TELEGRAM_SCHEMA);
-
-// Keep only the known fields of a block, dropping anything unrecognized (a stray projectChoices echo,
-// the read-only pricing-source line the Usage tab renders next to its toggles).
-function sanitizeBlock(block, { booleans = [], trimmedStrings = [], verbatim = [] }) {
-  const out = {};
-  for (const key of booleans) {
-    if (block[key] != null) out[key] = !!block[key];
-  }
-  for (const key of trimmedStrings) {
-    if (block[key] != null) out[key] = String(block[key]).trim();
-  }
-  for (const key of verbatim) {
-    if (block[key] != null) out[key] = block[key];
-  }
-  return out;
-}
-
-function sanitizePrReview(pr) {
-  return sanitizeBlock(pr, {
-    booleans: PR_REVIEW_BOOLEAN_KEYS,
-    verbatim: [...PR_REVIEW_VALUE_KEYS, ...PR_REVIEW_NUMERIC_KEYS],
-  });
-}
-
-function sanitizeBranchGc(branchGc) {
-  return sanitizeBlock(branchGc, {
-    booleans: BRANCH_GC_BOOLEAN_KEYS,
-    verbatim: BRANCH_GC_NUMERIC_KEYS,
-  });
-}
-
-function sanitizeVisions(visions) {
-  const out = sanitizeBlock(visions, { booleans: VISIONS_BOOLEAN_KEYS, verbatim: VISIONS_VALUE_KEYS });
-  if (isPlainObject(visions.dispatch)) {
-    const dispatch = sanitizeBlock(visions.dispatch, {
-      booleans: VISIONS_DISPATCH_BOOLEAN_KEYS,
-      trimmedStrings: VISIONS_DISPATCH_STRING_KEYS,
-      verbatim: VISIONS_DISPATCH_NUMERIC_KEYS,
-    });
-    if (Object.keys(dispatch).length > 0) out.dispatch = dispatch;
-  }
-  return out;
-}
-
-// projectMap is a free-form id -> display-name map owned by the dashboard, so it passes through
-// untouched once it is an object.
-function sanitizePosthog(ph) {
-  const out = sanitizeBlock(ph, {
-    booleans: POSTHOG_BOOLEAN_KEYS,
-    trimmedStrings: POSTHOG_STRING_KEYS,
-    verbatim: ['projects'],
-  });
-  if (isPlainObject(ph.projectMap)) out.projectMap = ph.projectMap;
-  return Object.assign(out, sanitizeBlock(ph, { verbatim: POSTHOG_NUMERIC_KEYS }));
-}
-
-function sanitizeUsage(u) {
-  const out = sanitizeBlock(u, {
-    booleans: USAGE_BOOLEAN_KEYS,
-    verbatim: Object.keys(USAGE_INTEGER_RANGES),
-  });
-  if (u.costMode != null) out.costMode = String(u.costMode);
-  if (isPlainObject(u.vendors)) {
-    const vendors = sanitizeBlock(u.vendors, { booleans: USAGE_VENDOR_KEYS });
-    if (Object.keys(vendors).length > 0) out.vendors = vendors;
-  }
-  if (isPlainObject(u.budget)) {
-    const budget = sanitizeBudget(u.budget);
-    if (Object.keys(budget).length > 0) out.budget = budget;
-  }
-  if (Array.isArray(u.extraProjectsDirs)) out.extraProjectsDirs = u.extraProjectsDirs.map((dir) => String(dir).trim());
-  return out;
-}
-
-function sanitizeBudget(budget) {
-  const out = {};
-  for (const key of USAGE_BUDGET_KEYS) {
-    if (budget[key] === null) out[key] = null;
-    if (typeof budget[key] === 'number') out[key] = budget[key];
-  }
-  return out;
-}
 
 // Reads `since` from a `/control?since=<n>` upgrade URL. Returns null for a missing/malformed
 // value (no query string, no param, non-numeric) so the caller treats it as "no replay wanted".
@@ -517,22 +285,18 @@ function registerControlHandlers(controlWss, deps) {
     controlReplayLog = null,
     // Last rtk self-install outcome (optional - undefined in older callers/tests, which then report idle).
     getRtkInstallStatus = () => null,
+    conversationFs = fs,
+    conversationGit = runGitForConversationHistory,
+    conversationProjectsDir = claudeProjectsDir(process.env, os.homedir()),
   } = deps;
 
   function buildSettingsPayload() {
     return buildSettingsPayloadFrom({ configStore, rtkInstallStatus: getRtkInstallStatus() });
   }
 
-  /** Find a session by id (primary) with name fallback for legacy clients. */
+  /** Find a session by stable id. */
   function findSession(msg) {
-    // Prefer msg.id (stable identifier)
     if (msg.id && sessions.has(msg.id)) return sessions.get(msg.id);
-    // Fallback: match by name for backward compatibility
-    if (msg.session) {
-      for (const [, sess] of sessions) {
-        if (sess.name === msg.session) return sess;
-      }
-    }
     return null;
   }
 
@@ -726,7 +490,12 @@ function registerControlHandlers(controlWss, deps) {
     }
     let conversations = [];
     try {
-      conversations = await listRepoConversations({ repoPath: sess.path });
+      conversations = await listRepoConversations({
+        repoPath: sess.path,
+        projectsDir: conversationProjectsDir,
+        git: conversationGit,
+        fsMod: conversationFs,
+      });
     } catch (err) {
       ws.send(JSON.stringify({ type: 'conversations', requestId: msg.requestId || null, id: sess.id, conversations: [], error: err.message }));
       return;
@@ -787,56 +556,16 @@ function registerControlHandlers(controlWss, deps) {
   }
 
   function handleUpdateSettings(msg, ws) {
-    const s = msg.settings || {};
+    const parsedSettings = ConfigUpdate.safeParse(msg.settings || {});
+    if (!parsedSettings.success) {
+      sendError(ws, configIssueMessage(parsedSettings.error), { type: 'settings-error', requestId: msg.requestId || null });
+      return;
+    }
+    const s = parsedSettings.data;
 
     const invalidPaths = (s.repoRoots || []).filter(p => !fs.existsSync(p));
     if (invalidPaths.length > 0) {
       sendError(ws, `Invalid paths: ${invalidPaths.join(', ')}`, { type: 'settings-error', requestId: msg.requestId || null });
-      return;
-    }
-
-    for (const { keys, isValid, label } of SETTINGS_VALIDATORS) {
-      for (const key of keys) {
-        if (s[key] != null && !isValid(s[key])) {
-          sendError(ws, `${key} must be ${label}`, { type: 'settings-error', requestId: msg.requestId || null });
-          return;
-        }
-      }
-    }
-
-    const prReviewError = validatePrReview(s.prReview);
-    if (prReviewError) {
-      sendError(ws, prReviewError, { type: 'settings-error', requestId: msg.requestId || null });
-      return;
-    }
-
-    const branchGcError = validateBranchGc(s.branchGc);
-    if (branchGcError) {
-      sendError(ws, branchGcError, { type: 'settings-error', requestId: msg.requestId || null });
-      return;
-    }
-
-    const visionsError = validateVisions(s.visions);
-    if (visionsError) {
-      sendError(ws, visionsError, { type: 'settings-error', requestId: msg.requestId || null });
-      return;
-    }
-
-    const posthogError = validatePosthog(s.posthog);
-    if (posthogError) {
-      sendError(ws, posthogError, { type: 'settings-error', requestId: msg.requestId || null });
-      return;
-    }
-
-    const usageError = validateUsage(s.usage);
-    if (usageError) {
-      sendError(ws, usageError, { type: 'settings-error', requestId: msg.requestId || null });
-      return;
-    }
-
-    const telegramError = validateTelegram(s.telegram);
-    if (telegramError) {
-      sendError(ws, telegramError, { type: 'settings-error', requestId: msg.requestId || null });
       return;
     }
 
@@ -848,36 +577,22 @@ function registerControlHandlers(controlWss, deps) {
     }
 
     const freshConfig = configStore.save(cfg => {
-      for (const key of TIMEOUT_KEYS) {
-        if (s[key] != null) cfg[key] = s[key];
-      }
-      for (const key of BOOLEAN_KEYS) {
+      for (const key of RUNTIME_CONFIG_SCALAR_KEYS) {
         if (s[key] == null) continue;
-        // The dialog sends every boolean on every save, so an unrelated change would otherwise
-        // write this launch's default (dev debugMode) into config.json permanently and leak it
-        // into production. Skipped only while the key is absent AND the value is that default.
-        if (configStore.isUnchosenLaunchDefault(cfg, key, !!s[key])) continue;
-        cfg[key] = !!s[key];
-      }
-      for (const key of STRING_KEYS) {
-        if (s[key] != null) cfg[key] = String(s[key]);
+        if (typeof s[key] === 'boolean' && configStore.isUnchosenLaunchDefault(cfg, key, s[key])) continue;
+        cfg[key] = s[key];
       }
       if (s.repoRoots != null) cfg.repoRoots = s.repoRoots;
-      if (s.prReview != null) cfg.prReview = sanitizePrReview(s.prReview);
-      if (s.branchGc != null) cfg.branchGc = sanitizeBranchGc(s.branchGc);
-      if (s.visions != null) cfg.visions = sanitizeVisions(s.visions);
-      if (s.posthog != null) cfg.posthog = sanitizePosthog(s.posthog);
-      if (s.usage != null) cfg.usage = sanitizeUsage(s.usage);
+      if (s.prReview != null) cfg.prReview = s.prReview;
+      if (s.branchGc != null) cfg.branchGc = s.branchGc;
+      if (s.visions != null) cfg.visions = s.visions;
+      if (s.posthog != null) cfg.posthog = mergeSettingsBlockOverStored(cfg.posthog, s.posthog);
+      if (s.usage != null) cfg.usage = s.usage;
       for (const spec of MILL_SPECS) {
         if (s[spec.name] == null) continue;
         cfg[spec.name] = mergeMillBlock(cfg[spec.name], s[spec.name], spec);
       }
-      if (s.telegram != null) {
-        cfg.telegram = {
-          botToken: String(s.telegram.botToken || '').trim(),
-          chatId: String(s.telegram.chatId || '').trim(),
-        };
-      }
+      if (s.telegram != null) cfg.telegram = mergeSettingsBlockOverStored(cfg.telegram, s.telegram);
     });
     if (!freshConfig) return;
     applySettingsReload(freshConfig);
@@ -1187,7 +902,7 @@ function registerControlHandlers(controlWss, deps) {
   }
 
   // Handler map - single dispatch table for all control message types
-  // Session action handlers use findSession() for id-based lookup with name fallback.
+  // Session action handlers use findSession() for stable id lookup.
   const handlers = {
     'add-session':      handleAddSession,
     'list-conversations': handleListConversations,
@@ -1349,15 +1064,20 @@ function registerControlHandlers(controlWss, deps) {
       try {
         msg = JSON.parse(raw);
       } catch {
+        console.warn('[control] Dropped malformed JSON message');
         return;
       }
 
-      // Own-property guard: a bracket lookup on an object literal resolves inherited keys too, so
-      // {"type":"__proto__"} would yield Object.prototype and the call below would throw synchronously,
-      // crashing the process (no uncaughtException handler exists by design). The null check matters:
-      // a literal `null` frame parses fine, and dereferencing .type on it is the same crash class.
-      if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string'
-        || !Object.hasOwn(handlers, msg.type)) return;
+      const parsedMessage = ClientMessage.safeParse(msg);
+      if (!parsedMessage.success) {
+        const message = configIssueMessage(parsedMessage.error);
+        console.warn(`[control] Dropped invalid client message: ${message}`);
+        const reply = requestValidationErrorReply(msg, message);
+        if (reply) ws.send(JSON.stringify(reply));
+        return;
+      }
+      msg = parsedMessage.data;
+      if (!Object.hasOwn(handlers, msg.type)) return;
       const handler = handlers[msg.type];
       // Run synchronously so a sync handler's side effects land in this tick (the existing tests and
       // callers rely on that). Only an async handler returns a thenable; attach a catch so its rejection

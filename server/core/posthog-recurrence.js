@@ -129,7 +129,7 @@ function signatureRecords(state = {}) {
 
 // Best in-window same-project prior transient, or null; total ordering (score, recency, key) keeps
 // the pick deterministic for a given state file.
-function findRecurrenceMatch({ title, projectId, key } = {}, state = {}, nowMs = 0, opts = {}) {
+function findRecurrenceMatch({ title, projectId, key } = /** @type {any} */ ({}), state = {}, nowMs = 0, opts = {}) {
   const candidateTokens = distinctiveTokens(title);
   if (candidateTokens.length < MIN_DISTINCTIVE_TOKENS) return null;
   const windowMs = dayMs(opts.recurrenceWindowDays, DEFAULT_RECURRENCE_WINDOW_DAYS);
@@ -223,7 +223,7 @@ function normalizeRecord(record) {
 
 // Open or refresh a cluster; a refresh keeps the original title (the matching corpus) and counter,
 // moving only the recency window forward. Returns a new registry.
-function recordTransientSignature(state = {}, { key, projectId, issueId, title, summaryLine, at } = {}) {
+function recordTransientSignature(state = {}, { key, projectId, issueId, title, summaryLine, at } = /** @type {any} */ ({})) {
   const wanted = String(key ?? '');
   if (!wanted) return signatureRecords(state);
   const registry = { ...signatureRecords(state) };
@@ -241,7 +241,7 @@ function recordTransientSignature(state = {}, { key, projectId, issueId, title, 
 
 // Count one repeat (optionally latching escalated); the counter lives on the cluster so it outlives
 // the deduped issue's own entry.
-function noteRecurrence(state = {}, key, { at, issueId, escalated = false } = {}) {
+function noteRecurrence(state = {}, key, { at, issueId, escalated = false } = /** @type {any} */ ({})) {
   const wanted = String(key ?? '');
   const registry = { ...signatureRecords(state) };
   const existing = registry[wanted];
@@ -271,13 +271,13 @@ function pruneSignatures(state = {}, nowMs = 0, opts = {}) {
 }
 
 /** The verdict summary recorded for an investigation that never ran, naming the prior it reused. */
-function recurrenceSummaryLine({ matchIssueId, ordinal } = {}) {
+function recurrenceSummaryLine({ matchIssueId, ordinal } = /** @type {any} */ ({})) {
   const priorId = String(matchIssueId ?? '').trim() || 'unknown';
   return `TRANSIENT by recurrence: matches prior transient issue ${priorId} (repeat ${toCount(ordinal, 1)}); no investigation spawned`;
 }
 
 /** The extra Telegram line for an escalation, explaining what stopped the old verdict being reused. */
-function escalationDetail({ ordinal, matchIssueId, reason, recurrenceWindowDays } = {}) {
+function escalationDetail({ ordinal, matchIssueId, reason, recurrenceWindowDays } = /** @type {any} */ ({})) {
   const days = toCount(recurrenceWindowDays, DEFAULT_RECURRENCE_WINDOW_DAYS);
   const priorId = String(matchIssueId ?? '').trim() || 'unknown';
   const head = `recurring transient escalated: repeat ${toCount(ordinal, 1)} within ${days} days of issue ${priorId}`;

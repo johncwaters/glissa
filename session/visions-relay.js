@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const WebSocket = require('ws');
@@ -70,7 +71,7 @@ function resolvePortPlan(argv = [], env = process.env, configPort = null) {
 function readConfiguredPort(env = process.env, fsApi = fs) {
   const decided = decideConfigPath({
     env,
-    homeDir: glissaHomeDir(),
+    homeDir: glissaHomeDir(os.homedir()),
     packageRoot: path.join(__dirname, '..'),
   }, (candidate) => {
     try {

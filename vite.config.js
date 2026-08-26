@@ -7,6 +7,7 @@ import tailwindcss from '@tailwindcss/vite';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const pkg = require('./package.json');
+const { renderSharedCjsEsm } = require('./server/core/shared-cjs-esm-core');
 
 // The browser's ESM view of shared/states.js, generated from the CJS module rather than kept as a
 // hand-copied twin. Mirrors the /shared/states.mjs route in server/backend.js (the no-build path), and
@@ -50,6 +51,37 @@ function glissaSharedSettingsRangesPlugin() {
   };
 }
 
+const SHARED_CJS_MODULES = new Map([
+  ['/shared/control-messages.mjs', { virtualId: '\0glissa:control-messages', source: './shared/contracts/control-messages.js' }],
+  ['/shared/session.mjs', { virtualId: '\0glissa:session-contract', source: './shared/contracts/session.js' }],
+]);
+const SHARED_CJS_VIRTUAL_MODULES = new Map(
+  [...SHARED_CJS_MODULES.values()].map((entry) => [entry.virtualId, entry]),
+);
+
+function sharedContractSpecifier(specifier) {
+  if (specifier === 'zod') return 'zod';
+  if (specifier === './session') return '/shared/session.mjs';
+  if (specifier === '../states') return '/shared/states.mjs';
+  throw new Error(`Unsupported shared contract import ${specifier}`);
+}
+
+function glissaSharedCjsDevPlugin() {
+  return {
+    name: 'glissa-shared-cjs-dev',
+    enforce: 'pre',
+    resolveId(source) {
+      return SHARED_CJS_MODULES.get(source)?.virtualId || null;
+    },
+    load(id) {
+      const entry = SHARED_CJS_VIRTUAL_MODULES.get(id);
+      if (!entry) return null;
+      const source = require('node:fs').readFileSync(path.resolve(__dirname, entry.source), 'utf8');
+      return renderSharedCjsEsm(source, sharedContractSpecifier);
+    },
+  };
+}
+
 function glissaBackendPlugin() {
   let backend = null;
 
@@ -83,7 +115,13 @@ function glissaBackendPlugin() {
 }
 
 export default defineConfig({
-  plugins: [tailwindcss(), glissaSharedStatesPlugin(), glissaSharedSettingsRangesPlugin(), glissaBackendPlugin()],
+  plugins: [
+    tailwindcss(),
+    glissaSharedStatesPlugin(),
+    glissaSharedSettingsRangesPlugin(),
+    glissaSharedCjsDevPlugin(),
+    glissaBackendPlugin(),
+  ],
 
   // Bake the package version in at build time so the dashboard's help surface can show what is running.
   // Replaced as a string literal in both dev and the dist bundle; the browser never reads package.json.

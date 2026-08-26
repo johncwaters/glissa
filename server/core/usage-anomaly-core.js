@@ -2,7 +2,7 @@
 
 const { safeNumber } = require('./usage-number-core');
 
-function dailyBaseline(dailyRows, { excludeDay } = {}) {
+function dailyBaseline(dailyRows, { excludeDay } = /** @type {any} */ ({})) {
   const usableRows = (dailyRows || []).filter((row) => isUsableDailyRow(row, excludeDay));
   if (usableRows.length < 7) return null;
   const totalUsd = usableRows.reduce((sum, row) => sum + safeNumber(row.costUSD), 0);
@@ -14,7 +14,7 @@ function dailyBaseline(dailyRows, { excludeDay } = {}) {
   };
 }
 
-function detectDailyAnomaly({ todayUsd, todayTokens, baseline, minUsd = 5, factor = 1.8 } = {}) {
+function detectDailyAnomaly({ todayUsd, todayTokens, baseline, minUsd = 5, factor = 1.8 } = /** @type {any} */ ({})) {
   if (!baseline) return null;
   const safeTodayUsd = safeNumber(todayUsd);
   const baselineUsd = safeNumber(baseline.meanUsd);
@@ -30,7 +30,7 @@ function detectDailyAnomaly({ todayUsd, todayTokens, baseline, minUsd = 5, facto
   };
 }
 
-function detectBurnAnomaly({ currentTokensPerMinute, completedBlocks, minTokensPerMinute = 200000, factor = 2.5 } = {}) {
+function detectBurnAnomaly({ currentTokensPerMinute, completedBlocks, minTokensPerMinute = 200000, factor = 2.5 } = /** @type {any} */ ({})) {
   const baselineRates = (completedBlocks || []).map(tokensPerMinute).filter((rate) => rate !== null);
   if (baselineRates.length < 3) return null;
   const current = safeNumber(currentTokensPerMinute);

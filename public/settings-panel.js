@@ -285,6 +285,7 @@ function renderInput(setting) {
   const input = el('input', 'settings-view-input');
   input.type = setting.control;
   input.value = settingValue(setting) ?? '';
+  if (setting.control === 'password') input.placeholder = 'No credential stored';
   input.autocomplete = 'off';
   input.spellcheck = false;
   input.setAttribute('aria-labelledby', setting.id);

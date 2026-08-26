@@ -94,7 +94,7 @@ function withIntentSlot(state, projectId, slot) {
   return { global: state.global, byProject: { ...state.byProject, [key]: slot } };
 }
 
-function applyModelIntent(state, { text, now = 0, projectId = null } = {}) {
+function applyModelIntent(state, { text, now = 0, projectId = null } = /** @type {any} */ ({})) {
   const current = state || createIntentState();
   const proposed = sanitizeIntentText(text);
   if (!proposed) return { state: current, changed: false };

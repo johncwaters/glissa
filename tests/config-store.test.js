@@ -12,7 +12,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const {
-  createConfigStore, ensureProjectIds, validateConfig, loadConfigFile, DEFAULT_CONFIG,
+  createConfigStore, ensureProjectIds, validateConfig, loadConfigFile, DEFAULT_CONFIG, SECRET_PRESENCE_SUFFIX,
 } = require('../server/config-store');
 
 function writeTmpConfig(cfg) {
@@ -71,6 +71,27 @@ test('validateConfig accepts lenient partial configs and unknown keys', () => {
     remote: {},
     unknownKey: 123,
   }), { ok: true });
+});
+
+test('config file compatibility keeps port zero and replayBufferKB zero', () => {
+  withStore({ projects: [], port: 0, replayBufferKB: 0 }, (store) => {
+    assert.equal(store.config.port, 0);
+    assert.equal(store.config.replayBufferKB, 0);
+  });
+});
+
+test('an invalid config file scalar falls back with a warning naming the key and value', () => {
+  const originalWarn = console.warn;
+  const warnings = [];
+  console.warn = (message) => warnings.push(String(message));
+  try {
+    withStore({ projects: [], replayBufferKB: 20000 }, (store) => {
+      assert.equal(store.config.replayBufferKB, DEFAULT_CONFIG.replayBufferKB);
+    });
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.match(warnings.join('\n'), /replayBufferKB value 20000 is invalid; using 512/);
 });
 
 test('a legacy packReadTelemetry config key is ignored', () => {
@@ -211,7 +232,7 @@ test('loadConfigFile saves corrupt JSON aside and returns the startup error when
   try {
     const loaded = loadConfigFile(p, { exitOnError: false });
     assert.ok(loaded.error);
-    assert.match(loaded.message, /Could not parse/);
+    assert.match(loaded.message, /Could not load/);
     assert.match(loaded.message, /config\.json\.boot\.bak/);
     assert.match(loaded.message, /config\.json\.bak/);
     assert.equal(fs.readFileSync(`${p}.invalid.bak`, 'utf8'), '{ not json');
@@ -271,6 +292,20 @@ test('applySettings coerces booleans and strings and applies timeouts', () => {
   });
 });
 
+test('applySettings never live-applies the listener port', () => {
+  withStore({ projects: [], port: 4123 }, (store) => {
+    const originalLog = console.log;
+    console.log = () => {};
+    try {
+      store.applySettings({ port: 4999, cursorBlink: true });
+    } finally {
+      console.log = originalLog;
+    }
+    assert.equal(store.config.port, 4123);
+    assert.equal(store.config.cursorBlink, true);
+  });
+});
+
 test('rtk is a settable top-level boolean', () => {
   withStore({ projects: [] }, (store) => {
     store.applySettings({ rtk: true });
@@ -298,7 +333,41 @@ test('getSettings resolves branchGc defaults while opt-in blocks stay null; proj
     assert.deepEqual(s2.prReview, { enabled: true, projects: ['p1'] });
     assert.deepEqual(s2.branchGc, { enabled: false, staleDays: 21, intervalMs: DEFAULT_CONFIG.branchGc.intervalMs });
     assert.deepEqual(s2.visions, { enabled: true, dispatch: { enabled: false } });
-    assert.deepEqual(s2.telegram, { botToken: 'tok', chatId: '123' });
+    assert.deepEqual(s2.telegram, { chatId: '123', botTokenConfigured: true });
+  });
+});
+
+test('getSettings redacts the telegram bot token and the PostHog api key to presence flags', async () => {
+  const { SECRET_PRESENCE_SUFFIX: clientSuffix } = await import('../public/settings-view-core.mjs');
+  withStore({ projects: [] }, (store) => {
+    store.config.telegram = { botToken: 'tok-secret', chatId: '123' };
+    store.config.posthog = { enabled: true, host: 'https://us.posthog.com', apiKey: 'phx_secret', repoPath: '/repo' };
+    const settings = store.getSettings();
+
+    assert.equal(SECRET_PRESENCE_SUFFIX, clientSuffix, 'the wire convention the dashboard hydrates from');
+    assert.equal(JSON.stringify(settings).includes('tok-secret'), false, 'no bot token anywhere in the payload');
+    assert.equal(JSON.stringify(settings).includes('phx_secret'), false, 'no api key anywhere in the payload');
+    assert.equal(Object.hasOwn(settings.telegram, 'botToken'), false);
+    assert.equal(Object.hasOwn(settings.posthog, 'apiKey'), false);
+    assert.equal(settings.telegram.botTokenConfigured, true);
+    assert.equal(settings.posthog.apiKeyConfigured, true);
+    assert.deepEqual(settings.telegram, { chatId: '123', botTokenConfigured: true });
+
+    store.config.telegram = { botToken: '', chatId: '123' };
+    store.config.posthog = { enabled: false };
+    const cleared = store.getSettings();
+    assert.equal(cleared.telegram.botTokenConfigured, false, 'an empty string is not a stored credential');
+    assert.equal(cleared.posthog.apiKeyConfigured, false);
+  });
+});
+
+test('getSettings drops posthog keys outside the dashboard allow-list', () => {
+  withStore({ projects: [] }, (store) => {
+    store.config.posthog = { enabled: true, apiKey: 'phx_secret', internalOnlyKey: 'leak-me' };
+    const settings = store.getSettings();
+
+    assert.equal(Object.hasOwn(settings.posthog, 'internalOnlyKey'), false);
+    assert.deepEqual(settings.posthog, { enabled: true, apiKeyConfigured: true });
   });
 });
 
@@ -529,8 +598,9 @@ test('a duplicate event for content already applied is not re-applied', async ()
 // The escalation ladder's delay is an operator-facing timeout like every other one, not a constant
 // buried in the manager.
 test('phoneEscalationMs is a settable timeout key with the five-minute default', async () => {
-  const { TIMEOUT_KEYS, DEFAULT_CONFIG } = require('../server/config-store');
-  assert.equal(TIMEOUT_KEYS.includes('phoneEscalationMs'), true);
+  const { DEFAULT_CONFIG } = require('../server/config-store');
+  const { ConfigUpdate } = require('../shared/contracts');
+  assert.equal('phoneEscalationMs' in ConfigUpdate.shape, true);
   assert.equal(DEFAULT_CONFIG.phoneEscalationMs, 300000);
 
   await withStoreAsync({ projects: [] }, async (store) => {

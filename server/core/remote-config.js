@@ -76,7 +76,7 @@ function isLoopbackHost(host) {
  * unless GLISSA_INSECURE_BIND=1 states the intent out loud; the shell turns allowed:false into a
  * boot refusal rather than quietly falling back, so nobody thinks they are bound wide when they are not.
  */
-function decideBindHost({ envHost, insecureBind } = {}) {
+function decideBindHost({ envHost, insecureBind } = /** @type {any} */ ({})) {
   const host = typeof envHost === 'string' ? envHost.trim() : '';
   if (host === '') return { host: '127.0.0.1', allowed: true, reason: null };
   if (isLoopbackHost(host)) return { host, allowed: true, reason: null };

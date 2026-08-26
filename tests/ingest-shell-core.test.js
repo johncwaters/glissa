@@ -74,6 +74,12 @@ test('PSReadLine off Windows resolves under XDG_DATA_HOME', () => {
   assert.equal(fallback.dir, path.join('/home/j', '.local', 'share', 'powershell', 'PSReadLine'));
 });
 
+test('home directory fallback is supplied by the IO caller', () => {
+  const [location] = historyLocations({ env: {}, homeDir: '/fallback/home', platform: 'linux', shells: ['bash'] });
+  assert.equal(location.name, '.bash_history');
+  assert.equal(location.dir, '/fallback/home');
+});
+
 test('fish is XDG aware and keeps the pre-3.0 config-dir path as a second candidate', () => {
   const found = historyLocations({ env: { HOME: '/home/j' }, platform: 'linux', shells: ['fish'] });
   assert.deepEqual(found.map((location) => location.dir), [

@@ -16,7 +16,7 @@ const path = require('node:path');
 
 const { createBackend } = require('../server/backend');
 const { isolateTranscriptHomes } = require('./helpers/transcript-homes');
-const { BOOLEAN_KEYS, STRING_KEYS, TIMEOUT_KEYS } = require('../server/config-store');
+const { CONFIG_SCALAR_KEYS } = require('../shared/contracts');
 
 async function bootWithConfig(memory) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memory-backend-'));
@@ -79,11 +79,5 @@ test('memory enabled true constructs the store beside the resolved config file',
 });
 
 test('memory is in no control-WS settable key list', () => {
-  for (const list of [BOOLEAN_KEYS, STRING_KEYS, TIMEOUT_KEYS]) {
-    assert.equal(
-      list.some((key) => String(key).toLowerCase().includes('memory')),
-      false,
-      'an unauthenticated local socket must not be able to widen what is durably recorded'
-    );
-  }
+  assert.equal(CONFIG_SCALAR_KEYS.some((key) => key.toLowerCase().includes('memory')), false);
 });

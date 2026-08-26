@@ -2,6 +2,8 @@
 
 'use strict';
 
+/** @typedef {{ command: string, args: string[] }} Invocation */
+
 function relayInvocation({ glissaOnPath = true, cliPath = '', nodePath = 'node' } = {}) {
   if (glissaOnPath) return { command: 'glissa', args: ['visions', 'relay'] };
   return { command: nodePath, args: [cliPath, 'visions', 'relay'] };
@@ -24,7 +26,7 @@ function neovimSnippet(invocation) {
     "vim.api.nvim_create_autocmd('FileType', {",
     "  pattern = 'markdown',",
     '  callback = function()',
-    "    vim.lsp.start({ name = 'glissa-visions', cmd = { " + invocationParts(invocation).map((part) => `'${part}'`).join(', ') + ' } })',
+    `    vim.lsp.start({ name = 'glissa-visions', cmd = { ${invocationParts(invocation).map((part) => `'${part}'`).join(', ')} } })`,
     '  end,',
     '})',
   ].join('\n');
@@ -136,7 +138,8 @@ function recipeIds() {
   return EDITOR_RECIPES.map((recipe) => recipe.id);
 }
 
-function buildSetupGuide({ editorId = null, invocation } = {}) {
+/** @param {{ editorId?: string|null, invocation: Invocation }} options */
+function buildSetupGuide({ editorId = null, invocation }) {
   const recipes = editorId ? EDITOR_RECIPES.filter((recipe) => recipe.id === editorId) : EDITOR_RECIPES;
   if (recipes.length === 0) return { ok: false, reason: `unknown editor: ${editorId}`, sections: [] };
   return {

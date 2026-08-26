@@ -4,7 +4,7 @@ const os = require('node:os');
 
 const { decideRtkInstall } = require('./core/rtk-install-core');
 const { installRtk } = require('./rtk-installer');
-const { getRtkPath } = require('../session/core/rtk-command');
+const { getRtkPath } = require('./rtk-resolver');
 
 // One-shot lane, not a poller: the only triggers are boot and a settings save, so there is no timer to
 // own. getRtkPath memoizes successes only, so a fresh install is picked up by the next call with no bust.

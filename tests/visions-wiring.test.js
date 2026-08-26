@@ -18,7 +18,8 @@ const path = require('node:path');
 const WebSocket = require('ws');
 
 const { createBackend } = require('../server/backend');
-const { createConfigStore, BOOLEAN_KEYS, STRING_KEYS, TIMEOUT_KEYS } = require('../server/config-store');
+const { createConfigStore } = require('../server/config-store');
+const { CONFIG_SCALAR_KEYS, ConfigUpdate } = require('../shared/contracts');
 const { MAX_PROMPT_BYTES } = require('../server/core/visions-dispatch-core');
 const { DIGEST_BUDGET_CHARS, createVisionsWiring, VISIONS_DEBOUNCE_MS } = require('../server/visions-wiring');
 
@@ -2103,9 +2104,8 @@ test('/visions is refused on the remote listener even with the lane enabled', as
 });
 
 test('visions is echoed by getSettings and applied as a restart-required settings block', () => {
-  assert.equal(BOOLEAN_KEYS.includes('visions'), false);
-  assert.equal(STRING_KEYS.includes('visions'), false);
-  assert.equal(TIMEOUT_KEYS.includes('visions'), false);
+  assert.equal(CONFIG_SCALAR_KEYS.includes('visions'), false);
+  assert.equal('visions' in ConfigUpdate.shape, true);
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-visions-settings-'));
   const configPath = path.join(dir, 'config.json');
