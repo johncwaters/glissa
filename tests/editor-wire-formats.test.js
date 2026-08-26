@@ -1,7 +1,6 @@
 'use strict';
 
-// Glissa writes into config files real editors parse, so the shapes are checked with a real parser
-// rather than a regex: TOML through python's tomllib, JSON through the runtime's own.
+// Real editors parse these files, so a real parser checks them rather than a regex.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');

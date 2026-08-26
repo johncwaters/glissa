@@ -19,11 +19,7 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-/**
- * Per SOURCE, not per block: an operator who enabled Visions before a source existed has an `ingest`
- * block that predates it, and a whole-block check would leave that source off forever. An ABSENT key is
- * not a choice; an explicit `false` is, and is never touched.
- */
+// Per SOURCE: an ingest block predating a source would otherwise leave that source off forever.
 function impliedIngestChanges(config) {
   if (!isPlainObject(config.ingest)) {
     return [{ path: ['ingest'], value: JSON.parse(JSON.stringify(IMPLIED_INGEST)), why: 'visions needs machine context' }];
@@ -36,7 +32,7 @@ function impliedIngestChanges(config) {
   const sources = isPlainObject(config.ingest.sources) ? config.ingest.sources : {};
   for (const [name, value] of Object.entries(IMPLIED_INGEST.sources)) {
     if (isPlainObject(sources[name])) continue;
-    changes.push({ path: ['ingest', 'sources', name], value: { ...value }, why: `visions implies the ${name} source` });
+    changes.push({ path: ['ingest', 'sources', name], value: JSON.parse(JSON.stringify(value)), why: `visions implies the ${name} source` });
   }
   return changes;
 }

@@ -91,7 +91,6 @@ test('a source that did not exist when the block was written is still implied', 
     visions: { enabled: true, dispatch: { enabled: true } },
     ingest: { enabled: false, sources: {} },
   };
-  assert.deepEqual(laneOffStaysOff.ingest.enabled, false);
   assert.deepEqual(decideImpliedDefaults(laneOffStaysOff).changes, []);
 });
 
