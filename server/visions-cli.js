@@ -1,8 +1,5 @@
-/*
- * `glissa visions install` / `glissa visions status`: pack the bundled editor extension into a .vsix and
- * hand it to every VS Code family CLI on PATH. Without it the Visions lane has no document source at
- * all, so a fresh install has a working advisor only after this one command.
- */
+// Without the editor extension the Visions lane has no document source at all, which is why installing
+// it is one command rather than a documented procedure.
 
 'use strict';
 
@@ -20,11 +17,8 @@ const { resolvePathCommandMatches } = require('../session/core/spawn-command');
 const PACKAGE_ROOT = path.join(__dirname, '..');
 const EXTENSION_DIR = path.join(PACKAGE_ROOT, 'tools', 'vscode-visions');
 const RELAY_PATH = path.join(PACKAGE_ROOT, 'session', 'visions-relay.js');
+const LSP_CORE_PATH = path.join(PACKAGE_ROOT, 'server', 'core', 'visions-lsp-core.js');
 const EDITOR_TIMEOUT_MS = 60000;
-
-function readText(filePath) {
-  return fs.readFileSync(filePath, 'utf8');
-}
 
 function resolvedEditorPaths({ platform = process.platform, exec = execSync } = {}) {
   const resolved = {};
@@ -37,15 +31,15 @@ function resolvedEditorPaths({ platform = process.platform, exec = execSync } = 
 }
 
 function packVsix() {
-  const manifestJson = readText(path.join(EXTENSION_DIR, 'package.json'));
+  const manifestJson = fs.readFileSync(path.join(EXTENSION_DIR, 'package.json'), 'utf8');
   const manifest = JSON.parse(manifestJson);
   const vsix = buildVsix({
     manifest,
     extensionFiles: visionsExtensionFiles({
       manifestJson,
-      extensionJs: readText(path.join(EXTENSION_DIR, 'extension.js')),
-      convertJs: readText(path.join(EXTENSION_DIR, 'lsp-convert.js')),
-      lspCoreJs: readText(path.join(PACKAGE_ROOT, 'server', 'core', 'visions-lsp-core.js')),
+      extensionJs: fs.readFileSync(path.join(EXTENSION_DIR, 'extension.js'), 'utf8'),
+      convertJs: fs.readFileSync(path.join(EXTENSION_DIR, 'lsp-convert.js'), 'utf8'),
+      lspCoreJs: fs.readFileSync(LSP_CORE_PATH, 'utf8'),
       relayPath: RELAY_PATH,
     }),
   });
@@ -74,8 +68,9 @@ async function installInto(target, vsixPath, extensionId) {
 }
 
 async function runInstall(args) {
-  if (!fs.existsSync(RELAY_PATH)) {
-    console.error(`visions install: relay missing from this install: ${RELAY_PATH}`);
+  const missing = [RELAY_PATH, LSP_CORE_PATH].filter((filePath) => !fs.existsSync(filePath));
+  if (missing.length > 0) {
+    console.error(`visions install: missing from this install: ${missing.join(', ')}`);
     return 1;
   }
 

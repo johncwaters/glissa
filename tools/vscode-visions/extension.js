@@ -1,14 +1,5 @@
-/*
- * Glissa Visions editor extension: a dependency-free LSP client for session/visions-relay.js.
- *
- * It speaks the protocol directly rather than through vscode-languageclient because this extension
- * ships inside the glissa npm package and is packed into a .vsix at install time (server/core/vsix-core.js):
- * a client library would have to ride the tarball as vendored node_modules, and the repo takes no
- * dependency it does not need. The relay is a plain stdio LSP server, so the client it needs is small.
- *
- * The relay is spawned with the editor's own Electron binary in node mode, so a machine with no `node`
- * on the extension host's PATH still connects.
- */
+// A hand-rolled LSP client rather than vscode-languageclient: this extension rides the npm tarball, so
+// a client library would have to ride it too as vendored node_modules.
 
 'use strict';
 
@@ -143,8 +134,7 @@ function createRelayClient({ relayPath, port, output, diagnostics }) {
     });
   }
 
-  // Whole-buffer changes: the relay's store takes them (server/core/visions-buffer-core.js), and the
-  // incremental path would have this client re-deriving ranges the editor already applied.
+  // Whole-buffer changes: the incremental path would re-derive ranges the editor already applied.
   function didChange(document) {
     if (!isMirrored(document)) return;
     if (!openVersionByUri.has(document.uri.toString())) return didOpen(document);
@@ -235,6 +225,7 @@ function createRelayClient({ relayPath, port, output, diagnostics }) {
     if (isStopping) return;
     parserState = createParserState();
     openVersionByUri.clear();
+    // The editor's own binary in node mode, so an extension host with no `node` on PATH still connects.
     child = spawn(process.execPath, relayArgs(relayPath, port), {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
       windowsHide: true,

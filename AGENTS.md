@@ -17,7 +17,7 @@ What each entry owns, not how it works. A directory with its own `AGENTS.md` get
 | `DESIGN.md`, `DESIGN.json`, `PRODUCT.md` | Visual design system; product definition |
 | `docs/`, `bin/` | Design docs, plans, postmortems; npm CLI entry |
 | `server/` | Backend runtime: Express/WS wiring, control plane, config, every lane (`server/AGENTS.md` names the files) |
-| `server/child-process-safe.js` | The ONLY module allowed to import `node:child_process` |
+| `server/child-process-safe.js` | The ONLY importer of `node:child_process`, bar the extension packed outside it |
 | `server/git-workspace.js` | The ONLY module allowed to run `git worktree` |
 | `server/core/` | Pure decision modules for everything in `server/`, no IO |
 | `session/` | Session domain: Session class, recorder, standalone relays (`session/AGENTS.md`) |
@@ -27,7 +27,7 @@ What each entry owns, not how it works. A directory with its own `AGENTS.md` get
 | `packs/`, `shared/` | Version-controlled pack specs and sources; state constants shared by server (CJS) and browser (ESM) |
 | `public/` | Browser dashboard, ES modules bundled by Vite (`public/AGENTS.md`) |
 | `scripts/`, `tests/`, `test/` | Release scripts; the `node --test` suite; manual and container tests |
-| `tools/`, `assets/`, `dist/` | Dev tooling; the packed Visions extension; static assets; build output (gitignored, never edit) |
+| `tools/`, `assets/`, `dist/` | Dev tooling with the Visions editor extension; static assets; build output (gitignored, never edit) |
 
 ## For AI Agents
 
@@ -227,7 +227,6 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 - CommonJS only on the server: `const x = require('x')`, `module.exports = { ... }`.
 - No classes unless the pattern genuinely requires instance state.
-- Prefer explicit over clever; keep functions small and single-purpose.
 - Propagate errors via EventEmitter `error` events or callbacks, not thrown exceptions in async paths.
 - Comments are a last resort and carry only the why.
 

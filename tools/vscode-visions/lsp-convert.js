@@ -1,8 +1,5 @@
-/*
- * Pure LSP-to-editor conversions for the bundled Visions extension. Split out because the extension
- * host is the one runtime the repo's own tests cannot boot: everything here takes the `vscode`
- * namespace as an argument, so tests/visions-extension-convert.test.js exercises it against a stub.
- */
+// The `vscode` namespace is an argument rather than a require, so these run under node:test against a
+// stub (tests/helpers/vscode-stub.js); the extension host is the one runtime the suite cannot boot.
 
 'use strict';
 
@@ -65,12 +62,8 @@ function toCodeActions(vscodeApi, actions) {
   return actions.map((action) => toCodeAction(vscodeApi, action));
 }
 
-/**
- * The version gate the lane's edits are built against (server/core/visions-fix-core.js): an edit
- * carrying a version answers for the buffer it was computed from, so one that no longer describes the
- * open document is REFUSED rather than landing on text the carbon unit has since typed into. A null
- * version is the LSP way of saying do not check, and an unopened uri cannot be checked at all.
- */
+// A versioned edit answers for the buffer it was computed from, so a stale one is REFUSED rather than
+// landing on text the carbon unit has since typed into (`server/core/visions-fix-core.js`).
 function decideEditFreshness(edit, versionOfUri) {
   const changes = documentChangesOf(edit);
   if (changes.length === 0) return { fresh: false, reason: 'no-document-changes' };

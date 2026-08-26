@@ -1,8 +1,5 @@
-/*
- * Pure decisions for `glissa visions install`: which editor CLIs to target, what goes inside the
- * packed extension, and whether an install actually took. The VS Code family all expose the same
- * `--install-extension` / `--list-extensions` CLI, so one table covers every fork the operator may run.
- */
+// Pure decisions for `glissa visions install`. Every VS Code fork exposes the same install CLI, so one
+// candidate table covers them all.
 
 'use strict';
 
@@ -14,12 +11,8 @@ const EDITOR_CANDIDATES = [
   { command: 'windsurf', label: 'Windsurf' },
 ];
 
-/**
- * Every detected editor is a target, not just the first: a machine with two of them has no way to say
- * which one the operator will open the file in, and installing into one it does not use looks like the
- * extension silently never ran. An explicit `--editor` overrides that and fails loudly when it resolves
- * to nothing, since a typo there would otherwise install somewhere the operator did not ask for.
- */
+// EVERY detected editor is a target: nothing here can know which one the operator will open the file
+// in, and installing into the other one looks exactly like an extension that never ran.
 function decideEditorTargets({ requested = null, resolvedByCommand = {} } = {}) {
   if (requested) {
     const commandPath = resolvedByCommand[requested];
@@ -42,11 +35,8 @@ function relayStamp(relayPath) {
   return `${JSON.stringify({ relayPath }, null, 2)}\n`;
 }
 
-/**
- * The packed extension carries the daemon's own copy of the LSP framing module rather than a second
- * spelling of it, which is why the relay path is STAMPED at pack time: the extension lives outside the
- * npm package once installed and can no longer resolve anything inside it.
- */
+// The relay path is STAMPED and the framing module COPIED because an installed extension lives outside
+// this package and can resolve nothing inside it.
 function visionsExtensionFiles({ manifestJson, extensionJs, convertJs, lspCoreJs, relayPath }) {
   return [
     { path: 'package.json', data: manifestJson },

@@ -1,10 +1,5 @@
-/*
- * Pure VSIX (OPC zip) builder for the bundled Visions editor extension. A .vsix is the only install
- * shape every VS Code family CLI accepts (`--install-extension` takes a file or a marketplace id, never
- * a directory), and hand-editing the editor's own extensions.json instead would fight its cache.
- * Entries are STORED, not deflated: the payload is a few kilobytes, and store keeps this file free of
- * a compressor and its state.
- */
+// A .vsix is the only install shape a VS Code family CLI accepts, so a directory copy plus an
+// extensions.json edit is not an option (`--install-extension` takes a file or a marketplace id).
 
 'use strict';
 
@@ -15,7 +10,7 @@ const END_OF_CENTRAL_SIG = 0x06054b50;
 const STORED = 0;
 const ZIP_VERSION = 20;
 const UTF8_FLAG = 0x0800;
-// Zip dates predate the epoch and every builder that emits a constant here stays byte-reproducible.
+// Constant, so a rebuild of unchanged sources is byte-identical.
 const DOS_TIME = 0;
 const DOS_DATE = 0x21;
 
@@ -77,10 +72,6 @@ function centralHeader(entry, nameBytes) {
   return header;
 }
 
-/**
- * One zip archive from `[{ path, data }]`, where data is a Buffer or a string. Paths are used verbatim,
- * so the caller owns the `extension/` prefix the OPC layout wants.
- */
 function buildZip(files) {
   const chunks = [];
   const central = [];
@@ -163,11 +154,6 @@ function vsixManifestXml({ id, publisher, version, displayName, description, eng
   ].join('');
 }
 
-/**
- * The whole package from the extension's own manifest plus its source files. `extensionFiles` are
- * `{ path, data }` relative to the extension root, and the identity the editor installs under comes
- * from the manifest alone, so a version bump there is the only thing a reinstall needs.
- */
 function buildVsix({ manifest, extensionFiles = [] }) {
   const files = [
     { path: 'extension.vsixmanifest', data: vsixManifestXml({
