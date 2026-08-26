@@ -79,6 +79,8 @@ let serverError = '';
 let searchQuery = '';
 const dangerConfirmationBySettingId = new Map();
 let dangerConfirmationFocusSettingId = null;
+let sectionPickerDocumentClickHandler = null;
+let sectionPickerDocumentKeydownHandler = null;
 
 function browserPreferences() {
   return {
@@ -614,14 +616,8 @@ function selectSection(sectionId, { focusContent = false, settingId = null, upda
     dangerConfirmationFocusSettingId = null;
   }
   serverError = '';
-  for (const button of navigationEl?.querySelectorAll('[data-settings-section]') || []) {
-    const selected = button.dataset.settingsSection === selectedSection.id;
-    button.setAttribute('aria-current', selected ? 'page' : 'false');
-  }
-  for (const button of sectionPickerEl?.querySelectorAll('[data-settings-section]') || []) {
-    const selected = button.dataset.settingsSection === selectedSection.id;
-    button.setAttribute('aria-current', selected ? 'page' : 'false');
-  }
+  markCurrentSection(navigationEl);
+  markCurrentSection(sectionPickerEl);
   if (sectionButtonTitleEl) {
     sectionButtonTitleEl.textContent = selectedSection.title;
     sectionButtonEl.title = selectedSection.title;
@@ -633,6 +629,13 @@ function selectSection(sectionId, { focusContent = false, settingId = null, upda
   if (focusContent) contentEl?.querySelector('h1')?.focus();
 }
 
+function markCurrentSection(container) {
+  for (const button of container?.querySelectorAll('[data-settings-section]') || []) {
+    const selected = button.dataset.settingsSection === selectedSection.id;
+    button.setAttribute('aria-current', selected ? 'page' : 'false');
+  }
+}
+
 function chooseSearchResult(searchResult) {
   setSectionPickerOpen(false);
   searchEl.value = '';
@@ -641,8 +644,7 @@ function chooseSearchResult(searchResult) {
   selectSection(searchResult.section.id, { settingId: searchResult.setting.id });
 }
 
-function appendSearchResults(target) {
-  const results = scoreSettingsSearch(SETTINGS_VIEW_MAP, searchQuery);
+function appendSearchResults(target, results) {
   if (results.length === 0) {
     target.appendChild(el('div', 'settings-empty settings-view-search-empty', 'No settings found.'));
     return;
@@ -666,26 +668,33 @@ function appendSearchResults(target) {
   }
 }
 
-function renderSectionPicker() {
-  const grouped = sectionsByLevel(SETTINGS_VIEW_MAP);
-  sectionPickerEl.textContent = '';
+function appendSectionGroups(container, grouped, { groupClassName, headingClassName, createButton }) {
   for (const level of ['browser', 'machine', 'lanes', 'projects']) {
     if (grouped[level].length === 0) continue;
-    const group = el('div', 'settings-view-section-picker-group');
-    group.appendChild(el('div', 'settings-view-section-picker-heading', LEVEL_LABELS[level]));
-    for (const section of grouped[level]) {
+    const group = el('div', groupClassName);
+    group.appendChild(el('div', headingClassName, LEVEL_LABELS[level]));
+    for (const section of grouped[level]) group.appendChild(createButton(section));
+    container.appendChild(group);
+  }
+}
+
+function renderSectionPicker(grouped) {
+  sectionPickerEl.textContent = '';
+  appendSectionGroups(sectionPickerEl, grouped, {
+    groupClassName: 'settings-view-section-picker-group',
+    headingClassName: 'settings-view-section-picker-heading',
+    createButton(section) {
       const button = el('button', 'settings-view-section-option', section.title);
       button.type = 'button';
       button.dataset.settingsSection = section.id;
-      button.setAttribute('aria-current', section.id === selectedSection.id ? 'page' : 'false');
       button.addEventListener('click', () => {
         setSectionPickerOpen(false);
         selectSection(section.id);
       });
-      group.appendChild(button);
-    }
-    sectionPickerEl.appendChild(group);
-  }
+      return button;
+    },
+  });
+  markCurrentSection(sectionPickerEl);
 }
 
 function isSectionPickerOpen() {
@@ -698,7 +707,7 @@ function setSectionPickerOpen(isOpen, { returnFocus = true } = {}) {
   sectionPickerEl.hidden = !isOpen;
   sectionButtonEl.setAttribute('aria-expanded', String(isOpen));
   if (isOpen) {
-    renderSectionPicker();
+    renderSectionPicker(sectionsByLevel(SETTINGS_VIEW_MAP));
     requestAnimationFrame(() => sectionPickerEl.querySelector('[aria-current="page"]')?.focus());
     return;
   }
@@ -712,24 +721,23 @@ function renderNavigation() {
   shellEl.dataset.searching = String(Boolean(searchQuery));
   phoneSearchResultsEl.hidden = !searchQuery;
   if (searchQuery) {
-    appendSearchResults(navigationEl);
-    appendSearchResults(phoneSearchResultsEl);
+    const results = scoreSettingsSearch(SETTINGS_VIEW_MAP, searchQuery);
+    appendSearchResults(navigationEl, results);
+    appendSearchResults(phoneSearchResultsEl, results);
     return;
   }
-  for (const level of ['browser', 'machine', 'lanes', 'projects']) {
-    if (grouped[level].length === 0) continue;
-    const group = el('div', 'settings-view-nav-group');
-    group.appendChild(el('div', 'settings-view-nav-label', LEVEL_LABELS[level]));
-    for (const section of grouped[level]) {
+  appendSectionGroups(navigationEl, grouped, {
+    groupClassName: 'settings-view-nav-group',
+    headingClassName: 'settings-view-nav-label',
+    createButton(section) {
       const button = el('button', 'settings-view-nav-item', section.title);
       button.type = 'button';
       button.dataset.settingsSection = section.id;
       button.addEventListener('click', () => selectSection(section.id));
-      group.appendChild(button);
-    }
-    navigationEl.appendChild(group);
-  }
-  renderSectionPicker();
+      return button;
+    },
+  });
+  renderSectionPicker(grouped);
   selectSection(selectedSection.id, { updateHash: false });
 }
 
@@ -797,16 +805,20 @@ export function mountSettingsView(container) {
   navigationEl.addEventListener('keydown', handleNavigationKeydown);
   phoneSearchResultsEl.addEventListener('keydown', handleNavigationKeydown);
   sectionButtonEl.addEventListener('click', () => setSectionPickerOpen(!isSectionPickerOpen()));
-  document.addEventListener('click', (event) => {
+  document.removeEventListener('click', sectionPickerDocumentClickHandler);
+  document.removeEventListener('keydown', sectionPickerDocumentKeydownHandler);
+  sectionPickerDocumentClickHandler = (event) => {
     if (!isSectionPickerOpen()) return;
     if (sectionPickerEl.contains(event.target) || sectionButtonEl.contains(event.target)) return;
     setSectionPickerOpen(false);
-  });
-  document.addEventListener('keydown', (event) => {
+  };
+  sectionPickerDocumentKeydownHandler = (event) => {
     if (event.key !== 'Escape' || !isSectionPickerOpen()) return;
     event.preventDefault();
     setSectionPickerOpen(false);
-  });
+  };
+  document.addEventListener('click', sectionPickerDocumentClickHandler);
+  document.addEventListener('keydown', sectionPickerDocumentKeydownHandler);
   sidebar.append(searchEl, sectionButtonEl, navigationEl, sectionPickerEl);
   shellEl.append(sidebar, phoneSearchResultsEl, contentEl);
   rootEl.appendChild(shellEl);
