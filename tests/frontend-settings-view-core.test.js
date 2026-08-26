@@ -189,17 +189,19 @@ test('project sections derive pack controls and read-only records', async () => 
   assert.equal(sections[0].settings[3].fileOnly, true);
 });
 
-test('two card records on one Mill project produce one project section', async () => {
+test('two card records on one Mill project use the checkout name and list both cards', async () => {
   const { buildProjectSections, enrichProjectsById } = await load();
-  const groupedProjects = [{ id: 'p1', name: 'Glissa', packs: ['context'] }];
+  const groupedProjects = [{ id: 'p1', name: 'glissa', packs: ['context'] }];
   const cardRecords = [
-    { id: 'p1', name: 'Glissa', path: '/repos/glissa', agent: 'codex' },
-    { id: 'p2', name: 'Glissa (2)', path: '/repos/glissa', agent: 'claude-code' },
+    { id: 'p1', name: 'glissa', path: '/repos/glissa', agent: 'codex' },
+    { id: 'p2', name: 'glissa (2)', path: '/repos/glissa', agent: 'claude-code' },
   ];
   const projects = enrichProjectsById(groupedProjects, cardRecords);
   const sections = buildProjectSections(projects, [{ name: 'context' }]);
 
   assert.equal(sections.length, 1);
   assert.equal(sections[0].id, 'project-p1');
+  assert.equal(sections[0].title, 'glissa');
+  assert.equal(sections[0].caption, 'Cards: glissa, glissa (2)');
   assert.equal(sections[0].settings[1].value, 'codex');
 });

@@ -60,9 +60,14 @@ const LEVEL_LABELS = Object.freeze({
 });
 
 let rootEl = null;
+let shellEl = null;
 let navigationEl = null;
 let searchEl = null;
-let pickerEl = null;
+let sectionButtonEl = null;
+let sectionButtonTitleEl = null;
+let sectionButtonLevelEl = null;
+let sectionPickerEl = null;
+let phoneSearchResultsEl = null;
 let contentEl = null;
 let selectedSection = SETTINGS_VIEW_MAP[0];
 let settingsPayload = {};
@@ -574,6 +579,7 @@ function renderContent() {
   titleRow.append(title);
   titleRow.append(el('span', 'settings-view-level', LEVEL_LABELS[selectedSection.level] || selectedSection.level));
   header.append(titleRow, el('p', 'settings-view-section-description', selectedSection.description));
+  if (selectedSection.caption) header.appendChild(el('p', 'settings-view-section-caption', selectedSection.caption));
   contentEl.appendChild(header);
 
   if (selectedSection.id === 'browser-shortcuts') {
@@ -612,7 +618,15 @@ function selectSection(sectionId, { focusContent = false, settingId = null, upda
     const selected = button.dataset.settingsSection === selectedSection.id;
     button.setAttribute('aria-current', selected ? 'page' : 'false');
   }
-  if (pickerEl) pickerEl.value = selectedSection.id;
+  for (const button of sectionPickerEl?.querySelectorAll('[data-settings-section]') || []) {
+    const selected = button.dataset.settingsSection === selectedSection.id;
+    button.setAttribute('aria-current', selected ? 'page' : 'false');
+  }
+  if (sectionButtonTitleEl) {
+    sectionButtonTitleEl.textContent = selectedSection.title;
+    sectionButtonEl.title = selectedSection.title;
+  }
+  if (sectionButtonLevelEl) sectionButtonLevelEl.textContent = LEVEL_LABELS[selectedSection.level] || selectedSection.level;
   renderContent();
   if (updateHash) replaceSettingsHash(selectedSection.id, settingId);
   if (settingId) flashSetting(settingId);
@@ -620,16 +634,17 @@ function selectSection(sectionId, { focusContent = false, settingId = null, upda
 }
 
 function chooseSearchResult(searchResult) {
+  setSectionPickerOpen(false);
   searchEl.value = '';
   searchQuery = '';
   renderNavigation();
   selectSection(searchResult.section.id, { settingId: searchResult.setting.id });
 }
 
-function renderSearchResults() {
+function appendSearchResults(target) {
   const results = scoreSettingsSearch(SETTINGS_VIEW_MAP, searchQuery);
   if (results.length === 0) {
-    navigationEl.appendChild(el('div', 'settings-empty settings-view-search-empty', 'No settings found.'));
+    target.appendChild(el('div', 'settings-empty settings-view-search-empty', 'No settings found.'));
     return;
   }
   const resultsBySection = new Map();
@@ -647,16 +662,58 @@ function renderSearchResults() {
       button.addEventListener('click', () => chooseSearchResult(result));
       group.appendChild(button);
     }
-    navigationEl.appendChild(group);
+    target.appendChild(group);
   }
+}
+
+function renderSectionPicker() {
+  const grouped = sectionsByLevel(SETTINGS_VIEW_MAP);
+  sectionPickerEl.textContent = '';
+  for (const level of ['browser', 'machine', 'lanes', 'projects']) {
+    if (grouped[level].length === 0) continue;
+    const group = el('div', 'settings-view-section-picker-group');
+    group.appendChild(el('div', 'settings-view-section-picker-heading', LEVEL_LABELS[level]));
+    for (const section of grouped[level]) {
+      const button = el('button', 'settings-view-section-option', section.title);
+      button.type = 'button';
+      button.dataset.settingsSection = section.id;
+      button.setAttribute('aria-current', section.id === selectedSection.id ? 'page' : 'false');
+      button.addEventListener('click', () => {
+        setSectionPickerOpen(false);
+        selectSection(section.id);
+      });
+      group.appendChild(button);
+    }
+    sectionPickerEl.appendChild(group);
+  }
+}
+
+function isSectionPickerOpen() {
+  return !!sectionPickerEl && !sectionPickerEl.hidden;
+}
+
+function setSectionPickerOpen(isOpen, { returnFocus = true } = {}) {
+  if (!sectionPickerEl || !sectionButtonEl) return;
+  const wasOpen = isSectionPickerOpen();
+  sectionPickerEl.hidden = !isOpen;
+  sectionButtonEl.setAttribute('aria-expanded', String(isOpen));
+  if (isOpen) {
+    renderSectionPicker();
+    requestAnimationFrame(() => sectionPickerEl.querySelector('[aria-current="page"]')?.focus());
+    return;
+  }
+  if (returnFocus && wasOpen) sectionButtonEl.focus();
 }
 
 function renderNavigation() {
   const grouped = sectionsByLevel(SETTINGS_VIEW_MAP);
   navigationEl.textContent = '';
-  pickerEl.textContent = '';
+  phoneSearchResultsEl.textContent = '';
+  shellEl.dataset.searching = String(Boolean(searchQuery));
+  phoneSearchResultsEl.hidden = !searchQuery;
   if (searchQuery) {
-    renderSearchResults();
+    appendSearchResults(navigationEl);
+    appendSearchResults(phoneSearchResultsEl);
     return;
   }
   for (const level of ['browser', 'machine', 'lanes', 'projects']) {
@@ -669,12 +726,10 @@ function renderNavigation() {
       button.dataset.settingsSection = section.id;
       button.addEventListener('click', () => selectSection(section.id));
       group.appendChild(button);
-      const option = el('option', null, `${LEVEL_LABELS[level]}: ${section.title}`);
-      option.value = section.id;
-      pickerEl.appendChild(option);
     }
     navigationEl.appendChild(group);
   }
+  renderSectionPicker();
   selectSection(selectedSection.id, { updateHash: false });
 }
 
@@ -706,7 +761,7 @@ function handleNavigationKeydown(event) {
 export function mountSettingsView(container) {
   rootEl = container;
   rootEl.textContent = '';
-  const shell = el('div', 'settings-view-shell');
+  shellEl = el('div', 'settings-view-shell');
   const sidebar = el('div', 'settings-view-sidebar');
   searchEl = el('input', 'settings-view-search');
   searchEl.type = 'search';
@@ -715,8 +770,23 @@ export function mountSettingsView(container) {
   navigationEl = el('nav', 'settings-view-nav');
   navigationEl.setAttribute('role', 'navigation');
   navigationEl.setAttribute('aria-label', 'Settings sections');
-  pickerEl = el('select', 'settings-view-picker');
-  pickerEl.setAttribute('aria-label', 'Settings section');
+  sectionButtonEl = el('button', 'settings-view-section-button');
+  sectionButtonEl.type = 'button';
+  sectionButtonEl.setAttribute('aria-expanded', 'false');
+  sectionButtonEl.setAttribute('aria-controls', 'settings-section-picker');
+  sectionButtonTitleEl = el('span', 'settings-view-section-button-title');
+  sectionButtonLevelEl = el('span', 'settings-view-section-button-level');
+  const sectionButtonChevron = el('span', 'settings-view-section-button-chevron', String.fromCharCode(0x2304));
+  sectionButtonChevron.setAttribute('aria-hidden', 'true');
+  sectionButtonEl.append(sectionButtonTitleEl, sectionButtonLevelEl, sectionButtonChevron);
+  sectionPickerEl = el('div', 'settings-view-section-picker');
+  sectionPickerEl.id = 'settings-section-picker';
+  sectionPickerEl.hidden = true;
+  sectionPickerEl.setAttribute('role', 'dialog');
+  sectionPickerEl.setAttribute('aria-label', 'Settings sections');
+  phoneSearchResultsEl = el('nav', 'settings-view-phone-results');
+  phoneSearchResultsEl.hidden = true;
+  phoneSearchResultsEl.setAttribute('aria-label', 'Settings search results');
   contentEl = el('div', 'settings-view-content');
   contentEl.setAttribute('aria-live', 'polite');
   searchEl.addEventListener('input', () => {
@@ -725,12 +795,27 @@ export function mountSettingsView(container) {
   });
   searchEl.addEventListener('keydown', handleNavigationKeydown);
   navigationEl.addEventListener('keydown', handleNavigationKeydown);
-  pickerEl.addEventListener('change', () => selectSection(pickerEl.value));
-  sidebar.append(searchEl, navigationEl);
-  shell.append(sidebar, pickerEl, contentEl);
-  rootEl.appendChild(shell);
+  phoneSearchResultsEl.addEventListener('keydown', handleNavigationKeydown);
+  sectionButtonEl.addEventListener('click', () => setSectionPickerOpen(!isSectionPickerOpen()));
+  document.addEventListener('click', (event) => {
+    if (!isSectionPickerOpen()) return;
+    if (sectionPickerEl.contains(event.target) || sectionButtonEl.contains(event.target)) return;
+    setSectionPickerOpen(false);
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !isSectionPickerOpen()) return;
+    event.preventDefault();
+    setSectionPickerOpen(false);
+  });
+  sidebar.append(searchEl, sectionButtonEl, navigationEl, sectionPickerEl);
+  shellEl.append(sidebar, phoneSearchResultsEl, contentEl);
+  rootEl.appendChild(shellEl);
   hydrate(settingsPayload);
   renderNavigation();
+}
+
+export function closeSettingsSectionPicker({ returnFocus = true } = {}) {
+  setSectionPickerOpen(false, { returnFocus });
 }
 
 export function activateSettingsSection(sectionId, settingId = null) {

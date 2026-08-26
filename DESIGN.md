@@ -244,7 +244,7 @@ The header overflow menu. An Ink Violet panel with a 1px lifted border, 4px radi
 
 ### Settings View
 A primary view with a 220px grouped sidebar and one scrolling section page.
-- **Navigation:** levels use 10px uppercase Faint Lavender labels; search replaces the section tree with exact-token results, and anchored rows accept stable deep links. The selected section takes orchid text, a faint orchid wash and a full 1px border. On phone, one section select replaces the sidebar above the same content column.
+- **Navigation:** levels use 10px uppercase Faint Lavender labels; search replaces the section tree with exact-token results, and anchored rows accept stable deep links. The selected section takes orchid text, a faint orchid wash and a full 1px border. On phone, the shared search input and current-section button stay in a sticky header; the button opens a themed in-page section sheet, and search results replace the content column.
 - **Content:** all settings in the selected section stack under anchored headings. The level tag stays beside the section title, and a sticky Save and Revert footer appears only for a dirty machine or lane section.
 - **Controls:** checkboxes use an orchid accent-color; file-only values use a mono key plus a quiet config caption. Unattended controls use an amber full-border warning and inline typed confirmation. Field and footer errors use 10px Signal Red.
 

@@ -775,7 +775,8 @@ body {
 .settings-about-link:focus-visible,
 .btn-settings-add:focus-visible,
 .settings-view-nav-item:focus-visible,
-.settings-view-picker:focus-visible,
+.settings-view-section-button:focus-visible,
+.settings-view-section-option:focus-visible,
 .settings-view-input:focus-visible,
 .settings-view-checkbox:focus-visible,
 .dialog-advanced-toggle:focus-visible,
@@ -4850,7 +4851,9 @@ a.pr-title:hover {
   background: color-mix(in oklab, var(--accent) 8%, transparent);
 }
 
-.settings-view-picker {
+.settings-view-section-button,
+.settings-view-section-picker,
+.settings-view-phone-results {
   display: none;
 }
 
@@ -4908,6 +4911,14 @@ a.pr-title:hover {
 
 .settings-view-section-description {
   margin: 7px 0 0;
+}
+
+.settings-view-section-caption {
+  margin: 7px 0 0;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.5;
 }
 
 .settings-view-stack {
@@ -5144,24 +5155,145 @@ a.pr-title:hover {
 }
 
 [data-layout="phone"] .settings-view-sidebar {
-  display: none;
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+  gap: 8px;
+  flex-shrink: 0;
+  min-height: auto;
+  padding: 12px 14px;
+  border-right: none;
+  border-bottom: 1px solid var(--border-dim);
 }
 
 [data-layout="phone"] .settings-view-nav {
   display: none;
 }
 
-[data-layout="phone"] .settings-view-picker {
-  display: block;
-  flex-shrink: 0;
-  margin: 12px 14px 0;
-  padding: 9px 12px;
+[data-layout="phone"] .settings-view-search {
+  min-width: 0;
+  margin: 0;
+}
+
+[data-layout="phone"] .settings-view-section-button {
+  display: flex;
+  min-width: 0;
+  max-width: 48vw;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 9px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-surface);
   color: var(--text-head);
   font-family: var(--font-mono);
-  font-size: 13px;
+  cursor: pointer;
+}
+
+[data-layout="phone"] .settings-view-section-button-title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-layout="phone"] .settings-view-section-button-level {
+  flex-shrink: 0;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+[data-layout="phone"] .settings-view-section-button-chevron {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+[data-layout="phone"] .settings-view-section-picker:not([hidden]) {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 14px;
+  left: 14px;
+  z-index: 5;
+  display: flex;
+  max-height: min(68vh, 520px);
+  flex-direction: column;
+  padding: 8px;
+  overflow-y: auto;
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  background: var(--bg-header);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--bg) 82%, transparent);
+}
+
+[data-layout="phone"] .settings-view-section-picker-group {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0 8px;
+}
+
+[data-layout="phone"] .settings-view-section-picker-group:last-child {
+  padding-bottom: 4px;
+}
+
+[data-layout="phone"] .settings-view-section-picker-heading {
+  padding: 4px 10px 6px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+[data-layout="phone"] .settings-view-section-option {
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+[data-layout="phone"] .settings-view-section-option:active {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+[data-layout="phone"] .settings-view-section-option[aria-current="page"] {
+  border-color: color-mix(in oklab, var(--accent) 42%, var(--border));
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+}
+
+[data-layout="phone"] .settings-view-phone-results:not([hidden]) {
+  display: block;
+  flex: 1;
+  min-height: 0;
+  padding: 18px 14px 52px;
+  overflow-y: auto;
+}
+
+[data-layout="phone"] .settings-view-phone-results .settings-view-nav-group {
+  width: min(100%, 820px);
+  margin-inline: auto;
+}
+
+[data-layout="phone"] .settings-view-shell[data-searching="true"] .settings-view-content {
+  display: none;
 }
 
 [data-layout="phone"] .settings-view-content {

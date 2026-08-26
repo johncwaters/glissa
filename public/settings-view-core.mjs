@@ -293,6 +293,21 @@ function projectSetting(projectId, suffix, fields) {
   };
 }
 
+function canonicalProjectRecordName(name) {
+  return String(name || '').replace(/\s+\(\d+\)$/, '');
+}
+
+function projectPathBasename(projectPath) {
+  const normalizedPath = String(projectPath || '').replace(/[\\/]+$/, '');
+  return normalizedPath.split(/[\\/]/).at(-1) || '';
+}
+
+function projectSectionTitle(project) {
+  return projectPathBasename(project?.path)
+    || canonicalProjectRecordName(project?.name)
+    || project?.id;
+}
+
 export function buildProjectSections(projects = [], packs = []) {
   const packNames = packs
     .filter((pack) => !pack?.group && typeof pack?.name === 'string' && pack.name)
@@ -302,8 +317,9 @@ export function buildProjectSections(projects = [], packs = []) {
     .map((project) => ({
       id: `project-${project.id}`,
       level: 'projects',
-      title: project.name || project.id,
+      title: projectSectionTitle(project),
       description: 'Settings scoped to this configured project.',
+      caption: project.recordNames?.length > 1 ? `Cards: ${project.recordNames.join(', ')}` : '',
       project,
       settings: [
         projectSetting(project.id, 'packs', {
@@ -347,10 +363,20 @@ export function enrichProjectsById(projects = [], details = []) {
   const detailsById = new Map(details
     .filter((detail) => typeof detail?.id === 'string' && detail.id)
     .map((detail) => [detail.id, detail]));
-  return projects.map((project) => ({
-    ...detailsById.get(project?.id),
-    ...project,
-  }));
+  return projects.map((project) => {
+    const matchingDetail = detailsById.get(project?.id);
+    const projectPath = project?.path || matchingDetail?.path;
+    const recordNames = details
+      .filter((detail) => projectPath && detail?.path === projectPath)
+      .map((detail) => detail?.name)
+      .filter((name) => typeof name === 'string' && name);
+    return {
+      ...matchingDetail,
+      ...project,
+      path: projectPath,
+      recordNames: [...new Set(recordNames)],
+    };
+  });
 }
 
 export function decideDangerToggle(current, requested, typed, expected) {

@@ -25,6 +25,7 @@ import { adoptElement, el, releaseElement } from '../dom-helpers.js';
 import { sessionUIs } from '../session-card/card-registry.js';
 import { reparentReviewPanel } from '../sidebar/review-sidebar.js';
 import { setSelectedId } from '../sidebar/selection.js';
+import { closeSettingsSectionPicker } from '../settings-panel.js';
 import { getLastFocusedSessionId, setLastFocusedSessionId } from '../ui-prefs.js';
 import { createBoardScreen } from './board-screen.js';
 import { createTerminalScreen } from './terminal-screen.js';
@@ -453,6 +454,7 @@ export function activatePhoneShell({ sessionId } = {}) {
 export function deactivatePhoneShell() {
   if (!active) return;
   active = false;
+  closeSettingsSectionPicker({ returnFocus: false });
   // Give every borrowed element back BEFORE hiding the shell, so nothing live is left inside a hidden
   // subtree where its terminal cannot measure itself.
   terminalScreen.clear();
