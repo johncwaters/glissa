@@ -11,7 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 
-const { createMemoryStore } = require('../server/memory-store');
+const { createCanonicalProjectLookupPlanner, createMemoryStore } = require('../server/memory-store');
 const { createMemoryDb, recordToRow, rowToRecord } = require('../server/memory-db');
 const {
   resolveMemoryConfig, segmentFileName, verifyRecordSignature, withSignature,
@@ -51,6 +51,19 @@ test.afterEach(async () => {
   for (const store of openedStores.splice(0)) {
     await store.stop().catch(() => {});
   }
+});
+
+test('a canonical project lookup reuses its plan for fresh equal-content project lists', () => {
+  const planLookup = createCanonicalProjectLookupPlanner();
+  const first = planLookup({
+    project: '/repos/glissa', knownProjects: ['/repos/glissa'], hasCachedProject: false,
+    cachedProject: null, hasResolver: false,
+  });
+  const second = planLookup({
+    project: '/repos/glissa', knownProjects: ['/repos/glissa'], hasCachedProject: false,
+    cachedProject: null, hasResolver: false,
+  });
+  assert.strictEqual(second, first);
 });
 
 // json-file.js writes `<target>.tmp.<pid>.<n>` beside its target, so a read racing a rename sees one.

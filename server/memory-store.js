@@ -40,36 +40,36 @@ const MAX_DELIVERED_HASHES = 2000;
 const SEARCH_CANDIDATE_FACTOR = 10;
 const SEARCH_CANDIDATE_FLOOR = 100;
 
-/*
- * Rebuilt on every append otherwise, and the list is the same array nearly every time: one slot keyed on
- * identity is enough, and a stale entry is impossible because a new list is a new array.
- */
-let memoizedProjectList = null;
-let memoizedProjectTags = null;
-
-function knownProjectTagSet(knownProjects) {
-  if (knownProjects === memoizedProjectList) return memoizedProjectTags;
-  memoizedProjectList = knownProjects;
-  memoizedProjectTags = new Set(core.configuredProjectTags(knownProjects));
-  return memoizedProjectTags;
+function configuredProjectPathsSignature(knownProjects) {
+  return core.configuredProjectTags(knownProjects).join('\u0000');
 }
 
-function buildCanonicalProjectLookupPlan({
-  project,
-  knownProjects,
-  hasCachedProject,
-  cachedProject,
-  hasResolver,
-}) {
-  const normalized = core.normalizeProjectTag(project);
-  const configured = core.canonicalProjectPath(normalized, knownProjects);
-  if (!normalized || normalized !== configured || knownProjectTagSet(knownProjects).has(normalized)) {
-    return { canonical: configured };
-  }
-  if (hasCachedProject) return { canonical: cachedProject };
-  if (!hasResolver) return { canonical: configured };
-  return {
-    canonical: null, configured, normalized, knownProjects,
+function createCanonicalProjectLookupPlanner() {
+  let memoizedProjectPathsSignature = null;
+  let memoizedProjectTags = null;
+  let memoizedPlanSignature = null;
+  let memoizedPlan = null;
+  return ({ project, knownProjects, hasCachedProject, cachedProject, hasResolver }) => {
+    const projectPathsSignature = configuredProjectPathsSignature(knownProjects);
+    if (projectPathsSignature !== memoizedProjectPathsSignature) {
+      memoizedProjectPathsSignature = projectPathsSignature;
+      memoizedProjectTags = new Set(projectPathsSignature ? projectPathsSignature.split('\u0000') : []);
+    }
+    const planSignature = [project, projectPathsSignature, hasCachedProject, cachedProject, hasResolver].join('\u0000');
+    if (planSignature === memoizedPlanSignature) return memoizedPlan;
+    const commit = (plan) => {
+      memoizedPlan = plan;
+      memoizedPlanSignature = planSignature;
+      return plan;
+    };
+    const normalized = core.normalizeProjectTag(project);
+    const configured = core.canonicalProjectPath(normalized, knownProjects);
+    if (!normalized || normalized !== configured || memoizedProjectTags.has(normalized)) {
+      return commit({ canonical: configured });
+    }
+    if (hasCachedProject) return commit({ canonical: cachedProject });
+    if (!hasResolver) return commit({ canonical: configured });
+    return commit({ canonical: null, configured, normalized, knownProjects });
   };
 }
 
@@ -93,6 +93,7 @@ function createMemoryStore(deps = {}) {
     resolveProjectPath = null,
     resolveProjectPathSync = null,
   } = deps;
+  const buildCanonicalProjectLookupPlan = createCanonicalProjectLookupPlanner();
 
   if (typeof dir !== 'string' || !dir) throw new Error('createMemoryStore needs an explicit dir');
   if (typeof dbPath !== 'string' || !dbPath) throw new Error('createMemoryStore needs an explicit dbPath');
@@ -769,4 +770,4 @@ function createMemoryStore(deps = {}) {
   };
 }
 
-module.exports = { createMemoryStore, MEMORY_DIR_NAME };
+module.exports = { createCanonicalProjectLookupPlanner, createMemoryStore, MEMORY_DIR_NAME };

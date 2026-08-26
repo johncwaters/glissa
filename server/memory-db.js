@@ -60,11 +60,7 @@ const PROJECT_TAG_SCHEMA_KEY = 'memory.schema.projectTags';
 const PROJECT_TAG_SCHEMA_VERSION = 1;
 const DISTILL_CURSOR_KEY = 'memory.distill.cursorSeq';
 const DISTILL_FAILURE_KEY = 'memory.distill.failures';
-/*
- * The append ordinal a distill cursor is read against. It is a HIGH WATER MARK rather than max(seq),
- * which rowid and max() both fail to be: a forget deletes the newest row, and reusing its ordinal would
- * put a fresh record behind a cursor that has already passed it.
- */
+// A high water mark prevents a forgotten newest row from letting a new record fall behind the cursor.
 const SEQ_HIGH_KEY = 'memory.seq.high';
 
 function recordToRow(record) {
@@ -116,11 +112,7 @@ function ftsMatchExpression(terms) {
   return terms.map((term) => `"${String(term).replace(/"/g, '""')}"`).join(' OR ');
 }
 
-/*
- * CREATE TABLE IF NOT EXISTS cannot widen a table that already exists, so an existing one is altered
- * and backfilled in rowid order BEFORE the schema runs: its index over the new column comes next.
- * An absent table is left to the schema, which creates it carrying the column already.
- */
+// Existing tables need widening before the schema adds an index over the new column.
 function ensureSeqColumn(db) {
   const columns = db.prepare('PRAGMA table_info(memory_records)').all();
   if (columns.length === 0 || columns.some((column) => column.name === 'seq')) return false;
@@ -187,10 +179,7 @@ function createMemoryDb({ dbPath, busyTimeoutMs = undefined } = {}) {
     return Number.isFinite(value) ? Math.floor(value) : 0;
   }
 
-  /*
-   * Two statements, and atomic because every production caller already holds the BEGIN IMMEDIATE write
-   * lock; the row max is folded in so a hand-edited or pre-migration database cannot hand out a dead seq.
-   */
+  // The write lock and row max keep hand-edited or pre-migration databases from receiving a dead seq.
   function allocateSeq() {
     const next = Math.max(readMetaInteger(SEQ_HIGH_KEY), Number(statements.maxSeq.get().high) || 0) + 1;
     statements.writeMeta.run(SEQ_HIGH_KEY, String(next));

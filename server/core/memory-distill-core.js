@@ -239,11 +239,7 @@ function recordSeq(record) {
   return Number.isInteger(record?.seq) ? record.seq : 0;
 }
 
-/**
- * What one INCREMENTAL run reads: the projectable records appended above the cursor, oldest first. The
- * slice is safe where a full-canon slice was not, because the result MERGES into the published claims
- * rather than replacing them, so an unread record keeps the claim it already has.
- */
+// Delta results merge into standing claims, so unread records retain their existing claims.
 function selectDeltaForPrompt(records, {
   sinceSeq = 0, limit = MAX_PROMPT_RECORDS, maxChars = MAX_PROMPT_CHARS,
 } = {}) {
@@ -300,10 +296,7 @@ function claimsByProject(claims) {
   return counts;
 }
 
-/**
- * Compaction: a project whose rendered claim count crossed the threshold is re-distilled IN FULL from
- * its own records, which is the only thing that can shrink a set a merge only ever grows.
- */
+// A full project re-distill is the only operation that can shrink a claim set a merge grows.
 function decideDistillMode(published, {
   maxProjectClaims = DEFAULT_MAX_PROJECT_CLAIMS, maxChars = MAX_PROMPT_CHARS,
 } = {}) {
@@ -328,10 +321,7 @@ function renderPublishedForPrompt(claims) {
   return (Array.isArray(claims) ? claims : []).map(publishedLine).join('\n');
 }
 
-/**
- * The seed prompt for one INCREMENTAL run. Two untrusted corpora, so two markers: one fence must not be
- * closable from inside the other, and each digest is derived from the bytes it fences.
- */
+// Separate untrusted corpora need separate markers so one fence cannot close the other.
 function buildIncrementalDistillPrompt({
   published = [], records = [], resultPath, maxNewClaims = DEFAULT_MAX_NEW_CLAIMS, maxClaims = MAX_CLAIMS,
   maxClaimChars = MAX_PROJECTION_LINE_CHARS,
@@ -391,10 +381,7 @@ function opFailure(reason, detail) {
   };
 }
 
-/**
- * The whole op list, believed or refused as one, exactly as a full result is: a partial accept publishes
- * a projection nobody planned.
- */
+// Operations are accepted whole because a partial projection was never planned.
 function validateDistillOps(parsed, { records = [], published = [], maxClaims = MAX_CLAIMS } = {}) {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return opFailure('bad-result', 'the result file is not an object');
   const verdict = String(parsed.verdict || '').toUpperCase();
@@ -478,11 +465,7 @@ function lockedClaimFor(record) {
   return { ...claim, handle: claimHandle(claim) };
 }
 
-/**
- * The mechanical half of a merge, which runs with no model in it at all: a claim whose records left the
- * canon (superseded, forgotten, expunged) is pruned, and every locked record is re-synthesized verbatim
- * so the locked sweep judges the MERGED set rather than the slice one run happened to read.
- */
+// Merge prunes departed records and re-synthesizes locks so the locked sweep sees the complete claim set.
 function finalizeMergedClaims(claims, {
   records = [], previousTexts = new Set(), maxNewClaims = DEFAULT_MAX_NEW_CLAIMS, maxClaims = MAX_CLAIMS,
   lockedTouched = [],
@@ -577,13 +560,7 @@ function decideDistillRun({
   // Measured against the last DISTILLED build: a fallback publish carries no distilledAt, so an
   // expunge or a fresh enable leaves a run due rather than looking like a canon that never moved.
   const published = distilledAt === null ? null : manifest.watermark;
-  /*
-   * A published watermark equal to the canon's says the canon has not moved, which is FALSE while records
-   * still sit above the cursor or a project is waiting to be compacted: an incremental build measures the
-   * whole canon but reads only a window, so without this the lane would publish its first window and then
-   * call itself current forever. The interval is untouched, being the operator's rate limit on spawns
-   * rather than a staleness test.
-   */
+  // A matching watermark still has work while records exceed the cursor or a project needs compaction.
   const settled = workPending !== true;
   if (settled && published && watermark && published.hash === watermark.hash) return { run: false, reason: 'unchanged' };
   if (distilledAt !== null && now - distilledAt < intervalMs) return { run: false, reason: 'cooling' };

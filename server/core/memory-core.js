@@ -734,11 +734,7 @@ const KIND_BY_HEADING = new Map(Object.entries(KIND_HEADINGS).map(([kind, headin
 const PROJECTION_HEADING_RE = /^## (.+)$/;
 const PROJECTION_PROJECT_RE = /^Project: (.+)$/;
 
-/*
- * The published projection read back as claims. An incremental run is shown what already stands, so the
- * heading and the Project line have to survive the parse: without them a bullet carries no kind and no
- * project, and a merge would have to guess which file it came from.
- */
+// The heading and Project line preserve each bullet's kind and project when claims are read back.
 function parsePublishedClaims(text) {
   const claims = [];
   let kind = null;

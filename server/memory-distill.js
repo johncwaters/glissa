@@ -162,11 +162,7 @@ function createMemoryDistiller(deps = {}) {
     return { files, recordCount: valid.length, claimCount: claims.length };
   }
 
-  /*
-   * Only a DISTILLED build carries claims. The fallback renderer emits one bullet per record, so reading
-   * those back as standing claims would put the whole canon in the prompt the delta exists to avoid, and
-   * would freeze raw records into a claim set nobody distilled.
-   */
+  // Fallback bullets are raw records, not standing claims the incremental prompt may reuse.
   async function readPublished() {
     const manifest = await store.readPublishedManifest();
     const documents = await store.readPublishedDocuments(manifest);
@@ -179,10 +175,7 @@ function createMemoryDistiller(deps = {}) {
     };
   }
 
-  /*
-   * The cursor is a receipt for a published build, so it moves only once the bytes are on disk and
-   * re-read; anything else leaves the delta to be read again, narrower each time it keeps failing.
-   */
+  // The cursor advances only after published bytes are re-read, leaving failed deltas available again.
   async function noteOutcome({ advanced, cursor, failures }) {
     if (!advanced) {
       await store.setDistillFailures(failures + 1);
@@ -267,10 +260,7 @@ function createMemoryDistiller(deps = {}) {
     });
   }
 
-  /*
-   * Compaction. A merge only ever grows a project's claim set, so the one thing that can shrink it is a
-   * full re-distill of that project's own records, replacing that project's claims and nothing else.
-   */
+  // A full project re-distill is the only operation that can shrink that project's claim set.
   async function compact({
     valid, watermark, published, project, failures,
   }) {
@@ -306,10 +296,7 @@ function createMemoryDistiller(deps = {}) {
       await noteOutcome({ advanced: false, cursor: 0, failures });
       return report({ status: 'error', reason: `compaction returned ${checked.claims.length} claim(s), no fewer than the ${before} it replaced`, mode: 'full' });
     }
-    /*
-     * The net-new TEXT cap is not applied here: a full re-distill rewrites ground the projection already
-     * covers, so every line reads as new. The shrink gate above is what bounds this run instead.
-     */
+    // Full re-distills rewrite standing ground, so their shrink gate replaces the net-new cap.
     const replaced = distillCore.replaceProjectClaims(published.claims, checked.claims, project);
     const merged = distillCore.finalizeMergedClaims(replaced, {
       records: valid,
@@ -335,10 +322,7 @@ function createMemoryDistiller(deps = {}) {
     });
   }
 
-  /*
-   * The mechanical merge, run with no model in it at all: a supersession or a forget removes the records
-   * a standing claim cited, and pruning that claim needs no judgement.
-   */
+  // A supersession or forget can prune claims mechanically without a model run.
   async function reconcile({
     valid, watermark, published, cursor, failures,
   }) {
@@ -420,10 +404,7 @@ function createMemoryDistiller(deps = {}) {
       const watermark = store.watermark();
       const failures = store.distillFailures();
       const published = await readPublished();
-      /*
-       * A forget republishes the fallback build over the distilled one, which drops every standing claim;
-       * the cursor has to fall back with it, or the lane would resume mid-canon over an empty claim set.
-       */
+      // A fallback publish drops standing claims, so the cursor resets to avoid resuming mid-canon.
       const cursor = published.distilled ? store.distillCursorSeq() : 0;
       const standing = distillCore.renderPublishedForPrompt(published.claims).length;
       const delta = distillCore.selectDeltaForPrompt(valid, {
