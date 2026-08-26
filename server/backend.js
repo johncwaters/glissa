@@ -65,6 +65,7 @@ const { createVisionsDispatcher, createVisionsSpawn } = require('./visions-dispa
 const { resolveVisionsConfig } = require('./core/visions-dispatch-core');
 const { normalizeShapePath } = require('./core/visions-scope-core');
 const { createIngestLane } = require('./ingest-wiring');
+const { createVisionsSetup } = require('./visions-setup');
 const { resolveIngestConfig } = require('./core/ingest-core');
 const { createMemoryStore } = require('./memory-store');
 const { dbPathForConfig } = require('./glissa-db');
@@ -1264,6 +1265,15 @@ function createBackend(httpServer, options = {}) {
   // `memory.enabled` implies the SOURCE only, so with the ingest lane off the consumer builds its own.
   if (memoryIngest && !ingestLane?.agentLogsEnabled) memoryIngest.startOwnSource();
 
+  // Visions is one switch: the flip that arms the lane also wires every editor and writes the lanes it
+  // implies. Constructed unconditionally because it acts on the TRANSITION, in both directions.
+  const visionsSetup = createVisionsSetup({
+    getConfig: () => config,
+    configStore,
+    logger: console,
+    debug: () => configStore.getSettings().debugMode === true,
+  });
+
   const visionsDispatchConfig = visionsConfig.dispatch;
   const visionsScopeProjects = visionsEnabled
     ? resolveVisionsScopeProjects(visionsConfig.projects, config.projects)
@@ -1693,6 +1703,8 @@ function createBackend(httpServer, options = {}) {
   }
 
   void rtkInstall.maybeInstall();
+  // Boot with Visions already on re-wires the editors, which is how an upgrade reaches them.
+  void visionsSetup.maybeApply();
 
   branchGc.start();
 
@@ -1884,6 +1896,9 @@ function createBackend(httpServer, options = {}) {
     if (packsAutoRebuildEnabled) packService.restartIfConsumersChanged();
     // A save that just switched rtk on is the second install trigger (boot is the first).
     void rtkInstall.maybeInstall();
+    // Same shape for Visions: a save that switched it on wires the editors, one that switched it off
+    // takes that wiring back out.
+    void visionsSetup.maybeApply();
   }
 
   // Restart/shutdown handlers live in server-lifecycle.js so the re-entry guard, the reap-before-exit

@@ -268,8 +268,8 @@ export const SETTINGS_MAP = Object.freeze([
     settings: [
       {
         id: 'visions-enabled', path: 'visions.enabled', title: 'Enable Visions',
-        description: 'Accept local editor buffers and show findings in the Visions view.',
-        control: 'toggle', keywords: ['editor', 'findings'], defaultValue: false,
+        description: 'Wires every editor on this machine, then shows their buffers findings in the Visions view.',
+        control: 'toggle', keywords: ['editor', 'findings', 'lsp'], defaultValue: false,
       },
       {
         id: 'visions-dispatch-enabled', path: 'visions.dispatch.enabled', title: 'Enable model comments',
@@ -387,7 +387,7 @@ export const SETTINGS_MAP = Object.freeze([
       },
       {
         id: 'ingest-enabled', path: 'ingest.enabled', title: 'Enable machine context ingest',
-        description: 'Enable the local activity feed behind memory and Visions.',
+        description: 'Enable the local activity feed behind memory and Visions. Turning Visions on turns this on for you.',
         control: 'toggle', keywords: ['events', 'activity'], defaultValue: false,
       },
       {

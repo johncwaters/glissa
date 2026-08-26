@@ -1,0 +1,231 @@
+// Visions is one switch: turning it on wires every editor on the machine and turning it off unwires
+// them, because a lane whose input needs a per-editor setup chore is a lane nobody has running.
+
+'use strict';
+
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+const { execFileAsync, execSync } = require('./child-process-safe');
+const { buildVsix, extensionIdOf } = require('./core/vsix-core');
+const {
+  EDITOR_CANDIDATES, decideEditorTargets, isExtensionInstalled, visionsExtensionFiles,
+} = require('./core/editor-extension-core');
+const { relayInvocation } = require('./core/editor-setup-core');
+const { applyChanges, decideImpliedDefaults } = require('./core/visions-defaults-core');
+const { createLaneLog } = require('./lane-log');
+const { unwireEditors, wireEditors } = require('./editor-wire');
+const { resolvePathCommandMatches } = require('../session/core/spawn-command');
+
+const PACKAGE_ROOT = path.join(__dirname, '..');
+const EXTENSION_DIR = path.join(PACKAGE_ROOT, 'tools', 'vscode-visions');
+const RELAY_PATH = path.join(PACKAGE_ROOT, 'session', 'visions-relay.js');
+const LSP_CORE_PATH = path.join(PACKAGE_ROOT, 'server', 'core', 'visions-lsp-core.js');
+const CLI_PATH = path.join(PACKAGE_ROOT, 'bin', 'glissa.js');
+const EDITOR_TIMEOUT_MS = 60000;
+
+function packVsix() {
+  const manifestJson = fs.readFileSync(path.join(EXTENSION_DIR, 'package.json'), 'utf8');
+  const manifest = JSON.parse(manifestJson);
+  const vsix = buildVsix({
+    manifest,
+    extensionFiles: visionsExtensionFiles({
+      manifestJson,
+      extensionJs: fs.readFileSync(path.join(EXTENSION_DIR, 'extension.js'), 'utf8'),
+      convertJs: fs.readFileSync(path.join(EXTENSION_DIR, 'lsp-convert.js'), 'utf8'),
+      lspCoreJs: fs.readFileSync(LSP_CORE_PATH, 'utf8'),
+      relayPath: RELAY_PATH,
+    }),
+  });
+  return { manifest, vsix };
+}
+
+function missingInstallFiles() {
+  return [RELAY_PATH, LSP_CORE_PATH].filter((filePath) => !fs.existsSync(filePath));
+}
+
+function resolvedEditorPaths({ platform = process.platform, exec = execSync } = {}) {
+  const resolved = {};
+  for (const candidate of EDITOR_CANDIDATES) {
+    const matches = resolvePathCommandMatches(candidate.command, { platform, exec });
+    if (matches.length === 0) continue;
+    resolved[candidate.command] = matches[0];
+  }
+  return resolved;
+}
+
+function relayInvocationOptions({ platform = process.platform, exec = execSync } = {}) {
+  const onPath = resolvePathCommandMatches('glissa', { platform, exec }).length > 0;
+  return {
+    chosen: relayInvocation({ glissaOnPath: onPath, cliPath: CLI_PATH, nodePath: process.execPath }),
+    absolute: relayInvocation({ glissaOnPath: false, cliPath: CLI_PATH, nodePath: process.execPath }),
+    onPath,
+  };
+}
+
+function resolveRelayInvocation(options = {}) {
+  return relayInvocationOptions(options).chosen;
+}
+
+async function editorExtensions(commandPath) {
+  try {
+    const { stdout } = await execFileAsync(commandPath, ['--list-extensions'], { timeout: EDITOR_TIMEOUT_MS });
+    return stdout;
+  } catch (error) {
+    return `${error?.stdout || ''}`;
+  }
+}
+
+async function installInto(target, vsixPath, extensionId) {
+  try {
+    await execFileAsync(target.commandPath, ['--install-extension', vsixPath, '--force'], { timeout: EDITOR_TIMEOUT_MS });
+  } catch (error) {
+    const detail = String(error?.stderr || error?.message || error).trim().split('\n').pop();
+    return { ...target, ok: false, detail };
+  }
+  const installed = isExtensionInstalled(await editorExtensions(target.commandPath), extensionId);
+  if (!installed) return { ...target, ok: false, detail: 'the editor reported no error but does not list the extension' };
+  return { ...target, ok: true, detail: 'installed' };
+}
+
+async function uninstallFrom(target, extensionId) {
+  if (!isExtensionInstalled(await editorExtensions(target.commandPath), extensionId)) {
+    return { ...target, ok: true, detail: 'not installed' };
+  }
+  try {
+    await execFileAsync(target.commandPath, ['--uninstall-extension', extensionId], { timeout: EDITOR_TIMEOUT_MS });
+  } catch (error) {
+    return { ...target, ok: false, detail: String(error?.stderr || error?.message || error).trim().split('\n').pop() };
+  }
+  return { ...target, ok: true, detail: 'removed' };
+}
+
+async function installExtensions({ requested = null, resolvedByCommand = null } = {}) {
+  const { targets, reason } = decideEditorTargets({ requested, resolvedByCommand: resolvedByCommand || resolvedEditorPaths() });
+  if (targets.length === 0) return { targets: [], reason, results: [] };
+
+  const { manifest, vsix } = packVsix();
+  const extensionId = extensionIdOf(manifest);
+  const vsixPath = path.join(os.tmpdir(), `${extensionId}-${manifest.version}.vsix`);
+  fs.writeFileSync(vsixPath, vsix);
+  const results = [];
+  for (const target of targets) results.push(await installInto(target, vsixPath, extensionId));
+  return { targets, reason, results };
+}
+
+async function uninstallExtensions({ resolvedByCommand = null } = {}) {
+  const { targets } = decideEditorTargets({ resolvedByCommand: resolvedByCommand || resolvedEditorPaths() });
+  const { manifest } = packVsix();
+  const extensionId = extensionIdOf(manifest);
+  const results = [];
+  for (const target of targets) results.push(await uninstallFrom(target, extensionId));
+  return { targets, results };
+}
+
+async function wireEverything({ requested = null, dryRun = false } = {}) {
+  const missing = missingInstallFiles();
+  if (missing.length > 0) return { ok: false, reason: `missing from this install: ${missing.join(', ')}`, extensions: [], files: [] };
+  const invocation = resolveRelayInvocation();
+  const extensions = await installExtensions({ requested });
+  const files = wireEditors({ invocation, dryRun });
+  return { ok: true, reason: 'ok', invocation, extensions, files };
+}
+
+async function unwireEverything() {
+  const extensions = await uninstallExtensions();
+  const files = unwireEditors();
+  return { extensions, files };
+}
+
+// One run per transition of `visions.enabled`, and failure is a log line: an editor that could not be
+// wired must never be able to stop the lane it was for.
+function createVisionsSetup({
+  getConfig, configStore = null, logger = console, debug = false,
+  wire = wireEverything, unwire = unwireEverything,
+} = {}) {
+  const { note, warn } = createLaneLog({ prefix: '[visions-setup]', logger, debugFlag: debug });
+  // False rather than null, so a boot with Visions OFF is not a transition and unwires nothing the
+  // operator installed by hand; a boot with it ON is one, which is what keeps a wiring current.
+  let appliedState = false;
+  let inFlight = null;
+
+  function isEnabled() {
+    return getConfig()?.visions?.enabled === true;
+  }
+
+  function reportFiles(files) {
+    for (const file of files) {
+      if (file.action === 'unchanged' || file.action === 'skipped') continue;
+      if (file.action === 'failed') {
+        warn(`${file.label}: ${file.reason} (${file.filePath})`);
+        continue;
+      }
+      note(`${file.label}: ${file.action} ${file.filePath}`);
+    }
+  }
+
+  async function apply(enabled) {
+    if (!enabled) {
+      const report = await unwire();
+      reportFiles(report.files);
+      for (const result of report.extensions.results) note(`${result.label}: extension ${result.detail}`);
+      return report;
+    }
+    writeImpliedDefaults();
+    const report = await wire({});
+    if (!report.ok) {
+      warn(report.reason);
+      return report;
+    }
+    reportFiles(report.files);
+    for (const result of report.extensions.results) {
+      if (result.ok) note(`${result.label}: extension ${result.detail}`);
+      if (!result.ok) warn(`${result.label}: extension install failed: ${result.detail}`);
+    }
+    return report;
+  }
+
+  // The lanes read config at boot, so a write here reaches them on the next start; the editor wiring
+  // below is what takes effect now.
+  function writeImpliedDefaults() {
+    if (!configStore) return null;
+    const { changes } = decideImpliedDefaults(getConfig());
+    if (changes.length === 0) return null;
+    const saved = configStore.save((freshConfig) => applyChanges(freshConfig, decideImpliedDefaults(freshConfig).changes));
+    for (const change of changes) note(`config: ${change.path.join('.')} on (${change.why})`);
+    return saved;
+  }
+
+  async function maybeApply() {
+    const enabled = isEnabled();
+    if (appliedState === enabled) return null;
+    if (inFlight) return inFlight;
+    appliedState = enabled;
+    inFlight = apply(enabled)
+      .catch((error) => {
+        appliedState = null;
+        warn(`editor wiring failed: ${error.message}`);
+        return null;
+      })
+      .finally(() => {
+        inFlight = null;
+      });
+    return inFlight;
+  }
+
+  return { maybeApply };
+}
+
+module.exports = {
+  RELAY_PATH,
+  createVisionsSetup,
+  editorExtensions,
+  installExtensions,
+  packVsix,
+  relayInvocationOptions,
+  resolveRelayInvocation,
+  resolvedEditorPaths,
+  unwireEverything,
+  wireEverything,
+};
