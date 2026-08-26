@@ -51,12 +51,8 @@ function parsePortValue(value) {
   return port;
 }
 
-/**
- * The daemon's own configured port leads, with the two defaults kept behind it: a dev daemon answers on
- * Vite's 5173 while its config still says 3000, so a configured port is a better first guess than the
- * only guess. An editor config outlives the daemon it was written for, which is why nothing here is baked
- * into the command the editor spawns.
- */
+// The configured port leads but the defaults stay behind it: a dev daemon answers on Vite's 5173 while
+// its own config still says 3000.
 function resolvePortPlan(argv = [], env = process.env, configPort = null) {
   const flagIndex = argv.indexOf('--port');
   const flagPort = flagIndex >= 0 ? parsePortValue(argv[flagIndex + 1]) : null;

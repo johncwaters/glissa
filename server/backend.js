@@ -1306,10 +1306,25 @@ function createBackend(httpServer, options = {}) {
     });
   }
 
+  // `memory.enabled` implies the SOURCE only, so with the ingest lane off the consumer builds its own.
+  // Idempotent by construction (memory-ingest-wiring.js returns the standing source), which is what lets
+  // a lane rebuild call it again without stacking a second tail of the same transcripts.
+  function ensureMemorySource() {
+    if (!memoryIngest || ingestLane?.agentLogsEnabled) return;
+    memoryIngest.startOwnSource();
+  }
+
+  // The taps a live session owes a standing ingest lane. Called when a session is wired and again for
+  // every session behind a rebuilt lane; the per-session listeners themselves are registered once, in
+  // wireSessionEvents, and read whichever lane is standing.
+  function tapIngestForSession(sess) {
+    if (ingestLane?.terminalEnabled) ingestLane.attachSessionTap(sess);
+    if (ingestLane?.fsEnabled) ingestLane.noteSessionRoots(sess);
+  }
+
   let ingestLane = buildIngestLane();
   let visionsLane = buildVisionsLane();
-  // `memory.enabled` implies the SOURCE only, so with the ingest lane off the consumer builds its own.
-  if (memoryIngest && !ingestLane?.agentLogsEnabled) memoryIngest.startOwnSource();
+  ensureMemorySource();
 
   /*
    * Both lanes are rebuilt when their config moves, so the Visions switch takes effect on the save that
@@ -1324,10 +1339,7 @@ function createBackend(httpServer, options = {}) {
 
   function reattachIngest() {
     if (!ingestLane) return;
-    for (const sess of sessions.values()) {
-      if (ingestLane.terminalEnabled) ingestLane.attachSessionTap(sess);
-      if (ingestLane.fsEnabled) ingestLane.noteSessionRoots(sess);
-    }
+    for (const sess of sessions.values()) tapIngestForSession(sess);
     void ingestLane.noteRepos();
   }
 
@@ -1339,7 +1351,7 @@ function createBackend(httpServer, options = {}) {
     await Promise.allSettled(stopping);
     ingestLane = buildIngestLane();
     visionsLane = buildVisionsLane();
-    if (memoryIngest && !ingestLane?.agentLogsEnabled) memoryIngest.startOwnSource();
+    ensureMemorySource();
     reattachIngest();
     console.log(`[lanes] rebuilt: ingest ${ingestConfig.enabled ? 'on' : 'off'}, visions ${visionsConfig.enabled ? 'on' : 'off'}`);
   }
@@ -1672,7 +1684,7 @@ function createBackend(httpServer, options = {}) {
      * CONSTRUCTION. Without that, the Visions lane's own dispatch output would feed straight back into its
      * next prompt. Pinned by tests/ingest-backend.test.js.
      */
-    if (ingestLane?.terminalEnabled) ingestLane.attachSessionTap(sess);
+    tapIngestForSession(sess);
   }
 
   // Sessions are constructed dormant - no PTY spawns on boot. The user starts
