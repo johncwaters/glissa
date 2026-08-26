@@ -14,7 +14,7 @@ A zero-dependency MCP server exposing one tool, `get_company_context({ query }) 
 | `README.md` | Setup and editing instructions |
 | `_protocol-test.jsonl` | Recorded MCP protocol exchange used as a manual smoke check |
 
-The content itself lives in `context/` (`conventions.md`, engineering conventions). It used to be a context-mill source too, and is not any more: a pack assembled from this repo's own files is refused at delivery, since a session working here already loads them.
+The content itself lives in `context/` (`conventions.md`, the engineering conventions). It used to be a context-mill source too, and is not any more: a pack assembled from this repo's own files is refused at delivery, since a session working here already loads them.
 
 ## For AI Agents
 
