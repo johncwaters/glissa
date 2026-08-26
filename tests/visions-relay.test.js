@@ -4,6 +4,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { once } = require('node:events');
 const { spawn } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const WebSocket = require('ws');
 
@@ -13,7 +15,7 @@ const {
   serializeFrame,
 } = require('../server/core/visions-lsp-core');
 const {
-  CODE_ACTION_TIMEOUT_MS, SYNC_KIND_INCREMENTAL, sendWsFrame, sendWsJson,
+  CODE_ACTION_TIMEOUT_MS, SYNC_KIND_INCREMENTAL, readConfiguredPort, resolvePortPlan, sendWsFrame, sendWsJson,
 } = require('../session/visions-relay');
 
 const RELAY_PATH = path.join(__dirname, '..', 'session', 'visions-relay.js');
@@ -497,4 +499,32 @@ test('shutdown and exit terminate the relay cleanly', async () => {
     const [code] = await withTimeout(once(relay.child, 'exit'), TEST_TIMEOUT_MS, 'relay did not exit');
     assert.equal(code, 0);
   });
+});
+
+test('the port plan puts the daemon\'s configured port ahead of the defaults', () => {
+  // An explicit flag or env is a fixed answer: the operator named the daemon, so nothing else is tried.
+  assert.deepEqual(resolvePortPlan(['--port', '4100'], {}, 3000), { ports: [4100], isFixed: true });
+  assert.deepEqual(resolvePortPlan([], { GLISSA_PORT: '4100' }, 3000), { ports: [4100], isFixed: true });
+
+  // A configured port leads but does not exclude: a dev daemon answers on Vite's port with 3000 on disk.
+  assert.deepEqual(resolvePortPlan([], {}, 4100), { ports: [4100, 5173, 3000], isFixed: false });
+  assert.deepEqual(resolvePortPlan([], {}, 3000), { ports: [3000, 5173], isFixed: false });
+  assert.deepEqual(resolvePortPlan([], {}, null), { ports: [5173, 3000], isFixed: false });
+  assert.deepEqual(resolvePortPlan([], {}, 'not-a-port'), { ports: [5173, 3000], isFixed: false });
+});
+
+test('the configured port is read from the resolved config, never seeded', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-relay-config-'));
+  const configPath = path.join(dir, 'config.json');
+  fs.writeFileSync(configPath, JSON.stringify({ port: 4321, projects: [] }), 'utf8');
+  try {
+    assert.equal(readConfiguredPort({ GLISSA_CONFIG: configPath }), 4321);
+    assert.equal(readConfiguredPort({ GLISSA_CONFIG: path.join(dir, 'missing.json') }), null);
+    assert.equal(fs.existsSync(path.join(dir, 'missing.json')), false);
+
+    fs.writeFileSync(configPath, '{ not json', 'utf8');
+    assert.equal(readConfiguredPort({ GLISSA_CONFIG: configPath }), null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

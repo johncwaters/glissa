@@ -111,18 +111,16 @@ if (!isPackCommand && !isMemoryCommand && !isAgentCommand && !isVisionsCommand) 
 // path WITHOUT creating or seeding anything (the real resolver has side effects),
 // so `glissa doctor` stays safe to run.
 function resolveConfigPathReadOnly() {
-  const os = require('node:os');
   const fs = require('node:fs');
   const path = require('node:path');
-  if (process.env.GLISSA_CONFIG) {
-    const p = path.resolve(process.env.GLISSA_CONFIG);
-    return fs.existsSync(p) ? p : `${p} (set via GLISSA_CONFIG, but NOT found)`;
-  }
-  const localConfig = path.join(__dirname, '..', 'config.json');
-  if (fs.existsSync(localConfig)) return localConfig;
-  const homeConfig = path.join(os.homedir(), '.glissa', 'config.json');
-  if (fs.existsSync(homeConfig)) return homeConfig;
-  return `${homeConfig} (created on first run)`;
+  const { decideConfigPath } = require('../server/core/config-path-core');
+  const decided = decideConfigPath({
+    env: process.env,
+    packageRoot: path.join(__dirname, '..'),
+  }, (candidate) => fs.existsSync(candidate));
+  if (decided.path) return decided.path;
+  if (decided.source === 'env') return `${decided.envPath} (set via GLISSA_CONFIG, but NOT found)`;
+  return `${decided.homePath} (created on first run)`;
 }
 
 // `glissa doctor`: print a read-only diagnosis of why `glissa` may not be found

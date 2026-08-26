@@ -14,6 +14,7 @@ const {
 } = require('./core/editor-extension-core');
 const { relayInvocation } = require('./core/editor-setup-core');
 const { applyChanges, decideImpliedDefaults } = require('./core/visions-defaults-core');
+const { underTestRunner } = require('./core/db-path-guard');
 const { createLaneLog } = require('./lane-log');
 const { unwireEditors, wireEditors } = require('./editor-wire');
 const { resolvePathCommandMatches } = require('../session/core/spawn-command');
@@ -143,7 +144,7 @@ async function unwireEverything() {
 // One run per transition of `visions.enabled`, and failure is a log line: an editor that could not be
 // wired must never be able to stop the lane it was for.
 function createVisionsSetup({
-  getConfig, configStore = null, logger = console, debug = false,
+  getConfig, configStore = null, logger = console, debug = false, env = process.env,
   wire = wireEverything, unwire = unwireEverything,
 } = {}) {
   const { note, warn } = createLaneLog({ prefix: '[visions-setup]', logger, debugFlag: debug });
@@ -199,7 +200,14 @@ function createVisionsSetup({
     return saved;
   }
 
+  // A test that boots a backend with Visions on must not install extensions or rewrite the operator's
+  // own editor config, the same hazard db-path-guard refuses a home database for.
+  function isRefusedUnderTest() {
+    return underTestRunner(env) && wire === wireEverything && unwire === unwireEverything;
+  }
+
   async function maybeApply() {
+    if (isRefusedUnderTest()) return null;
     const enabled = isEnabled();
     if (appliedState === enabled) return null;
     if (inFlight) return inFlight;

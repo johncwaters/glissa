@@ -6,6 +6,7 @@ const path = require('node:path');
 const os = require('node:os');
 
 const { canonicalizePath, equalsIgnoringCaseOnWindows } = require('../shared/paths');
+const { decideConfigPath, glissaHomeDir } = require('./core/config-path-core');
 const { isPlainObject } = require('./core/usage-number-core');
 const {
   INGEST_SPEC, MEMORY_SPEC, PACK_DISTILLER_SPEC, pickMillBlock,
@@ -180,29 +181,20 @@ function restrictMode(target, mode) {
   }
 }
 
-/** The one spelling of the directory Glissa keeps runtime state in (config, pairings, recordings, built packs). */
-function glissaHomeDir() {
-  return path.join(os.homedir(), '.glissa');
-}
-
 function resolveConfigPath() {
-  // 1. Explicit --config flag (via env bridge from bin/glissa.js)
-  if (process.env.GLISSA_CONFIG) {
-    const p = path.resolve(process.env.GLISSA_CONFIG);
-    if (fs.existsSync(p)) return p;
-    console.error(`Config file not found: ${p}`);
+  const decided = decideConfigPath({
+    env: process.env,
+    homeDir: glissaHomeDir(),
+    packageRoot: path.join(__dirname, '..'),
+  }, (candidate) => fs.existsSync(candidate));
+  if (decided.path) return decided.path;
+  if (decided.source === 'env') {
+    console.error(`Config file not found: ${decided.envPath}`);
     process.exit(1);
   }
 
-  // 2. Local config (__dirname/config.json) - dev use with `node server.js` or `vite`
-  const localConfig = path.join(__dirname, '..', 'config.json');
-  if (fs.existsSync(localConfig)) return localConfig;
-
-  // 3. User home directory (~/.glissa/config.json) - installed CLI use
-  const homeConfig = path.join(glissaHomeDir(), 'config.json');
-  if (fs.existsSync(homeConfig)) return homeConfig;
-
-  // 4. None found - seed default at ~/.glissa/config.json
+  // None found - seed default at ~/.glissa/config.json
+  const homeConfig = decided.homePath;
   const homeDir = glissaHomeDir();
   fs.mkdirSync(homeDir, { recursive: true, mode: CONFIG_DIR_MODE });
   restrictMode(homeDir, CONFIG_DIR_MODE);

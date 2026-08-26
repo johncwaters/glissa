@@ -1141,9 +1141,8 @@ function createBackend(httpServer, options = {}) {
    * flag, so a lane whose sources are all off builds no adapter, holds no ring and taps nothing.
    * Constructed BEFORE the Visions lane because that lane takes this one's digest as a dependency.
    */
-  const ingestConfig = resolveIngestConfig(config.ingest);
-  const visionsConfig = resolveVisionsConfig(config.visions);
-  const visionsEnabled = visionsConfig.enabled;
+  let ingestConfig = resolveIngestConfig(config.ingest);
+  let visionsConfig = resolveVisionsConfig(config.visions);
   /*
    * The git source's watch set (docs/plan-ingestion.md, M8): the checkouts glissa's OWN project sessions
    * are working in, which is the same session-following rule the plan gives the fs source. Both halves of
@@ -1226,16 +1225,18 @@ function createBackend(httpServer, options = {}) {
     })
     : null;
 
-  const ingestLane = ingestConfig.enabled
-    ? createIngestLane({
+  function buildIngestLane() {
+    if (!ingestConfig.enabled) return null;
+    return createIngestLane({
       ...(options.ingestLaneOptions || {}),
       config: ingestConfig,
       logger: console,
       broadcast: (msg) => broadcastLocalControl(msg),
       // Feeds the M7 feedback-loop exclusion; rationale at the consuming site in ingest-wiring.js.
       laneMap: () => laneLedger.laneMap(),
-      // The M14 fan-out. Empty with memory off, and the lane is then byte-identical to the pre-M14 one.
-      agentLogConsumers: memoryIngest ? [memoryIngest.consumer] : [],
+      // The M14 fan-out. Empty with memory off, and empty once the memory lane built its OWN source: two
+      // tails of the same transcript files would ingest every line twice.
+      agentLogConsumers: memoryIngest && !memoryIngest.source ? [memoryIngest.consumer] : [],
       repoRoots: gitRepoRoots,
       // The fs source ignores the state files the daemon writes beside this path. It matters most in a
       // dev checkout, where the resolved config file is the repo's own config.json and every
@@ -1244,26 +1245,20 @@ function createBackend(httpServer, options = {}) {
       // Read per line rather than captured, because debugMode is settable from the dashboard while this
       // lane is constructed once at boot.
       debug: () => configStore.getSettings().debugMode === true,
-      /*
-       * The other half of activity-driven dispatch (docs/plan-ingestion.md, M7.5), wired only when BOTH
-       * lanes exist. Late-binding on purpose: the Visions lane is constructed below, and the first
-       * poke can only arrive a batch interval after both are up.
-       */
-      onActivity: visionsEnabled ? () => visionsLane.noteActivity() : null,
-    })
-    : null;
+      // The other half of activity-driven dispatch (docs/plan-ingestion.md, M7.5). Late-bound, so the
+      // poke follows whichever Visions lane is standing rather than the one built beside it.
+      onActivity: () => visionsLane?.noteActivity(),
+    });
+  }
 
   /*
    * Visions lane: absent config constructs nothing (docs/archive/plan-navigator.md, "Wire and
-   * trust"). The Settings dialog can persist config.visions, but this lane is constructed only at
-   * boot, so changes take effect after server restart. Its tier 3 model dispatch is a second opt-in
-   * inside that one: without config.visions.dispatch.enabled the dispatcher is never constructed, so
-   * the lane arms no dispatch timer and can spawn nothing. Its sessions get their own ephemeral map for
-   * the same reasons as the PR and distill lanes, and it is that registration (logPrefix 'visions')
-   * that puts the lane on the usage ledger.
+   * trust"). Its tier 3 model dispatch is a second opt-in inside that one: without
+   * config.visions.dispatch.enabled the dispatcher is never constructed, so the lane arms no dispatch
+   * timer and can spawn nothing. Its sessions get their own ephemeral map for the same reasons as the
+   * PR and distill lanes, and it is that registration (logPrefix 'visions') that puts the lane on the
+   * usage ledger.
    */
-  // `memory.enabled` implies the SOURCE only, so with the ingest lane off the consumer builds its own.
-  if (memoryIngest && !ingestLane?.agentLogsEnabled) memoryIngest.startOwnSource();
 
   // Visions is one switch: the flip that arms the lane also wires every editor and writes the lanes it
   // implies. Constructed unconditionally because it acts on the TRANSITION, in both directions.
@@ -1274,13 +1269,11 @@ function createBackend(httpServer, options = {}) {
     debug: () => configStore.getSettings().debugMode === true,
   });
 
-  const visionsDispatchConfig = visionsConfig.dispatch;
-  const visionsScopeProjects = visionsEnabled
-    ? resolveVisionsScopeProjects(visionsConfig.projects, config.projects)
-    : null;
   const visionsSessions = new Map();
-  const visionsLane = visionsEnabled
-    ? createVisionsWiring({
+  function buildVisionsLane() {
+    if (!visionsConfig.enabled) return null;
+    const visionsDispatchConfig = visionsConfig.dispatch;
+    return createVisionsWiring({
       logger: console,
       broadcast: (msg) => broadcastControl(msg),
       // Same reason as the ingest lane above: the setting moves, the lane is built once.
@@ -1299,21 +1292,68 @@ function createBackend(httpServer, options = {}) {
           model: visionsDispatchConfig.model,
         })
         : null,
-      // One cross-source context section in the dispatch prompt. Null with no ingest lane, and the
-      // prompt is then byte-identical to the pre-M6 one.
-      contextDigest: ingestLane ? ingestLane.buildDigest : null,
-      // The movement signal beside it: new events, never aging timestamps. Null with no ingest lane, and
-      // the gate then decides exactly what it decided before M7.5.
-      contextSeq: ingestLane ? ingestLane.latestSeq : null,
-      scopeProjects: visionsScopeProjects,
+      // One cross-source context section in the dispatch prompt, late-bound like the poke above: with no
+      // ingest lane standing both answer null, and the prompt and gate are then the pre-M6 ones.
+      contextDigest: (...args) => ingestLane?.buildDigest(...args) ?? null,
+      contextSeq: () => ingestLane?.latestSeq() ?? null,
+      scopeProjects: resolveVisionsScopeProjects(visionsConfig.projects, config.projects),
       // The M13 memory writers, inert on a default config because the store is then null.
       getMemoryStore: () => memoryStore,
       // Every project the machine knows, so an intent slot for a DELETED project is dropped on load.
       knownProjectIds: (Array.isArray(config.projects) ? config.projects : [])
         .map((project) => project?.id)
         .filter((id) => typeof id === 'string' && id),
-    })
-    : null;
+    });
+  }
+
+  let ingestLane = buildIngestLane();
+  let visionsLane = buildVisionsLane();
+  // `memory.enabled` implies the SOURCE only, so with the ingest lane off the consumer builds its own.
+  if (memoryIngest && !ingestLane?.agentLogsEnabled) memoryIngest.startOwnSource();
+
+  /*
+   * Both lanes are rebuilt when their config moves, so the Visions switch takes effect on the save that
+   * flipped it rather than on the next boot: `server/visions-setup.js` wires the editors at that moment,
+   * and a lane that only arrives later would leave them mirroring into nothing. Serialized like the other
+   * restartable lanes, since a second save during a rebuild would race two lanes onto one WS route.
+   */
+  let laneRestart = Promise.resolve();
+  function laneSignature() {
+    return JSON.stringify({ ingest: ingestConfig, visions: visionsConfig });
+  }
+
+  function reattachIngest() {
+    if (!ingestLane) return;
+    for (const sess of sessions.values()) {
+      if (ingestLane.terminalEnabled) ingestLane.attachSessionTap(sess);
+      if (ingestLane.fsEnabled) ingestLane.noteSessionRoots(sess);
+    }
+    void ingestLane.noteRepos();
+  }
+
+  async function rebuildLanes() {
+    // Visions first in both directions: it reads the ingest lane's digest, never the other way round.
+    const stopping = [visionsLane?.stop(), ingestLane?.stop()];
+    visionsLane = null;
+    ingestLane = null;
+    await Promise.allSettled(stopping);
+    ingestLane = buildIngestLane();
+    visionsLane = buildVisionsLane();
+    if (memoryIngest && !ingestLane?.agentLogsEnabled) memoryIngest.startOwnSource();
+    reattachIngest();
+    console.log(`[lanes] rebuilt: ingest ${ingestConfig.enabled ? 'on' : 'off'}, visions ${visionsConfig.enabled ? 'on' : 'off'}`);
+  }
+
+  function restartLanesIfConfigChanged() {
+    const previousSignature = laneSignature();
+    ingestConfig = resolveIngestConfig(config.ingest);
+    visionsConfig = resolveVisionsConfig(config.visions);
+    if (laneSignature() === previousSignature) return laneRestart;
+    laneRestart = laneRestart
+      .then(() => rebuildLanes())
+      .catch((error) => console.warn(`[lanes] rebuild failed: ${error.message}`));
+    return laneRestart;
+  }
 
   // Context-pack auto-rebuild (server/pack-service.js): watchers on each spec's source roots plus a
   // fallback sweep. Started at boot below unless config.packsAutoRebuild is false, stopped in
@@ -1897,8 +1937,9 @@ function createBackend(httpServer, options = {}) {
     // A save that just switched rtk on is the second install trigger (boot is the first).
     void rtkInstall.maybeInstall();
     // Same shape for Visions: a save that switched it on wires the editors, one that switched it off
-    // takes that wiring back out.
+    // takes that wiring back out. The lanes behind it move on the same save.
     void visionsSetup.maybeApply();
+    void restartLanesIfConfigChanged();
   }
 
   // Restart/shutdown handlers live in server-lifecycle.js so the re-entry guard, the reap-before-exit
@@ -2286,9 +2327,9 @@ function createBackend(httpServer, options = {}) {
     }
     // Cancels the batch timer and detaches every session tap; null whenever the lane is off. Ahead of
     // the Visions lane only because the taps ride sessions already destroyed above.
-    if (ingestLane) stoppers.add('ingest', () => ingestLane.stop());
+    stoppers.add('ingest', () => ingestLane?.stop());
     // Drops every mirrored buffer and its pending sweep timer; null whenever the lane is off.
-    if (visionsLane) stoppers.add('visions', () => visionsLane.stop());
+    stoppers.add('visions', () => visionsLane?.stop());
     // Before the store: they drain their queued writes THROUGH that store.
     if (memoryIngest) stoppers.add('memory-ingest', () => memoryIngest.stop());
     if (memoryDistiller) stoppers.add('memory-distill', () => memoryDistiller.stop());

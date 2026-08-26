@@ -1,5 +1,8 @@
 'use strict';
 
+const fs = require('node:fs');
+const path = require('node:path');
+
 const WebSocket = require('ws');
 
 const {
@@ -18,6 +21,7 @@ const {
   listDocs,
   uriOfParams,
 } = require('../server/core/visions-buffer-core');
+const { decideConfigPath, glissaHomeDir } = require('../server/core/config-path-core');
 const {
   MAX_DAEMON_FRAME_BYTES,
   daemonMessage,
@@ -47,7 +51,13 @@ function parsePortValue(value) {
   return port;
 }
 
-function resolvePortPlan(argv = [], env = process.env) {
+/**
+ * The daemon's own configured port leads, with the two defaults kept behind it: a dev daemon answers on
+ * Vite's 5173 while its config still says 3000, so a configured port is a better first guess than the
+ * only guess. An editor config outlives the daemon it was written for, which is why nothing here is baked
+ * into the command the editor spawns.
+ */
+function resolvePortPlan(argv = [], env = process.env, configPort = null) {
   const flagIndex = argv.indexOf('--port');
   const flagPort = flagIndex >= 0 ? parsePortValue(argv[flagIndex + 1]) : null;
   if (flagPort !== null) return { ports: [flagPort], isFixed: true };
@@ -55,7 +65,30 @@ function resolvePortPlan(argv = [], env = process.env) {
   const envPort = parsePortValue(env.GLISSA_PORT);
   if (envPort !== null) return { ports: [envPort], isFixed: true };
 
-  return { ports: DEFAULT_PORTS.slice(), isFixed: false };
+  const configured = parsePortValue(configPort);
+  if (configured === null) return { ports: DEFAULT_PORTS.slice(), isFixed: false };
+  return { ports: [configured, ...DEFAULT_PORTS.filter((port) => port !== configured)], isFixed: false };
+}
+
+// Read-only: the relay runs inside somebody's editor and must never seed or rewrite the operator's config.
+function readConfiguredPort(env = process.env, fsApi = fs) {
+  const decided = decideConfigPath({
+    env,
+    homeDir: glissaHomeDir(),
+    packageRoot: path.join(__dirname, '..'),
+  }, (candidate) => {
+    try {
+      return fsApi.existsSync(candidate);
+    } catch {
+      return false;
+    }
+  });
+  if (!decided.path) return null;
+  try {
+    return JSON.parse(fsApi.readFileSync(decided.path, 'utf8'))?.port ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function nextDelayMs(currentDelayMs) {
@@ -138,7 +171,7 @@ function createRelay({
   stdout = process.stdout,
   stderr = process.stderr,
 } = {}) {
-  const portPlan = resolvePortPlan(argv, env);
+  const portPlan = resolvePortPlan(argv, env, readConfiguredPort(env));
   const docStore = createDocStore();
   let parserState = createParserState();
   let ws = null;
@@ -432,6 +465,7 @@ if (require.main === module) {
 
 module.exports = {
   APPLY_EDIT_METHOD,
+  readConfiguredPort,
   CODE_ACTION_METHOD,
   CODE_ACTION_TIMEOUT_MS,
   MAX_DAEMON_FRAME_BYTES,
