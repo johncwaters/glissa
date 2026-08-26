@@ -24,6 +24,9 @@ const MAX_HAND_CHARS = 300;
 const MAX_FINDING_LINES = 20;
 const HOUR_MS = 3600000;
 const MODEL_DIAGNOSTIC_SEVERITY_HINT = 4;
+// Comments are suggestions rather than defects, so they carry the severity below a warning: the editor
+// shows them where the carbon unit is already looking without claiming something is broken.
+const COMMENT_SEVERITY_INFORMATION = 3;
 const LINT_RULE_PATTERNS = [
   /^(?:eslint|tslint|stylelint|biome|prettier)(?:\b|[-_/])/i,
   /^(?:syntax|type(?:check)?|type-error|lint)(?:\b|[-_/])/i,
@@ -300,10 +303,42 @@ function sanitizeModelDiagnostics(raw, { text = '', lineCount = countLines(text)
   return { diagnostics, lintDomainDropped };
 }
 
-function mergeDiagnostics(ruleDiagnostics, modelDiagnostics) {
-  const rules = Array.isArray(ruleDiagnostics) ? ruleDiagnostics : [];
-  const models = Array.isArray(modelDiagnostics) ? modelDiagnostics : [];
-  return [...rules, ...models];
+function mergeDiagnostics(...diagnosticLists) {
+  const merged = [];
+  for (const list of diagnosticLists) {
+    if (!Array.isArray(list)) continue;
+    merged.push(...list);
+  }
+  return merged;
+}
+
+/**
+ * The same line-anchored comments the Visions tab renders, as editor diagnostics. A dispatch that only
+ * ever reached the dashboard is one the carbon unit reads after the fact, and the buffer is where the
+ * work is; the tab keeps its own copy, so this widens where they show rather than moving them.
+ */
+function commentsToLsp(comments, { text = '' } = {}) {
+  const lines = lineTextsOf(text);
+  const entries = Array.isArray(comments) ? comments : [];
+  const diagnostics = [];
+  for (const entry of entries) {
+    const lineIndex = Number(entry?.line) - 1;
+    if (!Number.isInteger(lineIndex) || lineIndex < 0) continue;
+    const message = typeof entry?.message === 'string' ? entry.message : '';
+    if (!message) continue;
+    const lineText = lines[lineIndex] || '';
+    diagnostics.push({
+      range: {
+        start: { line: lineIndex, character: 0 },
+        end: { line: lineIndex, character: Math.max(lineText.length, 1) },
+      },
+      severity: COMMENT_SEVERITY_INFORMATION,
+      source: 'glissa-visions',
+      code: 'comment',
+      message,
+    });
+  }
+  return diagnostics;
 }
 
 // The standing tier 2 findings, as the one-line-each summary the prompt carries.
@@ -459,6 +494,7 @@ module.exports = {
   decidePromptSize,
   forgetUri,
   hashText,
+  commentsToLsp,
   mergeDiagnostics,
   modelDiagnosticsToLsp,
   recordDispatch,

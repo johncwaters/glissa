@@ -826,6 +826,29 @@ test('model diagnostics publish and broadcast as a union after rule diagnostics'
   assert.deepEqual(wiring.documentsSnapshot()[0].diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word', 'model']);
 });
 
+test('a dispatch comment reaches the editor and dies with the next keystroke', async (t) => {
+  const { wiring, timers, sent, lsp } = dispatchingConnection({
+    respond: () => Promise.resolve({ verdict: 'COMMENTS', comments: [COMMENT], reason: null }),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  const withComment = sent.filter((message) => message.type === 'publishDiagnostics').at(-1).params.diagnostics;
+  const comment = withComment.find((diagnostic) => diagnostic.code === 'comment');
+  assert.equal(comment.message, COMMENT.message);
+  assert.equal(comment.range.start.line, COMMENT.line - 1);
+  // Information, not a warning: a suggestion must not read as something broken.
+  assert.equal(comment.severity, 3);
+
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, `${REPEATED_WORD_MARKDOWN}\nmore text\n`));
+  runSweepThenDispatch(timers);
+  const afterEdit = sent.filter((message) => message.type === 'publishDiagnostics').at(-1).params.diagnostics;
+  assert.equal(afterEdit.some((diagnostic) => diagnostic.code === 'comment'), false);
+});
+
 test('lint-domain model diagnostics are dropped with a debug count only', async (t) => {
   const { wiring, timers, sent, notes, lsp } = dispatchingConnection({
     debug: () => true,
@@ -1061,7 +1084,7 @@ test('shared uri state survives until its last owner closes', async (t) => {
 
   harness.lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
   const [document] = harness.wiring.documentsSnapshot();
-  assert.deepEqual(document.diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word']);
+  assert.deepEqual(document.diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word', 'comment']);
   assert.deepEqual(document.comments, [COMMENT]);
   assert.equal(document.hand, 'the document mixes two structures');
 

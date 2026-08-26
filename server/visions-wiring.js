@@ -15,6 +15,7 @@ const {
   decidePromptSize,
   forgetUri,
   hashText,
+  commentsToLsp,
   mergeDiagnostics,
   recordDispatch,
   resolveDispatchConfig,
@@ -225,6 +226,9 @@ function createVisionsWiring({
    * kind without the other, and the tab renders them as two different things.
    */
   const commentsByUri = new Map();
+  // The same comments as LSP diagnostics, kept apart from the tab's copy because they die with the next
+  // keystroke exactly as the model diagnostics beside them do.
+  const commentDiagnosticsByUri = new Map();
   const handsByUri = new Map();
   const openOwnersByUri = new Map();
   /*
@@ -358,7 +362,11 @@ function createVisionsWiring({
   }
 
   function unionDiagnosticsFor(uri) {
-    return mergeDiagnostics(ruleFindingsByUri.get(uri) || [], modelDiagnosticsByUri.get(uri) || []);
+    return mergeDiagnostics(
+      ruleFindingsByUri.get(uri) || [],
+      modelDiagnosticsByUri.get(uri) || [],
+      commentDiagnosticsByUri.get(uri) || [],
+    );
   }
 
   function recordRuleFindings(uri, diagnostics) {
@@ -391,8 +399,10 @@ function createVisionsWiring({
     return { changed: hadDiagnostics || diagnostics.length > 0, diagnostics: unionDiagnosticsFor(uri) };
   }
 
-  function dropModelDiagnostics(uri) {
+  // Both halves of a dispatch describe the text it read, so a buffer that moved invalidates both.
+  function dropDispatchDiagnostics(uri) {
     modelDiagnosticsByUri.delete(uri);
+    commentDiagnosticsByUri.delete(uri);
   }
 
   function broadcastComments(uri, comments) {
@@ -401,14 +411,20 @@ function createVisionsWiring({
   }
 
   // Wholesale replacement, like a sweep's findings: a uri with no comments is absent, never stored empty.
-  function recordComments(uri, comments) {
+  function recordComments(uri, comments, doc = null) {
     const list = Array.isArray(comments) ? comments : [];
     if (list.length === 0) commentsByUri.delete(uri);
     if (list.length > 0) commentsByUri.set(uri, list);
+    const diagnostics = commentsToLsp(list, { text: doc?.text || '' });
+    const hadDiagnostics = commentDiagnosticsByUri.has(uri);
+    if (diagnostics.length === 0) commentDiagnosticsByUri.delete(uri);
+    if (diagnostics.length > 0) commentDiagnosticsByUri.set(uri, diagnostics);
     broadcastComments(uri, list);
+    return { changed: hadDiagnostics || diagnostics.length > 0 };
   }
 
   function clearComments(uri) {
+    commentDiagnosticsByUri.delete(uri);
     if (!commentsByUri.delete(uri)) return;
     broadcastComments(uri, []);
   }
@@ -464,7 +480,7 @@ function createVisionsWiring({
   }
 
   function clearUriState(uri) {
-    dropModelDiagnostics(uri);
+    dropDispatchDiagnostics(uri);
     clearFindings(uri);
     clearComments(uri);
     clearHand(uri);
@@ -543,12 +559,13 @@ function createVisionsWiring({
     }
     if (result.reason) note(`dispatch for ${uri}: ${result.reason}`);
     const modelUpdate = recordModelDiagnostics(uri, result, doc);
-    if (modelUpdate.changed) {
-      publishDiagnosticsFrame(send, uri, modelUpdate.diagnostics);
-      recordFindings(uri, modelUpdate.diagnostics);
-    }
     const comments = result.verdict === 'COMMENTS' ? result.comments : [];
-    recordComments(uri, comments);
+    const commentUpdate = recordComments(uri, comments, doc);
+    if (modelUpdate.changed || commentUpdate.changed) {
+      const merged = unionDiagnosticsFor(uri);
+      publishDiagnosticsFrame(send, uri, merged);
+      recordFindings(uri, merged);
+    }
     const hand = handFromResult(result);
     recordHand(uri, hand);
     rememberRecords(dispatchMemoryInputs({
@@ -916,7 +933,7 @@ function createVisionsWiring({
         const result = applyDidChange(store, params);
         if (!result.applied) return changeFailureReason(uri, version, result);
         const doc = uri ? getDoc(store, uri) : null;
-        dropModelDiagnostics(uri);
+        dropDispatchDiagnostics(uri);
         // Debug only: this fires once per keystroke burst on every open buffer.
         debugNote(() => `didChange ${uri} v${version} (${result.changeCount} changes, ${result.size} chars)`);
         scheduleSweep(uri);

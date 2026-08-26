@@ -21,6 +21,13 @@ test('sweepMarkdown reports repeated second word with an exact range', () => {
   assert.equal(repeated[0].source, 'glissa-visions');
 });
 
+test('a word inside a token that starts with a digit is not a word', () => {
+  const line = 'Work kept off Codex by rule 1, or after a 1a fallback: opus is the default tier.';
+  assert.deepEqual(sweepMarkdown(line).map((diagnostic) => diagnostic.message), []);
+  assert.deepEqual(sweepMarkdown('the 3rd item and the 4th').map((diagnostic) => diagnostic.message), []);
+  assert.deepEqual(sweepMarkdown('a real a a repeat').map((diagnostic) => diagnostic.message), ['Repeated word "a"']);
+});
+
 test('sweepMarkdown skips repeated words in inline code spans', () => {
   const diagnostics = sweepMarkdown('Keep `the the` code but flag the the prose.');
   const repeated = byCode(diagnostics, 'repeated-word');

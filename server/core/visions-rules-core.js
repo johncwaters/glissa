@@ -5,7 +5,9 @@ const SOURCE = 'glissa-visions';
 const FENCE = '```';
 const FENCE_RE = /^(\s*)```/;
 const HEADING_RE = /^( {0,3})(#{1,6})(?:\s|$)/;
-const WORD_RE = /[A-Za-z][A-Za-z0-9']*/g;
+// The lookbehind is load-bearing: without it a match starts INSIDE a token that begins with a digit, so
+// "a 1a fallback" reads as the word "a" twice and the fix deletes the token beside it.
+const WORD_RE = /(?<![A-Za-z0-9'])[A-Za-z][A-Za-z0-9']*/g;
 
 function sweepMarkdown(text) {
   return sweepMarkdownWithFixes(text).diagnostics;
