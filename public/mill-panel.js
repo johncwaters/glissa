@@ -11,6 +11,7 @@
 import { createAttentionAck } from './attention-ack-core.mjs';
 import { buildPanelSection, buildStatChip, el, isPanelHidden } from './dom-helpers.js';
 import { getMillAttentionAck, setMillAttentionAck } from './ui-prefs.js';
+import { createSettingsLink } from './settings-link.js';
 import {
   DELIVER_TO_CAP_NOTE,
   DELIVER_TO_EMPTY_TEXT,
@@ -102,7 +103,10 @@ function buildTotalsSection() {
     chips.append(buildStatChip('mill', chip.label, chip.value, chip.tone));
   }
   section.append(chips);
-  section.append(buildLine('mill-meta', autoRebuildLine(_report)));
+  const autoRebuild = buildLine('mill-meta', autoRebuildLine(_report));
+  const autoRebuildLink = createSettingsLink('lanes-mill', 'packs-auto-rebuild', 'Settings');
+  autoRebuild.append(document.createTextNode(' '), autoRebuildLink);
+  section.append(autoRebuild);
   section.append(buildLine('mill-meta', distillerLine(_report)));
   for (const warning of configWarningsOf(_report)) {
     section.append(buildLine('mill-warning', warning));

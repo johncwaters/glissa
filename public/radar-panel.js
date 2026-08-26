@@ -13,6 +13,7 @@ import { sendControlRequest } from './control-ws.js';
 import { createPollAgoTicker, formatAgo, formatDuration } from './poll-ago.js';
 import { phaseLabel } from './pr-view-core.mjs';
 import { createRenderHold } from './radar-hold-core.mjs';
+import { createSettingsLink } from './settings-link.js';
 import { getRadarAttentionAck, setRadarAttentionAck } from './ui-prefs.js';
 import {
   healthAnomalyRows,
@@ -513,7 +514,10 @@ function render() {
   // Nothing configured anywhere: the bare hint, with no section chrome to make an empty board look
   // like a broken one.
   if (projects.length === 0 && investigations.length === 0 && ops.length === 0 && prs.length === 0) {
-    _root.append(el('p', 'radar-unconfigured', radarPlaceholder(_latest)));
+    const empty = el('p', 'radar-unconfigured', radarPlaceholder(_latest));
+    const link = createSettingsLink('lanes-posthog', 'posthog-enabled', 'Enable PostHog');
+    empty.append(document.createTextNode(' '), link);
+    _root.append(empty);
     return;
   }
   _root.append(buildErrorsSection(projects));

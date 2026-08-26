@@ -7,6 +7,7 @@ import { createAttentionAck } from './attention-ack-core.mjs';
 import { buildStatChip, el, externalLink, isPanelHidden, projectsOf } from './dom-helpers.js';
 import { phaseLabel, prAttentionSignature, prStatusPlaceholder, severityFor as severity, sortPrsByAttention, summarizePrs } from './pr-view-core.mjs';
 import { createPollAgoTicker } from './poll-ago.js';
+import { createSettingsLink } from './settings-link.js';
 import { getPrsAttentionAck, setPrsAttentionAck } from './ui-prefs.js';
 
 let _latest = null;
@@ -104,7 +105,10 @@ function render() {
   _pollTicker.reset();
   const projects = projectsOf(_latest);
   if (projects.length === 0) {
-    _root.append(el('p', 'pr-unconfigured', prStatusPlaceholder(_latest)));
+    const empty = el('p', 'pr-unconfigured', prStatusPlaceholder(_latest));
+    const link = createSettingsLink('lanes-unattended', 'pr-review-enabled', 'Enable PR review');
+    empty.append(document.createTextNode(' '), link);
+    _root.append(empty);
     return;
   }
   for (const project of projects) _root.append(buildProject(project));

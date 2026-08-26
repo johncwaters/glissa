@@ -31,6 +31,19 @@ function settingsOf(map) {
   return map.flatMap((section) => section.settings || []);
 }
 
+function isReadOnlySetting(setting) {
+  return setting.fileOnly || setting.control === 'readonly' || setting.control === 'pack-toggles';
+}
+
+function searchTokens(value) {
+  return String(value || '').toLowerCase().match(/[a-z0-9]+/g) || [];
+}
+
+function fieldScore(tokens, queryTokens, weight) {
+  if (!queryTokens.every((token) => tokens.includes(token))) return 0;
+  return queryTokens.length * weight;
+}
+
 function valuesEqual(left, right) {
   if (Object.is(left, right)) return true;
   if (Array.isArray(left) && Array.isArray(right)) {
@@ -73,6 +86,7 @@ function hydratedPayload(values) {
 export function hydrateFromSettings(map, settingsPayload = {}) {
   const values = {};
   for (const setting of settingsOf(map)) {
+    if (isReadOnlySetting(setting)) continue;
     if (setting.path.startsWith('pref:')) {
       const preferenceName = setting.path.slice(5);
       const preferenceValue = settingsPayload.prefs?.[preferenceName] ?? settingsPayload[setting.path];
@@ -117,6 +131,7 @@ export function rehydratePreservingDirtySections(
 
 export function collectDirtyBlocks(map, original, edited) {
   const changedSettings = settingsOf(map).filter((setting) => {
+    if (isReadOnlySetting(setting)) return false;
     if (setting.path.startsWith('pref:')) return false;
     return !valuesEqual(original[setting.path], edited[setting.path]);
   });
@@ -191,6 +206,7 @@ function posthogProjectsError(value) {
 export function validateLocally(map, edited, settingsRanges = {}) {
   const errors = {};
   for (const setting of settingsOf(map)) {
+    if (isReadOnlySetting(setting)) continue;
     let error = null;
     if (setting.control === 'number') error = numberError(setting, edited[setting.path], settingsRanges);
     if (setting.valueKind === 'posthog-projects') error = posthogProjectsError(edited[setting.path]);
@@ -209,6 +225,138 @@ export function sectionsByLevel(map) {
     grouped[section.level].push(section);
   }
   return grouped;
+}
+
+export function scoreSettingsSearch(map, query) {
+  const queryTokens = searchTokens(query);
+  if (queryTokens.length === 0) return [];
+  const results = [];
+  for (const section of map) {
+    const sectionTokens = searchTokens(section.title);
+    for (const setting of section.settings || []) {
+      const titleScore = fieldScore(searchTokens(setting.title), queryTokens, 1000);
+      const keywordScore = fieldScore(searchTokens((setting.keywords || []).join(' ')), queryTokens, 100);
+      const sectionScore = fieldScore(sectionTokens, queryTokens, 10);
+      const descriptionScore = fieldScore(searchTokens(setting.description), queryTokens, 1);
+      const score = titleScore + keywordScore + sectionScore + descriptionScore;
+      if (score === 0) continue;
+      results.push({ section, setting, score });
+    }
+  }
+  return results
+    .sort((left, right) => right.score - left.score
+      || left.section.title.localeCompare(right.section.title)
+      || left.setting.title.localeCompare(right.setting.title))
+    .slice(0, 30);
+}
+
+export function parseSettingsHash(hash, map, aliases = {}) {
+  const match = /^#settings\/([^/]+)(?:\/([^/]+))?$/.exec(String(hash || ''));
+  if (!match) return null;
+  let requestedSectionId;
+  let requestedSettingId;
+  try {
+    requestedSectionId = decodeURIComponent(match[1]);
+    requestedSettingId = match[2] ? decodeURIComponent(match[2]) : null;
+  } catch {
+    return null;
+  }
+  const sectionId = aliases[requestedSectionId] || requestedSectionId;
+  const section = map.find((entry) => entry.id === sectionId);
+  if (!section) return null;
+  const setting = requestedSettingId
+    ? (section.settings || []).find((entry) => entry.id === requestedSettingId)
+    : null;
+  if (requestedSettingId && !setting) return null;
+  return {
+    sectionId,
+    settingId: setting?.id || null,
+    hash: `#settings/${sectionId}${setting ? `/${setting.id}` : ''}`,
+  };
+}
+
+export function orderSections(map) {
+  const unattendedId = 'lanes-unattended';
+  const unattended = map.find((section) => section.id === unattendedId);
+  if (!unattended) return [...map];
+  const ordered = map.filter((section) => section.id !== unattendedId);
+  const lastLaneIndex = ordered.findLastIndex((section) => section.level === 'lanes');
+  ordered.splice(lastLaneIndex + 1, 0, unattended);
+  return ordered;
+}
+
+function projectSetting(projectId, suffix, fields) {
+  return {
+    id: `project-${projectId}-${suffix}`,
+    projectId,
+    ...fields,
+  };
+}
+
+export function buildProjectSections(projects = [], packs = []) {
+  const packNames = packs
+    .filter((pack) => !pack?.group && typeof pack?.name === 'string' && pack.name)
+    .map((pack) => pack.name);
+  return projects
+    .filter((project) => typeof project?.id === 'string' && project.id)
+    .map((project) => ({
+      id: `project-${project.id}`,
+      level: 'projects',
+      title: project.name || project.id,
+      description: 'Settings scoped to this configured project.',
+      project,
+      settings: [
+        projectSetting(project.id, 'packs', {
+          path: `project:${project.id}:packs`,
+          title: 'Context packs',
+          description: 'Packs delivered on the next session spawn.',
+          control: 'pack-toggles',
+          keywords: ['context', 'delivery'],
+          options: packNames,
+          value: Array.isArray(project.packs) ? project.packs : [],
+        }),
+        projectSetting(project.id, 'agent', {
+          path: `project:${project.id}:agent`,
+          title: 'Agent',
+          description: 'Agent configured for this project.',
+          control: 'readonly',
+          keywords: ['cli', 'runtime'],
+          value: project.agent || 'Not available in the current dashboard payload',
+        }),
+        projectSetting(project.id, 'permission-mode', {
+          path: `project:${project.id}:permission-mode`,
+          title: 'Default permission mode',
+          description: 'Permission mode used for newly spawned sessions.',
+          control: 'readonly',
+          keywords: ['approval', 'sandbox'],
+          value: project.permissionMode || 'Not available in the current dashboard payload',
+        }),
+        projectSetting(project.id, 'codex-hook-trust', {
+          path: `projects.${project.id}.codexBypassHookTrust`,
+          title: 'Codex hook trust bypass',
+          description: 'Configured only on this project record.',
+          control: 'readonly',
+          keywords: ['hooks', 'codex'],
+          fileOnly: true,
+        }),
+      ],
+    }));
+}
+
+export function enrichProjectsById(projects = [], details = []) {
+  const detailsById = new Map(details
+    .filter((detail) => typeof detail?.id === 'string' && detail.id)
+    .map((detail) => [detail.id, detail]));
+  return projects.map((project) => ({
+    ...detailsById.get(project?.id),
+    ...project,
+  }));
+}
+
+export function decideDangerToggle(current, requested, typed, expected) {
+  if (requested !== true) return false;
+  if (current === true) return true;
+  return String(typed || '').trim() === String(expected || '');
 }
 
 export function resolveEntry(map, sectionId) {

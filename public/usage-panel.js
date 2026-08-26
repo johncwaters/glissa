@@ -10,6 +10,7 @@
 import { createAttentionAck } from './attention-ack-core.mjs';
 import { buildPanelSection, el, isPanelHidden } from './dom-helpers.js';
 import { createPollAgoTicker, formatAgo } from './poll-ago.js';
+import { createSettingsLink } from './settings-link.js';
 import { getUsageAttentionAck, setUsageAttentionAck } from './ui-prefs.js';
 import {
   DEFAULT_DAY_SORT,
@@ -585,6 +586,8 @@ function buildBudgetMeters() {
   const rows = budgetRows(_report);
   if (rows.length === 0) return null;
   const wrap = el('div', 'usage-budgets');
+  const settingsLink = createSettingsLink('machine-usage', 'usage-daily-budget', 'Budget settings');
+  wrap.appendChild(settingsLink);
   for (const row of rows) {
     const item = el('div', 'usage-budget');
     const head = el('div', 'usage-budget-head');

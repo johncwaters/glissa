@@ -2,13 +2,20 @@ import { SETTINGS_RANGES } from '/shared/settings-ranges.mjs';
 import { playAlertSound, SOUND_OPTIONS } from './alert-sound.js';
 import { sendControlRequest } from './control-ws.js';
 import { el } from './dom-helpers.js';
+import { DELIVER_TO_CAP_NOTE, deliverToCapHint, deliveryTargets, packDeltaFor } from './mill-view-core.mjs';
 import { ensureNotificationPermission, notificationPermission, notificationsSupported } from './notifications.js';
-import { SETTINGS_MAP } from './settings-map.mjs';
+import { SETTINGS_MAP, SETTINGS_SECTION_ALIASES } from './settings-map.mjs';
 import {
+  buildProjectSections,
   collectDirtyBlocks,
+  decideDangerToggle,
+  enrichProjectsById,
   hydrateFromSettings,
+  orderSections,
+  parseSettingsHash,
   rehydratePreservingDirtySections,
   resolveEntry,
+  scoreSettingsSearch,
   sectionsByLevel,
   validateLocally,
 } from './settings-view-core.mjs';
@@ -38,10 +45,12 @@ function resolveSettingOptions(setting) {
   };
 }
 
-const SETTINGS_VIEW_MAP = Object.freeze(SETTINGS_MAP.map((section) => ({
+const STATIC_SETTINGS_VIEW_MAP = Object.freeze(SETTINGS_MAP.map((section) => ({
   ...section,
   settings: section.settings.map(resolveSettingOptions),
 })));
+
+let SETTINGS_VIEW_MAP = orderSections(STATIC_SETTINGS_VIEW_MAP);
 
 const LEVEL_LABELS = Object.freeze({
   browser: 'This browser',
@@ -52,13 +61,19 @@ const LEVEL_LABELS = Object.freeze({
 
 let rootEl = null;
 let navigationEl = null;
+let searchEl = null;
 let pickerEl = null;
 let contentEl = null;
 let selectedSection = SETTINGS_VIEW_MAP[0];
 let settingsPayload = {};
+let projectReport = { projects: [], packs: [], maxPacksPerProject: null };
+const projectDetailsById = new Map();
 let originalValues = null;
 let editedValues = null;
 let serverError = '';
+let searchQuery = '';
+const dangerConfirmationBySettingId = new Map();
+let dangerConfirmationFocusSettingId = null;
 
 function browserPreferences() {
   return {
@@ -75,6 +90,7 @@ function hydrate(payload) {
 }
 
 function settingValue(setting) {
+  if (setting.control === 'readonly' || setting.control === 'pack-toggles') return setting.value;
   return editedValues?.[setting.path] ?? setting.defaultValue;
 }
 
@@ -83,6 +99,46 @@ function sectionIsDirty(section) {
     if (setting.path.startsWith('pref:')) return false;
     return JSON.stringify(originalValues?.[setting.path]) !== JSON.stringify(editedValues?.[setting.path]);
   });
+}
+
+function settingsHash(sectionId, settingId = null) {
+  return `#settings/${encodeURIComponent(sectionId)}${settingId ? `/${encodeURIComponent(settingId)}` : ''}`;
+}
+
+function replaceSettingsHash(sectionId, settingId = null) {
+  history.replaceState(history.state, '', settingsHash(sectionId, settingId));
+}
+
+function flashSetting(settingId) {
+  requestAnimationFrame(() => {
+    const heading = document.getElementById(settingId);
+    const row = heading?.closest('.settings-view-setting');
+    if (!row) return;
+    row.scrollIntoView({ block: 'center' });
+    row.classList.remove('settings-view-setting-flash');
+    requestAnimationFrame(() => row.classList.add('settings-view-setting-flash'));
+  });
+}
+
+function rebuildSettingsMap() {
+  const previousSectionId = selectedSection?.id;
+  const projectSections = buildProjectSections(projectReport.projects, projectReport.packs);
+  SETTINGS_VIEW_MAP = orderSections([...STATIC_SETTINGS_VIEW_MAP, ...projectSections]);
+  selectedSection = resolveEntry(SETTINGS_VIEW_MAP, selectedSection?.id);
+  if (previousSectionId === selectedSection?.id) return;
+  dangerConfirmationBySettingId.clear();
+  dangerConfirmationFocusSettingId = null;
+}
+
+function rememberProjectDetails(projects) {
+  for (const project of Array.isArray(projects) ? projects : []) {
+    if (typeof project?.id !== 'string' || !project.id) continue;
+    projectDetailsById.set(project.id, {
+      ...projectDetailsById.get(project.id),
+      ...project,
+    });
+  }
+  projectReport.projects = enrichProjectsById(projectReport.projects, [...projectDetailsById.values()]);
 }
 
 function renderShortcutGroups(container) {
@@ -169,6 +225,7 @@ function inputMinimum(setting, range) {
 }
 
 function renderToggle(setting) {
+  const wrapper = el('div', 'settings-view-toggle-wrap');
   const label = el('label', 'settings-view-toggle');
   const input = el('input', 'settings-view-checkbox');
   input.type = 'checkbox';
@@ -178,9 +235,43 @@ function renderToggle(setting) {
     input.disabled = true;
   }
   input.setAttribute('aria-labelledby', setting.id);
-  input.addEventListener('change', () => setEditedValue(setting, input.checked));
+  input.addEventListener('change', () => {
+    if (!setting.dangerConfirmation) {
+      setEditedValue(setting, input.checked);
+      return;
+    }
+    const typed = dangerConfirmationBySettingId.get(setting.id) || '';
+    const next = decideDangerToggle(settingValue(setting), input.checked, typed, setting.dangerConfirmation);
+    if (next === input.checked) {
+      dangerConfirmationBySettingId.delete(setting.id);
+      setEditedValue(setting, next);
+      return;
+    }
+    dangerConfirmationBySettingId.set(setting.id, typed);
+    dangerConfirmationFocusSettingId = setting.id;
+    renderContent();
+  });
   label.append(input, el('span', 'settings-view-toggle-state', input.checked ? 'On' : 'Off'));
-  return label;
+  wrapper.appendChild(label);
+  if (!setting.dangerConfirmation || input.checked || !dangerConfirmationBySettingId.has(setting.id)) return wrapper;
+  const confirmation = el('input', 'settings-view-input settings-view-danger-confirm');
+  confirmation.type = 'text';
+  confirmation.value = dangerConfirmationBySettingId.get(setting.id) || '';
+  confirmation.placeholder = `Type ${setting.dangerConfirmation}`;
+  confirmation.setAttribute('aria-label', `Type ${setting.dangerConfirmation} to confirm`);
+  confirmation.addEventListener('input', () => {
+    dangerConfirmationBySettingId.set(setting.id, confirmation.value);
+    const next = decideDangerToggle(false, true, confirmation.value, setting.dangerConfirmation);
+    if (!next) return;
+    dangerConfirmationBySettingId.delete(setting.id);
+    setEditedValue(setting, true);
+  });
+  wrapper.appendChild(confirmation);
+  if (dangerConfirmationFocusSettingId === setting.id) {
+    dangerConfirmationFocusSettingId = null;
+    requestAnimationFrame(() => confirmation.focus());
+  }
+  return wrapper;
 }
 
 function renderInput(setting) {
@@ -287,7 +378,60 @@ function renderProjects(setting) {
   return wrapper;
 }
 
+function renderFileOnly(setting) {
+  const block = el('div', 'settings-view-file-only');
+  block.append(el('code', 'settings-view-key-path', setting.path));
+  block.append(el('span', 'settings-view-file-caption', 'Configured in config.json'));
+  return block;
+}
+
+function renderReadonly(setting) {
+  return el('div', 'settings-readonly', setting.value || 'Not configured');
+}
+
+function renderPackToggles(setting) {
+  const wrapper = el('div', 'settings-view-projects');
+  if (setting.options.length === 0) wrapper.appendChild(el('div', 'settings-empty', 'No packs are available.'));
+  for (const packName of setting.options) {
+    const target = deliveryTargets(projectReport, { name: packName })
+      .find((candidate) => candidate.id === setting.projectId);
+    if (!target) continue;
+    const label = el('label', 'settings-view-project-choice');
+    const input = el('input', 'settings-view-checkbox');
+    input.type = 'checkbox';
+    input.checked = target.checked;
+    input.disabled = target.disabled;
+    input.addEventListener('change', async () => {
+      input.disabled = true;
+      try {
+        const message = await sendControlRequest('set-project-packs', {
+          ...packDeltaFor(target, packName),
+        });
+        if (message.ok === true) return;
+        input.checked = target.checked;
+        input.disabled = target.disabled;
+        serverError = message.error || 'Could not change pack delivery.';
+        renderContent();
+      } catch (error) {
+        input.checked = target.checked;
+        input.disabled = target.disabled;
+        serverError = error.message || 'Could not change pack delivery.';
+        renderContent();
+      }
+    });
+    label.append(input, document.createTextNode(packName));
+    if (target.disabled) label.appendChild(el('span', 'mill-deliver-note', DELIVER_TO_CAP_NOTE));
+    wrapper.appendChild(label);
+  }
+  const capHint = deliverToCapHint(projectReport);
+  if (capHint) wrapper.appendChild(el('div', 'settings-readonly', capHint));
+  return wrapper;
+}
+
 function renderControl(setting) {
+  if (setting.fileOnly) return renderFileOnly(setting);
+  if (setting.control === 'readonly') return renderReadonly(setting);
+  if (setting.control === 'pack-toggles') return renderPackToggles(setting);
   if (setting.control === 'toggle') return renderToggle(setting);
   if (setting.control === 'number') return renderNumber(setting);
   if (setting.control === 'select') return renderSelect(setting);
@@ -303,21 +447,51 @@ function statusText(setting) {
   if (setting.id === 'desktop-notifications' && settingValue(setting) && notificationPermission() === 'denied') {
     return 'Blocked by the browser. Allow notifications for this site to enable them.';
   }
-  if (setting.id !== 'rtk-compression' || !settingValue(setting) || settingsPayload.rtkAvailable) return '';
+  if (setting.status !== 'rtk-install' || !settingValue(setting) || settingsPayload.rtkAvailable) return '';
   const install = settingsPayload.rtkInstall || { status: 'idle' };
   if (install.status === 'installing') return 'No rtk binary found. Glissa is installing it into ~/.glissa/bin now.';
   if (install.status === 'failed') return `No rtk binary found. The last install attempt failed: ${install.reason || 'unknown reason'}. Glissa retries on the next save.`;
   return 'No rtk binary found. Glissa will install it into ~/.glissa/bin when you save.';
 }
 
-function renderSetting(setting, errors) {
-  const article = el('article', 'settings-view-setting');
+function buildStatusSlot(setting) {
+  if (setting.status === 'usage-last-report') return buildUsageStatus();
+  const status = statusText(setting);
+  if (!status) return null;
+  return el('div', 'settings-view-warning settings-view-status-slot', status);
+}
+
+function renderSettingHeading(setting) {
+  const row = el('div', 'settings-view-setting-heading');
   const heading = el('h2', 'settings-view-setting-title', setting.title);
   heading.id = setting.id;
-  article.append(heading, el('p', 'settings-view-setting-description', setting.description));
+  heading.addEventListener('click', () => replaceSettingsHash(selectedSection.id, setting.id));
+  const copy = el('button', 'settings-view-copy-link', '#');
+  copy.type = 'button';
+  copy.setAttribute('aria-label', 'Copy link');
+  const copyStatus = el('span', 'settings-view-copy-status');
+  copyStatus.setAttribute('role', 'status');
+  copy.addEventListener('click', async () => {
+    const url = new URL(settingsHash(selectedSection.id, setting.id), location.href).href;
+    try {
+      await navigator.clipboard.writeText(url);
+      copyStatus.textContent = 'Link copied';
+    } catch {
+      copyStatus.textContent = 'Copy failed';
+    }
+    setTimeout(() => { copyStatus.textContent = ''; }, 1600);
+  });
+  row.append(heading, copy, copyStatus);
+  return row;
+}
+
+function renderSetting(setting, errors) {
+  const article = el('article', 'settings-view-setting');
+  article.append(renderSettingHeading(setting), el('p', 'settings-view-setting-description', setting.description));
   article.appendChild(renderControl(setting));
-  const status = statusText(setting);
-  if (status) article.appendChild(el('div', 'settings-view-warning', status));
+  if (setting.danger && setting.warning) article.appendChild(el('div', 'settings-view-warning settings-warning', setting.warning));
+  const statusSlot = buildStatusSlot(setting);
+  if (statusSlot) article.appendChild(statusSlot);
   if (errors[setting.id]) article.appendChild(el('div', 'settings-view-field-error', errors[setting.id]));
   return article;
 }
@@ -360,10 +534,14 @@ async function saveSelectedSection() {
 }
 
 function renderFooter(errors) {
-  if (selectedSection.level === 'browser' || !sectionIsDirty(selectedSection)) return null;
+  const isDirty = sectionIsDirty(selectedSection);
+  if (selectedSection.level === 'browser') return null;
+  if (!isDirty && !serverError) return null;
   const footer = el('footer', 'settings-view-footer');
   const message = el('div', 'settings-view-footer-error', serverError);
   message.setAttribute('role', 'status');
+  footer.appendChild(message);
+  if (!isDirty) return footer;
   const actions = el('div', 'settings-view-footer-actions');
   const revert = el('button', 'btn-dialog btn-dialog-cancel', 'Revert');
   revert.type = 'button';
@@ -373,12 +551,12 @@ function renderFooter(errors) {
   save.disabled = Object.keys(errors).length > 0;
   save.addEventListener('click', saveSelectedSection);
   actions.append(revert, save);
-  footer.append(message, actions);
+  footer.appendChild(actions);
   return footer;
 }
 
 function buildUsageStatus() {
-  const block = el('div', 'settings-view-status-block');
+  const block = el('div', 'settings-view-status-block settings-view-status-slot');
   block.appendChild(el('div', 'settings-section-title', 'Last report'));
   const lines = usageStatusLines();
   for (const line of lines) block.appendChild(el('div', 'settings-readonly', line));
@@ -392,6 +570,7 @@ function renderContent() {
   const titleRow = el('div', 'settings-view-title-row');
   const title = el('h1', 'settings-view-section-title', selectedSection.title);
   title.tabIndex = -1;
+  title.addEventListener('click', () => replaceSettingsHash(selectedSection.id));
   titleRow.append(title);
   titleRow.append(el('span', 'settings-view-level', LEVEL_LABELS[selectedSection.level] || selectedSection.level));
   header.append(titleRow, el('p', 'settings-view-section-description', selectedSection.description));
@@ -408,14 +587,26 @@ function renderContent() {
   const errors = validateLocally([selectedSection], editedValues, SETTINGS_RANGES);
   const stack = el('div', 'settings-view-stack');
   for (const setting of selectedSection.settings) stack.appendChild(renderSetting(setting, errors));
+  for (const link of selectedSection.unattendedLinks || []) {
+    const row = el('div', 'settings-view-unattended-link');
+    row.append(document.createTextNode(`${link.title}: `));
+    const anchor = el('a', null, 'Enabled in Unattended actions');
+    anchor.href = settingsHash('lanes-unattended', link.settingId);
+    row.appendChild(anchor);
+    stack.appendChild(row);
+  }
   contentEl.appendChild(stack);
-  if (selectedSection.id === 'machine-usage') contentEl.appendChild(buildUsageStatus());
   const footer = renderFooter(errors);
   if (footer) contentEl.appendChild(footer);
 }
 
-function selectSection(sectionId, { focusContent = false } = {}) {
+function selectSection(sectionId, { focusContent = false, settingId = null, updateHash = true } = {}) {
+  const previousSectionId = selectedSection?.id;
   selectedSection = resolveEntry(SETTINGS_VIEW_MAP, sectionId);
+  if (previousSectionId !== selectedSection?.id) {
+    dangerConfirmationBySettingId.clear();
+    dangerConfirmationFocusSettingId = null;
+  }
   serverError = '';
   for (const button of navigationEl?.querySelectorAll('[data-settings-section]') || []) {
     const selected = button.dataset.settingsSection === selectedSection.id;
@@ -423,14 +614,52 @@ function selectSection(sectionId, { focusContent = false } = {}) {
   }
   if (pickerEl) pickerEl.value = selectedSection.id;
   renderContent();
+  if (updateHash) replaceSettingsHash(selectedSection.id, settingId);
+  if (settingId) flashSetting(settingId);
   if (focusContent) contentEl?.querySelector('h1')?.focus();
+}
+
+function chooseSearchResult(searchResult) {
+  searchEl.value = '';
+  searchQuery = '';
+  renderNavigation();
+  selectSection(searchResult.section.id, { settingId: searchResult.setting.id });
+}
+
+function renderSearchResults() {
+  const results = scoreSettingsSearch(SETTINGS_VIEW_MAP, searchQuery);
+  if (results.length === 0) {
+    navigationEl.appendChild(el('div', 'settings-empty settings-view-search-empty', 'No settings found.'));
+    return;
+  }
+  const resultsBySection = new Map();
+  for (const result of results) {
+    if (!resultsBySection.has(result.section.id)) resultsBySection.set(result.section.id, []);
+    resultsBySection.get(result.section.id).push(result);
+  }
+  for (const sectionResults of resultsBySection.values()) {
+    const section = sectionResults[0].section;
+    const group = el('div', 'settings-view-nav-group');
+    group.appendChild(el('div', 'settings-view-nav-label', `${section.title} (${LEVEL_LABELS[section.level]})`));
+    for (const result of sectionResults) {
+      const button = el('button', 'settings-view-nav-item settings-view-search-result', result.setting.title);
+      button.type = 'button';
+      button.addEventListener('click', () => chooseSearchResult(result));
+      group.appendChild(button);
+    }
+    navigationEl.appendChild(group);
+  }
 }
 
 function renderNavigation() {
   const grouped = sectionsByLevel(SETTINGS_VIEW_MAP);
   navigationEl.textContent = '';
   pickerEl.textContent = '';
-  for (const level of ['browser', 'machine', 'lanes']) {
+  if (searchQuery) {
+    renderSearchResults();
+    return;
+  }
+  for (const level of ['browser', 'machine', 'lanes', 'projects']) {
     if (grouped[level].length === 0) continue;
     const group = el('div', 'settings-view-nav-group');
     group.appendChild(el('div', 'settings-view-nav-label', LEVEL_LABELS[level]));
@@ -446,23 +675,43 @@ function renderNavigation() {
     }
     navigationEl.appendChild(group);
   }
-  navigationEl.addEventListener('keydown', (event) => {
-    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
-    const buttons = [...navigationEl.querySelectorAll('[data-settings-section]')];
-    const currentIndex = buttons.indexOf(document.activeElement);
-    if (currentIndex < 0) return;
+  selectSection(selectedSection.id, { updateHash: false });
+}
+
+function handleNavigationKeydown(event) {
+  if (searchQuery && event.key === 'Enter') {
+    const first = scoreSettingsSearch(SETTINGS_VIEW_MAP, searchQuery)[0];
+    if (!first) return;
     event.preventDefault();
-    const direction = event.key === 'ArrowDown' ? 1 : -1;
-    buttons[(currentIndex + direction + buttons.length) % buttons.length].focus();
-  });
-  pickerEl.addEventListener('change', () => selectSection(pickerEl.value));
-  selectSection(selectedSection.id);
+    chooseSearchResult(first);
+    return;
+  }
+  if (event.key === 'Escape' && searchQuery) {
+    event.preventDefault();
+    searchEl.value = '';
+    searchQuery = '';
+    renderNavigation();
+    searchEl.focus();
+    return;
+  }
+  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+  const buttons = [...navigationEl.querySelectorAll('[data-settings-section]')];
+  const currentIndex = buttons.indexOf(document.activeElement);
+  if (currentIndex < 0) return;
+  event.preventDefault();
+  const direction = event.key === 'ArrowDown' ? 1 : -1;
+  buttons[(currentIndex + direction + buttons.length) % buttons.length].focus();
 }
 
 export function mountSettingsView(container) {
   rootEl = container;
   rootEl.textContent = '';
   const shell = el('div', 'settings-view-shell');
+  const sidebar = el('div', 'settings-view-sidebar');
+  searchEl = el('input', 'settings-view-search');
+  searchEl.type = 'search';
+  searchEl.placeholder = 'Search settings';
+  searchEl.setAttribute('aria-label', 'Search settings');
   navigationEl = el('nav', 'settings-view-nav');
   navigationEl.setAttribute('role', 'navigation');
   navigationEl.setAttribute('aria-label', 'Settings sections');
@@ -470,19 +719,33 @@ export function mountSettingsView(container) {
   pickerEl.setAttribute('aria-label', 'Settings section');
   contentEl = el('div', 'settings-view-content');
   contentEl.setAttribute('aria-live', 'polite');
-  shell.append(navigationEl, pickerEl, contentEl);
+  searchEl.addEventListener('input', () => {
+    searchQuery = searchEl.value.trim();
+    renderNavigation();
+  });
+  searchEl.addEventListener('keydown', handleNavigationKeydown);
+  navigationEl.addEventListener('keydown', handleNavigationKeydown);
+  pickerEl.addEventListener('change', () => selectSection(pickerEl.value));
+  sidebar.append(searchEl, navigationEl);
+  shell.append(sidebar, pickerEl, contentEl);
   rootEl.appendChild(shell);
   hydrate(settingsPayload);
   renderNavigation();
 }
 
-export function activateSettingsSection(sectionId) {
-  selectSection(sectionId);
+export function activateSettingsSection(sectionId, settingId = null) {
+  selectSection(sectionId || selectedSection.id, { settingId });
+}
+
+export function resolveSettingsTarget(hash) {
+  return parseSettingsHash(hash, SETTINGS_VIEW_MAP, SETTINGS_SECTION_ALIASES);
 }
 
 export function applySettingsBroadcast(freshSettings, { rehydrateSectionIds = [] } = {}) {
   if (!freshSettings) return;
   settingsPayload = freshSettings;
+  rememberProjectDetails(freshSettings.projectChoices);
+  rebuildSettingsMap();
   const source = { ...settingsPayload, prefs: browserPreferences() };
   const hydrated = rehydratePreservingDirtySections(
     SETTINGS_VIEW_MAP,
@@ -494,12 +757,40 @@ export function applySettingsBroadcast(freshSettings, { rehydrateSectionIds = []
   originalValues = hydrated.original;
   editedValues = hydrated.edited;
   serverError = '';
+  if (navigationEl) renderNavigation();
   renderContent();
 }
 
 export function refreshSettingsStatus() {
-  if (selectedSection.id !== 'machine-usage') return;
-  const currentStatus = contentEl?.querySelector('.settings-view-status-block');
-  if (!currentStatus) return;
-  currentStatus.replaceWith(buildUsageStatus());
+  for (const setting of selectedSection.settings || []) {
+    if (!setting.status) continue;
+    const row = document.getElementById(setting.id)?.closest('.settings-view-setting');
+    if (!row) continue;
+    const currentStatus = row?.querySelector('.settings-view-status-slot');
+    const nextStatus = buildStatusSlot(setting);
+    if (currentStatus && nextStatus) currentStatus.replaceWith(nextStatus);
+    if (currentStatus && !nextStatus) currentStatus.remove();
+    if (!currentStatus && nextStatus) row.appendChild(nextStatus);
+  }
+}
+
+export function applySettingsProjectReport(report) {
+  if (typeof report?.error === 'string' && report.error) return;
+  projectReport = {
+    projects: enrichProjectsById(
+      Array.isArray(report?.projects) ? report.projects : [],
+      [...projectDetailsById.values()],
+    ),
+    packs: Array.isArray(report?.packs) ? report.packs : [],
+    maxPacksPerProject: report?.maxPacksPerProject,
+  };
+  rebuildSettingsMap();
+  if (!rootEl) return;
+  renderNavigation();
+}
+
+export function applySettingsProjects(projects) {
+  rememberProjectDetails(projects);
+  rebuildSettingsMap();
+  if (navigationEl) renderNavigation();
 }

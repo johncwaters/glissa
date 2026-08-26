@@ -15,7 +15,7 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 | `control-ws.js` | Control WebSocket client: connection, reconnect, request/response |
 | `reconnect-backoff.mjs` | Pure `nextReconnectDelayMs(attempt, random)`: the ONE retry delay for both WS clients (500ms doubling to a 30s cap, jittered to 50-100%) |
 | `dialogs.js` | Add Session and investigation-report dialog factories |
-| `settings-map.mjs` / `settings-view-core.mjs` / `settings-panel.js` | Declarative settings source, pure hydration and dirty-block rules, primary-view DOM shell |
+| `settings-map.mjs` / `settings-view-core.mjs` / `settings-panel.js` | Declarative settings source, pure search/hash/project/dirty rules, primary-view DOM shell |
 | `render-scheduler.mjs` | Global xterm WRITE scheduler: callback-gated round-robin with per-frame budget |
 | `notifications.js` | Native Web Notifications (browser routes to Windows Action Center); replaces the server-side toast path |
 | `notify-dedupe-core.mjs` | Pure cross-tab claim (short-TTL localStorage) so exactly one open tab raises each notification |

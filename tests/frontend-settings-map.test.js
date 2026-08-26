@@ -39,6 +39,15 @@ function pathIsKnown(path) {
   return !!millSpec && specAllows(millSpec, remaining);
 }
 
+function pathExistsInDefaultConfig(path) {
+  let cursor = DEFAULT_CONFIG;
+  for (const part of path.split('.')) {
+    if (!cursor || typeof cursor !== 'object' || !Object.hasOwn(cursor, part)) return false;
+    cursor = cursor[part];
+  }
+  return true;
+}
+
 test('the map has unique ids, known paths, range-backed numbers and searchable keywords', async () => {
   const { SETTINGS_MAP } = await loadMap();
   const sectionIds = new Set();
@@ -64,4 +73,26 @@ test('the map never exposes remote and memory keys stay inside the dashboard all
     assert.equal(specAllows(MEMORY_SPEC, setting.path.split('.').slice(1)), true, setting.path);
   }
   assert.equal(pathIsKnown('visions.dispatch.quietMS'), false);
+});
+
+test('aliases resolve without shadowing canonical section ids', async () => {
+  const { SETTINGS_MAP, SETTINGS_SECTION_ALIASES } = await loadMap();
+  const sectionIds = new Set(SETTINGS_MAP.map((section) => section.id));
+  for (const [alias, sectionId] of Object.entries(SETTINGS_SECTION_ALIASES)) {
+    assert.equal(sectionIds.has(alias), false, `${alias} shadows a section id`);
+    assert.equal(sectionIds.has(sectionId), true, `${alias} resolves to missing ${sectionId}`);
+  }
+});
+
+test('file-only paths exist in defaults and never enter a dirty payload', async () => {
+  const { SETTINGS_MAP } = await loadMap();
+  const { collectDirtyBlocks, hydrateFromSettings } = await import('../public/settings-view-core.mjs');
+  const fileOnlySettings = SETTINGS_MAP.flatMap((section) => section.settings).filter((setting) => setting.fileOnly);
+  const original = hydrateFromSettings(SETTINGS_MAP, DEFAULT_CONFIG);
+  const edited = hydrateFromSettings(SETTINGS_MAP, DEFAULT_CONFIG);
+  for (const setting of fileOnlySettings) {
+    assert.equal(pathExistsInDefaultConfig(setting.path), true, setting.path);
+    edited[setting.path] = 'changed';
+  }
+  assert.deepEqual(collectDirtyBlocks(SETTINGS_MAP, original, edited), {});
 });

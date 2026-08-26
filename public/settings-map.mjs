@@ -1,3 +1,22 @@
+export const SETTINGS_SECTION_ALIASES = Object.freeze({
+  general: 'machine-general',
+  terminal: 'machine-terminal',
+  repos: 'machine-repositories',
+  repositories: 'machine-repositories',
+  advanced: 'machine-detection-sessions',
+  detection: 'machine-detection-sessions',
+  telegram: 'machine-telegram',
+  notifications: 'machine-telegram',
+  'pr-review': 'lanes-pr-review',
+  prreview: 'lanes-pr-review',
+  visions: 'lanes-visions',
+  mill: 'lanes-mill',
+  posthog: 'lanes-posthog',
+  usage: 'machine-usage',
+  shortcuts: 'browser-shortcuts',
+  unattended: 'lanes-unattended',
+});
+
 export const SETTINGS_MAP = Object.freeze([
   {
     id: 'browser-appearance',
@@ -55,16 +74,12 @@ export const SETTINGS_MAP = Object.freeze([
         control: 'toggle', keywords: ['startup', 'conversation'], defaultValue: true,
       },
       {
-        id: 'rtk-compression', path: 'rtk', title: 'rtk output compression',
-        description: 'Compress Bash output for newly spawned or restarted sessions.',
-        control: 'toggle', keywords: ['bash', 'tokens'], danger: true, defaultValue: false,
-      },
-      {
         id: 'debug-mode', path: 'debugMode', title: 'Debug mode',
         description: 'Show session-card diagnostics for state, transitions and detection signals.',
         control: 'toggle', keywords: ['diagnostics', 'state'], defaultValue: false,
       },
     ],
+    unattendedLinks: [{ settingId: 'rtk-compression', title: 'rtk output compression' }],
   },
   {
     id: 'machine-terminal',
@@ -87,6 +102,33 @@ export const SETTINGS_MAP = Object.freeze([
         description: 'Check GitHub at launch and show the update command when a newer Glissa is available.',
         control: 'toggle', keywords: ['release', 'github'], defaultValue: true,
       },
+    ],
+  },
+  {
+    id: 'machine-detection-sessions',
+    level: 'machine',
+    title: 'Detection and sessions',
+    description: 'Config-file-only detection, timing, worktree and process settings.',
+    settings: [
+      { id: 'file-detect-background-agents', path: 'detectBackgroundAgents', title: 'Detect background agents', description: 'Hold completion while tracked background work is active.', control: 'readonly', keywords: ['subagents', 'completion'], fileOnly: true },
+      { id: 'file-record-signals', path: 'recordSignals', title: 'Record structural signals', description: 'Keep forensic status and hook recordings.', control: 'readonly', keywords: ['recordings', 'diagnostics'], fileOnly: true },
+      { id: 'file-anti-slop-prompt', path: 'antiSlopPrompt', title: 'Anti-slop prompt', description: 'Append the configured quality prompt to session instructions.', control: 'readonly', keywords: ['quality', 'instructions'], fileOnly: true },
+      { id: 'file-detect-scheduled-wakeups', path: 'detectScheduledWakeups', title: 'Detect scheduled wakeups', description: 'Surface advisory wakeup timing for scheduled sessions.', control: 'readonly', keywords: ['schedule', 'sleep'], fileOnly: true },
+      { id: 'file-worktree-auto-rebase', path: 'worktreeAutoRebase', title: 'Worktree auto-rebase', description: 'Rebase eligible session worktrees when the integration branch moves.', control: 'readonly', keywords: ['git', 'branch'], fileOnly: true },
+      { id: 'file-worktree-rerere', path: 'worktreeRerere', title: 'Worktree rerere', description: 'Reuse recorded Git conflict resolutions.', control: 'readonly', keywords: ['git', 'conflicts'], fileOnly: true },
+      { id: 'file-integration-branch', path: 'integrationBranch', title: 'Integration branch', description: 'Base branch used for session worktrees.', control: 'readonly', keywords: ['git', 'merge'], fileOnly: true },
+      { id: 'file-worktree-root', path: 'worktreeRoot', title: 'Worktree root', description: 'Directory that contains session worktrees.', control: 'readonly', keywords: ['git', 'directory'], fileOnly: true },
+      { id: 'file-worktree-share', path: 'worktreeShare', title: 'Shared worktree paths', description: 'Local paths copied or linked into worktrees.', control: 'readonly', keywords: ['files', 'context'], fileOnly: true },
+      { id: 'file-port', path: 'port', title: 'Local port', description: 'Port used by the local dashboard listener.', control: 'readonly', keywords: ['server', 'listener'], fileOnly: true },
+      { id: 'file-auto-recover-seconds', path: 'autoRecoverSeconds', title: 'Auto-recovery delay', description: 'Delay before an interrupted state can recover.', control: 'readonly', keywords: ['timer', 'recovery'], fileOnly: true },
+      { id: 'file-input-grace-seconds', path: 'inputGraceSeconds', title: 'Input grace period', description: 'Grace window around operator input.', control: 'readonly', keywords: ['timer', 'prompt'], fileOnly: true },
+      { id: 'file-prompt-detection-ms', path: 'promptDetectionMs', title: 'Prompt detection delay', description: 'Timing threshold used by prompt detection.', control: 'readonly', keywords: ['timer', 'detection'], fileOnly: true },
+      { id: 'file-notify-debounce-ms', path: 'notifyDebounceMs', title: 'Notification debounce', description: 'Delay used to coalesce notification state changes.', control: 'readonly', keywords: ['timer', 'alerts'], fileOnly: true },
+      { id: 'file-phone-escalation-ms', path: 'phoneEscalationMs', title: 'Phone escalation delay', description: 'Delay before off-dashboard escalation.', control: 'readonly', keywords: ['timer', 'telegram'], fileOnly: true },
+      { id: 'file-post-turn-checks', path: 'postTurnChecks', title: 'Post-turn checks', description: 'Deterministic checks applied after eligible turns.', control: 'readonly', keywords: ['quality', 'fixes'], fileOnly: true },
+      { id: 'file-branch-gc-enabled', path: 'branchGc.enabled', title: 'Branch cleanup', description: 'Enable cleanup of eligible session branches.', control: 'readonly', keywords: ['git', 'cleanup'], fileOnly: true },
+      { id: 'file-branch-gc-stale-days', path: 'branchGc.staleDays', title: 'Branch stale days', description: 'Age threshold for orphan branch cleanup.', control: 'readonly', keywords: ['git', 'retention'], fileOnly: true },
+      { id: 'file-branch-gc-interval-ms', path: 'branchGc.intervalMs', title: 'Branch cleanup interval', description: 'Delay between branch cleanup passes.', control: 'readonly', keywords: ['git', 'schedule'], fileOnly: true },
     ],
   },
   {
@@ -134,7 +176,7 @@ export const SETTINGS_MAP = Object.freeze([
       {
         id: 'usage-enabled', path: 'usage.enabled', title: 'Track token usage',
         description: 'Read local CLI transcripts and roll them into the Usage view and session chips.',
-        control: 'toggle', keywords: ['tokens', 'cost'], defaultValue: true,
+        control: 'toggle', keywords: ['tokens', 'cost'], defaultValue: true, status: 'usage-last-report',
       },
       {
         id: 'usage-codex', path: 'usage.vendors.codex', title: 'Track Codex usage',
@@ -193,11 +235,6 @@ export const SETTINGS_MAP = Object.freeze([
     description: 'Review and merge eligible GitHub pull requests behind hard gates.',
     settings: [
       {
-        id: 'pr-review-enabled', path: 'prReview.enabled', title: 'Enable PR auto-review',
-        description: 'Review your own open pull requests and merge clean heads after green checks.',
-        control: 'toggle', keywords: ['github', 'pull request'], danger: true, defaultValue: false,
-      },
-      {
         id: 'pr-review-projects', path: 'prReview.projects', title: 'Projects to watch',
         description: 'Configured projects eligible for PR review.',
         control: 'projects', keywords: ['repositories', 'watch list'], defaultValue: [],
@@ -217,17 +254,10 @@ export const SETTINGS_MAP = Object.freeze([
         description: 'Maximum time allowed for one review session.',
         control: 'number', range: 'PR_REVIEW_TIMEOUT_RANGE', keywords: ['deadline', 'session'], defaultValue: 900,
       },
-      {
-        id: 'pr-review-merge-method', path: 'prReview.mergeMethod', title: 'Merge method',
-        description: 'GitHub merge strategy used after every gate passes.',
-        control: 'select',
-        options: [
-          { value: 'rebase', label: 'Rebase' },
-          { value: 'squash', label: 'Squash' },
-          { value: 'merge', label: 'Merge' },
-        ],
-        keywords: ['github', 'strategy'], defaultValue: 'rebase',
-      },
+    ],
+    unattendedLinks: [
+      { settingId: 'pr-review-enabled', title: 'Enable PR auto-review' },
+      { settingId: 'pr-review-merge-method', title: 'Merge method' },
     ],
   },
   {
@@ -277,16 +307,12 @@ export const SETTINGS_MAP = Object.freeze([
         control: 'text', keywords: ['claude', 'override'], defaultValue: '',
       },
       {
-        id: 'visions-auto-fix', path: 'visions.autoFix', title: 'Apply tier 1 fixes',
-        description: 'Allow Visions to edit the active buffer without asking.',
-        control: 'toggle', keywords: ['automatic', 'edits'], danger: true, defaultValue: false,
-      },
-      {
         id: 'visions-projects', path: 'visions.projects', title: 'Projects',
         description: 'Leave every project clear to accept buffers from any project.',
         control: 'projects', keywords: ['repositories', 'filter'], defaultValue: [],
       },
     ],
+    unattendedLinks: [{ settingId: 'visions-auto-fix', title: 'Apply tier 1 fixes' }],
   },
   {
     id: 'lanes-mill',
@@ -453,11 +479,6 @@ export const SETTINGS_MAP = Object.freeze([
         control: 'number', range: 'POSTHOG_ESCALATION_RANGE', keywords: ['threshold', 'severity'], defaultValue: 25,
       },
       {
-        id: 'posthog-auto-fix', path: 'posthog.autoFix', title: 'Attempt fixes for major issues',
-        description: 'Allow an isolated agent to fix an issue, push a branch and open a pull request.',
-        control: 'toggle', keywords: ['automatic', 'pull request'], danger: true, defaultValue: false,
-      },
-      {
         id: 'posthog-fix-timeout', path: 'posthog.fixTimeoutSeconds', title: 'Fix timeout (seconds)',
         description: 'Maximum time allowed for one fix session.',
         control: 'number', range: 'POSTHOG_FIX_TIMEOUT_RANGE', keywords: ['deadline', 'repair'], defaultValue: 1800,
@@ -486,6 +507,46 @@ export const SETTINGS_MAP = Object.freeze([
         id: 'posthog-traffic-baseline', path: 'posthog.trafficSpikeBaselineDays', title: 'Baseline window (days)',
         description: 'Historical window used to calculate normal hourly traffic.',
         control: 'number', range: 'POSTHOG_TRAFFIC_BASELINE_RANGE', keywords: ['history', 'analytics'], defaultValue: 7,
+      },
+    ],
+    unattendedLinks: [{ settingId: 'posthog-auto-fix', title: 'Attempt fixes for major issues' }],
+  },
+  {
+    id: 'lanes-unattended',
+    level: 'lanes',
+    title: 'Unattended actions',
+    description: 'Controls that let automated work change repositories or install executable tooling.',
+    settings: [
+      {
+        id: 'pr-review-enabled', path: 'prReview.enabled', title: 'Enable PR auto-review',
+        description: 'Review and merge eligible pull requests after every configured gate passes.',
+        control: 'toggle', keywords: ['github', 'pull request'], danger: true, dangerConfirmation: 'pr-review',
+        warning: 'Enabling this lane can merge eligible pull requests without a carbon unit present.', defaultValue: false,
+      },
+      {
+        id: 'pr-review-merge-method', path: 'prReview.mergeMethod', title: 'Merge method',
+        description: 'GitHub merge strategy used after every gate passes.',
+        control: 'select', options: [{ value: 'rebase', label: 'Rebase' }, { value: 'squash', label: 'Squash' }, { value: 'merge', label: 'Merge' }],
+        keywords: ['github', 'strategy'], danger: true,
+        warning: 'This method is applied automatically when PR review reaches its merge gate.', defaultValue: 'rebase',
+      },
+      {
+        id: 'visions-auto-fix', path: 'visions.autoFix', title: 'Apply tier 1 fixes',
+        description: 'Allow Visions to edit the active buffer without asking.',
+        control: 'toggle', keywords: ['automatic', 'edits'], danger: true, dangerConfirmation: 'visions',
+        warning: 'Enabling this control lets Visions edit eligible buffers without a carbon unit present.', defaultValue: false,
+      },
+      {
+        id: 'posthog-auto-fix', path: 'posthog.autoFix', title: 'Attempt fixes for major issues',
+        description: 'Allow an isolated agent to fix an issue, push a branch and open a pull request.',
+        control: 'toggle', keywords: ['automatic', 'pull request'], danger: true, dangerConfirmation: 'posthog',
+        warning: 'Enabling this control lets PostHog fixes commit, push and open pull requests automatically.', defaultValue: false,
+      },
+      {
+        id: 'rtk-compression', path: 'rtk', title: 'rtk output compression',
+        description: 'Compress Bash output for newly spawned or restarted sessions.',
+        control: 'toggle', keywords: ['bash', 'tokens'], danger: true, dangerConfirmation: 'rtk', status: 'rtk-install',
+        warning: 'Enabling this control permits Glissa to install the pinned rtk executable automatically.', defaultValue: false,
       },
     ],
   },

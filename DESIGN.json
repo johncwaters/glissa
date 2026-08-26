@@ -187,8 +187,8 @@
       "name": "Settings View",
       "kind": "nav",
       "refersTo": null,
-      "description": "Primary settings view with grouped level navigation, one scrolling section and a sticky dirty-state footer.",
-      "html": "<div class=\"ds-settings\"><nav class=\"ds-settings-nav\"><button aria-current=\"page\">General</button><button>Terminal</button></nav><main class=\"ds-settings-content\"><h2>General</h2><span class=\"ds-settings-level\">Machine</span></main></div>",
+      "description": "Primary settings view with exact-token search, anchored rows, grouped levels and a sticky dirty-state footer.",
+      "html": "<div class=\"ds-settings\"><nav class=\"ds-settings-nav\"><input aria-label=\"Search settings\" /><button aria-current=\"page\">General</button></nav><main class=\"ds-settings-content\"><h2>General</h2><span class=\"ds-settings-level\">Machine</span></main></div>",
       "css": ".ds-settings { display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 320px; border: 1px solid var(--border); background: var(--bg); font-family: 'Cascadia Code', monospace; } .ds-settings-nav { display: flex; flex-direction: column; gap: 3px; padding: 16px 12px; border-right: 1px solid var(--border); background: var(--bg-header); } .ds-settings-nav button { padding: 8px 10px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--text-dim); text-align: left; } .ds-settings-nav button[aria-current=\"page\"] { border-color: var(--accent); color: var(--accent); background: color-mix(in oklab, var(--accent) 8%, transparent); } .ds-settings-content { padding: 24px; color: var(--text); } .ds-settings-level { padding: 2px 6px; border: 1px solid var(--border); border-radius: 2px; color: var(--text-muted); font-size: 10px; text-transform: uppercase; }"
     }
   ],

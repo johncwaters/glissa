@@ -1,6 +1,7 @@
 // Visions view.
 
 import { el, isPanelHidden } from './dom-helpers.js';
+import { createSettingsLink } from './settings-link.js';
 import {
   INGEST_EMPTY_TEXT,
   VISIONS_EMPTY_TEXT,
@@ -56,6 +57,7 @@ let _root = null;
 let _feed = null;
 let _intentUI = null;
 let _activityCallback = null;
+let _isEnabled = null;
 // The ingest lane's cross-source timeline, newest first and already capped by the view core.
 let _activityEvents = [];
 // What the last batched frame could not fit. A count, never the events themselves.
@@ -164,10 +166,20 @@ function render({ force = false } = {}) {
   const sections = visionsSections(_findingsByUri, _commentsByUri, _handsByUri);
   // The bare hint, with no section chrome to make an idle lane look like a broken one (Radar's precedent).
   if (sections.length === 0) {
-    _feed.append(el('p', 'visions-empty', VISIONS_EMPTY_TEXT));
+    const empty = el('p', 'visions-empty', VISIONS_EMPTY_TEXT);
+    if (_isEnabled === false) {
+      const link = createSettingsLink('lanes-visions', 'visions-enabled', 'Enable Visions');
+      empty.append(document.createTextNode(' '), link);
+    }
+    _feed.append(empty);
     return;
   }
   for (const section of sections) _feed.append(buildSection(section));
+}
+
+export function applyVisionsSettings(settings) {
+  _isEnabled = settings?.visions?.enabled === true;
+  render();
 }
 
 /*

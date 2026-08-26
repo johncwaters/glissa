@@ -102,16 +102,16 @@ test('zero and negative budgets validate and serialize as no ceiling', async () 
 test('a successful save rehydrates its section while preserving other dirty sections', async () => {
   const { SETTINGS_MAP, collectDirtyBlocks, hydrateFromSettings, rehydratePreservingDirtySections } = await load();
   const currentPayload = {
-    prReview: { enabled: false },
-    visions: { enabled: false, autoFix: false },
+    prReview: { projects: [] },
+    visions: { enabled: false },
   };
   const currentOriginal = hydrateFromSettings(SETTINGS_MAP, currentPayload);
   const currentEdited = hydrateFromSettings(SETTINGS_MAP, currentPayload);
-  currentEdited['prReview.enabled'] = true;
-  currentEdited['visions.autoFix'] = true;
+  currentEdited['prReview.projects'] = ['project-1'];
+  currentEdited['visions.enabled'] = true;
   const freshPayload = {
-    prReview: { enabled: true },
-    visions: { enabled: false, autoFix: false },
+    prReview: { projects: ['project-1'] },
+    visions: { enabled: false },
   };
   const { original, edited } = rehydratePreservingDirtySections(
     SETTINGS_MAP,
@@ -121,6 +121,85 @@ test('a successful save rehydrates its section while preserving other dirty sect
     { rehydrateSectionIds: ['lanes-pr-review'] },
   );
   assert.deepEqual(collectDirtyBlocks(SETTINGS_MAP, original, edited), {
-    visions: { enabled: false, autoFix: true },
+    visions: { enabled: true },
   });
+});
+
+test('search uses exact tokens and weighted fields', async () => {
+  const { scoreSettingsSearch } = await load();
+  const map = [
+    { id: 'feature', level: 'machine', title: 'Feature flags', settings: [
+      { id: 'feature-flag', title: 'Feature flag', description: 'Controls a switch.', keywords: ['toggle', 'option'] },
+    ] },
+    { id: 'thermal', level: 'machine', title: 'Heat controls', settings: [
+      { id: 'temperature', title: 'Temperature', description: 'Controls heat output.', keywords: ['thermal', 'warmth'] },
+      { id: 'keyword-only', title: 'Cooling', description: 'Controls airflow.', keywords: ['heat', 'thermal'] },
+    ] },
+    { id: 'other', level: 'machine', title: 'Other', settings: [
+      { id: 'title-match', title: 'Heat limit', description: 'A ceiling.', keywords: ['temperature', 'ceiling'] },
+    ] },
+  ];
+  const results = scoreSettingsSearch(map, 'heat');
+  assert.equal(results.some((entry) => entry.setting.id === 'feature-flag'), false);
+  assert.equal(results.some((entry) => entry.setting.id === 'keyword-only'), true);
+  assert.equal(results[0].setting.id, 'title-match');
+  assert.ok(results.findIndex((entry) => entry.setting.id === 'temperature') > 0);
+  assert.deepEqual(scoreSettingsSearch(map, ''), []);
+});
+
+test('settings hashes resolve aliases and canonical anchors', async () => {
+  const { SETTINGS_MAP, parseSettingsHash } = await load();
+  const aliases = { general: 'machine-general' };
+  assert.deepEqual(parseSettingsHash('#settings/general/auto-resume', SETTINGS_MAP, aliases), {
+    sectionId: 'machine-general', settingId: 'auto-resume', hash: '#settings/machine-general/auto-resume',
+  });
+  assert.equal(parseSettingsHash('#settings/missing', SETTINGS_MAP, aliases), null);
+  assert.equal(parseSettingsHash('#settings/machine-general/missing', SETTINGS_MAP, aliases), null);
+});
+
+test('unattended actions sort last within the map', async () => {
+  const { orderSections } = await load();
+  const ordered = orderSections([
+    { id: 'lanes-unattended', level: 'lanes' },
+    { id: 'lanes-pr-review', level: 'lanes' },
+    { id: 'lanes-mill', level: 'lanes' },
+    { id: 'project-one', level: 'projects' },
+  ]);
+  assert.deepEqual(ordered.map((section) => section.id), [
+    'lanes-pr-review', 'lanes-mill', 'lanes-unattended', 'project-one',
+  ]);
+});
+
+test('danger toggles require an exact confirmation only when turning on', async () => {
+  const { decideDangerToggle } = await load();
+  assert.equal(decideDangerToggle(false, true, 'pr review', 'pr-review'), false);
+  assert.equal(decideDangerToggle(false, true, 'pr-review', 'pr-review'), true);
+  assert.equal(decideDangerToggle(true, false, '', 'pr-review'), false);
+});
+
+test('project sections derive pack controls and read-only records', async () => {
+  const { buildProjectSections } = await load();
+  const sections = buildProjectSections(
+    [{ id: 'p1', name: 'Glissa', packs: ['context'], agent: 'codex', permissionMode: 'default' }],
+    [{ name: 'context' }, { name: 'variant', group: 'context' }],
+  );
+  assert.equal(sections[0].id, 'project-p1');
+  assert.deepEqual(sections[0].settings[0].options, ['context']);
+  assert.equal(sections[0].settings[1].value, 'codex');
+  assert.equal(sections[0].settings[3].fileOnly, true);
+});
+
+test('two card records on one Mill project produce one project section', async () => {
+  const { buildProjectSections, enrichProjectsById } = await load();
+  const groupedProjects = [{ id: 'p1', name: 'Glissa', packs: ['context'] }];
+  const cardRecords = [
+    { id: 'p1', name: 'Glissa', path: '/repos/glissa', agent: 'codex' },
+    { id: 'p2', name: 'Glissa (2)', path: '/repos/glissa', agent: 'claude-code' },
+  ];
+  const projects = enrichProjectsById(groupedProjects, cardRecords);
+  const sections = buildProjectSections(projects, [{ name: 'context' }]);
+
+  assert.equal(sections.length, 1);
+  assert.equal(sections[0].id, 'project-p1');
+  assert.equal(sections[0].settings[1].value, 'codex');
 });

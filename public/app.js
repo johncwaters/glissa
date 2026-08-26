@@ -13,7 +13,7 @@ import { refreshFavicon } from './favicon.js';
 import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, getFocusedSessionId, isFocusActive, mountFocusView, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
 import { initFormFactor, isPhoneLayout, onLayoutChange } from './form-factor.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
-import { applyIngestActivity, applyIngestSnapshot, applyVisionsComments, applyVisionsFindings, applyVisionsFix, applyVisionsHand, applyVisionsIntent, applyVisionsSnapshot, mountVisionsView, refreshVisionsView, setVisionsActivityCallback, setVisionsProjectNames } from './visions-panel.js';
+import { applyIngestActivity, applyIngestSnapshot, applyVisionsComments, applyVisionsFindings, applyVisionsFix, applyVisionsHand, applyVisionsIntent, applyVisionsSettings, applyVisionsSnapshot, mountVisionsView, refreshVisionsView, setVisionsActivityCallback, setVisionsProjectNames } from './visions-panel.js';
 import { acknowledgeMillAttention, applyMillReport, mountMillView, refreshMillView, requestMillReport, setMillActivityCallback, setMillRequestSender } from './mill-panel.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, isPhoneScreenActive, isPhoneShellActive, mountPhoneShell, refreshPhoneBoard, setPhoneScreenAttention, showPhoneScreen } from './phone/phone-shell.js';
@@ -29,7 +29,7 @@ import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, 
 import { openConfirmDialog } from './session-card/modal.js';
 import { reconnectDataWs } from './session-card/terminal.js';
 import { showErrorToast } from './session-card/toast.js';
-import { activateSettingsSection, applySettingsBroadcast, mountSettingsView, refreshSettingsStatus } from './settings-panel.js';
+import { activateSettingsSection, applySettingsBroadcast, applySettingsProjectReport, applySettingsProjects, mountSettingsView, refreshSettingsStatus, resolveSettingsTarget } from './settings-panel.js';
 import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar, resolveSelectedSession, resyncSelectedSession, setReviewBranchSync } from './sidebar/review-sidebar.js';
 import { decideReloadOnBuild } from './server-build-core.mjs';
 import { applyTheme } from './theme.js';
@@ -96,6 +96,7 @@ setConnectionStateCallback((state, label) => {
         if (!msg.settings) return;
         applyTerminalSettings(msg.settings);
         applySettingsBroadcast(msg.settings);
+        applyVisionsSettings(msg.settings);
       })
       .catch(() => {});
     return;
@@ -126,6 +127,12 @@ function handleSnapshot(sessions, packVersions) {
   setLatestPackVersions(packVersions);
   // A session id IS its project id, which is what the Visions intent rows are keyed by.
   setVisionsProjectNames(new Map((sessions || []).filter((s) => !s.ephemeral).map((s) => [s.id, s.name])));
+  applySettingsProjects((sessions || []).filter((session) => !session.ephemeral).map((session) => ({
+    id: session.id,
+    name: session.name,
+    agent: session.agent,
+    permissionMode: session.dangerouslySkipPermissions ? 'Skip permissions' : 'Default',
+  })));
   for (const s of (sessions || [])) {
     if (!s.ephemeral) noteKnownProjectPath(s.path); // remember the project so its rail group survives a last-session close
     const exists = hasSession(s.id);
@@ -256,6 +263,7 @@ function requestUsageReportIfVisible() {
 // than costing a full spec walk per pack. The snapshot-time pull stays immediate: it is one event.
 const MILL_PULL_DEBOUNCE_MS = 500;
 let millPullTimer = null;
+let shouldResolveSettingsHashOnMillReport = location.hash.startsWith('#settings/');
 
 function requestMillReportSoon() {
   if (millPullTimer) clearTimeout(millPullTimer);
@@ -272,7 +280,14 @@ const messageHandlers = {
   // is pulled from wherever the operator is, not only while its tab is open: the report is cheap, and a
   // rebuild is exactly what turns a delivery stale, which is what the dot exists to say.
   'pack-updated':       (msg) => { notePackVersion(msg.name, msg.version); requestMillReportSoon(); },
-  'mill-report':        (msg) => applyMillReport(msg),
+  'mill-report':        (msg) => {
+    applyMillReport(msg);
+    applySettingsProjectReport(msg);
+    if (_activeView === 'settings') activateSettingsHash();
+    if (!shouldResolveSettingsHashOnMillReport) return;
+    shouldResolveSettingsHashOnMillReport = false;
+    activateSettingsHash();
+  },
   // A project's pack list changed from some dashboard. The Mill tab is a pull surface, so the broadcast
   // says the report moved and every client fetches its own; the debounce coalesces a run of toggles.
   'project-packs-updated': () => requestMillReportSoon(),
@@ -306,7 +321,7 @@ const messageHandlers = {
   'update-available':   (msg) => { showUpdateBanner(msg); applyRadarUpdate(msg); },
   'error':              (msg) => showErrorToast(msg.message, { persist: true }),
   'session-error':      (msg) => showErrorToast(`${msg.session}: ${msg.message}`, { persist: true }),
-  'settings-updated':   (msg) => { if (msg.settings) { applyTerminalSettings(msg.settings); applySettingsBroadcast(msg.settings); } },
+  'settings-updated':   (msg) => { if (msg.settings) { applyTerminalSettings(msg.settings); applySettingsBroadcast(msg.settings); applyVisionsSettings(msg.settings); } },
   'health-snapshot':    (msg) => { if (msg.stats) { applyHealthSnapshot(msg.stats); applyRadarHealth(msg.stats); } },
   'posthog-status':     (msg) => applyPosthogStatus(msg),
   'pr-status':          (msg) => { applyPrStatus(msg); applyRadarPrStatus(msg); },
@@ -440,7 +455,25 @@ observeHeaderHeight(document.querySelector('.header'));
 function openSettings(section) {
   if (section) activateSettingsSection(section);
   if (showPhoneScreen('settings')) return;
-  activateView('settings');
+  activateView('settings', { section });
+}
+
+function clearSettingsHash() {
+  if (!location.hash.startsWith('#settings/')) return;
+  history.replaceState(history.state, '', `${location.pathname}${location.search}`);
+}
+
+function activateSettingsTarget(target) {
+  if (!target) return false;
+  activateSettingsSection(target.sectionId, target.settingId);
+  if (showPhoneScreen('settings')) return true;
+  activateView('settings', { section: target.sectionId, setting: target.settingId, persist: false });
+  return true;
+}
+
+function activateSettingsHash() {
+  const target = resolveSettingsTarget(location.hash);
+  return activateSettingsTarget(target);
 }
 
 document.getElementById('btn-settings').addEventListener('click', () => {
@@ -547,6 +580,7 @@ const VIEW_TABS = [
 ];
 
 let _activeView = 'focus';
+let shouldPersistActiveView = true;
 
 // Looking at a surface is what clears its dot, on either layout: a desktop tab activation and a phone
 // screen becoming visible mean the same thing, and the screen ids match the view ids. The panel stores
@@ -560,15 +594,16 @@ function acknowledgeViewAttention(view) {
   if (view === 'visions') refreshVisionsView();
 }
 
-function activateView(view, { section } = {}) {
+function activateView(view, { section, setting, persist = true } = {}) {
   const prev = _activeView;
   _activeView = view;
+  shouldPersistActiveView = persist;
   // Mirror the active view onto the body: terminal.js reads document.body.dataset.activeView to decide
   // whether a focused xterm releases Alt+W to the chrome triage handler (Focus) or treats it as a real
   // keystroke. Without this write it stays undefined and xterm swallows Alt+W whenever a terminal is focused.
   document.body.dataset.activeView = view;
   // Persist the active tab so a page reload returns to it (restored at boot below).
-  setActiveView(view);
+  if (persist) setActiveView(view);
   for (const v of VIEW_TABS) {
     const selected = v.view === view;
     if (v.el) v.el.hidden = !selected;
@@ -590,7 +625,8 @@ function activateView(view, { section } = {}) {
     refreshMillView();
     requestMillReport();
   }
-  if (view === 'settings' && section) activateSettingsSection(section);
+  if (prev === 'settings' && view !== 'settings') clearSettingsHash();
+  if (view === 'settings' && section) activateSettingsSection(section, setting);
   acknowledgeViewAttention(view);
 }
 
@@ -612,7 +648,16 @@ for (let i = 0; i < VIEW_TABS.length; i++) {
 // dataset set) so the view module activates; the snapshot that arrives later refreshes it and restores
 // the centered session (see handleSnapshot).
 const savedView = getActiveView();
-activateView(VIEW_TABS.some((v) => v.view === savedView) ? savedView : 'focus');
+const initialSettingsTarget = resolveSettingsTarget(location.hash);
+if (initialSettingsTarget) {
+  shouldResolveSettingsHashOnMillReport = false;
+  activateView('settings', {
+    section: initialSettingsTarget.sectionId,
+    setting: initialSettingsTarget.settingId,
+    persist: false,
+  });
+}
+if (!initialSettingsTarget) activateView(VIEW_TABS.some((v) => v.view === savedView) ? savedView : 'focus');
 
 // ── Form-factor layout switch ────────────────────────────────
 // One app instance, two first-class layouts. Switching between them is a HANDOFF, not a re-render: the
@@ -632,6 +677,8 @@ mountPhoneShell({
   onScreenShown: (screenId) => {
     if (screenId === 'usage') { refreshUsageView(); requestUsageReport(); }
     if (screenId === 'mill') { refreshMillView(); requestMillReport(); }
+    if (screenId !== 'settings') clearSettingsHash();
+    if (screenId === 'settings' && !location.hash.startsWith('#settings/')) activateSettingsSection();
     acknowledgeViewAttention(screenId);
   },
   // The desktop header does not render under [data-layout="phone"], so its controls move to the Board's
@@ -654,7 +701,7 @@ function applyFormFactorLayout(layout) {
   }
   const carriedSessionId = getPhoneSessionId();
   deactivatePhoneShell();
-  activateView(_activeView); // re-activates the saved view now that the desktop DOM is whole
+  activateView(_activeView, { persist: shouldPersistActiveView }); // re-activates the saved view now that the desktop DOM is whole
   // Quietly, NOT via the pill-activation path: that one is the operator making a selection, so it
   // sends start-session for a DORMANT target and dismiss for a COMPLETE one. A rotation is a layout event,
   // and treating it as a selection would respawn a session the operator just killed or acknowledge away
@@ -664,6 +711,7 @@ function applyFormFactorLayout(layout) {
 
 if (isPhoneLayout()) applyFormFactorLayout('phone');
 onLayoutChange(applyFormFactorLayout);
+window.addEventListener('hashchange', activateSettingsHash);
 
 document.getElementById('btn-restart').addEventListener('click', () => {
   headerMenu.classList.remove('open');
