@@ -40,6 +40,9 @@ const SKILLS_DIR = '.claude/skills';
 // Where a `data: true` source lands: a plain directory Claude Code loads nothing from by itself.
 const DATA_DIR = 'data';
 
+const DELIVERY_SKIP_SELF_REFERENTIAL = 'self-referential';
+const DELIVERY_SKIP_EMPTY = 'empty';
+
 // The only runtime path a version-controlled spec may name, resolved by pack-builder to the config dir.
 const GLISSA_HOME_PLACEHOLDER = '{{glissaHome}}';
 // The per-project layer's placeholder: resolved once per DERIVED pack, never at delivery time.
@@ -470,6 +473,81 @@ function applyPackDelta(currentPacks, packName, deliver, { maxPacks = MAX_PACKS_
   return { ok: true, packs: [...names, packName] };
 }
 
+// Two DELIVERY gates for a pack that BUILT fine: `self-referential` sources sit inside the consumer's
+// own checkout, so the pack copies what that session already loads; `empty` carries only the index.
+
+// Case-folded on Windows only, like ingest-fs-core: folding everywhere would call two POSIX checkouts one.
+function comparablePath(value) {
+  if (typeof value !== 'string' || value.length === 0) return null;
+  const normalized = value.replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!normalized) return null;
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+}
+
+function pathIsInside(candidate, root) {
+  return candidate === root || candidate.startsWith(`${root}/`);
+}
+
+function isAbsolutePosix(value) {
+  return value.startsWith('/') || /^[A-Za-z]:\//.test(value);
+}
+
+// Roots are recorded packs-relative (a manifest ships inside the pack), so one is judged only against a base.
+function resolveSourceRoot(root, packsDir) {
+  const value = String(root).replace(/\\/g, '/');
+  if (isAbsolutePosix(value)) return value;
+  const base = typeof packsDir === 'string' && packsDir ? packsDir.replace(/\\/g, '/') : null;
+  if (base === null) return null;
+  return path.posix.normalize(`${base}/${value}`);
+}
+
+/** Every file or directory a build assembled from, as recorded; absent on a legacy manifest. */
+function manifestSourceRoots(manifest) {
+  const roots = isPlainObject(manifest) && Array.isArray(manifest.sourceRoots) ? manifest.sourceRoots : [];
+  return roots.filter((root) => typeof root === 'string' && root.length > 0);
+}
+
+function isSelfReferentialPack(sourceRoots, projectPath, { packsDir = null } = {}) {
+  const project = comparablePath(projectPath);
+  if (project === null) return false;
+  return (Array.isArray(sourceRoots) ? sourceRoots : []).some((root) => {
+    const resolved = comparablePath(resolveSourceRoot(root, packsDir));
+    return resolved !== null && pathIsInside(resolved, project);
+  });
+}
+
+function countSourceFiles(source) {
+  return isPlainObject(source) && Array.isArray(source.files) ? source.files.length : 0;
+}
+
+// An absent array reads as UNKNOWN, never empty: refusing on a field a legacy build never wrote is a guess.
+function deliversOnlyBoilerplate(manifest) {
+  if (!isPlainObject(manifest) || !Array.isArray(manifest.sources)) return false;
+  if (manifest.sources.some((source) => countSourceFiles(source) > 0)) return false;
+  if (Array.isArray(manifest.rules) && manifest.rules.length > 0) return false;
+  if (Array.isArray(manifest.skills) && manifest.skills.length > 0) return false;
+  return true;
+}
+
+
+/**
+ * Whether one built pack may be delivered to one project, `packsDir` being where its relative source
+ * roots resolve from. `detail` carries no path: a decision trace reaches a paired phone.
+ */
+function decidePackDelivery({ manifest = null, projectPath = null, packsDir = null } = {}) {
+  if (isSelfReferentialPack(manifestSourceRoots(manifest), projectPath, { packsDir })) {
+    return {
+      deliver: false,
+      reason: DELIVERY_SKIP_SELF_REFERENTIAL,
+      detail: 'the pack assembles from files inside this project, which the session already loads',
+    };
+  }
+  if (deliversOnlyBoilerplate(manifest)) {
+    return { deliver: false, reason: DELIVERY_SKIP_EMPTY, detail: 'the build delivered no sources, rules or skills' };
+  }
+  return { deliver: true, reason: null, detail: null };
+}
+
 /*
  * Per-project pack VARIANTS, flattened the way PostHog's context-mill flattens its skill variants: a
  * variant is not a dimension of a pack's version, it is its own top-level pack named
@@ -893,10 +971,11 @@ function templateStubErrors(outputs) {
  * @param {Array<{relPath: string, content: string, sourceIndex?: number, skillIndex?: number}>} files
  *   files the shell already read: `sourceIndex` names the spec source that matched it, `skillIndex`
  *   the skill dir it came from (and then `relPath` is relative to that dir).
- * @param {{ builtAt: string }} options build stamp, supplied by the caller so this stays clock-free
+ * @param {{ builtAt: string, sourceRoots?: string[] }} options build stamp, supplied by the caller so
+ *   this stays clock-free, plus the absolute roots the shell resolved the spec's patterns to.
  * @returns {{ ok: boolean, outputs: Array<{relPath: string, content: string}>, manifest: object|null, errors: string[] }}
  */
-function planPackBuild(spec, files, { builtAt, variant = null } = {}) {
+function planPackBuild(spec, files, { builtAt, variant = null, sourceRoots = [] } = {}) {
   const specCheck = validatePackSpec(spec);
   if (!specCheck.ok) return { ok: false, outputs: [], manifest: null, errors: specCheck.errors };
 
@@ -996,6 +1075,8 @@ function planPackBuild(spec, files, { builtAt, variant = null } = {}) {
     budgetTokens: spec.budgetTokens,
     budgetOk: true,
     indexTokenEstimate: indexTokens,
+    // Where this build read from: a pattern alone cannot say, being relative to whichever dir built it.
+    sourceRoots: [...new Set((Array.isArray(sourceRoots) ? sourceRoots : []).filter((root) => typeof root === 'string' && root.length > 0))].sort(),
     rules: Array.isArray(spec.rules) ? [...spec.rules] : [],
     sources: groups.map((group) => ({
       pattern: group.pattern,
@@ -1018,6 +1099,8 @@ function planPackBuild(spec, files, { builtAt, variant = null } = {}) {
 module.exports = {
   DATA_DIR,
   DATA_NOTICE,
+  DELIVERY_SKIP_EMPTY,
+  DELIVERY_SKIP_SELF_REFERENTIAL,
   GLISSA_HOME_PLACEHOLDER,
   PROJECT_SLUG_PLACEHOLDER,
   INDEX_FILE,
@@ -1027,7 +1110,9 @@ module.exports = {
   PACK_NAME_RE,
   applyPackDelta,
   consumedPackNames,
+  decidePackDelivery,
   estimateTokens,
+  isSelfReferentialPack,
   isDataSource,
   isPackRelativePath,
   packConsumerGroups,

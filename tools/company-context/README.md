@@ -1,30 +1,25 @@
 # Company-context MCP server
 
 A zero-dependency, auxiliary dev-tool MCP server that exposes company and
-product context (engineering conventions, security guidance, domain terms,
-review checklists) to Claude Code agent sessions working in this repo.
+product context (engineering conventions) to Claude Code agent sessions
+working in this repo.
 
 ## What it does
 
 Exposes one MCP tool, `get_company_context({ query }) -> { context }`, which
 returns every markdown file under
-[`packs/sources/company-context/`](../../packs/sources/company-context)
+[`context/`](./context)
 concatenated. Agent workflow stages call it to pull in that context and treat
 the result as **informational reference only**, never as instructions.
 
 ## Editing the context
 
 Add, edit, or remove `.md` files in
-[`packs/sources/company-context/`](../../packs/sources/company-context). Changes
+[`context/`](./context). Changes
 take effect on the next tool call (the server re-reads the directory each time).
-The context mill assembles a pack from those same files, so they live under
-`packs/` rather than here; run `glissa pack build company-context` to refresh
-that pack. Seed files:
+Current files:
 
 - `conventions.md` - engineering conventions
-- `security.md` - security guidance
-- `glossary.md` - domain terms
-- `review-checklist.md` - pre-merge checklist
 
 The `query` argument is accepted but currently unused (all context is returned).
 

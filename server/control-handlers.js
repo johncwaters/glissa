@@ -7,7 +7,7 @@ const { STATES } = require('../shared/states');
 const { listRepoConversations } = require('../session/core/conversation-history');
 const { normalizeClientTrust } = require('./core/request-trust');
 const { isPlainObject } = require('./core/usage-number-core');
-const { PACK_NAME_RE, applyPackDelta, sameProjectRecords } = require('./core/pack-core');
+const { PACK_NAME_RE, applyPackDelta, isSelfReferentialPack, sameProjectRecords } = require('./core/pack-core');
 const {
   INGEST_SPEC, MEMORY_SPEC, PACK_DISTILLER_SPEC, mergeMillBlock, validateMillBlock,
 } = require('./core/settings-mill-core');
@@ -508,6 +508,7 @@ function registerControlHandlers(controlWss, deps) {
     // The pack names a spec file defines, so an assignment can be refused before it is persisted
     // (optional - undefined in older callers/tests, which then refuse every assignment).
     listPackNames = null,
+    resolvePackSourceRoots = null,
     // Builds a newly delivered pack before the reload recreates the session that resolves it (optional -
     // undefined in older callers/tests, which then persist the assignment and build nothing).
     ensurePacksBuilt = null,
@@ -1098,6 +1099,12 @@ function registerControlHandlers(controlWss, deps) {
       if (!listPackNames) { reply({ error: 'The context mill is not running' }); return; }
       const known = new Set(await listPackNames());
       if (!known.has(pack)) { reply({ error: `No pack spec named "${pack}"` }); return; }
+      // Refused at ASSIGNMENT too: a checkbox that ticks and then silently skips every spawn is worse.
+      const sourceRoots = resolvePackSourceRoots ? await resolvePackSourceRoots(pack) : [];
+      if (isSelfReferentialPack(sourceRoots, project.path)) {
+        reply({ error: `Pack "${pack}" is built from files inside this project, which its sessions already load` });
+        return;
+      }
     }
 
     // The mutator cannot abort a save, so its verdict comes back out here and a refusal simply leaves

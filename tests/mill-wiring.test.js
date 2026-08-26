@@ -346,3 +346,21 @@ test('a group name is what a project may be assigned; a variant name is not offe
     fs.rmSync(fixture.tmpDir, { recursive: true, force: true });
   }
 });
+
+test('resolvePackSourceRoots answers from the SPEC, so an unbuilt pack is still judged', async (t) => {
+  const fixture = writeFixture();
+  t.after(() => fs.rmSync(fixture.tmpDir, { recursive: true, force: true }));
+  writeSpec(fixture.specsDir, 'mirror', JSON.stringify({
+    name: 'mirror',
+    description: 'never built',
+    sources: [{ path: 'sources/good' }],
+    distill: [{ output: 'sources/good/derived/brief.md', sources: [{ path: '../AGENTS.md' }], instructions: 'summarize' }],
+    budgetTokens: 8000,
+  }));
+
+  const { wiring } = makeWiring(fixture);
+  const roots = await wiring.resolvePackSourceRoots('mirror');
+  const relative = roots.map((root) => path.relative(fixture.packsDir, root).replace(/\\/g, '/')).sort();
+  assert.deepEqual(relative, ['../AGENTS.md', 'sources/good']);
+  assert.deepEqual(await wiring.resolvePackSourceRoots('no-such-pack'), []);
+});

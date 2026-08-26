@@ -31,8 +31,8 @@ function connect(extraDeps = {}) {
 }
 
 test('the snapshot carries the latest built pack versions', () => {
-  const snapshot = connect({ getPackVersions: () => ({ 'company-context': 'v2', glissa: 'v7' }) });
-  assert.deepEqual(snapshot.packVersions, { 'company-context': 'v2', glissa: 'v7' });
+  const snapshot = connect({ getPackVersions: () => ({ 'house-rules': 'v2', 'crew-rules': 'v7' }) });
+  assert.deepEqual(snapshot.packVersions, { 'house-rules': 'v2', 'crew-rules': 'v7' });
 });
 
 test('a caller without the accessor still gets a snapshot, with no versions', () => {
@@ -43,7 +43,7 @@ test('a caller without the accessor still gets a snapshot, with no versions', ()
 
 test('pack-updated is not retained for replay: the snapshot already repairs it', () => {
   const log = createReplayLog();
-  log.stamp({ type: 'pack-updated', name: 'glissa', version: 'v2' });
+  log.stamp({ type: 'pack-updated', name: 'crew-rules', version: 'v2' });
   log.stamp({ type: 'session-error', id: 'a', message: 'boom' });
 
   const { entries } = log.entriesSince(0);

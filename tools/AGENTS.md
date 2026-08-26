@@ -10,7 +10,7 @@ Auxiliary developer tooling that supports working ON Glissa; nothing here ships 
 
 | Directory | Purpose |
 |-----------|---------|
-| `company-context/` | Zero-dependency MCP server feeding project reference material to OMC workflow skills; its content lives in `../packs/sources/company-context/` (see `company-context/AGENTS.md`) |
+| `company-context/` | Zero-dependency MCP server feeding project reference material to OMC workflow skills; its content lives in `company-context/context/` (see `company-context/AGENTS.md`) |
 | `vscode-visions/` | Minimal VS Code extension that launches the Glissa Visions markdown LSP relay |
 
 ## For AI Agents

@@ -41,10 +41,10 @@ test('a pack the session never delivered cannot make it stale', () => {
 });
 
 test('one stale pack names it, both versions, and the re-read guidance', () => {
-  const notice = buildPackNotice([{ name: 'company-context', version: 'aaaaaaaaaaaabbbb' }], { 'company-context': 'ccccccccccccdddd' });
+  const notice = buildPackNotice([{ name: 'house-rules', version: 'aaaaaaaaaaaabbbb' }], { 'house-rules': 'ccccccccccccdddd' });
   assert.equal(
     notice,
-    '[glissa] Context pack updated since this session started: "company-context" (version aaaaaaaaaaaa is now cccccccccccc). '
+    '[glissa] Context pack updated since this session started: "house-rules" (version aaaaaaaaaaaa is now cccccccccccc). '
     + 'The pack CLAUDE.md and rules text loaded at spawn may be out of date. '
     + 'Re-read the files under the pack directory added to this session if they matter for this turn.',
   );

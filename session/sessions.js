@@ -44,8 +44,8 @@ const {
   decideResyncAction,
   firstGitErrorLine,
 } = require("../server/core/branch-sync-core");
-const { normalizePackNames, variantPackName } = require("../server/core/pack-core");
-const { defaultBuiltRoot, resolveBuiltPack } = require("../server/pack-builder");
+const { decidePackDelivery, normalizePackNames, variantPackName } = require("../server/core/pack-core");
+const { DEFAULT_PACKS_DIR, defaultBuiltRoot, resolveBuiltPack } = require("../server/pack-builder");
 const { buildPackNotice, listStalePacks, shouldHoldTerminalStopForNotice } = require("./core/pack-notice");
 const agentTracker = require("./core/agent-tracker");
 const { decideGateRelease, DEFAULT_GATE_RELEASE_SETTLE_MS } = require("./core/gate-release");
@@ -2484,6 +2484,13 @@ class Session extends EventEmitter {
       if (!resolved.dir) {
         console.warn(`[session:${this.name}] context pack "${name}" skipped: ${resolved.reason}`);
         this._recordDecision({ kind: "pack", ts, name, decision: "skipped", reason: resolved.reason });
+        continue;
+      }
+      // Two gates on a pack that built fine but must not reach THIS project (server/core/pack-core.js).
+      const verdict = decidePackDelivery({ manifest: resolved.manifest, projectPath: this.path, packsDir: DEFAULT_PACKS_DIR });
+      if (!verdict.deliver) {
+        console.warn(`[session:${this.name}] context pack "${name}" skipped: ${verdict.reason}, ${verdict.detail}`);
+        this._recordDecision({ kind: "pack", ts, name, decision: "skipped", reason: verdict.reason, detail: verdict.detail });
         continue;
       }
       deliveredPacks.push({ name: resolved.name, version: resolved.version, dir: resolved.dir });

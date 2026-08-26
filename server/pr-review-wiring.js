@@ -118,9 +118,9 @@ function prReviewCfgKey(cfg) {
 }
 
 // Context packs this lane delivers to its review sessions (config.prReview.packs). A review session is
-// exactly the consumer packs were built for: the company-context pack carries the review checklist. The
-// list is normalized the same defensive way a project's is, so a hand-edited entry costs that entry and
-// never the review. Absent key means an empty list, i.e. a spawn identical to before packs existed.
+// exactly the consumer packs were built for. The list is normalized the same defensive way a project's
+// is, so a hand-edited entry costs that entry and never the review. Absent key means an empty list,
+// i.e. a spawn identical to before packs existed.
 function prReviewPackNames(cfg) {
   return normalizePackNames(cfg.prReview ? cfg.prReview.packs : null).names;
 }

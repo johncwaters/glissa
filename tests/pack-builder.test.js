@@ -11,7 +11,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 
-const { buildPack, buildPacks, distillOutputPath, listPackSpecs, packWatchRoots, publishBuild, readBuiltManifest, resolveBuiltPack } = require('../server/pack-builder');
+const { buildPack, buildPacks, distillOutputPath, listPackSpecs, packSourceRoots, packWatchRoots, publishBuild, readBuiltManifest, resolveBuiltPack } = require('../server/pack-builder');
 
 function writeFile(root, relPath, content) {
   const full = path.join(root, relPath);
@@ -703,17 +703,17 @@ test('readBuiltManifest reads a built pack and null for one never built', async 
   });
 });
 
-test('the repo proof pack builds from its own spec', async () => {
+test('every spec the repo ships builds from its own spec file', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-proof-pack-'));
   try {
-    const report = await buildPack({
-      specPath: path.join(__dirname, '..', 'packs', 'specs', 'company-context.pack.json'),
-      builtRoot: root,
-    });
-    assert.equal(report.ok, true, report.errors.join('; '));
-    assert.ok(report.tokenEstimate <= report.budgetTokens);
-    assert.ok(fs.existsSync(path.join(report.currentDir, 'CLAUDE.md')));
-    assert.ok(fs.existsSync(path.join(report.currentDir, '.claude', 'rules', '01-conventions.md')));
+    const specs = await listPackSpecs({ specsDir: path.join(__dirname, '..', 'packs', 'specs') });
+    assert.ok(specs.length > 0);
+    for (const spec of specs) {
+      const report = await buildPack({ specPath: spec.specPath, builtRoot: root, glissaHome: path.join(root, 'home') });
+      assert.equal(report.ok, true, `${spec.name}: ${report.errors.join('; ')}`);
+      assert.ok(report.tokenEstimate <= report.budgetTokens);
+      assert.ok(fs.existsSync(path.join(report.currentDir, 'CLAUDE.md')));
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -1079,4 +1079,39 @@ test('a variant rejects a retired project layer selected by an exclude placehold
     assert.equal(variant.errors.some((error) => error.includes(retiredSlug) && error.includes(SLUG_A)), true);
     assert.equal(fs.existsSync(path.join(builtRoot, `memory-${SLUG_A}`, 'current')), false);
   }, { spec, seed: () => {} });
+});
+
+test('the manifest records every source root packs-relative, distill sources included', async () => {
+  const spec = baseSpec({
+    sources: [{ glob: 'sources/demo/**/*.md' }],
+    distill: [{ output: 'sources/demo/derived/brief.md', sources: [{ path: '../AGENTS.md' }], instructions: 'summarize' }],
+  });
+  await withFixture(async ({ build, currentDir, root }) => {
+    const report = await build();
+    assert.equal(report.ok, true, report.errors.join('; '));
+    const manifest = readManifest(currentDir());
+    assert.deepEqual(manifest.sourceRoots, ['../AGENTS.md', 'sources/demo']);
+    assert.equal(JSON.stringify(manifest).includes(root), false, 'a manifest ships inside the pack, so it carries no absolute path');
+  }, { spec });
+});
+
+test('a source root under the Glissa config dir is left out of the manifest entirely', async () => {
+  await withFixture(async ({ root, build, currentDir }) => {
+    const glissaHome = seedGlissaHome(root);
+    const report = await build({ glissaHome });
+    assert.equal(report.ok, true, report.errors.join('; '));
+    assert.deepEqual(readManifest(currentDir()).sourceRoots, []);
+  }, { spec: memorySpec(), seed: () => {} });
+});
+
+test('packSourceRoots resolves sources, skills and distill sources absolute', async () => {
+  const spec = baseSpec({
+    skills: [{ dir: 'skills/voice-style' }],
+    distill: [{ output: 'sources/demo/derived/brief.md', sources: [{ glob: '../docs/*.md' }], instructions: 'summarize' }],
+  });
+  await withFixture(async ({ packsDir }) => {
+    const roots = await packSourceRoots(spec, { baseDir: packsDir });
+    const relative = roots.map((root) => path.relative(packsDir, root).replace(/\\/g, '/'));
+    assert.deepEqual(relative.sort(), ['../docs', 'skills/voice-style', 'sources/demo']);
+  }, { spec });
 });

@@ -151,17 +151,17 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 ### Context Packs
 
-- Deterministic by contract, which lets the version be a hash and a rebuild diffable. It hashes every DELIVERED file, not just sources, or an edited rule rides out under an unchanged version.
-- Budgets are hard gates and a failed build writes NOTHING, leaving the last good `current/` untouched. The always-loaded index has a tighter cap, the discovery tier being what context rot bites first.
-- Both rebuild loops are CONSUMER-GATED, a docs tree worth packing being the one whose walk is expensive; `glissa pack build` stays always allowed, being how an operator inspects a pack. A newly assigned pack builds BEFORE the reload that recreates the session, or it lands after the spawn it exists for.
+- Deterministic by contract, so the version is a hash and a rebuild diffable. It hashes every DELIVERED file, not just sources, or an edited rule rides out under an unchanged version.
+- Budgets are hard gates and a failed build writes NOTHING, leaving the last good `current/` untouched. The always-loaded index has a tighter cap: context rot bites the discovery tier first.
+- Both rebuild loops are CONSUMER-GATED, a tree worth packing being one whose walk is expensive; `glissa pack build` stays always allowed. A newly assigned pack builds BEFORE the reload that recreates the session, or it lands after the spawn it exists for.
 - The staleness notice is Glissa-AUTHORED only, never pack content, or the hook response becomes an injection relay; only an ACCEPTED callback may consume one.
-- An unbuilt or unreadable pack is SKIPPED with a decision-trace entry: additive context must never block a spawn or guess a directory.
+- An unbuilt, unreadable, `self-referential` or `empty` pack is SKIPPED with a decision-trace entry (`decidePackDelivery`): additive context must never block a spawn, and a pack sourced from inside the consumer's own checkout is a drifting copy of what that session already loads.
 - A `data: true` source publishes outside the instruction tier, and the build FAILS if a data line appears in the index or under `.claude/rules/`: a build gate beats a convention.
 - Per-project variants flatten into independent pack NAMES, so one version per pack still holds. A foreign project's slug in a delivered path fails the build.
 - Sources are local files only: pack bytes land in permissionless sessions, so the boundary stays at files the operator already controls.
-- Assignment is a DELTA message: the list is re-read inside the config write so two dashboards cannot clobber each other; only the added name is validated.
-- Delivery is addressed per PROJECT, which is its resolved path, never per card record: two records may share one checkout ("glissa", "glissa (2)"), and a per-record control offered the same project twice. One delta fans over every record on that path, refusing whole when any of them is at the cap, and the Mill's delivery rows count the sessions behind one project (`server/core/pack-core.js` packConsumerGroups, `tests/control-project-packs.test.js`).
-- A reload restarts a recreated session only if it was LIVE: starting a dormant card would spawn a session, with that project's permission setting, that nobody asked for.
+- Assignment is a DELTA message: the list is re-read inside the config write, so two dashboards cannot clobber each other.
+- Delivery is addressed per PROJECT (its resolved path), never per card record: two records may share one checkout, and a per-record control offered the same project twice. One delta fans over every record on that path, refusing whole when any is at the cap, and the Mill's rows count sessions per project (`server/core/pack-core.js` packConsumerGroups, `tests/control-project-packs.test.js`).
+- A reload restarts a recreated session only if it was LIVE: starting a dormant card would spawn a session, with that project's permission setting, nobody asked for.
 - A codex card gets packs as ONE `-c developer_instructions` token: a constant directive plus index paths, never `--add-dir` (a writable root), pack bytes, or memory bytes (`session/adapters/codex.js.renderPackArgs`, `tests/agent-codex.test.js`).
 
 ### Long-Term Memory (plan: `docs/plan-visions-3.md`)

@@ -22,6 +22,7 @@ const {
   distillSourceHashes,
   listPackSpecs,
   loadPackSpec,
+  packSourceRoots,
   readBuiltManifest,
   resolveBuiltPack,
   DEFAULT_PACKS_DIR,
@@ -219,9 +220,23 @@ function createMillWiring(deps = {}) {
     return specs.map((spec) => spec.name);
   }
 
+  // Read from the SPEC, not a manifest: a first assignment is exactly the case that has never been built.
+  async function resolvePackSourceRoots(name) {
+    const specs = await listPackSpecs({ specsDir: resolvedSpecsDir() });
+    const found = specs.find((spec) => spec.name === name);
+    if (!found) return [];
+    try {
+      return packSourceRoots(await loadPackSpec(found.specPath), { baseDir });
+    } catch (error) {
+      log.warn(`[mill] could not resolve source roots for "${name}": ${error.message}`);
+      return [];
+    }
+  }
+
   return {
     requestReport,
     listPackNames,
+    resolvePackSourceRoots,
     getCachedReport: () => lastReport,
   };
 }

@@ -7,12 +7,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  DELIVERY_SKIP_EMPTY,
+  DELIVERY_SKIP_SELF_REFERENTIAL,
   INDEX_FILE,
   MANIFEST_FILE,
   MAX_INDEX_TOKENS,
   MAX_PACKS_PER_SESSION,
   applyPackDelta,
   consumedPackNames,
+  decidePackDelivery,
   estimateTokens,
   isPackRelativePath,
   matchesGlob,
@@ -73,7 +76,7 @@ test('a name that is not a plain path segment is rejected', () => {
   for (const name of ['../escape', 'has/slash', '', 'has space', '.hidden']) {
     assert.equal(validatePackSpec(validSpec({ name })).ok, false, name);
   }
-  for (const name of ['company-context', 'glissa_docs', 'pack.v2', 'A1']) {
+  for (const name of ['house-rules', 'glissa_docs', 'pack.v2', 'A1']) {
     assert.equal(validatePackSpec(validSpec({ name })).ok, true, name);
   }
 });
@@ -178,7 +181,7 @@ test('estimateTokens rounds the chars-per-4 heuristic up', () => {
 });
 
 test('sourceSlug names a rules file from the ordinal plus the last literal segment', () => {
-  assert.equal(sourceSlug('sources/company-context/*.md', 0), '01-company-context');
+  assert.equal(sourceSlug('sources/house-rules/*.md', 0), '01-house-rules');
   assert.equal(sourceSlug('docs/**/*.md', 1), '02-docs');
   assert.equal(sourceSlug('C:/notes/plan.md', 2), '03-plan');
   assert.equal(sourceSlug('*.md', 3), '04');
@@ -419,14 +422,14 @@ test('two source groups get their own rules file, numbered in spec order', () =>
 });
 
 test('normalizePackNames keeps valid names in config order', () => {
-  assert.deepEqual(normalizePackNames(['company-context', 'glissa']).names, ['company-context', 'glissa']);
-  assert.deepEqual(normalizePackNames(['company-context']).warnings, []);
+  assert.deepEqual(normalizePackNames(['house-rules', 'crew-rules']).names, ['house-rules', 'crew-rules']);
+  assert.deepEqual(normalizePackNames(['house-rules']).warnings, []);
 });
 
 test('normalizePackNames treats an absent list and a non-array as no packs', () => {
   assert.deepEqual(normalizePackNames(undefined), { names: [], warnings: [] });
   assert.deepEqual(normalizePackNames(null), { names: [], warnings: [] });
-  const notAnArray = normalizePackNames('company-context');
+  const notAnArray = normalizePackNames('house-rules');
   assert.deepEqual(notAnArray.names, []);
   assert.equal(notAnArray.warnings.length, 1);
 });
@@ -1037,4 +1040,66 @@ test('a plain build is byte-identical to the pre-variant one: no variant fields,
   assert.equal(plan.manifest.group, undefined);
   assert.equal(plan.manifest.projectSlug, undefined);
   assert.equal(plan.manifest.version, planPackBuild(spec, files, { builtAt: BUILT_AT, variant: null }).manifest.version);
+});
+
+// ── Delivery gates: a pack that built fine, refused for THIS consumer ──
+
+function builtManifest(extra = {}) {
+  return { name: 'demo', version: 'v1', sources: [{ pattern: 'sources/demo/*.md', files: [{ relPath: 'a.md' }] }], rules: [], skills: [], ...extra };
+}
+
+test('a pack whose sources live inside the consumer project is refused as self-referential', () => {
+  const manifest = builtManifest({ sourceRoots: ['/home/dev/glissa/docs'] });
+  const verdict = decidePackDelivery({ manifest, projectPath: '/home/dev/glissa' });
+  assert.equal(verdict.deliver, false);
+  assert.equal(verdict.reason, DELIVERY_SKIP_SELF_REFERENTIAL);
+  assert.equal(verdict.detail.includes('/home/dev'), false, 'the detail reaches a paired phone, so it carries no path');
+});
+
+test('the project path itself, and a Windows-shaped one, count as inside it', () => {
+  assert.equal(decidePackDelivery({ manifest: builtManifest({ sourceRoots: ['/repo'] }), projectPath: '/repo' }).deliver, false);
+  const windows = decidePackDelivery({
+    manifest: builtManifest({ sourceRoots: ['C:/Users/dev/repo/docs'] }),
+    projectPath: 'C:\\Users\\dev\\repo',
+  });
+  assert.equal(windows.deliver, false, 'a backslash path is normalized before it is compared');
+});
+
+test('a sibling directory sharing a prefix is not inside the project', () => {
+  const verdict = decidePackDelivery({ manifest: builtManifest({ sourceRoots: ['/home/dev/glissa-notes'] }), projectPath: '/home/dev/glissa' });
+  assert.equal(verdict.deliver, true);
+});
+
+test('a packs-relative source root is judged against the packs dir it was recorded from', () => {
+  const manifest = builtManifest({ sourceRoots: ['../docs'] });
+  assert.equal(decidePackDelivery({ manifest, projectPath: '/home/dev/glissa', packsDir: '/home/dev/glissa/packs' }).deliver, false);
+  assert.equal(decidePackDelivery({ manifest, projectPath: '/home/dev/other', packsDir: '/home/dev/glissa/packs' }).deliver, true);
+});
+
+test('a relative source root with no packs dir to resolve against decides nothing', () => {
+  const manifest = builtManifest({ sourceRoots: ['../docs'] });
+  assert.equal(decidePackDelivery({ manifest, projectPath: '/home/dev/glissa' }).deliver, true);
+});
+
+test('a legacy manifest that recorded no source roots still delivers', () => {
+  assert.equal(decidePackDelivery({ manifest: builtManifest(), projectPath: '/home/dev/glissa' }).deliver, true);
+});
+
+test('a build carrying only the Glissa-authored index is refused as empty', () => {
+  const verdict = decidePackDelivery({ manifest: builtManifest({ sources: [], rules: [], skills: [] }) });
+  assert.equal(verdict.deliver, false);
+  assert.equal(verdict.reason, DELIVERY_SKIP_EMPTY);
+});
+
+test('a source that matched nothing is empty, but any rule, skill or file is content', () => {
+  const empty = { sources: [{ pattern: 'x', files: [] }], rules: [], skills: [] };
+  assert.equal(decidePackDelivery({ manifest: empty }).reason, DELIVERY_SKIP_EMPTY);
+  assert.equal(decidePackDelivery({ manifest: { ...empty, rules: ['one'] } }).deliver, true);
+  assert.equal(decidePackDelivery({ manifest: { ...empty, skills: [{ name: 's' }] } }).deliver, true);
+  assert.equal(decidePackDelivery({ manifest: { ...empty, sources: [{ pattern: 'x', files: [{ relPath: 'a.md' }] }] } }).deliver, true);
+});
+
+test('a manifest that recorded no sources array at all is unknown, not empty', () => {
+  assert.equal(decidePackDelivery({ manifest: { name: 'demo', version: 'v1' } }).deliver, true);
+  assert.equal(decidePackDelivery({ manifest: null }).deliver, true);
 });

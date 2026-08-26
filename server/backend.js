@@ -1946,6 +1946,8 @@ function createBackend(httpServer, options = {}) {
     millReport: mill,
     // Which pack names exist, so a Mill tab assignment is validated against the specs on disk.
     listPackNames: () => mill.listPackNames(),
+    // And where that spec reads from, so the same tick can refuse a pack built out of this project.
+    resolvePackSourceRoots: (name) => mill.resolvePackSourceRoots(name),
     // Build a newly delivered pack before the assignment's reload recreates the session. Gated on the
     // same switch as the loops: with auto-rebuild off, a pack is whatever `glissa pack build` last wrote.
     ensurePacksBuilt: (names, savedConfig) => (packsAutoRebuildEnabled

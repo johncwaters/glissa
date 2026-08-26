@@ -12,9 +12,9 @@ const { EventEmitter } = require('node:events');
 
 const { registerControlHandlers } = require('../server/control-handlers');
 
-const SPECS = ['company-context', 'house-rules', 'a', 'b', 'c', 'd', 'e'];
+const SPECS = ['crew-rules', 'house-rules', 'a', 'b', 'c', 'd', 'e'];
 
-function harness(cfg, { specs = SPECS, onReload = null, ensurePacksBuilt } = {}) {
+function harness(cfg, { specs = SPECS, onReload = null, ensurePacksBuilt, packSourceRoots = null } = {}) {
   const controlWss = new EventEmitter();
   const sent = [];
   const broadcasts = [];
@@ -40,6 +40,7 @@ function harness(cfg, { specs = SPECS, onReload = null, ensurePacksBuilt } = {})
     },
     broadcastControl: (m) => { if (m.type === 'project-packs-updated') events.push('broadcast'); broadcasts.push(m); },
     listPackNames: async () => specs,
+    resolvePackSourceRoots: packSourceRoots ? async (name) => packSourceRoots[name] || [] : null,
     ensurePacksBuilt: ensurePacksBuilt || (async (names) => { events.push('build'); builds.push(...names); }),
   });
   controlWss.emit('connection', ws);
@@ -63,16 +64,16 @@ test('delivering a pack persists it on the project record and reloads like a han
   const cfg = { projects: [project()] };
   const h = harness(cfg);
 
-  await h.send({ type: 'set-project-packs', requestId: 'r1', projectId: 'p1', pack: 'company-context', deliver: true });
+  await h.send({ type: 'set-project-packs', requestId: 'r1', projectId: 'p1', pack: 'crew-rules', deliver: true });
 
-  assert.deepEqual(cfg.projects[0].packs, ['company-context']);
+  assert.deepEqual(cfg.projects[0].packs, ['crew-rules']);
   assert.equal(h.reloads.length, 1, 'the same reload a config.json edit takes');
   const result = resultOf(h);
   assert.equal(result.ok, true);
   assert.equal(result.requestId, 'r1');
-  assert.deepEqual(result.packs, ['company-context']);
+  assert.deepEqual(result.packs, ['crew-rules']);
   const broadcast = h.broadcasts.find((m) => m.type === 'project-packs-updated');
-  assert.deepEqual(broadcast.packs, ['company-context']);
+  assert.deepEqual(broadcast.packs, ['crew-rules']);
 });
 
 // MAJOR: consumer gating guarantees a newly delivered pack has NEVER been built, and a session resolves
@@ -81,9 +82,9 @@ test('a newly delivered pack is built BEFORE the reload that recreates the sessi
   const cfg = { projects: [project()] };
   const h = harness(cfg);
 
-  await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'company-context', deliver: true });
+  await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'crew-rules', deliver: true });
 
-  assert.deepEqual(h.builds, ['company-context']);
+  assert.deepEqual(h.builds, ['crew-rules']);
   assert.ok(h.events.indexOf('build') < h.events.indexOf('reload'),
     `build must precede reload, got ${h.events.join(' -> ')}`);
 });
@@ -99,16 +100,16 @@ test('the build is awaited, so a slow build still lands before the reload', asyn
     },
   });
 
-  await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'company-context', deliver: true });
+  await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'crew-rules', deliver: true });
 
   assert.deepEqual(order, ['build', 'reload']);
 });
 
 test('a removal builds nothing: there is no new delivery to prepare', async () => {
-  const cfg = { projects: [project({ packs: ['company-context'] })] };
+  const cfg = { projects: [project({ packs: ['crew-rules'] })] };
   const h = harness(cfg);
 
-  await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'company-context', deliver: false });
+  await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'crew-rules', deliver: false });
 
   assert.equal('packs' in cfg.projects[0], false, 'an emptied list removes the key');
   assert.deepEqual(h.builds, []);
@@ -119,9 +120,9 @@ test('the delta is applied to the list read inside the write, not to a client sn
   const cfg = { projects: [project({ packs: ['house-rules'] })] };
   const h = harness(cfg);
 
-  await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'company-context', deliver: true });
+  await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'crew-rules', deliver: true });
 
-  assert.deepEqual(cfg.projects[0].packs, ['house-rules', 'company-context'],
+  assert.deepEqual(cfg.projects[0].packs, ['house-rules', 'crew-rules'],
     'a concurrent edit this client never saw survives the toggle');
 });
 
@@ -130,23 +131,23 @@ test('a project already naming a deleted spec can still be edited', async () => 
   const h = harness(cfg);
 
   // Only the name being ADDED is checked against the specs, so the ghost does not freeze the list.
-  await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'company-context', deliver: true });
-  assert.deepEqual(cfg.projects[0].packs, ['ghost', 'company-context']);
+  await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'crew-rules', deliver: true });
+  assert.deepEqual(cfg.projects[0].packs, ['ghost', 'crew-rules']);
   assert.equal(resultOf(h).ok, true);
 
   h.sent.length = 0;
   await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'ghost', deliver: false });
-  assert.deepEqual(cfg.projects[0].packs, ['company-context'], 'and the ghost itself can be removed');
+  assert.deepEqual(cfg.projects[0].packs, ['crew-rules'], 'and the ghost itself can be removed');
   assert.equal(resultOf(h).ok, true);
 });
 
 test('delivering a pack twice is idempotent rather than a duplicate entry', async () => {
-  const cfg = { projects: [project({ packs: ['company-context'] })] };
+  const cfg = { projects: [project({ packs: ['crew-rules'] })] };
   const h = harness(cfg);
 
-  await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'company-context', deliver: true });
+  await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'crew-rules', deliver: true });
 
-  assert.deepEqual(cfg.projects[0].packs, ['company-context']);
+  assert.deepEqual(cfg.projects[0].packs, ['crew-rules']);
   assert.equal(resultOf(h).ok, true);
 });
 
@@ -156,24 +157,24 @@ test('a delta on one card moves every card sharing that checkout', async () => {
   const cfg = { projects: [project(), project({ id: 'p2', name: 'glissa (2)' }), project({ id: 'p3', name: 'other', path: 'C:/other' })] };
   const h = harness(cfg);
 
-  await h.send({ type: 'set-project-packs', projectId: 'p2', pack: 'company-context', deliver: true });
+  await h.send({ type: 'set-project-packs', projectId: 'p2', pack: 'crew-rules', deliver: true });
 
-  assert.deepEqual(cfg.projects[0].packs, ['company-context']);
-  assert.deepEqual(cfg.projects[1].packs, ['company-context']);
+  assert.deepEqual(cfg.projects[0].packs, ['crew-rules']);
+  assert.deepEqual(cfg.projects[1].packs, ['crew-rules']);
   assert.equal('packs' in cfg.projects[2], false, 'another checkout is untouched');
-  assert.deepEqual(resultOf(h).packs, ['company-context'], 'the addressed record is what the reply reports');
+  assert.deepEqual(resultOf(h).packs, ['crew-rules'], 'the addressed record is what the reply reports');
 });
 
 test('a removal on one card clears every card sharing that checkout', async () => {
   const cfg = {
     projects: [
-      project({ packs: ['company-context', 'house-rules'] }),
-      project({ id: 'p2', name: 'glissa (2)', packs: ['company-context'] }),
+      project({ packs: ['crew-rules', 'house-rules'] }),
+      project({ id: 'p2', name: 'glissa (2)', packs: ['crew-rules'] }),
     ],
   };
   const h = harness(cfg);
 
-  await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'company-context', deliver: false });
+  await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'crew-rules', deliver: false });
 
   assert.deepEqual(cfg.projects[0].packs, ['house-rules']);
   assert.equal('packs' in cfg.projects[1], false, 'an emptied list removes the key on the sibling too');
@@ -220,9 +221,9 @@ test('a record with no path is alone: nothing marks another record as its siblin
   const cfg = { projects: [project({ path: undefined }), project({ id: 'p2', name: 'other', path: undefined })] };
   const h = harness(cfg);
 
-  await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'company-context', deliver: true });
+  await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'crew-rules', deliver: true });
 
-  assert.deepEqual(cfg.projects[0].packs, ['company-context']);
+  assert.deepEqual(cfg.projects[0].packs, ['crew-rules']);
   assert.equal('packs' in cfg.projects[1], false);
 });
 
@@ -230,7 +231,7 @@ test('an unknown project changes nothing', async () => {
   const cfg = { projects: [project()] };
   const h = harness(cfg);
 
-  await h.send({ type: 'set-project-packs', projectId: 'nope', pack: 'company-context', deliver: true });
+  await h.send({ type: 'set-project-packs', projectId: 'nope', pack: 'crew-rules', deliver: true });
 
   assert.equal(h.saveCalls.length, 0);
   assert.equal(h.reloads.length, 0);
@@ -260,7 +261,7 @@ test('a project that vanished between the check and the write is refused, never 
   controlWss.emit('connection', ws);
   sent.length = 0;
 
-  await messageHandler(JSON.stringify({ type: 'set-project-packs', projectId: 'p1', pack: 'company-context', deliver: true }));
+  await messageHandler(JSON.stringify({ type: 'set-project-packs', projectId: 'p1', pack: 'crew-rules', deliver: true }));
 
   assert.deepEqual(reloads, []);
   const result = sent.find((m) => m.type === 'set-project-packs-result');
@@ -276,8 +277,8 @@ test('a malformed pack name or a non-boolean deliver changes nothing', async () 
     { pack: '../escape', deliver: true },
     { pack: '', deliver: true },
     { pack: 42, deliver: true },
-    { pack: 'company-context', deliver: 'yes' },
-    { pack: 'company-context' },
+    { pack: 'crew-rules', deliver: 'yes' },
+    { pack: 'crew-rules' },
   ]) {
     await h.send({ type: 'set-project-packs', projectId: 'p1', ...msg });
   }
@@ -326,7 +327,7 @@ test('with no spec listing available a delivery is refused, never guessed at', a
   controlWss.emit('connection', ws);
   sent.length = 0;
 
-  await messageHandler(JSON.stringify({ type: 'set-project-packs', projectId: 'p1', pack: 'company-context', deliver: true }));
+  await messageHandler(JSON.stringify({ type: 'set-project-packs', projectId: 'p1', pack: 'crew-rules', deliver: true }));
 
   assert.equal(saveCalls.length, 0);
   assert.match(sent.find((m) => m.type === 'set-project-packs-result').error, /not running/);
@@ -350,7 +351,7 @@ test('a failed config write is reported and never reloaded', async () => {
   controlWss.emit('connection', ws);
   sent.length = 0;
 
-  await messageHandler(JSON.stringify({ type: 'set-project-packs', projectId: 'p1', pack: 'company-context', deliver: true }));
+  await messageHandler(JSON.stringify({ type: 'set-project-packs', projectId: 'p1', pack: 'crew-rules', deliver: true }));
 
   assert.deepEqual(reloads, []);
   assert.equal(sent.find((m) => m.type === 'set-project-packs-result').ok, false);
@@ -364,9 +365,35 @@ test('the requester is answered before the reload, so a throwing reload cannot s
 
   // The dispatcher swallows an async handler's rejection (it must not become an unhandledRejection),
   // so what matters is that the requester already has its frame by the time the reload blows up.
-  await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'company-context', deliver: true });
+  await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'crew-rules', deliver: true });
 
   const result = resultOf(h);
   assert.equal(result.ok, true, 'the persisted change was reported before the reload ran');
   assert.ok(h.broadcasts.some((m) => m.type === 'project-packs-updated'));
+});
+
+test('assigning a pack built out of the project\'s own files is refused by name', async () => {
+  const cfg = { projects: [project()] };
+  const h = harness(cfg, { packSourceRoots: { 'house-rules': ['C:/repo/docs'] } });
+
+  await h.send({ type: 'set-project-packs', requestId: 'r1', projectId: 'p1', pack: 'house-rules', deliver: true });
+
+  const result = resultOf(h);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /built from files inside this project/);
+  assert.equal(cfg.projects[0].packs, undefined, 'a refusal writes nothing');
+  assert.equal(h.saveCalls.length, 0);
+  assert.equal(h.reloads.length, 0);
+});
+
+test('the same pack is accepted by a project it was not built out of, and removal never checks', async () => {
+  const cfg = { projects: [project({ path: 'C:/other', packs: ['house-rules'] })] };
+  const h = harness(cfg, { packSourceRoots: { 'house-rules': ['C:/repo/docs'] } });
+
+  await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'house-rules', deliver: true });
+  assert.deepEqual(cfg.projects[0].packs, ['house-rules']);
+
+  const removing = harness({ projects: [project({ packs: ['house-rules'] })] }, { packSourceRoots: { 'house-rules': ['C:/repo/docs'] } });
+  await removing.send({ type: 'set-project-packs', projectId: 'p1', pack: 'house-rules', deliver: false });
+  assert.equal(resultOf(removing).ok, true, 'a self-referential pack an operator already has must stay removable');
 });

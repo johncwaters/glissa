@@ -199,7 +199,7 @@ test('classifyClaudeKind maps extensions correctly', () => {
 });
 
 test('packArgs land between the settings block and claudeArgs, on both spawn forms', () => {
-  const PACKS = ['--add-dir', 'C:/Users/johnw/.glissa/packs/built/company-context/current'];
+  const PACKS = ['--add-dir', 'C:/Users/johnw/.glissa/packs/built/house-rules/current'];
   const direct = buildSpawnCommand({
     platform: 'win32',
     resolved: { path: 'C:/a/claude.exe', kind: 'exe' },

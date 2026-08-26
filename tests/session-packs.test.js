@@ -19,6 +19,10 @@ const CLAUDE_MD_ENV = 'CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD';
 // would make them meaningless.
 delete process.env[CLAUDE_MD_ENV];
 
+function toPosix(value) {
+  return value.replace(/\\/g, '/');
+}
+
 function fakePty(pid = 2147483646) {
   return { pid, onData() {}, onExit() {}, write() {}, resize() {}, kill() {} };
 }
@@ -59,23 +63,23 @@ function spawnCapture(calls) {
 }
 
 test('a built pack spawns as --add-dir, sets the CLAUDE.md env flag, and rides the snapshot', async () => {
-  const builtRoot = await makeBuiltRoot({ 'company-context': 'v-abc' });
+  const builtRoot = await makeBuiltRoot({ 'house-rules': 'v-abc' });
   const calls = [];
   const s = new Session({
     id: 'packed',
     name: 'packed',
     path: process.cwd(),
-    packs: ['company-context'],
+    packs: ['house-rules'],
     packsBuiltRoot: builtRoot,
     spawnCommand: { path: process.execPath, kind: 'exe' },
     ptySpawn: spawnCapture(calls),
   });
   try {
     await s.start();
-    const packDir = fixtureVersionDir(builtRoot, 'company-context', 'v-abc');
+    const packDir = fixtureVersionDir(builtRoot, 'house-rules', 'v-abc');
     assert.deepEqual(calls[0].args, ['--add-dir', packDir]);
     assert.equal(calls[0].opts.env[CLAUDE_MD_ENV], '1');
-    assert.deepEqual(s.toSnapshot().packs, [{ name: 'company-context', version: fixtureVersion('v-abc') }]);
+    assert.deepEqual(s.toSnapshot().packs, [{ name: 'house-rules', version: fixtureVersion('v-abc') }]);
     const delivered = s.getDebugState().decisions.filter((d) => d.kind === 'pack');
     assert.equal(delivered.length, 1);
     assert.equal(delivered[0].decision, 'delivered');
@@ -238,13 +242,13 @@ test('a malformed packs list costs the bad entries, not the spawn', async () => 
   }
 });
 
-test('packs: "company-context" (not an array) is ignored entirely', async () => {
+test('packs: "house-rules" (not an array) is ignored entirely', async () => {
   const calls = [];
   const s = new Session({
     id: 'not-an-array',
     name: 'not-an-array',
     path: process.cwd(),
-    packs: 'company-context',
+    packs: 'house-rules',
     spawnCommand: { path: process.execPath, kind: 'exe' },
     ptySpawn: spawnCapture(calls),
   });
@@ -400,5 +404,67 @@ test('a pack update between lookups still arms a notice before the delivered lis
     assert.match(s.takePackNoticeContext(), /"alpha" \(version v1 is now v2\)/);
   } finally {
     s.destroy();
+  }
+});
+
+test('a pack built out of the project\'s own files is skipped as self-referential', async () => {
+  const builtRoot = await makeBuiltRoot({ mirror: { version: 'v1', sourceRoots: [`${toPosix(process.cwd())}/docs`], sources: [{ pattern: 'docs/*.md', files: [{ relPath: 'a.md' }] }] } });
+  const calls = [];
+  const s = new Session({
+    id: 'mirror', name: 'mirror', path: process.cwd(),
+    packs: ['mirror'], packsBuiltRoot: builtRoot,
+    spawnCommand: { path: process.execPath, kind: 'exe' },
+    ptySpawn: spawnCapture(calls),
+  });
+  try {
+    await s.start();
+    assert.deepEqual(calls[0].args, []);
+    assert.equal(CLAUDE_MD_ENV in calls[0].opts.env, false);
+    assert.deepEqual(s.toSnapshot().packs, []);
+    const skips = s.getDebugState().decisions.filter((d) => d.kind === 'pack');
+    assert.deepEqual(skips.map((d) => [d.decision, d.reason]), [['skipped', 'self-referential']]);
+  } finally {
+    s.destroy();
+    await fsp.rm(builtRoot, { recursive: true, force: true });
+  }
+});
+
+test('the same pack still reaches a project it was not built out of', async () => {
+  const builtRoot = await makeBuiltRoot({ mirror: { version: 'v1', sourceRoots: [`${toPosix(process.cwd())}/docs`], sources: [{ pattern: 'docs/*.md', files: [{ relPath: 'a.md' }] }] } });
+  const calls = [];
+  const s = new Session({
+    id: 'elsewhere', name: 'elsewhere', path: os.tmpdir(),
+    packs: ['mirror'], packsBuiltRoot: builtRoot,
+    spawnCommand: { path: process.execPath, kind: 'exe' },
+    ptySpawn: spawnCapture(calls),
+  });
+  try {
+    await s.start();
+    assert.deepEqual(calls[0].args, ['--add-dir', fixtureVersionDir(builtRoot, 'mirror', 'v1')]);
+  } finally {
+    s.destroy();
+    await fsp.rm(builtRoot, { recursive: true, force: true });
+  }
+});
+
+test('a build carrying only its own index is skipped as empty, costing the session nothing', async () => {
+  const builtRoot = await makeBuiltRoot({ hollow: { version: 'v1', sources: [], rules: [], skills: [] } });
+  const calls = [];
+  const s = new Session({
+    id: 'hollow', name: 'hollow', path: process.cwd(),
+    packs: ['hollow'], packsBuiltRoot: builtRoot,
+    spawnCommand: { path: process.execPath, kind: 'exe' },
+    ptySpawn: spawnCapture(calls),
+  });
+  try {
+    await s.start();
+    assert.deepEqual(calls[0].args, []);
+    assert.equal(CLAUDE_MD_ENV in calls[0].opts.env, false);
+    assert.deepEqual(s.toSnapshot().packs, []);
+    const skips = s.getDebugState().decisions.filter((d) => d.kind === 'pack');
+    assert.deepEqual(skips.map((d) => [d.decision, d.reason]), [['skipped', 'empty']]);
+  } finally {
+    s.destroy();
+    await fsp.rm(builtRoot, { recursive: true, force: true });
   }
 });

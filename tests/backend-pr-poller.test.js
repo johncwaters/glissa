@@ -164,15 +164,15 @@ test('prReviewCfgKey: absent prReview/telegram normalizes to null, distinct from
 
 test('prReviewCfgKey: a changed packs list counts as a lane config change', () => {
   const { prReviewCfgKey } = require('../server/pr-review-wiring');
-  const base = { prReview: { enabled: true, projects: ['p1'], packs: ['glissa'] }, telegram: { botToken: 'x', chatId: 'y' } };
-  const changed = { prReview: { enabled: true, projects: ['p1'], packs: ['company-context'] }, telegram: { botToken: 'x', chatId: 'y' } };
+  const base = { prReview: { enabled: true, projects: ['p1'], packs: ['crew-rules'] }, telegram: { botToken: 'x', chatId: 'y' } };
+  const changed = { prReview: { enabled: true, projects: ['p1'], packs: ['house-rules'] }, telegram: { botToken: 'x', chatId: 'y' } };
   assert.notEqual(prReviewCfgKey(base), prReviewCfgKey(changed));
 });
 
 test('PR review lane passes configured packs into Session options', () => {
   withFakeSession('../server/pr-review-wiring', ({ createPrReviewWiring }, constructed) => {
     const wiring = createPrReviewWiring({
-      config: { prReview: { packs: ['glissa', '../bad', 'glissa', 'company-context'] }, replayBufferKB: 256 },
+      config: { prReview: { packs: ['crew-rules', '../bad', 'crew-rules', 'house-rules'] }, replayBufferKB: 256 },
       reviewSessions: new Map(),
       closeSessionDataClients() {},
       hookRouter: null,
@@ -182,7 +182,7 @@ test('PR review lane passes configured packs into Session options', () => {
       getProjectPathById: () => null,
     });
     wiring._makeReviewSession({ id: 'pr:1', name: 'PR', path: process.cwd(), initialPrompt: 'prompt' });
-    assert.deepEqual(constructed[0].packs, ['glissa', 'company-context']);
+    assert.deepEqual(constructed[0].packs, ['crew-rules', 'house-rules']);
   });
 });
 

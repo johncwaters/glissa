@@ -117,6 +117,7 @@ export function indexLine(built) {
 // reads as a plain fact rather than as the unbuilt-pack warning a consumed pack would earn.
 export function builtLine(pack) {
   const built = pack?.built;
+  if (built?.empty === true) return `${shortVersion(built.version)} built ${formatBuiltAt(built.builtAt)}, empty`;
   if (built) return `${shortVersion(built.version)} built ${formatBuiltAt(built.builtAt)}`;
   if (pack?.hasConsumers === false) return 'not built: no consumers';
   return pack?.builtReason ? `Not built: ${pack.builtReason}` : 'Not built.';
@@ -201,6 +202,7 @@ export function consumerLine(pack) {
 export function deliveryEmptyText(pack) {
   if (pack?.hasConsumers === false) return 'no consumers';
   if (!pack?.built) return 'no build';
+  if (pack.built.empty === true) return 'empty build, not delivered';
   return 'no live sessions';
 }
 

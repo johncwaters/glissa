@@ -11,20 +11,20 @@ Version-controlled input to the context mill: pack specs and the shared source m
 | Directory | Purpose |
 |-----------|---------|
 | `specs/` | One `<name>.pack.json` per pack. The filename must match the spec's `name` field |
-| `sources/` | Shared source material packs assemble from, e.g. `sources/company-context/*.md` |
+| `sources/` | Shared source material packs assemble from, e.g. `sources/house-rules/*.md`. Absent until a spec needs it |
 
 ## Spec format
 
 ```json
 {
-  "name": "company-context",
+  "name": "house-rules",
   "description": "One sentence on what this pack carries",
-  "sources": [{ "glob": "sources/company-context/*.md", "exclude": ["**/archive/**"] }],
+  "sources": [{ "glob": "sources/house-rules/*.md", "exclude": ["**/archive/**"] }],
   "rules": ["hand-written policy lines folded into the index"],
   "skills": [{ "dir": "skills/voice-style" }],
   "distill": [{
-    "output": "sources/company-context/derived/brief.md",
-    "sources": [{ "glob": "sources/company-context/*.md" }],
+    "output": "sources/house-rules/derived/brief.md",
+    "sources": [{ "glob": "sources/house-rules/*.md" }],
     "instructions": "Regenerate a short brief from the source files."
   }],
   "budgetTokens": 8000
@@ -45,10 +45,10 @@ A source may set `data: true`. Its files are published under `data/<slug>/` as p
 
 ### Working In This Directory
 - Sources are LOCAL FILES ONLY. No remote fetching in a spec: pack bytes land in `--dangerously-skip-permissions` sessions, so the trust boundary is "files the operator already controls".
-- `sources/company-context/` is also read live by `tools/company-context/server.js` (the MCP server), so it is one source of truth, not a copy.
+- A pack may NOT be built out of a consumer project's own checkout. Delivery refuses it (`self-referential`, `server/core/pack-core.js`) and so does assignment: a session already loads those files, and the pack is a lossy copy that drifts silently. Two packs distilled from this repo were retired for exactly that.
 - Adding a source that matches no file fails the build on purpose; fix the pattern rather than dropping the source.
 - These files ship in the npm tarball (`package.json` `files`), so keep them reference material, not scratch notes.
-- A spec whose sources reach OUTSIDE `packs/` (the `glissa` pack reads `../docs/*.md`) is repo-development context and must be excluded from the tarball, or a global install fails its build on every watch fire and every sweep. `scripts/check-package-files.js` enforces that: a shipped spec whose non-optional sources are not in the whitelist fails the release gate.
+- A spec whose sources reach OUTSIDE `packs/` is repo-development context and must be excluded from the tarball, or a global install fails its build on every watch fire and every sweep. `scripts/check-package-files.js` enforces that: a shipped spec whose non-optional sources are not in the whitelist fails the release gate.
 
 ### Testing Requirements
 - `node --test tests/pack-core.test.js tests/pack-builder.test.js` covers the format and the builder; `glissa pack build` is the end-to-end check.

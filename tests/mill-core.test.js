@@ -28,9 +28,9 @@ const OLD_VERSION = 'b'.repeat(64);
 
 function validSpec(overrides = {}) {
   return {
-    name: 'company-context',
+    name: 'house-rules',
     description: 'What the company is',
-    sources: [{ path: 'sources/company-context' }],
+    sources: [{ path: 'sources/house-rules' }],
     budgetTokens: 8000,
     ...overrides,
   };
@@ -38,7 +38,7 @@ function validSpec(overrides = {}) {
 
 function manifest(overrides = {}) {
   return {
-    name: 'company-context',
+    name: 'house-rules',
     description: 'What the company is',
     version: VERSION,
     builtAt: '2026-08-20T10:00:00.000Z',
@@ -46,7 +46,7 @@ function manifest(overrides = {}) {
     budgetTokens: 8000,
     indexTokenEstimate: 300,
     rules: ['no emoji'],
-    sources: [{ pattern: 'sources/company-context', files: [{ relPath: 'a.md' }, { relPath: 'b.md' }] }],
+    sources: [{ pattern: 'sources/house-rules', files: [{ relPath: 'a.md' }, { relPath: 'b.md' }] }],
     skills: [{ dir: 'skills/x', name: 'x', files: [] }],
     outputs: [
       { relPath: 'CLAUDE.md', tokenEstimate: 300 },
@@ -64,7 +64,7 @@ function baseInput(overrides = {}) {
     autoRebuild: true,
     distillerEnabled: false,
     watcherCount: 3,
-    specs: [{ name: 'company-context', spec: validSpec(), manifest: manifest(), builtReason: null, distill: [] }],
+    specs: [{ name: 'house-rules', spec: validSpec(), manifest: manifest(), builtReason: null, distill: [] }],
     sessionRows: [],
     consumerSources: sourcesFor(consumers || {}),
     ...rest,
@@ -81,7 +81,7 @@ test('a built valid pack reports its version, budget share and content counts', 
   assert.equal(report.error, null);
 
   const pack = report.packs[0];
-  assert.equal(pack.name, 'company-context');
+  assert.equal(pack.name, 'house-rules');
   assert.equal(pack.specValid, true);
   assert.deepEqual(pack.specErrors, []);
   assert.equal(pack.sourceCount, 1);
@@ -130,8 +130,8 @@ test('a spec that parses but does not validate carries the validator errors', ()
 test('a delivery is stale only when the delivered version differs from a KNOWN built one', () => {
   const report = buildMillReport(baseInput({
     sessionRows: [
-      { sessionId: 's1', sessionName: 'current', state: 'running', packs: [{ name: 'company-context', version: VERSION }] },
-      { sessionId: 's2', sessionName: 'behind', state: 'idle', packs: [{ name: 'company-context', version: OLD_VERSION }] },
+      { sessionId: 's1', sessionName: 'current', state: 'running', packs: [{ name: 'house-rules', version: VERSION }] },
+      { sessionId: 's2', sessionName: 'behind', state: 'idle', packs: [{ name: 'house-rules', version: OLD_VERSION }] },
       { sessionId: 's3', sessionName: 'other pack', state: 'idle', packs: [{ name: 'elsewhere', version: VERSION }] },
     ],
   }));
@@ -146,18 +146,18 @@ test('a delivery is stale only when the delivered version differs from a KNOWN b
 // ---- Delivery rows are addressed per PROJECT, never per card ----
 
 const SIBLING_PROJECTS = [
-  { id: 'p1', name: 'glissa', path: 'C:/repo', packs: ['company-context'] },
-  { id: 'p2', name: 'glissa (2)', path: 'C:/repo', packs: ['company-context'] },
-  { id: 'p3', name: 'other', path: 'C:/other', packs: ['company-context'] },
+  { id: 'p1', name: 'glissa', path: 'C:/repo', packs: ['house-rules'] },
+  { id: 'p2', name: 'glissa (2)', path: 'C:/repo', packs: ['house-rules'] },
+  { id: 'p3', name: 'other', path: 'C:/other', packs: ['house-rules'] },
 ];
 
 test('two cards on one checkout are ONE delivery row, counted and summed', () => {
   const report = buildMillReport(baseInput({
     consumers: { projects: SIBLING_PROJECTS },
     sessionRows: [
-      { sessionId: 's1', sessionName: 'glissa', path: 'C:/repo', state: 'running', packs: [{ name: 'company-context', version: VERSION }] },
-      { sessionId: 's2', sessionName: 'glissa (2)', path: 'C:/repo', state: 'idle', packs: [{ name: 'company-context', version: OLD_VERSION }] },
-      { sessionId: 's3', sessionName: 'other', path: 'C:/other', state: 'running', packs: [{ name: 'company-context', version: VERSION }] },
+      { sessionId: 's1', sessionName: 'glissa', path: 'C:/repo', state: 'running', packs: [{ name: 'house-rules', version: VERSION }] },
+      { sessionId: 's2', sessionName: 'glissa (2)', path: 'C:/repo', state: 'idle', packs: [{ name: 'house-rules', version: OLD_VERSION }] },
+      { sessionId: 's3', sessionName: 'other', path: 'C:/other', state: 'running', packs: [{ name: 'house-rules', version: VERSION }] },
     ],
   }));
   const pack = report.packs[0];
@@ -175,8 +175,8 @@ test('a grouped row keeps a state and a version its sessions agree on', () => {
   const report = buildMillReport(baseInput({
     consumers: { projects: SIBLING_PROJECTS },
     sessionRows: [
-      { sessionId: 's1', sessionName: 'glissa', path: 'C:/repo', state: 'running', packs: [{ name: 'company-context', version: VERSION }] },
-      { sessionId: 's2', sessionName: 'glissa (2)', path: 'C:/repo', state: 'running', packs: [{ name: 'company-context', version: VERSION }] },
+      { sessionId: 's1', sessionName: 'glissa', path: 'C:/repo', state: 'running', packs: [{ name: 'house-rules', version: VERSION }] },
+      { sessionId: 's2', sessionName: 'glissa (2)', path: 'C:/repo', state: 'running', packs: [{ name: 'house-rules', version: VERSION }] },
     ],
   }));
   const grouped = report.packs[0].deliveredTo[0];
@@ -190,7 +190,7 @@ test('the delivery row is named by the project record, not by whichever card hap
   const report = buildMillReport(baseInput({
     consumers: { projects: SIBLING_PROJECTS },
     sessionRows: [
-      { sessionId: 's2', sessionName: 'glissa (2)', path: 'C:/repo', state: 'running', packs: [{ name: 'company-context', version: VERSION }] },
+      { sessionId: 's2', sessionName: 'glissa (2)', path: 'C:/repo', state: 'running', packs: [{ name: 'house-rules', version: VERSION }] },
     ],
   }));
   assert.equal(report.packs[0].deliveredTo[0].project, 'glissa');
@@ -200,7 +200,7 @@ test('a session whose path no project record names is still reported, under its 
   const report = buildMillReport(baseInput({
     consumers: { projects: SIBLING_PROJECTS },
     sessionRows: [
-      { sessionId: 's9', sessionName: 'ephemeral', path: 'C:/nowhere', state: 'running', packs: [{ name: 'company-context', version: VERSION }] },
+      { sessionId: 's9', sessionName: 'ephemeral', path: 'C:/nowhere', state: 'running', packs: [{ name: 'house-rules', version: VERSION }] },
     ],
   }));
   assert.equal(report.packs[0].deliveredTo[0].project, 'ephemeral');
@@ -210,7 +210,7 @@ test('a session path never reaches the report: the tab renders on a paired phone
   const report = buildMillReport(baseInput({
     consumers: { projects: SIBLING_PROJECTS },
     sessionRows: [
-      { sessionId: 's1', sessionName: 'glissa', path: '/home/x/repo', state: 'running', packs: [{ name: 'company-context', version: VERSION }] },
+      { sessionId: 's1', sessionName: 'glissa', path: '/home/x/repo', state: 'running', packs: [{ name: 'house-rules', version: VERSION }] },
     ],
   }));
   assert.ok(!JSON.stringify(report).includes('/home/x/'), 'no server path survives into the wire shape');
@@ -220,14 +220,14 @@ test('sibling cards are one assignable project, with the packs either of them na
   const report = buildMillReport(baseInput({
     consumers: {
       projects: [
-        { id: 'p1', name: 'glissa', path: 'C:/repo', packs: ['company-context'] },
-        { id: 'p2', name: 'glissa (2)', path: 'C:/repo', packs: ['house-rules'] },
+        { id: 'p1', name: 'glissa', path: 'C:/repo', packs: ['house-rules'] },
+        { id: 'p2', name: 'glissa (2)', path: 'C:/repo', packs: ['crew-rules'] },
         { id: 'p3', name: 'other', path: 'C:/other', packs: [] },
       ],
     },
   }));
   assert.deepEqual(report.projects, [
-    { id: 'p1', name: 'glissa', packs: ['company-context', 'house-rules'] },
+    { id: 'p1', name: 'glissa', packs: ['house-rules', 'crew-rules'] },
     { id: 'p3', name: 'other', packs: [] },
   ], 'the primary id addresses the whole project, and neither card is offered twice');
   assert.deepEqual(report.packs[0].consumers.projects, ['glissa'], 'and it names the project once');
@@ -235,8 +235,8 @@ test('sibling cards are one assignable project, with the packs either of them na
 
 test('an unbuilt pack judges no delivery stale: an unknown version is not a mismatch', () => {
   const report = buildMillReport(baseInput({
-    specs: [{ name: 'company-context', spec: validSpec(), manifest: null, builtReason: 'not built', distill: [] }],
-    sessionRows: [{ sessionId: 's1', sessionName: 'a', state: 'running', packs: [{ name: 'company-context', version: OLD_VERSION }] }],
+    specs: [{ name: 'house-rules', spec: validSpec(), manifest: null, builtReason: 'not built', distill: [] }],
+    sessionRows: [{ sessionId: 's1', sessionName: 'a', state: 'running', packs: [{ name: 'house-rules', version: OLD_VERSION }] }],
   }));
   assert.equal(report.packs[0].deliveredTo[0].stale, null);
   assert.equal(report.totals.staleDeliveries, 0);
@@ -245,7 +245,7 @@ test('an unbuilt pack judges no delivery stale: an unknown version is not a mism
 test('distill rows keep stale, current and could-not-check apart', () => {
   const report = buildMillReport(baseInput({
     specs: [{
-      name: 'company-context',
+      name: 'house-rules',
       spec: validSpec(),
       manifest: manifest(),
       distill: [
@@ -263,10 +263,10 @@ test('consumers are normalized through the spawn rule, and every rejection is re
   const report = buildMillReport(baseInput({
     consumers: {
       projects: [
-        { name: 'glissa', packs: ['company-context', 'company-context'] },
+        { name: 'glissa', packs: ['house-rules', 'house-rules'] },
         { name: 'other', packs: 'not-an-array' },
       ],
-      prReview: ['company-context'],
+      prReview: ['house-rules'],
       posthog: ['../escape'],
     },
   }));
@@ -296,9 +296,9 @@ test('a pack no project and no lane names reports hasConsumers false and counts 
 
 test('one consumer of any kind is enough for hasConsumers', () => {
   for (const consumers of [
-    { projects: [{ id: 'p1', name: 'glissa', packs: ['company-context'] }], prReview: null, posthog: null },
-    { projects: [], prReview: ['company-context'], posthog: null },
-    { projects: [], prReview: null, posthog: ['company-context'] },
+    { projects: [{ id: 'p1', name: 'glissa', packs: ['house-rules'] }], prReview: null, posthog: null },
+    { projects: [], prReview: ['house-rules'], posthog: null },
+    { projects: [], prReview: null, posthog: ['house-rules'] },
   ]) {
     const report = buildMillReport(baseInput({ consumers }));
     assert.equal(report.packs[0].hasConsumers, true);
@@ -310,7 +310,7 @@ test('the report carries each project id with the pack list a spawn would actual
   const report = buildMillReport(baseInput({
     consumers: {
       projects: [
-        { id: 'p1', name: 'glissa', packs: ['company-context', 'company-context', 'nope!'] },
+        { id: 'p1', name: 'glissa', packs: ['house-rules', 'house-rules', 'nope!'] },
         { id: 'p2', name: 'other', packs: null },
       ],
       prReview: null,
@@ -318,7 +318,7 @@ test('the report carries each project id with the pack list a spawn would actual
     },
   }));
   assert.deepEqual(report.projects, [
-    { id: 'p1', name: 'glissa', packs: ['company-context'] },
+    { id: 'p1', name: 'glissa', packs: ['house-rules'] },
     { id: 'p2', name: 'other', packs: [] },
   ], 'the duplicate and the malformed entry are dropped, exactly as the spawn would drop them');
   assert.equal(report.maxPacksPerProject, MAX_PACKS_PER_SESSION, 'the cap ships so the tab cannot restate it wrong');
@@ -330,7 +330,7 @@ test('the outputs list is capped and the tail counted rather than shipped', () =
     tokenEstimate: 10,
   }));
   const report = buildMillReport(baseInput({
-    specs: [{ name: 'company-context', spec: validSpec(), manifest: manifest({ outputs }), distill: [] }],
+    specs: [{ name: 'house-rules', spec: validSpec(), manifest: manifest({ outputs }), distill: [] }],
   }));
   assert.equal(report.packs[0].built.outputs.length, MAX_OUTPUT_ROWS);
   assert.equal(report.packs[0].built.moreOutputs, 7);
@@ -341,7 +341,7 @@ test('an empty mill reports zeros rather than throwing', () => {
   assert.deepEqual(report.packs, []);
   assert.deepEqual(report.configWarnings, []);
   assert.deepEqual(report.totals, {
-    packCount: 0, variantCount: 0, builtCount: 0, unconsumed: 0, invalidSpecs: 0, staleDeliveries: 0, staleDistills: 0,
+    packCount: 0, variantCount: 0, builtCount: 0, unconsumed: 0, emptyBuilds: 0, invalidSpecs: 0, staleDeliveries: 0, staleDistills: 0,
   });
   assert.equal(report.autoRebuild, false);
   assert.equal(report.watcherCount, null);
@@ -350,7 +350,7 @@ test('an empty mill reports zeros rather than throwing', () => {
 
 test('a spec whose name differs from its filename is invalid: the builder refuses it forever', () => {
   const report = buildMillReport(baseInput({
-    specs: [{ name: 'company-context', spec: validSpec({ name: 'renamed' }), manifest: null, builtReason: 'not built (no dir)', distill: [] }],
+    specs: [{ name: 'house-rules', spec: validSpec({ name: 'renamed' }), manifest: null, builtReason: 'not built (no dir)', distill: [] }],
   }));
   const pack = report.packs[0];
   assert.equal(pack.specValid, false);
@@ -382,7 +382,7 @@ test('a manifest with no token estimate reports null rather than a confident zer
   delete bare.tokenEstimate;
   delete bare.indexTokenEstimate;
   const report = buildMillReport(baseInput({
-    specs: [{ name: 'company-context', spec: validSpec(), manifest: bare, distill: [] }],
+    specs: [{ name: 'house-rules', spec: validSpec(), manifest: bare, distill: [] }],
   }));
   assert.equal(report.packs[0].built.tokenEstimate, null);
   assert.equal(report.packs[0].built.indexTokenEstimate, null);
@@ -461,4 +461,18 @@ test('a delivery of a variant is joined onto the variant row, not its group', ()
   assert.deepEqual(group.deliveredTo, []);
   assert.equal(variant.deliveredTo.length, 1);
   assert.equal(variant.deliveredTo[0].stale, true, 'the delivered version is compared against the VARIANT build');
+});
+
+test('a build carrying only its own index reads as empty, and the totals count it', () => {
+  const report = buildMillReport(baseInput({
+    specs: [{ name: 'hollow', spec: validSpec({ name: 'hollow' }), manifest: manifest({ name: 'hollow', sources: [], rules: [], skills: [] }), distill: [] }],
+  }));
+  assert.equal(report.packs[0].built.empty, true);
+  assert.equal(report.totals.emptyBuilds, 1);
+});
+
+test('a build with content is not empty', () => {
+  const report = buildMillReport(baseInput({ specs: [{ name: 'house-rules', spec: validSpec(), manifest: manifest(), distill: [] }] }));
+  assert.equal(report.packs[0].built.empty, false);
+  assert.equal(report.totals.emptyBuilds, 0);
 });

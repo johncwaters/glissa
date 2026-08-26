@@ -79,10 +79,10 @@ async function withHooks(options, run) {
 }
 
 test('packs off: nothing is added to the argv, and the refusal is in the decision trace', async () => {
-  const builtRoot = await makeBuiltRoot({ 'company-context': 'v-abc' });
+  const builtRoot = await makeBuiltRoot({ 'house-rules': 'v-abc' });
   const { session, calls } = makeSession({
     id: 'no-packs', name: 'no-packs', adapter: agentWithout('packs'),
-    packs: ['company-context'], packsBuiltRoot: builtRoot,
+    packs: ['house-rules'], packsBuiltRoot: builtRoot,
   });
   try {
     await session.start();
@@ -92,7 +92,7 @@ test('packs off: nothing is added to the argv, and the refusal is in the decisio
     const decisions = session.getDebugState().decisions.filter((d) => d.kind === 'pack');
     assert.equal(decisions.length, 1);
     assert.equal(decisions[0].decision, 'unsupported');
-    assert.equal(decisions[0].name, 'company-context');
+    assert.equal(decisions[0].name, 'house-rules');
     assert.match(decisions[0].reason, /test-agent/);
     assert.equal(decisions[0].agent, 'test-agent', 'a non-default agent stamps its trace entries');
   } finally {
@@ -102,19 +102,19 @@ test('packs off: nothing is added to the argv, and the refusal is in the decisio
 });
 
 test('packNotice off: a rebuild arms nothing and the hook response can never carry context', async () => {
-  const builtRoot = await makeBuiltRoot({ 'company-context': 'v-abc' });
+  const builtRoot = await makeBuiltRoot({ 'house-rules': 'v-abc' });
   const cases = [
     { adapter: claudeCode, armed: true },
     { adapter: agentWithout('packNotice'), armed: false },
   ];
   for (const { adapter, armed } of cases) {
     const { session } = makeSession({
-      id: 'notice', name: 'notice', adapter, packs: ['company-context'], packsBuiltRoot: builtRoot,
+      id: 'notice', name: 'notice', adapter, packs: ['house-rules'], packsBuiltRoot: builtRoot,
     });
     try {
       await session.start();
-      assert.deepEqual(session.toSnapshot().packs.map((p) => p.name), ['company-context'], 'the pack is still delivered');
-      assert.equal(session.notePackUpdate('company-context', 'v-next'), armed);
+      assert.deepEqual(session.toSnapshot().packs.map((p) => p.name), ['house-rules'], 'the pack is still delivered');
+      assert.equal(session.notePackUpdate('house-rules', 'v-next'), armed);
       assert.equal(session.takePackNoticeContext() === null, !armed);
     } finally {
       session.destroy();
@@ -229,9 +229,9 @@ test('a claude-code recording differs only by the header agent field', async () 
 
 test('a non-default agent stamps its decision records, so a recording says which vocabulary it holds', async () => {
   const recorderBase = await fsp.mkdtemp(path.join(os.tmpdir(), 'glissa-cap-rec2-'));
-  const builtRoot = await makeBuiltRoot({ 'company-context': 'v-abc' });
+  const builtRoot = await makeBuiltRoot({ 'house-rules': 'v-abc' });
   const { session } = makeSession({
-    id: 'rec2', name: 'rec2', adapter: agentWithout('packs'), packs: ['company-context'], packsBuiltRoot: builtRoot,
+    id: 'rec2', name: 'rec2', adapter: agentWithout('packs'), packs: ['house-rules'], packsBuiltRoot: builtRoot,
   });
   const recorder = new SessionRecorder({ name: 'rec2', baseDir: recorderBase, recordData: false });
   session.setRecorder(recorder);

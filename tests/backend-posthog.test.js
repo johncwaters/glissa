@@ -166,15 +166,15 @@ test('posthogCfgKey: absent posthog/telegram normalizes to null, distinct from a
 });
 
 test('posthogCfgKey: a changed packs list counts as a lane config change', () => {
-  const base = { posthog: { ...ENABLED, packs: ['glissa'] }, telegram: TELEGRAM };
-  const changed = { posthog: { ...ENABLED, packs: ['company-context'] }, telegram: TELEGRAM };
+  const base = { posthog: { ...ENABLED, packs: ['crew-rules'] }, telegram: TELEGRAM };
+  const changed = { posthog: { ...ENABLED, packs: ['house-rules'] }, telegram: TELEGRAM };
   assert.notEqual(posthogCfgKey(base), posthogCfgKey(changed));
 });
 
 test('PostHog lane passes configured packs into Session options', () => {
   withFakeSession('../server/posthog-wiring', ({ createPosthogWiring }, constructed) => {
     const wiring = createPosthogWiring({
-      config: { posthog: { ...ENABLED, packs: ['glissa', '../bad', 'glissa', 'company-context'] }, replayBufferKB: 256 },
+      config: { posthog: { ...ENABLED, packs: ['crew-rules', '../bad', 'crew-rules', 'house-rules'] }, replayBufferKB: 256 },
       investigationSessions: new Map(),
       closeSessionDataClients() {},
       hookRouter: null,
@@ -188,7 +188,7 @@ test('PostHog lane passes configured packs into Session options', () => {
       initialPrompt: 'prompt',
       spawnEnv: { POSTHOG_API_KEY: 'x', POSTHOG_HOST: 'https://ph.test' },
     });
-    assert.deepEqual(constructed[0].packs, ['glissa', 'company-context']);
+    assert.deepEqual(constructed[0].packs, ['crew-rules', 'house-rules']);
   });
 });
 

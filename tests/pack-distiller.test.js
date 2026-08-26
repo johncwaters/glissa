@@ -45,12 +45,12 @@ function stampedFile(sources = HASHES) {
 
 function specWithDistill(overrides = {}) {
   return {
-    name: 'glissa',
+    name: 'house-rules',
     description: 'demo',
-    sources: [{ glob: 'sources/glissa/*.md' }],
+    sources: [{ glob: 'sources/house-rules/*.md' }],
     budgetTokens: 4000,
     distill: [{
-      output: 'sources/glissa/derived/brief.md',
+      output: 'sources/house-rules/derived/brief.md',
       sources: [{ path: '../AGENTS.md' }],
       instructions: 'Write a one page architecture brief.',
     }],
@@ -65,8 +65,8 @@ function specWithDistill(overrides = {}) {
  *   onSpawn    optional side effect (usually writing the output into `files`)
  */
 function harness({
-  specs = [{ name: 'glissa', specPath: '/specs/glissa.pack.json' }],
-  specByPath = { '/specs/glissa.pack.json': specWithDistill() },
+  specs = [{ name: 'house-rules', specPath: '/specs/house-rules.pack.json' }],
+  specByPath = { '/specs/house-rules.pack.json': specWithDistill() },
   hashes = HASHES,
   files = {},
   verdicts = ['DISTILLED'],
@@ -177,11 +177,11 @@ function harness({
 // ---------------------------------------------------------------------------
 
 test('an output whose stamp matches its sources is current, and nothing is spawned', async () => {
-  const h = harness({ files: { '/packs/sources/glissa/derived/brief.md': stampedFile() } });
+  const h = harness({ files: { '/packs/sources/house-rules/derived/brief.md': stampedFile() } });
   const [report] = await h.distiller.runOnce();
 
   assert.equal(report.status, 'current');
-  assert.equal(report.pack, 'glissa');
+  assert.equal(report.pack, 'house-rules');
   assert.equal(h.spawns.length, 0);
 });
 
@@ -192,7 +192,7 @@ test('a missing output spawns one distill session and reports the written file',
   assert.equal(h.spawns.length, 1);
   assert.equal(report.status, 'distilled');
   assert.equal(report.verdict, 'DISTILLED');
-  assert.equal(report.output, 'sources/glissa/derived/brief.md');
+  assert.equal(report.output, 'sources/house-rules/derived/brief.md');
 });
 
 // The result directory is a real mkdtemp in production, so a distill that skips its cleanup leaks one
@@ -201,17 +201,17 @@ test('a missing output spawns one distill session and reports the written file',
 test('every distill releases its result file, on a clean verdict and on ERROR alike', async () => {
   const distilled = harness();
   await distilled.distiller.runOnce();
-  assert.deepEqual(distilled.removed, ['/tmp/glissa-0.json'], 'released after a DISTILLED verdict');
+  assert.deepEqual(distilled.removed, ['/tmp/house-rules-0.json'], 'released after a DISTILLED verdict');
 
   const failed = harness({ verdicts: ['ERROR'] });
   const [report] = await failed.distiller.runOnce();
   assert.equal(report.verdict, 'ERROR');
-  assert.deepEqual(failed.removed, ['/tmp/glissa-0.json'], 'and after an ERROR one');
+  assert.deepEqual(failed.removed, ['/tmp/house-rules-0.json'], 'and after an ERROR one');
 });
 
 test('an edited source spawns a distill even though the output exists', async () => {
   const h = harness({
-    files: { '/packs/sources/glissa/derived/brief.md': stampedFile([{ path: 'AGENTS.md', sha256: 'f'.repeat(64) }]) },
+    files: { '/packs/sources/house-rules/derived/brief.md': stampedFile([{ path: 'AGENTS.md', sha256: 'f'.repeat(64) }]) },
   });
   const [report] = await h.distiller.runOnce();
 
@@ -239,14 +239,14 @@ test('the prompt file names the target as read-only context and the spawn runs f
   const [spawn] = h.spawns;
   const [promptWrite] = h.promptWrites;
   assert.equal(promptWrite.promptPath, `/tmp/${PACK_DISTILL_PROMPT_FILE}`);
-  assert.match(promptWrite.content, /\/packs\/sources\/glissa\/derived\/brief\.md/);
+  assert.match(promptWrite.content, /\/packs\/sources\/house-rules\/derived\/brief\.md/);
   assert.match(promptWrite.content, /C:\/repo\/AGENTS\.md/);
   assert.ok(promptWrite.content.includes('Write a one page architecture brief.'));
   assert.equal(promptWrite.content.includes(buildStampLine(HASHES)), false);
   assert.match(promptWrite.content, /Glissa alone writes that output file/);
-  assert.match(promptWrite.content, /\/tmp\/glissa-0\.json/);
+  assert.match(promptWrite.content, /\/tmp\/house-rules-0\.json/);
   assert.equal(spawn.cwd, '/tmp');
-  assert.equal(spawn.id, 'pack-distill:glissa#0');
+  assert.equal(spawn.id, 'pack-distill:house-rules#0');
   assert.ok(spawn.signal, 'a timeout signal is always passed');
 });
 
@@ -258,14 +258,14 @@ test('hostile instructions stay byte-identical in the prompt file and never reac
   const resultPath = path.join(workDir, 'result.json');
   try {
     const h = harness({
-      specByPath: { '/specs/glissa.pack.json': spec },
+      specByPath: { '/specs/house-rules.pack.json': spec },
       createResultFileOverride: () => ({ path: resultPath, cleanup: async () => {} }),
       writePromptOverride: (promptPath, content) => fs.promises.writeFile(promptPath, content, 'utf8'),
     });
     await h.distiller.runOnce();
 
     const expectedPrompt = buildPackDistillPrompt({
-      outputPath: '/packs/sources/glissa/derived/brief.md',
+      outputPath: '/packs/sources/house-rules/derived/brief.md',
       sources: HASHES,
       instructions: hostileInstructions,
       resultPath,
@@ -281,7 +281,7 @@ test('hostile instructions stay byte-identical in the prompt file and never reac
 test('an oversized prompt fails before the prompt write and spawn boundaries', async () => {
   const spec = specWithDistill();
   spec.distill[0].instructions = 'x'.repeat(MAX_DISTILL_PROMPT_BYTES);
-  const h = harness({ specByPath: { '/specs/glissa.pack.json': spec } });
+  const h = harness({ specByPath: { '/specs/house-rules.pack.json': spec } });
   const [report] = await h.distiller.runOnce();
 
   assert.equal(report.status, 'error');
@@ -446,10 +446,10 @@ test('Glissa renders the sole output from validated structured content', async (
 
   assert.equal(report.status, 'distilled');
   assert.deepEqual(h.writes, [{
-    fullPath: '/packs/sources/glissa/derived/brief.md',
+    fullPath: '/packs/sources/house-rules/derived/brief.md',
     content: expected,
   }]);
-  assert.equal(h.files['/packs/sources/glissa/derived/brief.md'], expected);
+  assert.equal(h.files['/packs/sources/house-rules/derived/brief.md'], expected);
 });
 
 test('a malformed structured result fails the distill and writes nothing', async () => {
@@ -497,10 +497,10 @@ test('a hung session is aborted by the timeout and reported as an error', async 
 test('a timed-out distill waits for the killed session before releasing its result file or starting the next entry', async () => {
   const h = harness({
     specByPath: {
-      '/specs/glissa.pack.json': specWithDistill({
+      '/specs/house-rules.pack.json': specWithDistill({
         distill: [
-          { output: 'sources/glissa/derived/one.md', sources: [{ path: '../AGENTS.md' }], instructions: 'one' },
-          { output: 'sources/glissa/derived/two.md', sources: [{ path: '../AGENTS.md' }], instructions: 'two' },
+          { output: 'sources/house-rules/derived/one.md', sources: [{ path: '../AGENTS.md' }], instructions: 'one' },
+          { output: 'sources/house-rules/derived/two.md', sources: [{ path: '../AGENTS.md' }], instructions: 'two' },
         ],
       }),
     },
@@ -522,7 +522,7 @@ test('a timed-out distill waits for the killed session before releasing its resu
 
   assert.equal(h.spawns.length, 2);
   assert.equal(h.maxConcurrent(), 1);
-  assert.deepEqual(h.removed, ['/tmp/glissa-0.json', '/tmp/glissa-1.json']);
+  assert.deepEqual(h.removed, ['/tmp/house-rules-0.json', '/tmp/house-rules-1.json']);
   assert.match(reports[0].reason, /timed out/);
   assert.equal(reports[1].status, 'distilled');
 });
@@ -534,7 +534,7 @@ test('a timed-out distill waits for the killed session before releasing its resu
 test('an output path that escapes the packs directory errors before any spawn', async () => {
   const h = harness({
     specByPath: {
-      '/specs/glissa.pack.json': specWithDistill({
+      '/specs/house-rules.pack.json': specWithDistill({
         distill: [{ output: '../outside.md', sources: [{ path: '../AGENTS.md' }], instructions: 'x' }],
       }),
     },
@@ -577,13 +577,13 @@ test('distill sources that matched no file error instead of distilling from noth
 });
 
 test('a spec with no distill entries is skipped silently', async () => {
-  const h = harness({ specByPath: { '/specs/glissa.pack.json': specWithDistill({ distill: undefined }) } });
+  const h = harness({ specByPath: { '/specs/house-rules.pack.json': specWithDistill({ distill: undefined }) } });
   assert.deepEqual(await h.distiller.runOnce(), []);
   assert.equal(h.spawns.length, 0);
 });
 
 test('a spec that declares distill but fails validation errors instead of spawning', async () => {
-  const h = harness({ specByPath: { '/specs/glissa.pack.json': specWithDistill({ budgetTokens: 0 }) } });
+  const h = harness({ specByPath: { '/specs/house-rules.pack.json': specWithDistill({ budgetTokens: 0 }) } });
   const [report] = await h.distiller.runOnce();
 
   assert.equal(report.status, 'error');
@@ -601,13 +601,13 @@ test('an unreadable spec is reported, not thrown', async () => {
 
 test('a name filter runs only that pack', async () => {
   const h = harness({
-    specs: [{ name: 'glissa', specPath: '/specs/glissa.pack.json' }, { name: 'other', specPath: '/specs/other.pack.json' }],
+    specs: [{ name: 'house-rules', specPath: '/specs/house-rules.pack.json' }, { name: 'other', specPath: '/specs/other.pack.json' }],
     specByPath: {
-      '/specs/glissa.pack.json': specWithDistill(),
+      '/specs/house-rules.pack.json': specWithDistill(),
       '/specs/other.pack.json': specWithDistill({ name: 'other' }),
     },
     verdicts: ['DISTILLED', 'DISTILLED'],
-    onSpawn: (files) => { files['/packs/sources/glissa/derived/brief.md'] = stampedFile(); },
+    onSpawn: (files) => { files['/packs/sources/house-rules/derived/brief.md'] = stampedFile(); },
   });
   const reports = await h.distiller.runOnce({ name: 'other' });
 
@@ -622,10 +622,10 @@ test('a name filter runs only that pack', async () => {
 test('two stale entries distill one at a time, never concurrently', async () => {
   const h = harness({
     specByPath: {
-      '/specs/glissa.pack.json': specWithDistill({
+      '/specs/house-rules.pack.json': specWithDistill({
         distill: [
-          { output: 'sources/glissa/derived/one.md', sources: [{ path: '../AGENTS.md' }], instructions: 'one' },
-          { output: 'sources/glissa/derived/two.md', sources: [{ path: '../AGENTS.md' }], instructions: 'two' },
+          { output: 'sources/house-rules/derived/one.md', sources: [{ path: '../AGENTS.md' }], instructions: 'one' },
+          { output: 'sources/house-rules/derived/two.md', sources: [{ path: '../AGENTS.md' }], instructions: 'two' },
         ],
       }),
     },
@@ -641,7 +641,7 @@ test('two stale entries distill one at a time, never concurrently', async () => 
 test('two overlapping passes queue behind each other rather than racing the same output', async () => {
   const h = harness({
     verdicts: ['DISTILLED', 'DISTILLED'],
-    onSpawn: (files) => { files['/packs/sources/glissa/derived/brief.md'] = stampedFile(); },
+    onSpawn: (files) => { files['/packs/sources/house-rules/derived/brief.md'] = stampedFile(); },
   });
   const [first, second] = await Promise.all([h.distiller.runOnce(), h.distiller.runOnce()]);
 
@@ -666,7 +666,7 @@ test('enabled: start() runs one pass immediately and arms an unref-ed interval',
   const h = harness({
     enabled: true,
     intervalHours: 6,
-    onSpawn: (files) => { files['/packs/sources/glissa/derived/brief.md'] = stampedFile(); },
+    onSpawn: (files) => { files['/packs/sources/house-rules/derived/brief.md'] = stampedFile(); },
   });
   await h.distiller.start();
 
@@ -699,7 +699,7 @@ test('the interval tick runs another pass, and is re-entrancy guarded', async ()
 test('stop() drains a distill that is already running', async () => {
   let release = null;
   const gate = new Promise((resolve) => { release = resolve; });
-  const h = harness({ onSpawn: (files) => { files['/packs/sources/glissa/derived/brief.md'] = stampedFile(); } });
+  const h = harness({ onSpawn: (files) => { files['/packs/sources/house-rules/derived/brief.md'] = stampedFile(); } });
   const original = h.distiller.runOnce;
   const pass = original({ });
 

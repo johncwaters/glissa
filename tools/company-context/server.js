@@ -10,7 +10,7 @@
  * Transport: MCP stdio = newline-delimited JSON-RPC 2.0 (one message per line,
  * requests/responses on stdout, logs on stderr). No SDK, no npm install.
  *
- * The returned context is every .md file under the shared context-mill source
+ * The returned context is every .md file under this server's own `context/`
  * dir, concatenated. Edit those files to change what OMC workflows see. The
  * `query` argument is accepted but currently unused (all context is returned);
  * make it query-aware later if the corpus grows.
@@ -19,9 +19,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-// The context mill builds a pack from these same files, so they live in packs/ (shipped, version
-// controlled) and this server reads them there rather than keeping a second copy.
-const CONTEXT_DIR = path.join(__dirname, "..", "..", "packs", "sources", "company-context");
+const CONTEXT_DIR = path.join(__dirname, "context");
 const SERVER_NAME = "company-context";
 const SERVER_VERSION = "0.1.0";
 const DEFAULT_PROTOCOL = "2025-06-18";

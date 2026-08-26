@@ -8,7 +8,7 @@
 // Everything here is derived on demand. The mill keeps no durable state of its own, so a report is
 // only ever as true as the moment it was built, and nothing in it is worth persisting.
 
-const { MAX_INDEX_TOKENS, MAX_PACKS_PER_SESSION, normalizePackNames, validatePackSpec } = require('./pack-core');
+const { DELIVERY_SKIP_EMPTY, MAX_INDEX_TOKENS, MAX_PACKS_PER_SESSION, decidePackDelivery, normalizePackNames, validatePackSpec } = require('./pack-core');
 const { isPlainObject, numberOrNull, safeNumber, stringOrNull } = require('./usage-number-core');
 
 // A pack delivering more files than this is a spec problem, not something a scrolling list fixes, so
@@ -51,6 +51,8 @@ function builtFrom(manifest) {
     fileCount,
     skillCount: countOf(manifest.skills),
     ruleCount: countOf(manifest.rules),
+    // Never delivered, so the tab reads it as empty rather than as an unnamed pack nobody consumes.
+    empty: decidePackDelivery({ manifest }).reason === DELIVERY_SKIP_EMPTY,
     outputs: outputs.slice(0, MAX_OUTPUT_ROWS),
     moreOutputs: Math.max(outputs.length - MAX_OUTPUT_ROWS, 0),
   };
@@ -247,6 +249,7 @@ function totalsFrom(packs) {
     variantCount: packs.filter((pack) => pack.group !== null).length,
     builtCount: packs.filter((pack) => pack.built !== null).length,
     unconsumed: packs.filter((pack) => !pack.hasConsumers).length,
+    emptyBuilds: packs.filter((pack) => pack.built?.empty === true).length,
     invalidSpecs: packs.filter((pack) => !pack.specValid).length,
     staleDeliveries: packs.reduce((total, pack) => total + pack.staleDeliveries, 0),
     staleDistills: packs.reduce((total, pack) => total + pack.distill.filter((row) => row.stale === true).length, 0),

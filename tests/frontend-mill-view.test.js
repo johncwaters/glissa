@@ -10,7 +10,7 @@ const VERSION = 'abcdef0123456789';
 
 function pack(overrides = {}) {
   return {
-    name: 'company-context',
+    name: 'house-rules',
     description: '',
     specValid: true,
     specErrors: [],
@@ -200,10 +200,10 @@ test('deliveryTargets marks the projects this pack is delivered to, and who is a
   const report = {
     maxPacksPerProject: 4,
     projects: [
-      { id: 'p1', name: 'glissa', packs: ['company-context'] },
+      { id: 'p1', name: 'glissa', packs: ['house-rules'] },
       { id: 'p2', name: 'other', packs: [] },
       { id: 'p3', name: 'full', packs: ['a', 'b', 'c', 'd'] },
-      { id: 'p4', name: 'full-with-it', packs: ['company-context', 'b', 'c', 'd'] },
+      { id: 'p4', name: 'full-with-it', packs: ['house-rules', 'b', 'c', 'd'] },
     ],
   };
   const targets = deliveryTargets(report, pack());
@@ -225,7 +225,7 @@ test('the checkbox list is one row per project the server ships, so sibling card
   const { deliveryTargets } = await importCore();
   // The server groups two records on one checkout into a single project row; the tab renders exactly
   // what it is given, which is what stops a "glissa" and a "glissa (2)" box offering the same delivery.
-  const report = { maxPacksPerProject: 4, projects: [{ id: 'p1', name: 'glissa', packs: ['company-context'] }] };
+  const report = { maxPacksPerProject: 4, projects: [{ id: 'p1', name: 'glissa', packs: ['house-rules'] }] };
   assert.deepEqual(deliveryTargets(report, pack()).map((target) => [target.id, target.name]), [['p1', 'glissa']]);
 });
 
@@ -249,10 +249,10 @@ test('a delivery row names one project and its cards', async () => {
 
 test('a toggle sends a delta, not a list, so two dashboards cannot clobber each other', async () => {
   const { packDeltaFor } = await importCore();
-  assert.deepEqual(packDeltaFor({ id: 'p1', checked: false }, 'company-context'),
-    { projectId: 'p1', pack: 'company-context', deliver: true });
-  assert.deepEqual(packDeltaFor({ id: 'p1', checked: true }, 'company-context'),
-    { projectId: 'p1', pack: 'company-context', deliver: false });
+  assert.deepEqual(packDeltaFor({ id: 'p1', checked: false }, 'house-rules'),
+    { projectId: 'p1', pack: 'house-rules', deliver: true });
+  assert.deepEqual(packDeltaFor({ id: 'p1', checked: true }, 'house-rules'),
+    { projectId: 'p1', pack: 'house-rules', deliver: false });
 });
 
 test('an unknown lane kind renders as its config label rather than vanishing', async () => {
@@ -306,4 +306,12 @@ test('a variant is never assignable: the project assigns the group and the mill 
   const report = { maxPacksPerProject: 4, projects: [{ id: 'p1', name: 'glissa', packs: ['memory'] }] };
   assert.deepEqual(deliveryTargets(report, pack({ name: 'memory-glissa-12345678', group: 'memory' })), []);
   assert.equal(deliveryTargets(report, pack({ name: 'memory' })).length, 1);
+});
+
+test('an empty build says so on its built line and in place of its deliveries', async () => {
+  const { builtLine, deliveryEmptyText } = await importCore();
+  const hollow = pack({ built: { ...pack().built, empty: true }, hasConsumers: true, deliveredTo: [] });
+  assert.match(builtLine(hollow), /, empty$/);
+  assert.equal(deliveryEmptyText(hollow), 'empty build, not delivered');
+  assert.equal(deliveryEmptyText(pack({ hasConsumers: true })), 'no live sessions');
 });

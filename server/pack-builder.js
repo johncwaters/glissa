@@ -152,28 +152,50 @@ async function walkFiles(rootDir, found = [], visitedRealDirs = new Set()) {
   return found;
 }
 
-/**
- * Directories worth watching for one spec's inputs: each source pattern's glob-free root plus each
- * skill dir (the parent when that root is a single file), deduped, existing ones only. The watch loop
- * asks for these rather than re-deriving them, so the walk and the watch always agree on where a
- * pack's sources live. A root that does not exist yet is simply absent; the interval sweep covers it.
- */
+function specRootPatterns(spec, { includeDistill = false } = {}) {
+  const patterns = [];
+  for (const source of Array.isArray(spec?.sources) ? spec.sources : []) patterns.push(sourcePattern(source));
+  for (const skill of Array.isArray(spec?.skills) ? spec.skills : []) patterns.push(skill?.dir);
+  for (const entry of includeDistill && Array.isArray(spec?.distill) ? spec.distill : []) {
+    for (const source of Array.isArray(entry?.sources) ? entry.sources : []) patterns.push(sourcePattern(source));
+  }
+  return patterns.filter((pattern) => typeof pattern === 'string' && pattern.length > 0);
+}
+
+// A per-project pattern is watched as a WILDCARD: a slug-shaped literal would watch nothing when that one project's file is absent.
 async function packWatchRoots(spec, { baseDir = DEFAULT_PACKS_DIR, glissaHome = null } = {}) {
   const roots = new Set();
-  const addRoot = async (pattern) => {
-    if (typeof pattern !== 'string' || pattern.length === 0) return;
-    // A per-project pattern is watched as a WILDCARD: the roots are the same for every variant, and a
-    // slug-shaped literal would resolve to one project's file and watch nothing when it is absent.
+  for (const pattern of specRootPatterns(spec)) {
     const { root } = literalRoot(resolvePattern(pattern, baseDir, glissaHome, '*'));
-    if (!root) return;
+    if (!root) continue;
     const stats = await statOrNull(root);
-    if (!stats) return;
+    if (!stats) continue;
     const full = path.resolve(root);
     roots.add(toPosix(stats.isDirectory() ? full : path.dirname(full)));
-  };
-  for (const source of Array.isArray(spec.sources) ? spec.sources : []) await addRoot(sourcePattern(source));
-  for (const skill of Array.isArray(spec.skills) ? spec.skills : []) await addRoot(skill.dir);
+  }
   return [...roots].sort();
+}
+
+// Distill sources count: a distill is still a copy of what it read.
+function packSourceRoots(spec, { baseDir = DEFAULT_PACKS_DIR, glissaHome = null } = {}) {
+  const roots = new Set();
+  for (const pattern of specRootPatterns(spec, { includeDistill: true })) {
+    const { root } = literalRoot(resolvePattern(pattern, baseDir, glissaHome));
+    if (root) roots.add(toPosix(path.resolve(root)));
+  }
+  return [...roots].sort();
+}
+
+// Packs-relative (even climbing out of packs/) so the manifest ships no absolute path; glissaHome roots dropped.
+function manifestSourceRoots(spec, { baseDir = DEFAULT_PACKS_DIR, glissaHome = null } = {}) {
+  const home = toPosix(path.resolve(glissaHome || defaultGlissaHome()));
+  const recorded = new Set();
+  for (const root of packSourceRoots(spec, { baseDir, glissaHome })) {
+    if (root === home || root.startsWith(`${home}/`)) continue;
+    const relative = toPosix(path.relative(baseDir, root));
+    recorded.add(relative && !path.isAbsolute(relative) ? relative : root);
+  }
+  return [...recorded].sort();
 }
 
 /** Display path for the manifest: relative to packs/ when the file lives under it, else the full path. */
@@ -639,7 +661,11 @@ async function buildOnePack(entry, { specPath, baseDir, builtRoot, glissaHome, n
     return failure(entry.name, specPath, [`could not read sources: ${err.message}`]);
   }
 
-  const built = planPackBuild(spec, files, { builtAt: new Date(now()).toISOString(), variant: entry.variant });
+  const built = planPackBuild(spec, files, {
+    builtAt: new Date(now()).toISOString(),
+    variant: entry.variant,
+    sourceRoots: manifestSourceRoots(spec, { baseDir, glissaHome }),
+  });
   if (!built.ok) return failure(entry.name, specPath, built.errors);
 
   const report = buildReport(entry.name, specPath, {
@@ -752,10 +778,11 @@ async function readBuiltManifest(name, { builtRoot = defaultBuiltRoot() } = {}) 
  * Delivery view of one pack: its pointed immutable version dir plus the version it is running, or a
  * skip reason. Never throws and never guesses: an unbuilt or unreadable pack resolves to dir null.
  *
- * @returns {Promise<{name: string, dir: string|null, version: string|null, reason: string|null}>}
+ * @returns {Promise<{name: string, dir: string|null, version: string|null, reason: string|null,
+ *   manifest: object|null}>}
  */
 async function resolveBuiltPack(name, { builtRoot = defaultBuiltRoot() } = {}) {
-  const skip = (reason) => ({ name, dir: null, version: null, reason, perProjectVariants: false, group: null });
+  const skip = (reason) => ({ name, dir: null, version: null, reason, manifest: null, perProjectVariants: false, group: null });
   // A pack name comes from config.json and becomes a path segment here, so it is re-checked even
   // though the caller normalizes: a `..` segment would resolve outside the built root.
   if (typeof name !== 'string' || !PACK_NAME_RE.test(name)) return skip('not a valid pack name');
@@ -771,6 +798,7 @@ async function resolveBuiltPack(name, { builtRoot = defaultBuiltRoot() } = {}) {
     dir: current.dir,
     version: manifest.version,
     reason: null,
+    manifest,
     perProjectVariants: manifest.perProjectVariants === true,
     group: typeof manifest.group === 'string' ? manifest.group : null,
   };
@@ -790,6 +818,7 @@ module.exports = {
   distillSourceHashes,
   listPackSpecs,
   loadPackSpec,
+  packSourceRoots,
   packWatchRoots,
   publishBuild,
   readBuiltManifest,

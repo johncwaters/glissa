@@ -324,7 +324,6 @@ function renderDebugOverlay(ui, payload) {
   html += `<div class="debug-field"><span class="debug-label">Gate:</span> <span class="debug-value">${escapeHtml(gateText)}</span></div>`;
   html += `</div>`;
 
-  // Context packs are absent entirely for a session that delivers no packs.
   const packs = Array.isArray(p.packs) ? p.packs : [];
   if (packs.length > 0) {
     html += `<div class="debug-section"><div class="debug-section-title">Packs</div>`;
