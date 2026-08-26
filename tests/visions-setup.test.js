@@ -70,6 +70,29 @@ test('what the operator already chose is never rewritten', () => {
   };
   assert.deepEqual(decideImpliedDefaults(chosen).changes, []);
   assert.deepEqual(decideImpliedDefaults({ visions: { enabled: false } }).changes, []);
+
+  const sourcesOff = {
+    visions: { enabled: true, dispatch: { enabled: true } },
+    ingest: { enabled: true, sources: { fs: { enabled: false }, git: { enabled: false }, editor: { enabled: false } } },
+  };
+  assert.deepEqual(decideImpliedDefaults(sourcesOff).changes, []);
+});
+
+test('a source that did not exist when the block was written is still implied', () => {
+  const beforeTheEditorSource = {
+    visions: { enabled: true, dispatch: { enabled: true } },
+    ingest: { enabled: true, sources: { fs: { enabled: true }, git: { enabled: true } } },
+  };
+  assert.deepEqual(decideImpliedDefaults(beforeTheEditorSource).changes.map((change) => change.path), [
+    ['ingest', 'sources', 'editor'],
+  ]);
+
+  const laneOffStaysOff = {
+    visions: { enabled: true, dispatch: { enabled: true } },
+    ingest: { enabled: false, sources: {} },
+  };
+  assert.deepEqual(laneOffStaysOff.ingest.enabled, false);
+  assert.deepEqual(decideImpliedDefaults(laneOffStaysOff).changes, []);
 });
 
 test('the implied sources are movement only, never captured prose', () => {
