@@ -5,7 +5,7 @@
  * server/core/memory-core.js. Every decision it makes comes from that core; this file only reads,
  * appends, projects and drains.
  *
- * The canon lives in the machine-wide database (server/memory-db.js), which is what retired the O_EXCL
+ * The canon lives in the machine-wide database (server/memory-openedDb.js), which is what retired the O_EXCL
  * lockfile and the fs.watch reload: SQLite arbitrates the CLI-vs-server race itself, and a write another
  * connection committed is noticed by `PRAGMA data_version` rather than by watching a directory. The
  * PROJECTION is still plain markdown on disk, published by the one mill-style versioned writer below.
@@ -55,13 +55,17 @@ function canonicalProjectPlanSignature(values) {
 }
 
 function createCanonicalProjectLookupPlanner() {
+  /** @type {string|null} */
   let memoizedProjectPathsSignature = null;
+  /** @type {Set<string>|null} */
   let memoizedProjectTags = null;
+  /** @type {string|null} */
   let memoizedPlanSignature = null;
+  /** @type {{ canonical: string|null, configured?: string|null, normalized?: string|null, knownProjects?: unknown[] }|null} */
   let memoizedPlan = null;
   return ({ project, knownProjects, hasCachedProject, cachedProject, hasResolver }) => {
     const projectPathsSignature = configuredProjectPathsSignature(knownProjects);
-    if (projectPathsSignature !== memoizedProjectPathsSignature) {
+    if (projectPathsSignature !== memoizedProjectPathsSignature || !memoizedProjectTags) {
       memoizedProjectPathsSignature = projectPathsSignature;
       memoizedProjectTags = new Set(JSON.parse(projectPathsSignature));
     }
@@ -115,17 +119,21 @@ function createMemoryStore(deps = {}) {
   const previousDir = path.join(distDir, PREVIOUS_DIR_NAME);
   const pendingDir = path.join(dir, distillCore.PENDING_DIR_NAME);
 
+  /** @type {string|null} */
   let signingKey = null;
   let records = [];
+  /** @type {number|null} */
   let cachedDataVersion = null;
   let cachedLastAppendAt = 0;
   let stopped = false;
   let mutationChain = Promise.resolve();
   let projectionChain = Promise.resolve();
+  /** @type {NodeJS.Timeout|null} */
   let projectionTimer = null;
   let projectionDirty = false;
   const canonicalProjectCache = new Map();
 
+  /** @type {ReturnType<typeof createMemoryDb>|null} */
   let db = null;
   try {
     fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
@@ -136,6 +144,8 @@ function createMemoryStore(deps = {}) {
     log.warn(`the memory lane stays off: ${error.message}`);
     return null;
   }
+  if (!db) return null;
+  const openedDb = db;
 
   // POSIX only: Windows reports no uid and no meaningful mode, so a planted key cannot be told apart
   // from a minted one there.
@@ -187,7 +197,7 @@ function createMemoryStore(deps = {}) {
 
   function canonicalProjectPathSync(project) {
     const lookup = canonicalProjectLookupPlan(project, resolveProjectPathSync);
-    if (lookup.canonical !== null) return lookup.canonical;
+    if (!lookup || lookup.canonical !== null) return lookup?.canonical ?? null;
     try {
       const resolved = resolveProjectPathSync({ cwd: lookup.normalized, knownProjects: lookup.knownProjects });
       const canonical = core.canonicalProjectPath(resolved, lookup.knownProjects) || lookup.configured;
@@ -201,7 +211,7 @@ function createMemoryStore(deps = {}) {
 
   async function canonicalProjectPathForAppend(project) {
     const lookup = canonicalProjectLookupPlan(project, resolveProjectPath);
-    if (lookup.canonical !== null) return lookup.canonical;
+    if (!lookup || lookup.canonical !== null) return lookup?.canonical ?? null;
     try {
       const resolved = await resolveProjectPath({ cwd: lookup.normalized, knownProjects: lookup.knownProjects });
       const canonical = core.canonicalProjectPath(resolved, lookup.knownProjects) || lookup.configured;
@@ -245,8 +255,8 @@ function createMemoryStore(deps = {}) {
    * redundant reload, which is the safe direction.
    */
   function refreshFromDb() {
-    cachedDataVersion = db.dataVersion();
-    const assembled = assembleRecords(db.listRecords());
+    cachedDataVersion = openedDb.dataVersion();
+    const assembled = assembleRecords(openedDb.listRecords());
     records = assembled.records;
     return assembled;
   }
@@ -259,7 +269,7 @@ function createMemoryStore(deps = {}) {
   function currentRecords() {
     if (stopped) return records;
     try {
-      if (db.dataVersion() === cachedDataVersion) return records;
+      if (openedDb.dataVersion() === cachedDataVersion) return records;
     } catch {
       return records;
     }
@@ -271,7 +281,7 @@ function createMemoryStore(deps = {}) {
   // Boot only, a one-shot cold path: the whole canon is read once before the server serves anything.
   function load() {
     signingKey = readOrMintSigningKey();
-    const projectTagMigration = db.migrateProjectTags((record) => {
+    const projectTagMigration = openedDb.migrateProjectTags((record) => {
       const project = canonicalProjectPathSync(record.project);
       if (project === record.project) return record;
       const migrated = { ...record, project };
@@ -281,11 +291,11 @@ function createMemoryStore(deps = {}) {
     if (projectTagMigration.applied) {
       log.note(`project tag migration remapped ${projectTagMigration.remapped} of ${projectTagMigration.examined} tagged record(s)`);
     }
-    const expired = core.expiredSegmentKeys(db.segmentKeys(), { now: now(), retainDays: config.retainDays });
-    const droppedRows = expired.length === 0 ? 0 : db.deleteSegments(expired);
-    db.ensureSearchIndex();
+    const expired = core.expiredSegmentKeys(openedDb.segmentKeys(), { now: now(), retainDays: config.retainDays });
+    const droppedRows = expired.length === 0 ? 0 : openedDb.deleteSegments(expired);
+    openedDb.ensureSearchIndex();
     const assembled = refreshFromDb();
-    cachedLastAppendAt = db.lastAppendAt();
+    cachedLastAppendAt = openedDb.lastAppendAt();
     log.note(
       `loaded ${records.length} record(s): ${expired.length} expired segment(s) dropped `
       + `(${droppedRows} record(s)), ${assembled.dropped} over cap, `
@@ -365,6 +375,11 @@ function createMemoryStore(deps = {}) {
    * The mill's publish, on the projection: tmp sibling, rotate current to previous, rename in. An
    * unchanged version rewrites manifest.json alone, so a build whose bytes did not move still records
    * the watermark it was measured at instead of re-running on every tick.
+   */
+  /**
+   * @param {{ files: Array<{ relPath: string, content: string }>, source?: string,
+   *   verdict?: string|null, distilledAt?: number|null, recordCount?: number,
+   *   claimCount?: number|null, watermark?: { hash?: unknown }|null }} options
    */
   async function publishProjection({
     files, source = 'trivial', verdict = null, distilledAt = null, recordCount = 0, claimCount = null,
@@ -493,11 +508,11 @@ function createMemoryStore(deps = {}) {
       let observedInside = observedBefore;
       let stored = [];
       try {
-        stored = db.transaction(() => {
+        stored = openedDb.transaction(() => {
           const out = [];
           for (const input of canonicalInputs) {
             const signed = buildForAppend(input);
-            const seq = signed === null ? false : db.insertRecord(signed);
+            const seq = signed === null ? false : openedDb.insertRecord(signed);
             if (!seq) {
               log.debugNote(() => (signed === null ? 'record rejected' : 'record already remembered'));
               out.push(null);
@@ -507,9 +522,9 @@ function createMemoryStore(deps = {}) {
             out.push(stamped);
             written.push(stamped);
           }
-          if (written.length > 0) db.setLastAppendAt(now());
+          if (written.length > 0) openedDb.setLastAppendAt(now());
           // Sampled under the write lock, so no other connection can commit between here and our COMMIT.
-          observedInside = db.dataVersion();
+          observedInside = openedDb.dataVersion();
           return out;
         });
       } catch (error) {
@@ -524,7 +539,7 @@ function createMemoryStore(deps = {}) {
         cachedDataVersion = observedInside;
       }
       if (written.length === 0) return { records: stored, refused: false };
-      cachedLastAppendAt = db.lastAppendAt();
+      cachedLastAppendAt = openedDb.lastAppendAt();
       scheduleProjection();
       return { records: stored, refused: false };
     });
@@ -547,12 +562,12 @@ function createMemoryStore(deps = {}) {
     const redactedIds = [];
     const segments = new Set();
     let droppedRows = 0;
-    for (const raw of db.listRecords()) {
+    for (const raw of openedDb.listRecords()) {
       const checked = verifiedRecord(raw);
       // A row too malformed to become a record still holds its bytes, so the expunge judges it RAW.
       if (!checked) {
         if (!core.matchesForgetPattern(JSON.stringify(raw), matcher)) continue;
-        db.deleteRecord(raw.id);
+        openedDb.deleteRecord(raw.id);
         segments.add(core.segmentKeyForTs(raw.ts));
         droppedRows += 1;
         continue;
@@ -561,11 +576,11 @@ function createMemoryStore(deps = {}) {
       if (verdict.action === 'keep') continue;
       segments.add(core.segmentKeyForTs(checked.record.ts));
       if (verdict.action === 'remove') {
-        db.deleteRecord(checked.record.id);
+        openedDb.deleteRecord(checked.record.id);
         removedIds.push(checked.record.id);
         continue;
       }
-      db.updateRecordText(core.withSignature({ ...checked.record, text: verdict.text }, signingKey));
+      openedDb.updateRecordText(core.withSignature({ ...checked.record, text: verdict.text }, signingKey));
       redactedIds.push(checked.record.id);
     }
     if (removedIds.length + redactedIds.length + droppedRows === 0) return null;
@@ -576,13 +591,14 @@ function createMemoryStore(deps = {}) {
       source: { kind: 'operator', vendor: 'glissa', sessionId: null },
       text: core.tombstoneText([...removedIds, ...redactedIds]),
     }, { now: now(), maxChars: config.maxRecordChars });
+    /** @type {string|null} */
     let tombstoneId = null;
-    if (built.ok && db.insertRecord(core.withSignature(built.record, signingKey))) {
+    if (built.ok && built.record && openedDb.insertRecord(core.withSignature(built.record, signingKey))) {
       tombstoneId = built.record.id;
-      db.setLastAppendAt(now());
+      openedDb.setLastAppendAt(now());
     }
     // Last inside the transaction: a deleted row's words survive in the index's segments until this runs.
-    db.scrubSearchIndex();
+    openedDb.scrubSearchIndex();
     return {
       removedIds,
       redactedIds,
@@ -600,9 +616,11 @@ function createMemoryStore(deps = {}) {
       };
       const matcher = core.makeForgetMatcher(idOrPattern);
       if (!matcher) return nothing;
+      /** @type {{ removedIds: string[], redactedIds: string[], droppedRows: number,
+       *   tombstoneId: string|null, segments: number, tombstoneReason: string|null }|null} */
       let outcome = null;
       try {
-        outcome = db.transaction(() => runForget(matcher));
+        outcome = openedDb.transaction(() => runForget(matcher));
       } catch (error) {
         if (!isBusyError(error)) throw error;
         // Reported as `locked` because that is what the operator is being told: another writer holds it.
@@ -612,9 +630,9 @@ function createMemoryStore(deps = {}) {
       if (!outcome) return nothing;
       if (!outcome.tombstoneId) log.warn(`tombstone rejected: ${outcome.tombstoneReason || 'not written'}`);
       // The committed expunge is still readable in the write-ahead log until the frames are reclaimed.
-      if (!db.checkpoint()) log.debugNote(() => 'wal checkpoint refused: expunged frames linger until close');
+      if (!openedDb.checkpoint()) log.debugNote(() => 'wal checkpoint refused: expunged frames linger until close');
       refreshFromDb();
-      cachedLastAppendAt = db.lastAppendAt();
+      cachedLastAppendAt = openedDb.lastAppendAt();
       if (projectionTimer) clearTimeoutFn(projectionTimer);
       projectionTimer = null;
       await writeProjection({ force: true });
@@ -663,25 +681,25 @@ function createMemoryStore(deps = {}) {
     await projectionChain;
     if (projectionDirty) await writeProjection().catch(() => log.warn('projection write failed during shutdown'));
     try {
-      db.close();
+      openedDb.close();
     } catch (error) {
       log.warn(`closing the memory database failed: ${error.message}`);
     }
   }
 
   // One object rather than one per ingested event: this is read on the consumer's hot path.
-  const deliveredView = { has: (hash) => db.deliveredHas(hash) };
+  const deliveredView = { has: (hash) => openedDb.deliveredHas(hash) };
 
   // Echo suppression's delivery half: M16 registers what it hands out, the ingest consumer drops those lines.
   function noteDelivered(text) {
     const hashes = core.deliveredLineHashes(text);
-    if (hashes.length === 0) return db.deliveredCount();
+    if (hashes.length === 0) return openedDb.deliveredCount();
     try {
-      return db.noteDelivered(hashes, { maxHashes: MAX_DELIVERED_HASHES });
+      return openedDb.noteDelivered(hashes, { maxHashes: MAX_DELIVERED_HASHES });
     } catch (error) {
       if (!isBusyError(error)) throw error;
       log.debugNote(() => 'the delivered-hash write was refused: the database is busy');
-      return db.deliveredCount();
+      return openedDb.deliveredCount();
     }
   }
 
@@ -690,7 +708,7 @@ function createMemoryStore(deps = {}) {
   function searchMatches(terms, limit) {
     if (terms.length === 0) return null;
     try {
-      return db.searchIds(terms, Math.max(SEARCH_CANDIDATE_FLOOR, limit * SEARCH_CANDIDATE_FACTOR));
+      return openedDb.searchIds(terms, Math.max(SEARCH_CANDIDATE_FLOOR, limit * SEARCH_CANDIDATE_FACTOR));
     } catch (error) {
       log.debugNote(() => `the search index is unavailable: ${error.code || 'unknown'}`);
       return null;
@@ -710,7 +728,7 @@ function createMemoryStore(deps = {}) {
    */
   function saveTailOffset(entry, options) {
     try {
-      db.saveTailOffset(entry, options);
+      openedDb.saveTailOffset(entry, options);
       return true;
     } catch (error) {
       if (isBusyError(error)) log.debugNote(() => 'a tail offset write was refused: the database is busy');
@@ -721,7 +739,7 @@ function createMemoryStore(deps = {}) {
 
   function forgetTails(paths) {
     try {
-      db.forgetTails(paths);
+      openedDb.forgetTails(paths);
       return true;
     } catch (error) {
       log.warn(`forgetting ${paths.length} tail offset(s) failed: ${error.message}`);
@@ -741,20 +759,20 @@ function createMemoryStore(deps = {}) {
     append,
     appendMany,
     // The third write of an expunge, exposed because a rebuild after one leaves fresh frames in the log.
-    checkpoint: () => db.checkpoint(),
+    checkpoint: () => openedDb.checkpoint(),
     currentDir,
     dbPath,
     deliveredHashes: () => deliveredView,
     dir,
-    distillCursorSeq: () => (stopped ? 0 : db.distillCursorSeq()),
-    distillFailures: () => (stopped ? 0 : db.distillFailures()),
+    distillCursorSeq: () => (stopped ? 0 : openedDb.distillCursorSeq()),
+    distillFailures: () => (stopped ? 0 : openedDb.distillFailures()),
     distDir,
     flushProjection,
     forget,
     forgetTails,
     lastAppendAt: () => {
       if (stopped) return cachedLastAppendAt;
-      cachedLastAppendAt = db.lastAppendAt();
+      cachedLastAppendAt = openedDb.lastAppendAt();
       return cachedLastAppendAt;
     },
     noteDelivered,
@@ -765,17 +783,17 @@ function createMemoryStore(deps = {}) {
     publishProjection: (args) => queue(() => publishProjection(args)),
     readPublishedDocuments,
     readPublishedManifest,
-    rebuildSearchIndex: () => db.rebuildSearchIndex(),
+    rebuildSearchIndex: () => openedDb.rebuildSearchIndex(),
     records: () => currentRecords().slice(),
     retrieve,
     saveTailOffset,
     // Queued with the writes: a cursor advance may not interleave with the publish it is a receipt for.
-    setDistillCursorSeq: (seq) => queue(async () => db.setDistillCursorSeq(seq)),
-    setDistillFailures: (count) => queue(async () => db.setDistillFailures(count)),
+    setDistillCursorSeq: (seq) => queue(async () => openedDb.setDistillCursorSeq(seq)),
+    setDistillFailures: (count) => queue(async () => openedDb.setDistillFailures(count)),
     search: (query, { limit = SEARCH_CANDIDATE_FLOOR } = {}) => searchMatches(core.tokenizeQuery(query), limit),
     stats,
     stop,
-    tailState: () => db.tailState(),
+    tailState: () => openedDb.tailState(),
     validRecords: () => core.selectValidRecords(currentRecords(), { now: now() }),
     watermark: () => core.canonWatermark(core.selectValidRecords(currentRecords(), { now: now() })),
   };

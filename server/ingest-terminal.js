@@ -30,7 +30,9 @@ function createTerminalIngest({
   clearTimeoutFn = clearTimeout,
 } = {}) {
   if (typeof publish !== 'function') throw new Error('createTerminalIngest requires publish');
-  const flushMs = Number.isFinite(sourceConfig.flushMs) && sourceConfig.flushMs > 0
+  /** @type {(event: Record<string, unknown>) => unknown} */
+  const publishEvent = publish;
+  const flushMs = typeof sourceConfig.flushMs === 'number' && Number.isFinite(sourceConfig.flushMs) && sourceConfig.flushMs > 0
     ? sourceConfig.flushMs
     : DEFAULT_FLUSH_MS;
   const tapsBySessionId = new Map();
@@ -66,6 +68,7 @@ function createTerminalIngest({
     if (existing) existing.detach();
 
     const state = createTerminalAccumulator({ sessionId: sess.id, root: rootOf(sess), ...sourceConfig });
+    /** @type {NodeJS.Timeout | null} */
     let flushTimer = null;
     let detached = false;
 
@@ -80,7 +83,7 @@ function createTerminalIngest({
       const event = flushAccumulator(state, { now: nowFn() });
       if (!event) return;
       try {
-        publish(event);
+        publishEvent(event);
       } catch (error) {
         warn(`publish failed for session ${sess.id}: ${error.message}`);
       }

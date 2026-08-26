@@ -47,26 +47,44 @@ const SCREENS = Object.freeze([
   { id: 'visions', label: 'Visions', glyph: '◇', nested: true },
   { id: 'settings', label: 'Settings', glyph: '@', nested: true },
 ]);
+/** @type {HTMLDivElement|null} */
 let shellEl = null;
 const navButtonById = new Map();
 const screenElById = new Map();
 const screenAttentionById = new Map();
+/** @type {ReturnType<typeof createBoardScreen>|null} */
 let boardScreen = null;
+/** @type {ReturnType<typeof createTerminalScreen>|null} */
 let terminalScreen = null;
+/** @type {HTMLDivElement|null} */
 let reviewMountEl = null;
+/** @type {HTMLDivElement|null} */
 let radarMountEl = null;
+/** @type {(HTMLElement & { _adoptHome?: { parent: HTMLElement|null, next: Element|null } })|null} */
 let radarPanelEl = null;
+/** @type {HTMLDivElement|null} */
 let prsMountEl = null;
+/** @type {(HTMLElement & { _adoptHome?: { parent: HTMLElement|null, next: Element|null } })|null} */
 let prsPanelEl = null;
+/** @type {HTMLDivElement|null} */
 let usageMountEl = null;
+/** @type {(HTMLElement & { _adoptHome?: { parent: HTMLElement|null, next: Element|null } })|null} */
 let usagePanelEl = null;
+/** @type {HTMLDivElement|null} */
 let millMountEl = null;
+/** @type {(HTMLElement & { _adoptHome?: { parent: HTMLElement|null, next: Element|null } })|null} */
 let millPanelEl = null;
+/** @type {HTMLDivElement|null} */
 let visionsMountEl = null;
+/** @type {(HTMLElement & { _adoptHome?: { parent: HTMLElement|null, next: Element|null } })|null} */
 let visionsPanelEl = null;
+/** @type {HTMLDivElement|null} */
 let settingsMountEl = null;
+/** @type {(HTMLElement & { _adoptHome?: { parent: HTMLElement|null, next: Element|null } })|null} */
 let settingsPanelEl = null;
+/** @type {HTMLButtonElement|null} */
 let moreButtonEl = null;
+/** @type {HTMLDivElement|null} */
 let moreMenuEl = null;
 const menuButtonById = new Map();
 let hooks = {};
@@ -186,7 +204,7 @@ function buildMoreMenu() {
 }
 
 function setMoreMenuOpen(isOpen) {
-  if (!moreMenuEl) return;
+  if (!moreMenuEl || !moreButtonEl) return;
   moreMenuEl.hidden = !isOpen;
   moreButtonEl.setAttribute('aria-expanded', String(isOpen));
 }
@@ -270,6 +288,7 @@ function build() {
   // toggled by the time this bubbles up, so it is excluded to avoid an instant reopen-close.
   document.addEventListener('click', (event) => {
     if (!isMoreMenuOpen()) return;
+    if (!moreMenuEl || !moreButtonEl || !(event.target instanceof Node)) return;
     if (moreMenuEl.contains(event.target) || moreButtonEl.contains(event.target)) return;
     setMoreMenuOpen(false);
   });
@@ -285,6 +304,7 @@ function build() {
 function openSession(sessionId) {
   const ui = sessionUIs.get(sessionId);
   if (!ui) return;
+  if (!boardScreen || !terminalScreen) throw new Error('Phone shell is not built');
   const state = ui.currentState || STATES.DORMANT;
   if (state === STATES.DORMANT) sendControlMsg({ type: 'start-session', id: sessionId });
   if (state === STATES.COMPLETE) sendControlMsg({ type: 'dismiss', id: sessionId });
@@ -374,6 +394,7 @@ function syncCurrent(buttonById, screenId) {
 }
 
 function applyScreen(screenId) {
+  if (!moreButtonEl || !terminalScreen) throw new Error('Phone shell is not built');
   uiState.dispatch('setPhoneScreen', screenId);
   setMoreMenuOpen(false);
   // A screen that pulls its own data (Usage requests a report) is told it became visible; every other
@@ -425,6 +446,7 @@ export function mountPhoneShell(options) {
 export function activatePhoneShell({ sessionId } = {}) {
   if (active) return;
   build();
+  if (!shellEl || !boardScreen || !terminalScreen) throw new Error('Phone shell is not built');
   active = true;
   shellEl.hidden = false;
   for (const control of (hooks.headerControls || [])) adoptElement(control, boardScreen.topBarEl);
@@ -454,18 +476,19 @@ export function activatePhoneShell({ sessionId } = {}) {
 
 export function deactivatePhoneShell() {
   if (!active) return;
+  if (!shellEl || !terminalScreen) throw new Error('Phone shell is not built');
   active = false;
   closeSettingsSectionPicker({ returnFocus: false });
   // Give every borrowed element back BEFORE hiding the shell, so nothing live is left inside a hidden
   // subtree where its terminal cannot measure itself.
   terminalScreen.clear();
   reparentReviewPanel(null);
-  releaseElement(radarPanelEl);
-  releaseElement(prsPanelEl);
-  releaseElement(usagePanelEl);
-  releaseElement(millPanelEl);
-  releaseElement(visionsPanelEl);
-  releaseElement(settingsPanelEl);
+  if (radarPanelEl) releaseElement(radarPanelEl);
+  if (prsPanelEl) releaseElement(prsPanelEl);
+  if (usagePanelEl) releaseElement(usagePanelEl);
+  if (millPanelEl) releaseElement(millPanelEl);
+  if (visionsPanelEl) releaseElement(visionsPanelEl);
+  if (settingsPanelEl) releaseElement(settingsPanelEl);
   for (const control of (hooks.headerControls || [])) releaseElement(control);
   setMoreMenuOpen(false);
   shellEl.hidden = true;
@@ -496,6 +519,7 @@ export function getPhoneSessionId() {
 // refresh the desktop rail; a no-op unless the phone layout is up.
 export function refreshPhoneBoard() {
   if (!active) return;
+  if (!boardScreen || !terminalScreen) throw new Error('Phone shell is not built');
   restoreShownSession();
   boardScreen.refresh();
   terminalScreen.refresh();
@@ -531,6 +555,7 @@ export function setPhoneScreenAttention(screenId, hasAttention) {
 // desktop refuses it: after a server restart every session loads DORMANT and none is worth returning
 // to. This NEVER starts or dismisses anything - it is a restore, not an operator selection.
 function restoreShownSession() {
+  if (!terminalScreen) throw new Error('Phone shell is not built');
   if (terminalScreen.getSessionId()) return;
   const id = getLastFocusedSessionId();
   const ui = id ? sessionUIs.get(id) : null;

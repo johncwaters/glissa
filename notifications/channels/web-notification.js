@@ -25,7 +25,7 @@ function createWebNotificationChannel(broadcast) {
       session: sessionName,
       category,
       message,
-      escalationCount: context ? context.escalationCount : 0,
+      escalationCount: context?.escalationCount ?? 0,
     });
   };
 }

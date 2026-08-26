@@ -80,6 +80,24 @@ const WORK_DIR = path.join(glissaHomeDir(), 'posthog-work');
 const REPORT_RETAIN_FILES = 20;
 const FORCE_TICK_DEBOUNCE_MS = 3000;
 
+/** @typedef {{ replayBufferKB?: number, worktreeRoot?: string,
+ *   posthog?: { enabled?: boolean, apiKey?: string, host?: string, autoFix?: boolean,
+ *     fixTimeoutSeconds?: number, intervalMinutes?: number, investigationTimeoutSeconds?: number,
+ *     maxConcurrentInvestigations?: number, minUsersToInvestigate?: number, packs?: unknown,
+ *     projectMap?: Record<string, string>, projects?: unknown[] | 'all', recurrenceDedupe?: boolean,
+ *     recurrenceWindowDays?: number, repoPath?: string, trafficSpikeBaselineDays?: number,
+ *     trafficSpikeCooldownMinutes?: number, trafficSpikeEnabled?: boolean, trafficSpikeMinUsers?: number,
+ *     trafficSpikeMultiplier?: number, transientRecurrenceLimit?: number, userEscalationThreshold?: number } | null,
+ *   telegram?: { botToken?: string, chatId?: string } | null }} PosthogWiringConfig */
+/** @typedef {{
+ *   create: (options: { projectPath: string, teamId: string, label: string, worktreeBase: string }) =>
+ *     Promise<{ isGit: boolean, cwd: string, branch: string, base: string, baseSha?: string } | null> |
+ *     { isGit: boolean, cwd: string, branch: string, base: string, baseSha?: string } | null,
+ *   discard: (options: { projectPath: string, workspace: {
+ *     isGit: boolean, cwd: string, branch: string, base: string, baseSha?: string
+ *   } }) => Promise<unknown> | unknown
+ * }} PosthogGitWorkspace */
+
 // PostHog issue ids reach the filesystem, a git branch name and the prompt, so they are reduced to a
 // conservative charset first. A run of dots goes too: git refuses a ref containing `..`, and no
 // surviving id should be able to read as a parent-directory segment anywhere it lands. Everything
@@ -272,7 +290,7 @@ async function sweepReports(dir = REPORT_DIR, retain = REPORT_RETAIN_FILES) {
       try { return { full, mtimeMs: (await fs.promises.stat(full)).mtimeMs }; }
       catch { return null; }
     }));
-    const ordered = stamped.filter(Boolean).sort((a, b) => b.mtimeMs - a.mtimeMs);
+    const ordered = stamped.filter((entry) => entry !== null).sort((a, b) => b.mtimeMs - a.mtimeMs);
     for (const victim of ordered.slice(retain)) {
       await fs.promises.rm(victim.full, { force: true }).catch(() => {});
     }
@@ -400,11 +418,19 @@ function posthogPackNames(cfg) {
   return normalizePackNames(cfg.posthog ? cfg.posthog.packs : null).names;
 }
 
+/**
+ * @param {{ config: PosthogWiringConfig, investigationSessions: Map<string, unknown>,
+ *   closeSessionDataClients: (id: string) => void, hookRouter: Pick<InstanceType<typeof import('../detection/hook-source').HookRouter>, 'register' | 'unregister'>|null,
+ *   getHookPort: (() => number | null) | null, spawnGate: { run: (callback: () => unknown) => Promise<unknown> },
+ *   gitWorkspace?: PosthogGitWorkspace | null, runCommand?: typeof runCli,
+ *   broadcast?: (message: Record<string, unknown>) => void,
+ *   recordLane?: ((sessionId: string, lane: string, vendor?: string) => unknown) | null }} options
+ */
 function createPosthogWiring({
   config, investigationSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate,
   // Only ever used by the auto-fix job, which must run in an isolated worktree; absent (or a repo the
   // create call refuses) means the lane falls back to a diagnose-only investigation.
-  gitWorkspace = null,
+  gitWorkspace = /** @type {PosthogGitWorkspace | null} */ (null),
   // The git/gh shell-outs of the fix handoff, injected so a test can drive a failing push or a
   // refused pull request without a repository or a GitHub account.
   runCommand = runCli,
@@ -412,6 +438,14 @@ function createPosthogWiring({
   // Lane attribution: names this lane on the ledger when its headless session reports a Claude session id.
   recordLane = null,
 }) {
+  function activePosthogConfig() {
+    const posthogConfig = config.posthog;
+    if (!posthogConfig?.host || !posthogConfig.apiKey) {
+      throw new Error('PostHog lane started without its required configuration');
+    }
+    return posthogConfig;
+  }
+
   // Build one headless (claude -p) investigation session, registered in investigationSessions and
   // auto-removed on exit. Not surfaced as a card (a -p session has no watchable TUI).
   function makeInvestigationSession({ id, name, path: cwd, initialPrompt, spawnEnv, permissions = POSTHOG_DENY }) {
@@ -448,8 +482,9 @@ function createPosthogWiring({
    * the prompt drops its cross-reference step.
    */
   function resolveRepoPath(projectId) {
-    const mapped = config.posthog.projectMap?.[projectId];
-    for (const candidate of [mapped, config.posthog.repoPath]) {
+    const posthogConfig = activePosthogConfig();
+    const mapped = posthogConfig.projectMap?.[projectId];
+    for (const candidate of [mapped, posthogConfig.repoPath]) {
       if (typeof candidate !== 'string' || !candidate.trim()) continue;
       if (!path.isAbsolute(candidate)) continue;
       try {
@@ -490,6 +525,7 @@ function createPosthogWiring({
    * pushed branch and its pull request are the durable output.
    */
   async function posthogFixSpawn({ issue, projectId, projectName, url, signal }) {
+    const posthogConfig = activePosthogConfig();
     if (!gitWorkspace) return null;
     const repoPath = resolveRepoPath(projectId);
     if (!repoPath) return null;
@@ -505,9 +541,10 @@ function createPosthogWiring({
     });
     if (!workspace || !workspace.isGit) return null;
 
-    const promptUrl = promptIssueUrl(config.posthog.host, projectId, issue.issueId);
+    const promptUrl = promptIssueUrl(posthogConfig.host, projectId, issue.issueId);
     // Created INSIDE the try: a throw between minting the directory and entering the guarded region
     // would strand it, and the finally below is the only thing that removes it.
+    /** @type {{ path: string, cleanup: () => Promise<void> | void }|null} */
     let resultFile = null;
     try {
       resultFile = await createResultFileFor('fix-', projectId, issueId);
@@ -518,13 +555,13 @@ function createPosthogWiring({
         initialPrompt: buildFixPrompt({
           issueId: issue.issueId,
           projectId,
-          host: config.posthog.host,
+          host: posthogConfig.host,
           resultPath: resultFile.path,
           repoPath: workspace.cwd,
           branch: workspace.branch,
           baseBranch: workspace.base,
         }),
-        spawnEnv: { POSTHOG_API_KEY: config.posthog.apiKey, POSTHOG_HOST: config.posthog.host },
+        spawnEnv: { POSTHOG_API_KEY: posthogConfig.apiKey, POSTHOG_HOST: posthogConfig.host },
         permissions: FIX_DENY,
       });
       await waitForExit(sess, signal);
@@ -574,6 +611,7 @@ function createPosthogWiring({
   // spawn gate, and resolve the file-borne verdict on exit. Honors an AbortSignal (the poller's hard
   // timeout) by destroying the session. Never rejects: any failure resolves to an ERROR verdict.
   async function posthogInvestigationSpawn({ issue, projectId, projectName, url, mode, signal }) {
+    const posthogConfig = activePosthogConfig();
     if (core.normalizeJobMode(mode) === core.JOB_MODES.fix) {
       const fixed = await posthogFixSpawn({ issue, projectId, projectName, url, signal });
       if (fixed) return fixed;
@@ -583,6 +621,7 @@ function createPosthogWiring({
     void sweepReports();
     // Same rule as the fix path: nothing between the mkdtemp and the guarded region, so the workspace
     // resolution, the prompt builder and the Session constructor cannot strand the directory either.
+    /** @type {{ path: string, cleanup: () => Promise<void> | void }|null} */
     let resultFile = null;
     try {
       resultFile = await createResultFileFor('', projectId, issueId);
@@ -590,7 +629,7 @@ function createPosthogWiring({
       const prompt = buildInvestigationPrompt({
         issueId: issue.issueId,
         projectId,
-        host: config.posthog.host,
+        host: posthogConfig.host,
         resultPath: resultFile.path,
         repoPath,
       });
@@ -600,7 +639,7 @@ function createPosthogWiring({
         name: `PostHog ${projectName} #${issue.issueId}`,
         path: cwd,
         initialPrompt: prompt,
-        spawnEnv: { POSTHOG_API_KEY: config.posthog.apiKey, POSTHOG_HOST: config.posthog.host },
+        spawnEnv: { POSTHOG_API_KEY: posthogConfig.apiKey, POSTHOG_HOST: posthogConfig.host },
       });
       await waitForExit(sess, signal);
       const result = readInvestigationResult(resultFile.path);
@@ -624,6 +663,7 @@ function createPosthogWiring({
     await writeJsonAtomic(posthogStatePath, state, { mkdir: true });
   }
 
+  /** @type {NodeJS.Timeout|null} */
   let forcedTickTimer = null;
   function clearForcedTickTimer() {
     if (!forcedTickTimer) return;
@@ -636,7 +676,7 @@ function createPosthogWiring({
       forcedTickTimer = null;
       if (runner.isStopped()) return;
       const poller = runner.getPoller();
-      if (!poller) return;
+      if (!poller || !('tick' in poller) || typeof poller.tick !== 'function') return;
       void poller.tick();
     }, FORCE_TICK_DEBOUNCE_MS);
     if (typeof forcedTickTimer.unref === 'function') forcedTickTimer.unref();
@@ -647,37 +687,46 @@ function createPosthogWiring({
   // last status live in server/lane-runner.js.
   const runner = createLaneRunner({
     tag: 'posthog-poller',
-    gate: () => posthogShouldStart(config),
+    gate: () => {
+      const verdict = posthogShouldStart(config);
+      if (verdict.reason) return verdict;
+      return { start: verdict.start };
+    },
     cfgKey: () => posthogCfgKey(config),
     emptyStatus: () => emptyLaneStatus('posthog-status', posthogShouldStart(config)),
     broadcast,
     beforeStop: clearForcedTickTimer,
     createPoller: ({ onTickComplete }) => {
-      const api = createPosthogApi({ host: config.posthog.host, apiKey: config.posthog.apiKey });
+      const posthogConfig = activePosthogConfig();
+      const telegramConfig = config.telegram;
+      if (!telegramConfig?.botToken || !telegramConfig.chatId) {
+        throw new Error('PostHog poller started without its required Telegram configuration');
+      }
+      const api = createPosthogApi({ host: posthogConfig.host, apiKey: posthogConfig.apiKey });
       return createPosthogPoller({
         api,
-        host: config.posthog.host,
+        host: posthogConfig.host,
         resolveProjects: makeResolveProjects(api, config),
         spawnInvestigation: posthogInvestigationSpawn,
-        telegram: (text) => sendPosthogPing(config.telegram.botToken, config.telegram.chatId, text),
+        telegram: (text) => sendPosthogPing(telegramConfig.botToken, telegramConfig.chatId, text),
         readState: readPosthogState,
         writeState: writePosthogState,
-        intervalMinutes: config.posthog.intervalMinutes || 15,
-        maxConcurrentInvestigations: config.posthog.maxConcurrentInvestigations || 2,
-        investigationTimeoutSeconds: config.posthog.investigationTimeoutSeconds || 900,
+        intervalMinutes: posthogConfig.intervalMinutes || 15,
+        maxConcurrentInvestigations: posthogConfig.maxConcurrentInvestigations || 2,
+        investigationTimeoutSeconds: posthogConfig.investigationTimeoutSeconds || 900,
         // Opt-in, like every automation lane: absent means the lane only ever diagnoses.
-        autoFix: config.posthog.autoFix === true,
-        fixTimeoutSeconds: config.posthog.fixTimeoutSeconds || 1800,
-        minUsersToInvestigate: config.posthog.minUsersToInvestigate,
-        userEscalationThreshold: config.posthog.userEscalationThreshold,
-        recurrenceDedupe: config.posthog.recurrenceDedupe,
-        recurrenceWindowDays: config.posthog.recurrenceWindowDays,
-        transientRecurrenceLimit: config.posthog.transientRecurrenceLimit,
-        trafficSpikeEnabled: config.posthog.trafficSpikeEnabled,
-        trafficSpikeMultiplier: config.posthog.trafficSpikeMultiplier,
-        trafficSpikeMinUsers: config.posthog.trafficSpikeMinUsers,
-        trafficSpikeCooldownMinutes: config.posthog.trafficSpikeCooldownMinutes,
-        trafficSpikeBaselineDays: config.posthog.trafficSpikeBaselineDays,
+        autoFix: posthogConfig.autoFix === true,
+        fixTimeoutSeconds: posthogConfig.fixTimeoutSeconds || 1800,
+        minUsersToInvestigate: posthogConfig.minUsersToInvestigate,
+        userEscalationThreshold: posthogConfig.userEscalationThreshold,
+        recurrenceDedupe: posthogConfig.recurrenceDedupe,
+        recurrenceWindowDays: posthogConfig.recurrenceWindowDays,
+        transientRecurrenceLimit: posthogConfig.transientRecurrenceLimit,
+        trafficSpikeEnabled: posthogConfig.trafficSpikeEnabled,
+        trafficSpikeMultiplier: posthogConfig.trafficSpikeMultiplier,
+        trafficSpikeMinUsers: posthogConfig.trafficSpikeMinUsers,
+        trafficSpikeCooldownMinutes: posthogConfig.trafficSpikeCooldownMinutes,
+        trafficSpikeBaselineDays: posthogConfig.trafficSpikeBaselineDays,
         onTickComplete,
       });
     },
@@ -694,7 +743,8 @@ function createPosthogWiring({
     const decision = core.decideIssueAction(action);
     if (!decision.ok) return decision;
     if (!runner.getPoller()) return { ok: false, error: 'PostHog monitoring is not running' };
-    const api = createPosthogApi({ host: config.posthog.host, apiKey: config.posthog.apiKey });
+    const posthogConfig = activePosthogConfig();
+    const api = createPosthogApi({ host: posthogConfig.host, apiKey: posthogConfig.apiKey });
     const res = await api.updateIssueStatus(projectId, issueId, decision.status);
     // The error string can carry an HTTP status but never a credential: request() builds it from the
     // status code alone, and the key lives only in the Authorization header.
@@ -713,7 +763,9 @@ function createPosthogWiring({
   /** @param {{ id?: string }} [options] */
   async function archiveInvestigation({ id } = {}) {
     const poller = runner.getPoller();
-    if (!poller) return { ok: false, error: 'PostHog monitoring is not running' };
+    if (!poller || !('archiveInvestigation' in poller) || typeof poller.archiveInvestigation !== 'function') {
+      return { ok: false, error: 'PostHog monitoring is not running' };
+    }
     const res = await poller.archiveInvestigation(id);
     if (!res.ok) return { ok: false, error: res.error };
     runner.patchStatus({ investigations: res.investigations });

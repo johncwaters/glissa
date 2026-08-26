@@ -4,7 +4,8 @@ const { execFile, execFileSync } = require('../../server/child-process-safe');
 const path = require('node:path');
 const fs = require('node:fs');
 
-let burntToastModulePath = null; // null = unknown, false = not found, string = resolved path
+/** @type {string|false|null} */
+let burntToastModulePath = null;
 
 function escapeForPowerShell(str) {
   return String(str).replace(/'/g, "''");
@@ -34,7 +35,7 @@ function burntToastModuleRoots() {
     process.env.OneDrive && path.join(process.env.OneDrive, 'Documents'),
     process.env.OneDriveCommercial && path.join(process.env.OneDriveCommercial, 'Documents'),
     process.env.ProgramFiles || 'C:\\Program Files',
-  ].filter(Boolean);
+  ].filter((root) => typeof root === 'string');
 }
 
 function findBurntToastByPath() {

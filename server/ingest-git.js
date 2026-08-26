@@ -76,6 +76,8 @@ function createGitIngest({
   gitPath = 'git',
 } = {}) {
   if (typeof publish !== 'function') throw new Error('createGitIngest requires publish');
+  /** @type {(event: Record<string, unknown>) => unknown} */
+  const publishEvent = publish;
   /*
    * Timing comes from the RESOLVED source config and nowhere else. The plan puts every timing value in
    * the pure config resolver beside the ring caps, so a constructor override would be a second place to
@@ -101,11 +103,14 @@ function createGitIngest({
   const layoutCache = new Map();
   // Keys refused by the repo cap, remembered only so the warning fires once rather than every reconcile.
   const warnedOverflow = new Set();
+  /** @type {NodeJS.Timeout | null} */
   let pollTimer = null;
   let running = false;
   let disabled = false;
+  /** @type {Promise<void> | null} */
   let reconcileInFlight = null;
   let reconcileDirty = false;
+  /** @type {Promise<void> | null} */
   let startPromise = null;
 
   // Re-read after every await: stop() must not be undone by a pass already in flight.
@@ -175,6 +180,7 @@ function createGitIngest({
 
   function readProvider() {
     if (typeof reposProvider !== 'function') return [];
+    /** @type {unknown} */
     let raw = null;
     try {
       raw = reposProvider();
@@ -393,6 +399,7 @@ function createGitIngest({
     }
     repo.warnedRead = false;
     const status = parsePorcelainStatus(statusOut);
+    /** @type {{ sha: string, author: string | null, committedAt: number | null, subject: string } | null} */
     let commit = null;
     if (shouldReadCommit(repo.state, status)) {
       const logOut = await runGit(repo.dir, LOG_ARGS);
@@ -403,7 +410,7 @@ function createGitIngest({
       previous: repo.state, status, commit, root: repo.root, now: nowFn(),
     });
     repo.state = decided.next;
-    for (const event of decided.events) publish(event);
+    for (const event of decided.events) publishEvent(event);
   }
 
   /**

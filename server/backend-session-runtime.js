@@ -7,13 +7,16 @@ const { getRtkPath } = require('./rtk-resolver');
 const { createSessionFactory } = require('./session-factory');
 const { buildSettingsPayload } = require('./settings-payload');
 
+/** @type {(options: { configStore: object, rtkInstallStatus?: Record<string, unknown>|null }) => Record<string, unknown>} */
+const buildRuntimeSettingsPayload = /** @type {(options: { configStore: object, rtkInstallStatus?: Record<string, unknown>|null }) => Record<string, unknown>} */ (buildSettingsPayload);
+
 /**
  * @typedef {object} BackendSessionRuntimeDependencies
  * @property {import('http').Server} httpServer
  * @property {object} config
  * @property {any} configStore
  * @property {() => any} getGitWorkspace
- * @property {() => ((message: object) => void)} getBroadcastControl
+ * @property {() => ((message: object) => void)|null} getBroadcastControl
  * @property {Pick<Console, 'warn'>} logger
  */
 
@@ -45,9 +48,11 @@ function createBackendSessionRuntime(dependencies) {
   const rtkInstall = createRtkInstallWiring({
     config: dependencies.config,
     onStatusChange: (status) => {
-      dependencies.getBroadcastControl()({
+      const broadcast = dependencies.getBroadcastControl();
+      if (!broadcast) return;
+      broadcast({
         type: 'settings-updated',
-        settings: buildSettingsPayload({ configStore: dependencies.configStore, rtkInstallStatus: status }),
+        settings: buildRuntimeSettingsPayload({ configStore: dependencies.configStore, rtkInstallStatus: status }),
       });
     },
   });

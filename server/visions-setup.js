@@ -26,18 +26,23 @@ const LSP_CORE_PATH = path.join(PACKAGE_ROOT, 'server', 'core', 'visions-lsp-cor
 const CLI_PATH = path.join(PACKAGE_ROOT, 'bin', 'glissa.js');
 const EDITOR_TIMEOUT_MS = 60000;
 
+/** @type {(options: { manifest: Record<string, unknown>, extensionFiles?: { path: string, data: string }[] }) => Buffer} */
+const buildEditorVsix = /** @type {(options: { manifest: Record<string, unknown>, extensionFiles?: { path: string, data: string }[] }) => Buffer} */ (buildVsix);
+
 function packVsix() {
   const manifestJson = fs.readFileSync(path.join(EXTENSION_DIR, 'package.json'), 'utf8');
   const manifest = JSON.parse(manifestJson);
-  const vsix = buildVsix({
+  /** @type {{ path: string, data: string }[]} */
+  const extensionFiles = visionsExtensionFiles({
+    manifestJson,
+    extensionJs: fs.readFileSync(path.join(EXTENSION_DIR, 'extension.js'), 'utf8'),
+    convertJs: fs.readFileSync(path.join(EXTENSION_DIR, 'lsp-convert.js'), 'utf8'),
+    lspCoreJs: fs.readFileSync(LSP_CORE_PATH, 'utf8'),
+    relayPath: RELAY_PATH,
+  });
+  const vsix = buildEditorVsix({
     manifest,
-    extensionFiles: visionsExtensionFiles({
-      manifestJson,
-      extensionJs: fs.readFileSync(path.join(EXTENSION_DIR, 'extension.js'), 'utf8'),
-      convertJs: fs.readFileSync(path.join(EXTENSION_DIR, 'lsp-convert.js'), 'utf8'),
-      lspCoreJs: fs.readFileSync(LSP_CORE_PATH, 'utf8'),
-      relayPath: RELAY_PATH,
-    }),
+    extensionFiles,
   });
   return { manifest, vsix };
 }
@@ -110,6 +115,7 @@ async function installExtensions({ requested = null, resolvedByCommand = null } 
   const extensionId = extensionIdOf(manifest);
   const vsixPath = path.join(os.tmpdir(), `${extensionId}-${manifest.version}.vsix`);
   fs.writeFileSync(vsixPath, vsix);
+  /** @type {Awaited<ReturnType<typeof installInto>>[]} */
   const results = [];
   for (const target of targets) results.push(await installInto(target, vsixPath, extensionId));
   return { targets, reason, results };
@@ -151,13 +157,15 @@ async function unwireEverything() {
  *   wire?: typeof wireEverything, unwire?: typeof unwireEverything }} [options]
  */
 function createVisionsSetup({
-  getConfig, configStore = null, logger = console, debug = false, env = process.env,
+  getConfig = () => ({}), configStore = null, logger = console, debug = false, env = process.env,
   onConfigChanged = null, wire = wireEverything, unwire = unwireEverything,
 } = {}) {
   const { note, warn } = createLaneLog({ prefix: '[visions-setup]', logger, debugFlag: debug });
   // False rather than null, so a boot with Visions OFF is not a transition and unwires nothing the
   // operator installed by hand; a boot with it ON is one, which is what keeps a wiring current.
+  /** @type {boolean | null} */
   let appliedState = false;
+  /** @type {Promise<unknown> | null} */
   let inFlight = null;
 
   function isEnabled() {

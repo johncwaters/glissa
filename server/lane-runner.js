@@ -4,6 +4,9 @@ const {
   nextBackoffMs, shouldSkipTick, DEFAULT_BASE_MS, DEFAULT_MAX_MS,
 } = require('./core/lane-backoff');
 
+/** @type {(options: { attempt?: number, baseMs?: number, maxMs?: number, retryAfterMs?: number|null, random?: () => number }) => number} */
+const calculateNextBackoffMs = /** @type {(options: { attempt?: number, baseMs?: number, maxMs?: number, retryAfterMs?: number|null, random?: () => number }) => number} */ (nextBackoffMs);
+
 /*
  * The two scaffolds the polling lanes (pr-review, posthog) share.
  *
@@ -39,11 +42,13 @@ function createTickLoop({
   random = Math.random,
   log = console,
 }) {
+  /** @type {NodeJS.Timeout|null} */
   let timer = null;
   let stopped = false;
   let tickRunning = false;
   let persistChain = Promise.resolve();
   // Open backoff window (a timestamp) and how many consecutive failures produced it.
+  /** @type {number} */
   let backoffUntil = 0;
   let failureStreak = 0;
   // In-flight lane jobs, tracked so stop() can drain them before a caller reuses the dependencies
@@ -75,11 +80,11 @@ function createTickLoop({
         return;
       }
       failureStreak += 1;
-      const waitMs = nextBackoffMs({
+      const waitMs = calculateNextBackoffMs({
         attempt: failureStreak,
         baseMs: backoffBaseMs,
         maxMs: backoffMaxMs,
-        retryAfterMs: outcome.retryAfterMs,
+        retryAfterMs: outcome.retryAfterMs ?? null,
         random,
       });
       backoffUntil = now() + waitMs;
@@ -89,6 +94,7 @@ function createTickLoop({
     }
   }
 
+  /** @param {(() => Promise<void> | void) | null} [prelude] */
   async function start(prelude = null) {
     stopped = false;
     if (prelude) await prelude();
@@ -122,24 +128,28 @@ function createTickLoop({
  * naturally. startPoller stays synchronous from its callers' perspective (it only appends to the chain).
  */
 /**
+ * @template {{ start: () => Promise<void>, stop: () => Promise<void> }} Poller
  * @param {{ tag: string, gate: () => { start: boolean, reason?: string }, cfgKey: () => string,
  *   emptyStatus: () => Record<string, unknown>,
- *   createPoller: (callbacks: { onTickComplete: (summary: Record<string, unknown>) => void }) => { start: () => Promise<void>, stop: () => Promise<void> },
+ *   createPoller: (callbacks: { onTickComplete: (summary: Record<string, unknown>) => void }) => Poller,
  *   broadcast?: (status: Record<string, unknown>) => void, beforeStop?: () => void }} options
  */
 function createLaneRunner({
   tag, gate, cfgKey, emptyStatus, createPoller, broadcast = () => {}, beforeStop = () => {},
 }) {
   // The last tick summary, replayed to a control client that connects between ticks.
+  /** @type {Record<string, unknown>|null} */
   let lastStatus = null;
+  /** @type {Poller|null} */
   let poller = null;
   let chain = Promise.resolve();
   let stopped = false;
+  /** @type {string|null} */
   let lastKey = null;
 
   function onTickComplete(summary) {
     lastStatus = { ...summary, configured: true };
-    broadcast(lastStatus);
+    if (lastStatus) broadcast(lastStatus);
   }
 
   function startPoller() {
@@ -159,8 +169,9 @@ function createLaneRunner({
         return;
       }
       if (!lastStatus) broadcast(emptyStatus());
-      poller = createPoller({ onTickComplete });
-      await poller.start().catch((e) => console.warn(`[${tag}] start failed: ${e.message}`));
+      const createdPoller = createPoller({ onTickComplete });
+      poller = createdPoller;
+      await createdPoller.start().catch((e) => console.warn(`[${tag}] start failed: ${e.message}`));
     }).catch((e) => console.warn(`[${tag}] restart failed: ${e.message}`));
   }
 
@@ -188,7 +199,7 @@ function createLaneRunner({
   // rebroadcast, rather than forcing a tick that would re-query and could re-spawn work.
   function patchStatus(patch) {
     lastStatus = { ...(lastStatus || emptyStatus()), ...patch };
-    broadcast(lastStatus);
+    if (lastStatus) broadcast(lastStatus);
   }
 
   return {

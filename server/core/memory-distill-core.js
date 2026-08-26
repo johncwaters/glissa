@@ -91,6 +91,11 @@ function renderCanonForPrompt(records) {
  * as DATA; the model answers with structured claims, never with markdown, so no remembered byte ever
  * reaches the published file except through the renderer below.
  */
+/**
+ * @param {{ records?: Array<{ id: string, project?: string|null, locked?: boolean,
+ *   kind: string, text: string }>, resultPath: string, maxNewClaims?: number,
+ *   maxClaims?: number, maxClaimChars?: number }} options
+ */
 function buildMemoryDistillPrompt({
   records = [], resultPath, maxNewClaims = DEFAULT_MAX_NEW_CLAIMS, maxClaims = MAX_CLAIMS,
   maxClaimChars = MAX_PROJECTION_LINE_CHARS,
@@ -141,41 +146,49 @@ function claimFailure(reason, detail) {
   return { ok: false, reason, detail, claims: [], newClaims: 0, lockedTouched: [] };
 }
 
+/**
+ * @returns {{ ok: false, error: string } | {
+ *   ok: true, error: null, lockedIds: string[],
+ *   claim: { kind: string, project: string|null, rank: string, ids: string[], locked: boolean, text: string }
+ * }}
+ */
 function normalizeClaim(raw, index, recordsById) {
   const at = `claim ${index}`;
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { error: `${at} is not an object` };
-  if (!PROJECTED_KINDS.includes(raw.kind)) return { error: `${at} carries an unknown kind` };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, error: `${at} is not an object` };
+  if (!PROJECTED_KINDS.includes(raw.kind)) return { ok: false, error: `${at} carries an unknown kind` };
   const rank = SOURCE_KINDS.includes(raw.rank) ? raw.rank : null;
-  if (!rank) return { error: `${at} carries an unknown rank` };
+  if (!rank) return { ok: false, error: `${at} carries an unknown rank` };
   const ids = Array.isArray(raw.ids) ? raw.ids.filter((id) => typeof id === 'string') : [];
-  if (ids.length === 0) return { error: `${at} cites no record` };
-  if (ids.length > MAX_CLAIM_IDS) return { error: `${at} cites more than ${MAX_CLAIM_IDS} records` };
+  if (ids.length === 0) return { ok: false, error: `${at} cites no record` };
+  if (ids.length > MAX_CLAIM_IDS) return { ok: false, error: `${at} cites more than ${MAX_CLAIM_IDS} records` };
   const cited = [];
   for (const id of ids) {
     const record = recordsById.get(id);
-    if (!record) return { error: `${at} cites an unresolvable record id` };
+    if (!record) return { ok: false, error: `${at} cites an unresolvable record id` };
     cited.push(record);
   }
   const text = nonEmptyString(raw.text);
-  if (!text) return { error: `${at} carries no text` };
-  if (text.length > MAX_PROJECTION_LINE_CHARS) return { error: `${at} is longer than ${MAX_PROJECTION_LINE_CHARS} characters` };
-  if (findHighEntropyToken(text)) return { error: `${at} carries a high-entropy token` };
+  if (!text) return { ok: false, error: `${at} carries no text` };
+  if (text.length > MAX_PROJECTION_LINE_CHARS) return { ok: false, error: `${at} is longer than ${MAX_PROJECTION_LINE_CHARS} characters` };
+  if (findHighEntropyToken(text)) return { ok: false, error: `${at} carries a high-entropy token` };
   const project = normalizeProjectTag(raw.project);
-  if (cited.some((record) => (record.project || null) !== project)) return { error: `${at} mixes projects` };
-  if (cited.some((record) => record.kind !== raw.kind)) return { error: `${at} mixes record kinds` };
+  if (cited.some((record) => (record.project || null) !== project)) return { ok: false, error: `${at} mixes projects` };
+  if (cited.some((record) => record.kind !== raw.kind)) return { ok: false, error: `${at} mixes record kinds` };
   /*
    * The implied-rank rule: a claim may not outrank its sources, and since a distillation is itself a
    * model claim, anything rendered above `model` has to be a verbatim copy of one record rather than a
    * derivation of it.
    */
   const sourceRank = Math.max(...cited.map(effectiveRankValue));
-  if (trustRankValue(rank) > sourceRank) return { error: `${at} claims a rank its sources do not carry` };
+  if (trustRankValue(rank) > sourceRank) return { ok: false, error: `${at} claims a rank its sources do not carry` };
   const verbatim = cited.length === 1 && sanitizeProjectionText(cited[0].text) === sanitizeProjectionText(text);
   if (trustRankValue(rank) > trustRankValue('model') && !verbatim) {
-    return { error: `${at} is ranked above model without copying a single record verbatim` };
+    return { ok: false, error: `${at} is ranked above model without copying a single record verbatim` };
   }
   const locked = cited.some((record) => record.locked === true);
   return {
+    ok: true,
+    error: null,
     // A rephrased lock is structurally valid and still unpublishable: the claim survives so the pending
     // build shows the operator what was proposed, and the id is what refuses the auto-publish.
     lockedIds: locked && !verbatim ? cited.filter((record) => record.locked === true).map((record) => record.id) : [],
@@ -213,7 +226,7 @@ function validateDistillResult(parsed, {
   const lockedTouched = [];
   for (const [index, entry] of raw.entries()) {
     const checked = normalizeClaim(entry, index, recordsById);
-    if (checked.error) return claimFailure('bad-claim', checked.error);
+    if (!checked.ok) return claimFailure('bad-claim', checked.error);
     lockedTouched.push(...checked.lockedIds);
     claims.push(checked.claim);
   }
@@ -403,19 +416,20 @@ function validateDistillOps(parsed, { records = [], published = [], maxClaims = 
     const at = `op ${index}`;
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return opFailure('bad-op', `${at} is not an object`);
     if (!OPS.includes(entry.op)) return opFailure('bad-op', `${at} carries an unknown op`);
+    /** @type {{ handle: string, locked: boolean, ids: string[] }|null} */
     let target = null;
     if (entry.op !== 'add') {
       target = publishedByHandle.get(nonEmptyString(entry.target));
       if (!target) return opFailure('bad-op', `${at} names a claim that does not stand`);
       // A retired or rewritten lock is refused the way a rephrased one is: the operator reviews it.
       if (target.locked === true) lockedTouched.push(...target.ids);
-    }
-    if (entry.op === 'retire') {
-      ops.push({ op: 'retire', target: target.handle, claim: null });
-      continue;
+      if (entry.op === 'retire') {
+        ops.push({ op: 'retire', target: target.handle, claim: null });
+        continue;
+      }
     }
     const checked = normalizeClaim(entry.claim, index, recordsById);
-    if (checked.error) return opFailure('bad-claim', checked.error);
+    if (!checked.ok) return opFailure('bad-claim', checked.error);
     lockedTouched.push(...checked.lockedIds);
     ops.push({ op: entry.op, target: target ? target.handle : null, claim: checked.claim });
   }
@@ -468,7 +482,7 @@ function lockedClaimFor(record) {
 // Merge prunes departed records and re-synthesizes locks so the locked sweep sees the complete claim set.
 function finalizeMergedClaims(claims, {
   records = [], previousTexts = new Set(), maxNewClaims = DEFAULT_MAX_NEW_CLAIMS, maxClaims = MAX_CLAIMS,
-  lockedTouched = [],
+  lockedTouched = /** @type {string[]} */ ([]),
 } = {}) {
   const valid = Array.isArray(records) ? records : [];
   const validIds = new Set(valid.map((record) => record.id));
@@ -529,7 +543,9 @@ function compareClaims(left, right) {
 }
 
 /** Rendered by Glissa from validated fields, so the published bytes are never the model's own markdown. */
-function renderDistilledProjection(claims, { project = null } = {}) {
+function renderDistilledProjection(claims, {
+  project = null,
+} = /** @type {{ project?: string|null }} */ ({})) {
   const tag = normalizeProjectTag(project);
   const selected = (Array.isArray(claims) ? claims : []).filter((claim) => (claim.project || null) === tag);
   const bulletsByKind = new Map();
@@ -555,11 +571,16 @@ function claimProjectTags(claims) {
 function decideDistillRun({
   now = 0, watermark = null, manifest = null, lastAppendAt = 0, intervalMs = DEFAULT_INTERVAL_MINUTES * 60000,
   quietMs = DEFAULT_QUIET_MS, workPending = false,
-} = {}) {
-  const distilledAt = Number.isFinite(manifest?.distilledAt) ? manifest.distilledAt : null;
+} = /** @type {{ now?: number, watermark?: { hash?: unknown }|null,
+  manifest?: { distilledAt?: number|null, watermark?: { hash?: unknown }|null }|null,
+  lastAppendAt?: number, intervalMs?: number, quietMs?: number, workPending?: boolean }} */ ({})) {
+  const manifestDistilledAt = manifest?.distilledAt;
+  const distilledAt = typeof manifestDistilledAt === 'number' && Number.isFinite(manifestDistilledAt)
+    ? manifestDistilledAt
+    : null;
   // Measured against the last DISTILLED build: a fallback publish carries no distilledAt, so an
   // expunge or a fresh enable leaves a run due rather than looking like a canon that never moved.
-  const published = distilledAt === null ? null : manifest.watermark;
+  const published = distilledAt === null ? null : manifest?.watermark;
   // A matching watermark still has work while records exceed the cursor or a project needs compaction.
   const settled = workPending !== true;
   if (settled && published && watermark && published.hash === watermark.hash) return { run: false, reason: 'unchanged' };

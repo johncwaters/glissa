@@ -50,6 +50,7 @@ function diffProjects(currentSessions, newProjects, dependencies) {
       continue;
     }
     const project = newProjectsById.get(id);
+    if (!project) continue;
     const pathChanged = project.path !== session.path;
     const permissionsChanged = projectSkipsPermissions(project) !== session.dangerouslySkipPermissions;
     const packsChanged = JSON.stringify(normalizePackNames(project.packs).names) !== JSON.stringify(session.packNames);

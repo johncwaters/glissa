@@ -40,7 +40,9 @@ function createMillWiring(deps = {}) {
     log = console,
   } = deps;
 
+  /** @type {ReturnType<typeof buildMillReport>|null} */
   let lastReport = null;
+  /** @type {Promise<ReturnType<typeof buildMillReport>>|null} */
   let inFlight = null;
   // A request that lands mid-pass would otherwise be answered from bytes read before it arrived.
   let dirty = false;
@@ -84,6 +86,7 @@ function createMillWiring(deps = {}) {
   }
 
   async function readSpecEntry({ name, specPath }) {
+    /** @type {{ name: string, spec: Record<string, unknown>|null, specError: string|null, manifest: Awaited<ReturnType<typeof readBuiltManifest>>, builtReason: string|null, distill: Array<Awaited<ReturnType<typeof distillStatus>>> }} */
     const entry = { name, spec: null, specError: null, manifest: null, builtReason: null, distill: [] };
     try {
       entry.spec = await loadPackSpec(specPath);
@@ -103,7 +106,9 @@ function createMillWiring(deps = {}) {
       const resolved = await resolveBuiltPack(name, { builtRoot: resolvedBuiltRoot() });
       entry.builtReason = resolved.reason;
     }
-    for (const distill of Array.isArray(entry.spec.distill) ? entry.spec.distill : []) {
+    const spec = entry.spec;
+    if (!spec) return entry;
+    for (const distill of Array.isArray(spec.distill) ? spec.distill : []) {
       entry.distill.push(await distillStatus(distill));
     }
     return entry;
@@ -133,13 +138,15 @@ function createMillWiring(deps = {}) {
    * multiply the one expensive thing this surface does.
    */
   async function variantEntries(entry) {
-    if (entry.spec?.perProjectVariants !== true) return [];
+    const spec = entry.spec;
+    if (!spec || spec.perProjectVariants !== true) return [];
     const projects = packVariantProjects(config);
     const labelById = new Map(projects.map((project) => [project.id, project.name]));
     const rows = [];
-    for (const build of planPackVariants(entry.spec, projects).builds) {
+    for (const build of planPackVariants(spec, projects).builds) {
       const variant = build.variant && typeof build.variant === 'object' ? build.variant : null;
-      const projectSlug = variant && 'projectSlug' in variant ? variant.projectSlug : null;
+      if (!variant) continue;
+      const projectSlug = 'projectSlug' in variant ? variant.projectSlug : null;
       if (!projectSlug) continue;
       const variantProjectId = 'projectId' in variant ? variant.projectId : null;
       const manifest = await readBuiltManifest(build.name, { builtRoot: resolvedBuiltRoot() });

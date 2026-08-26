@@ -334,6 +334,12 @@ function pickEvent({ previous, status, commit, root, now }) {
  * beside the cause would put two digest lines behind one action. The state still advances on every
  * field, so the NEXT genuine working-tree change is measured against what the commit left behind.
  */
+/**
+ * @param {{ previous: Record<string, unknown>|null|undefined,
+ *   status: { branch: string|null, oid: string|null, signature: string, counts: Record<string, number> },
+ *   commit?: { sha: string, author: string|null, committedAt: number|null, subject: string }|null,
+ *   root?: string|null, now?: number }} options
+ */
 function decideGitEvents({ previous, status, commit = null, root = null, now = 0 }) {
   const next = {
     initialized: true,

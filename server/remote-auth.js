@@ -66,7 +66,7 @@ function hashesMatch(a, b) {
  * @param {object} deps
  * @param {{ enabled: boolean, port: number|null, publicHost: string, allowedOrigins: string[] }} deps.remote
  * @param {PairingsStore} deps.pairingsStore  createPairingsStore(...)
- * @param {SeenStore} [deps.seenStore]    createSeenStore(...), display-only lastSeenAt
+ * @param {SeenStore|null} [deps.seenStore]    createSeenStore(...), display-only lastSeenAt
  * @param {() => number} [deps.now]
  * @param {number} [deps.deviceMaxAgeMs]
  * @param {(message: string) => void} [deps.log]
@@ -74,7 +74,7 @@ function hashesMatch(a, b) {
 function createRemoteAuth({
   remote,
   pairingsStore,
-  seenStore = null,
+  seenStore = /** @type {SeenStore|null} */ (null),
   now = Date.now,
   deviceMaxAgeMs = DEFAULT_DEVICE_MAX_AGE_MS,
   log = console.log,
@@ -89,6 +89,7 @@ function createRemoteAuth({
     const parsed = readDeviceCookie(req.headers?.cookie, COOKIE_NAME);
     if (!parsed) return { ok: false, reason: 'no-cookie', device: null };
     const device = pairingsStore.findDevice(parsed.id);
+    if (!device) return { ok: false, reason: 'no-device', device: null };
     const secretMatches = device ? hashesMatch(hashSecret(parsed.secret), device.secretHash) : false;
     const verdict = decideDeviceAuth({ record: device, now: now(), maxAgeMs: deviceMaxAgeMs, secretMatches });
     if (!verdict.ok) return { ok: false, reason: verdict.reason, device: null };
@@ -140,6 +141,10 @@ function createRemoteAuth({
         res.status(403)
           .type('html')
           .send(htmlPage('Pairing link not valid', 'This link was already used, has expired, or is not recognized. Run "glissa pair" on the host machine for a fresh one.'));
+        return;
+      }
+      if (!outcome.device) {
+        res.status(403).type('html').send(htmlPage('Pairing link not valid', 'This link was already used, has expired, or is not recognized. Run "glissa pair" on the host machine for a fresh one.'));
         return;
       }
       const flags = decideCookieFlags({ forwardedProto: req.headers['x-forwarded-proto'] });

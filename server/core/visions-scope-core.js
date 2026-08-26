@@ -29,6 +29,7 @@ function normalizeShapePath(input) {
 
 function pathOfFileUri(uri) {
   if (typeof uri !== 'string' || !uri) return null;
+  /** @type {URL | null} */
   let parsed = null;
   try {
     parsed = new URL(uri);
@@ -65,6 +66,7 @@ function isUriInProjects(uri, normalizedProjectPaths) {
 // Nested roots resolve to the DEEPEST one that contains the path: a project checked out inside another
 // owns its own files, and the shallower root would otherwise claim every one of them.
 function deepestRootFor(normalizedPath, roots) {
+  /** @type {string | null} */
   let owner = null;
   for (const raw of Array.isArray(roots) ? roots : []) {
     const root = normalizeShapePath(raw);

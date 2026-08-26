@@ -26,7 +26,7 @@ function nextBackoffMs({
   retryAfterMs = null,
   random = Math.random,
 } = {}) {
-  if (Number.isFinite(retryAfterMs) && retryAfterMs > 0) return Math.min(retryAfterMs, maxMs);
+  if (typeof retryAfterMs === 'number' && Number.isFinite(retryAfterMs) && retryAfterMs > 0) return Math.min(retryAfterMs, maxMs);
   const exponent = Math.max(0, Math.min(attempt, 20) - 1);
   const ceiling = Math.min(maxMs, baseMs * 2 ** exponent);
   return Math.round(random() * ceiling);

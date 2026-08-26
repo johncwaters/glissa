@@ -32,12 +32,19 @@ const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 // phone layout's Board instead - so the width half of the query mirrors the form-factor rule.
 const touchRail = window.matchMedia?.('(hover: none) and (min-width: 769px)');
 
+/** @type {HTMLElement|null} */
 let railEl = null;
+/** @type {HTMLButtonElement|null} */
 let railHeadEl = null;  // the "{n} NEED YOU" jump header (sticky top of the rail)
+/** @type {HTMLElement|null} */
 let centerEl = null;
+/** @type {HTMLElement|null} */
 let cardSlotEl = null;
+/** @type {HTMLElement|null} */
 let emptyEl = null;
+/** @type {HTMLElement|null} */
 let emptyTitleEl = null;
+/** @type {HTMLElement|null} */
 let emptyDescEl = null;
 
 let active = false;
@@ -155,13 +162,16 @@ export function getFocusedSessionId() { return uiState.snapshot().focusedSession
 export function mountFocusView({ rail, center, resizer }) {
   railEl = rail;
   centerEl = center;
+  if (!railEl || !centerEl) return;
+  const mountedRail = railEl;
+  const mountedCenter = centerEl;
   wireRailResizer(resizer);
 
   // The rail is a sticky jump header above one project-header + role=listbox sublist per project. The
   // outer nav is NOT itself a listbox (each project sublist is), so strip its listbox semantics; the
   // roving-arrow keydown listener stays on the outer nav (pill keydowns bubble up to it).
-  railEl.removeAttribute('role');
-  railEl.removeAttribute('aria-label');
+  mountedRail.removeAttribute('role');
+  mountedRail.removeAttribute('aria-label');
 
   railHeadEl = el('button', 'focus-rail-head');
   railHeadEl.type = 'button';
@@ -177,7 +187,7 @@ export function mountFocusView({ rail, center, resizer }) {
   railHeadEl.addEventListener('click', focusNextAttention);
   setRailHeadActive(false, attentionSummaryText(0)); // resting from the start until something needs you
 
-  railEl.append(railHeadEl);
+  mountedRail.append(railHeadEl);
 
   emptyEl = el('div', 'focus-empty');
   emptyEl.innerHTML = '<p class="focus-empty-title"></p>'
@@ -189,9 +199,9 @@ export function mountFocusView({ rail, center, resizer }) {
 
   // Review (diff + Merge / Discard) lives in the right review sidebar, not in the center, so
   // the borrowed card is just the live terminal; selection drives the sidebar (see focusSession).
-  centerEl.append(emptyEl, cardSlotEl);
+  mountedCenter.append(emptyEl, cardSlotEl);
 
-  railEl.addEventListener('keydown', onRailKeydown);
+  mountedRail.addEventListener('keydown', onRailKeydown);
 }
 
 // ── Rail resize ──
@@ -206,6 +216,7 @@ const RAIL_MAX_PX = 480;
 const RAIL_KEY_STEP_PX = 16;
 
 function applyRailWidth(resizer, px) {
+  if (!railEl) return null;
   const w = Math.round(Math.min(RAIL_MAX_PX, Math.max(RAIL_MIN_PX, px)));
   railEl.style.setProperty('--rail-width', `${w}px`);
   resizer.setAttribute('aria-valuenow', String(w));
@@ -213,7 +224,8 @@ function applyRailWidth(resizer, px) {
 }
 
 function wireRailResizer(resizer) {
-  if (!resizer) return;
+  if (!resizer || !railEl) return;
+  const mountedRail = railEl;
   resizer.setAttribute('aria-valuemin', String(RAIL_MIN_PX));
   resizer.setAttribute('aria-valuemax', String(RAIL_MAX_PX));
 
@@ -225,7 +237,7 @@ function wireRailResizer(resizer) {
   resizer.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     startX = e.clientX;
-    startW = railEl.getBoundingClientRect().width;
+    startW = mountedRail.getBoundingClientRect().width;
     resizer.setPointerCapture(e.pointerId);
     resizer.dataset.dragging = 'true';
     e.preventDefault(); // no text selection / focus steal while dragging
@@ -252,7 +264,7 @@ function wireRailResizer(resizer) {
   });
 
   resizer.addEventListener('dblclick', () => {
-    railEl.style.removeProperty('--rail-width'); // back to the stylesheet default
+    mountedRail.style.removeProperty('--rail-width'); // back to the stylesheet default
     resizer.removeAttribute('aria-valuenow');
     setRailWidth(null);
   });
@@ -260,7 +272,8 @@ function wireRailResizer(resizer) {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
     e.preventDefault();
     const delta = e.key === 'ArrowRight' ? RAIL_KEY_STEP_PX : -RAIL_KEY_STEP_PX;
-    setRailWidth(applyRailWidth(resizer, railEl.getBoundingClientRect().width + delta));
+    const width = applyRailWidth(resizer, mountedRail.getBoundingClientRect().width + delta);
+    if (width !== null) setRailWidth(width);
   });
 }
 
@@ -550,7 +563,7 @@ function updateRailHead() {
 // it is also non-interactive and out of the tab/AT order (disabled + aria-hidden): nothing to jump to.
 function setRailHeadActive(on, label) {
   if (!railHeadEl) return;
-  railHeadEl.querySelector('.focus-rail-head-count').textContent = label;
+  query(railHeadEl, '.focus-rail-head-count').textContent = label;
   railHeadEl.disabled = !on;
   if (on) {
     railHeadEl.removeAttribute('data-empty');
@@ -619,6 +632,7 @@ function flashAttention(id) {
 // xterm, so exactly one surface may hold its card at a time and that invariant has to be global.
 
 function borrowToCenter(ui, id) {
+  if (!cardSlotEl) return;
   borrowCard(ui, id, cardSlotEl, { className: 'focus-centered' });
 }
 
@@ -647,6 +661,7 @@ function focusSession(id) {
 }
 
 function updateCenter() {
+  if (!emptyEl || !emptyTitleEl || !emptyDescEl) return;
   const centeredId = getFocusedSessionId();
   const has = !!(centeredId && sessionUIs.has(centeredId));
   emptyEl.hidden = has;

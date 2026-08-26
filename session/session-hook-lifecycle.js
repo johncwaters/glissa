@@ -31,7 +31,9 @@ const MAX_PROJECT_CONFIG_DEPTH = 12;
 
 /** @param {SessionHookOptions} options */
 function createSessionHookLifecycle(options) {
+  /** @type {string | null} */
   let token = null;
+  /** @type {ReturnType<typeof writeSessionSettings> | null} */
   let settingsHandle = null;
 
   function cleanup() {
@@ -56,6 +58,7 @@ function createSessionHookLifecycle(options) {
           if (fs.existsSync(candidate)) return candidate;
           continue;
         }
+        /** @type {string | null} */
         let contents = null;
         try {
           contents = fs.readFileSync(candidate, "utf8");
@@ -86,6 +89,7 @@ function createSessionHookLifecycle(options) {
 
   /** @param {number} port @param {string[]} args @param {Record<string, string> | null} [relayEnv] */
   function registerRelayHooks(port, args, relayEnv = null) {
+    if (!options.hookRouter) return NO_HOOK_INJECTION;
     const nextToken = generateToken();
     const hookUrl = `http://127.0.0.1:${port}/hook/${encodeURIComponent(options.id)}?t=${encodeURIComponent(nextToken)}`;
     try {
@@ -134,11 +138,14 @@ function createSessionHookLifecycle(options) {
       });
       return NO_HOOK_INJECTION;
     }
+    /** @type {string | null} */
     let hooksPath = null;
+    /** @type {string | null} */
     let contents = null;
     try {
-      hooksPath = injection.filePath(process.env);
-      contents = fs.readFileSync(hooksPath, "utf8");
+      const resolvedHooksPath = injection.filePath(process.env);
+      hooksPath = resolvedHooksPath;
+      contents = fs.readFileSync(resolvedHooksPath, "utf8");
     } catch (error) {
       const reason = error.code === "ENOENT" ? "not installed" : error.message;
       console.warn(`[session:${options.name}] Grok hook injection skipped: ${reason}; run "glissa agent setup grok"`);
@@ -154,6 +161,7 @@ function createSessionHookLifecycle(options) {
 
   function inject() {
     if (!options.hookRouter || !options.getHookPort) return NO_HOOK_INJECTION;
+    /** @type {number | null} */
     let port = null;
     try {
       port = options.getHookPort();
@@ -165,7 +173,7 @@ function createSessionHookLifecycle(options) {
     if (options.adapter.hooks.injection?.kind === "argv-config") return injectRelayHooks(port);
     if (options.adapter.hooks.injection?.kind === "home-hooks-file") return injectHomeRelayHooks(port);
     try {
-      settingsHandle = writeSessionSettings({
+      const nextSettingsHandle = writeSessionSettings({
         port,
         glissaId: options.id,
         baseDir: options.hooksBaseDir,
@@ -175,13 +183,14 @@ function createSessionHookLifecycle(options) {
         rtkPath: options.rtkPath,
         planLimits: options.planLimits,
       });
-      token = settingsHandle.token;
+      settingsHandle = nextSettingsHandle;
+      token = nextSettingsHandle.token;
       options.hookRouter.register(options.id, {
         token,
         onSignal: options.ingestSignal,
         hooks: options.adapter.hooks,
       });
-      return { args: options.adapter.settingsArgs(settingsHandle.settingsPath), env: {} };
+      return { args: options.adapter.settingsArgs(nextSettingsHandle.settingsPath), env: {} };
     } catch (error) {
       console.warn(`[session:${options.name}] hook injection failed: ${error.message} - falling back to OSC title only`);
       cleanup();

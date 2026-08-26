@@ -9,6 +9,7 @@
     "noEmit": true,
     "skipLibCheck": true,
     "strict": false,
+    "strictNullChecks": true,
     "target": "ES2023",
     "types": ["node"]
   },

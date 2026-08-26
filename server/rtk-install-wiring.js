@@ -27,6 +27,7 @@ function createRtkInstallWiring({
 } = {}) {
   let status = { status: 'idle' };
   let inFlight = false;
+  /** @type {number|null} */
   let lastFailureAt = null;
 
   const getStatus = () => ({ ...status });
@@ -37,7 +38,7 @@ function createRtkInstallWiring({
   }
 
   async function maybeInstall() {
-    const rtkEnabled = config.rtk === true;
+    const rtkEnabled = config?.rtk === true;
     const decision = decideRtkInstall({
       rtkEnabled,
       resolvedPath: rtkEnabled ? resolveRtk() : null,
@@ -53,7 +54,7 @@ function createRtkInstallWiring({
     setStatus({ status: 'installing' });
     log?.log?.(`[rtk] no rtk binary resolved and config.rtk is on: installing ${decision.asset.version}`);
     try {
-      const result = await install({ homeDir, platform, arch, log });
+      const result = await install({ homeDir, platform, arch, ...(log ? { log } : {}) });
       if (result.ok) {
         lastFailureAt = null;
         setStatus({ status: 'installed', path: result.path });

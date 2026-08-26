@@ -66,6 +66,7 @@ function createWsSender(ws, opts = {}) {
   let sendBuffer = '';
   let sendScheduled = false;
   let flushNextData = false;
+  /** @type {NodeJS.Timeout|null} */
   let stallTimer = null;
   let destroyed = false;
   // sentOffset = LIVE bytes (offset >= startOffset) durably handed to ws.send for this

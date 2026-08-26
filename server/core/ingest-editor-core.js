@@ -33,6 +33,7 @@ function relativeTo(root, normalizedPath) {
  * @param {EditorNotification} notification
  */
 function applyEditorNotification(state, { method, uri, roots = [], now = 0 } = {}) {
+  if (typeof method !== 'string' || typeof uri !== 'string') return { state, event: null };
   const kind = KIND_BY_METHOD[method];
   if (!kind) return { state, event: null };
   const normalizedPath = normalizeShapePath(pathOfFileUri(uri));

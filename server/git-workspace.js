@@ -187,6 +187,7 @@ function createGitWorkspace(opts = {}) {
       const configured = await run(['config', '--get', 'rerere.enabled'], projectPath);
       if (!configured.ok || configured.out === '') await run(['config', 'rerere.enabled', 'true'], projectPath);
     }
+    /** @type {string|null} */
     let baseSha = head.out;
     let base = (await run(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath)).out || 'HEAD';
     if (baseBranch) {

@@ -61,7 +61,9 @@ export function wireTouchScroll(termWrap, term) {
   let isScrolling = false;
   let pendingPx = 0;
   let velocitySamples = [];
+  /** @type {{ velocityPxPerMs: number, lastMs: number, cellHeightPx: number, pendingPx: number }|null} */
   let inertiaState = null;
+  /** @type {number|null} */
   let inertiaFrame = null;
 
   const cancelInertia = () => {

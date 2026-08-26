@@ -93,6 +93,7 @@ function lowerTrustRank(left, right) {
 }
 
 function highestTrustRank(kinds) {
+  /** @type {string|null} */
   let best = null;
   for (const kind of Array.isArray(kinds) ? kinds : []) {
     if (!SOURCE_KINDS.includes(kind)) continue;
@@ -196,7 +197,9 @@ function absolutizeDates(text, { now } = /** @type {any} */ ({})) {
 }
 
 // The scrub is the EXPORTED ingest one, never a second pattern list that can drift out from under this gate.
-function screenMemoryText(raw, { maxChars = MAX_RECORD_CHARS, now = null } = {}) {
+function screenMemoryText(raw, {
+  maxChars = MAX_RECORD_CHARS, now = null,
+} = /** @type {{ maxChars?: number, now?: number|null }} */ ({})) {
   if (typeof raw !== 'string' || !raw.trim()) return { ok: false, reason: 'empty', text: '' };
   const scrubbed = scrubText(raw).replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
   if (!scrubbed) return { ok: false, reason: 'empty', text: '' };
@@ -469,7 +472,10 @@ function selectValidRecords(records, { now } = /** @type {any} */ ({})) {
 }
 
 // Only an operator mutation clears a lock; a model or reported record can never close a locked one.
-/** @param {any} options */
+/**
+ * @param {any} options
+ * @returns {{ allowed: false, reason: string, validTo: null } | { allowed: true, reason: null, validTo: number }}
+ */
 function decideSupersession({ candidate, target, now } = /** @type {any} */ ({})) {
   if (!candidate || !target) return { allowed: false, reason: 'unknown-target', validTo: null };
   if (candidate.id === target.id) return { allowed: false, reason: 'self', validTo: null };
@@ -621,7 +627,7 @@ function tokenizeQuery(query) {
 
 function scoreMemoryRecord(record, {
   terms = [], project = null, now = 0, halfLifeDays = DEFAULT_RECENCY_HALF_LIFE_DAYS,
-} = {}) {
+} = /** @type {{ terms?: string[], project?: string|null, now?: number, halfLifeDays?: number }} */ ({})) {
   const text = normalizeMemoryLine(record.text);
   let score = 0;
   for (const term of terms) {
@@ -657,7 +663,8 @@ function matchBonusById(matchedIds) {
 function retrieveMemories(records, {
   query = '', project = null, now = 0, limit = DEFAULT_RETRIEVAL_LIMIT,
   halfLifeDays = DEFAULT_RECENCY_HALF_LIFE_DAYS, matchedIds = null,
-} = {}) {
+} = /** @type {{ query?: string, project?: string|null, now?: number, limit?: number,
+  halfLifeDays?: number, matchedIds?: unknown[]|null }} */ ({})) {
   const at = finiteNumber(now) ?? 0;
   const tag = normalizeProjectTag(project);
   const terms = tokenizeQuery(query);
@@ -740,7 +747,9 @@ const PROJECTION_PROJECT_RE = /^Project: (.+)$/;
 // The heading and Project line preserve each bullet's kind and project when claims are read back.
 function parsePublishedClaims(text) {
   const claims = [];
+  /** @type {string|null} */
   let kind = null;
+  /** @type {string|null} */
   let project = null;
   for (const line of String(text || '').split('\n')) {
     const heading = PROJECTION_HEADING_RE.exec(line);
@@ -772,7 +781,9 @@ function claimHandle(claim) {
 }
 
 // No clock and no build stamp, so the same bullets always render byte-identical markdown.
-function renderProjectionDocument(bulletsByKind, { project = null } = {}) {
+function renderProjectionDocument(bulletsByKind, {
+  project = null,
+} = /** @type {{ project?: string|null }} */ ({})) {
   const lines = [PROJECTION_HEADER, '', PROJECTION_NOTICE, ''];
   if (project !== null) lines.push(`Project: ${project}`, '');
   let wrote = 0;
@@ -788,7 +799,9 @@ function renderProjectionDocument(bulletsByKind, { project = null } = {}) {
   return lines.join('\n');
 }
 
-function renderProjection(records, { project = null } = {}) {
+function renderProjection(records, {
+  project = null,
+} = /** @type {{ project?: string|null }} */ ({})) {
   const tag = normalizeProjectTag(project);
   const selected = (Array.isArray(records) ? records : []).filter((record) => {
     if (!PROJECTED_KINDS.includes(record.kind)) return false;
@@ -832,6 +845,11 @@ function projectionStampSources(watermark) {
  * One projection build, mill-style: every delivered byte hashed into `version`, the stamp line first so
  * drift reads the same way it does for a distilled pack source, and manifest.json excluded from the
  * version because it carries builtAt.
+ */
+/**
+ * @param {{ files?: Array<{ relPath: string, content: string }>, watermark?: { hash?: unknown }|null,
+ *   builtAt?: number, source?: string, verdict?: string|null, distilledAt?: number|null,
+ *   recordCount?: number, claimCount?: number|null }} options
  */
 function planProjectionBuild({
   files = [], watermark = null, builtAt = 0, source = 'trivial', verdict = null, distilledAt = null,

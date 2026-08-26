@@ -9,28 +9,36 @@
 // EXACT per-file counts derived from the hunk bodies (not the scaled --stat bars). Tolerates CRLF,
 // an empty input (returns []), new files (git add -N / "new file mode" / "--- /dev/null"), deletes,
 // renames, and binary files.
+/** @typedef {{ type: string, text: string }} DiffLine */
+/** @typedef {{ header: string, lines: DiffLine[] }} DiffHunk */
+/** @typedef {{ path: string, oldPath: string|null, status: string, added: number, removed: number, binary: boolean, hunks: DiffHunk[] }} DiffFile */
 export function parseUnifiedDiff(diff) {
   const files = [];
   if (!diff) return files;
   const lines = String(diff).split(/\r?\n/);
+  /** @type {DiffFile|null} */
   let cur = null;
+  /** @type {DiffHunk|null} */
   let hunk = null;
 
   const startFile = (header) => {
-    cur = { path: '', oldPath: null, status: 'modified', added: 0, removed: 0, binary: false, hunks: [] };
-    files.push(cur);
+    /** @type {DiffFile} */
+    const file = { path: '', oldPath: null, status: 'modified', added: 0, removed: 0, binary: false, hunks: [] };
+    files.push(file);
     hunk = null;
     const m = /^diff --git a\/(.+?) b\/(.+)$/.exec(header);
-    if (m) { cur.oldPath = m[1]; cur.path = m[2]; }
+    if (m) { file.oldPath = m[1]; file.path = m[2]; }
+    return file;
   };
 
   for (const line of lines) {
-    if (line.startsWith('diff --git ')) { startFile(line); continue; }
+    if (line.startsWith('diff --git ')) { cur = startFile(line); continue; }
     if (!cur) {
       // Tolerate a diff with no "diff --git" prefix (e.g. a single-file `git diff`): synthesize a file.
       if (!line.startsWith('--- ') && !line.startsWith('@@')) continue;
-      startFile('diff --git a/ b/');
+      cur = startFile('diff --git a/ b/');
     }
+    if (!cur) continue;
     if (line.startsWith('new file mode')) { cur.status = 'added'; continue; }
     if (line.startsWith('deleted file mode')) { cur.status = 'deleted'; continue; }
     if (line.startsWith('rename from ')) { cur.oldPath = line.slice('rename from '.length); cur.status = 'renamed'; continue; }

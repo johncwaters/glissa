@@ -20,8 +20,8 @@ const { decideOffDashboardDelivery } = require('../../server/core/client-presenc
  * Pure gate for one delivery.
  * @param {object} opts
  * @param {boolean} opts.enabled config.telegramNotifications
- * @param {string} opts.botToken config.telegram.botToken (shared with the PR-review lane)
- * @param {string} opts.chatId config.telegram.chatId
+ * @param {string|undefined} opts.botToken config.telegram.botToken (shared with the PR-review lane)
+ * @param {string|undefined} opts.chatId config.telegram.chatId
  * @param {number} opts.connectionCount open control-WS connections right now
  * @param {string | null} [opts.category]
  * @param {number} [opts.activeAgents]
@@ -61,7 +61,7 @@ function formatTelegramText(sessionName, category, message) {
  * @param {() => { telegramNotifications?: boolean, telegram?: { botToken?: string, chatId?: string } }} deps.getConfig live config object (read per delivery, never captured)
  * @param {() => number} deps.getConnectionCount open control-WS connection count
  * @param {(sessionId: string) => number} [deps.getActiveAgentCount]
- * @param {{ deliver: (text: string) => Promise<void> }} [deps.outbox] durable at-least-once queue; absent means fire-and-forget as before
+ * @param {{ deliver: (text: string) => Promise<void> }|null} [deps.outbox] durable at-least-once queue; absent means fire-and-forget as before
  * @param {(message: { botToken: string, chatId: string, text: string, tag?: string }) => unknown} [deps.send] injected transport for tests
  * @returns {(sessionName: string, category: string, message: string, context?: { phoneEscalation?: boolean }) => { send: boolean, reason: string }}
  */
@@ -69,23 +69,26 @@ function createTelegramChannel({
   getConfig,
   getConnectionCount,
   getActiveAgentCount = () => 0,
-  outbox = null,
+  outbox = /** @type {{ deliver: (text: string) => Promise<void> }|null} */ (null),
   send = sendTelegramMessage,
 }) {
   return function telegramChannel(sessionId, category, message, context) {
     const config = getConfig() || {};
     const telegram = config.telegram || {};
+    const botToken = telegram.botToken;
+    const chatId = telegram.chatId;
     const activeAgents = category === 'complete' ? getActiveAgentCount(sessionId) : 0;
     const decision = decideTelegramNotification({
       enabled: config.telegramNotifications === true,
-      botToken: telegram.botToken,
-      chatId: telegram.chatId,
+      botToken,
+      chatId,
       connectionCount: getConnectionCount(),
       phoneEscalation: context?.phoneEscalation === true,
       category,
       activeAgents,
     });
     if (!decision.send) return decision;
+    if (!botToken || !chatId) return decision;
     const text = formatTelegramText(sessionId, category, message);
     /*
      * Through the outbox when there is one: the ping is recorded BEFORE it is attempted, so a crash
@@ -99,8 +102,8 @@ function createTelegramChannel({
     // Not awaited: sendTelegramMessage swallows its own failures, and a channel must never make the
     // manager's delivery loop wait on the network.
     send({
-      botToken: telegram.botToken,
-      chatId: telegram.chatId,
+      botToken,
+      chatId,
       text,
       tag: 'channel:telegram',
     });

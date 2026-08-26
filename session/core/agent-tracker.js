@@ -95,6 +95,8 @@ const NON_GATING_TASK_TYPES = new Set(['dream']);
 
 const DEFAULT_SHELL_TASK_TTL_MS = 60 * 60 * 1000;
 
+/** @typedef {{ id: string | null, type: string | null }} DeclaredEntry */
+
 // Default time a declared teammate entry keeps gating after the Stop that declared it. A
 // teammate that is ACTUALLY working is already covered by the counted SubagentStart/Stop map;
 // a declared teammate entry only matters for a dropped SubagentStart. But an idle-but-alive
@@ -163,6 +165,12 @@ function declaredEntryTtlMs(type, weakTtlMs, teammateTtlMs, agentTtlMs) {
 // the caller falls back to its own interval. The idle-teammate-name offset is deliberately not
 // modelled: it only ever RAISES the count as names age out, so it can never be the next drain, and
 // including an offset teammate entry here only arms earlier (a re-check, never a missed one).
+/**
+ * @param {{ countedAgents?: Map<string, number> | null,
+ *   declaredEntries?: DeclaredEntry[] | null, declaredTs?: number,
+ *   idleIds?: Set<string> | null, now?: number, agentTtlMs?: number,
+ *   weakTtlMs?: number, teammateTtlMs?: number }} [options]
+ */
 function msUntilNextDrain({
   countedAgents = null,
   declaredEntries = null,
@@ -173,6 +181,7 @@ function msUntilNextDrain({
   weakTtlMs = DEFAULT_SHELL_TASK_TTL_MS,
   teammateTtlMs = DEFAULT_TEAMMATE_TASK_TTL_MS,
 } = {}) {
+  /** @type {number | null} */
   let earliestExpiry = null;
   const consider = (expiresAt) => {
     if (expiresAt <= now) return;
@@ -184,7 +193,7 @@ function msUntilNextDrain({
   if (declaredEntries) {
     for (const e of declaredEntries) {
       if (e.id && idleIds && idleIds.has(e.id)) continue;
-      if (NON_GATING_TASK_TYPES.has(e.type)) continue;
+      if (e.type && NON_GATING_TASK_TYPES.has(e.type)) continue;
       consider(declaredTs + declaredEntryTtlMs(e.type, weakTtlMs, teammateTtlMs, agentTtlMs));
     }
   }
@@ -244,6 +253,7 @@ function createTaskRegistry({
   const observedAgentIdsThisTurn = new Set();
   const orphanAgentStops = new Map();
   // The latest authoritative background_tasks declaration, and when it was declared.
+  /** @type {DeclaredEntry[] | null} */
   let declaredEntries = null;
   let declaredTs = 0;
   // Task ids settled out-of-band by TaskCompleted, filtering the declaration.

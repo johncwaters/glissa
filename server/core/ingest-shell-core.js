@@ -158,8 +158,14 @@ function locationKey(location) {
  * tracked, which is the vendor-home rule the usage lane already follows: an absent shell is absent,
  * never an error.
  */
+/**
+ * @param {{ shells?: string[] | null, env?: NodeJS.ProcessEnv, platform?: NodeJS.Platform,
+ *   homeDir?: string | null }} options
+ * @returns {Array<{ shell: string, dir: string, suffix: string | null, name: string | null }>}
+ */
 function historyLocations({ shells = null, env = {}, platform = process.platform, homeDir = null } = {}) {
   const wanted = normalizeShells(shells).shells;
+  /** @type {Array<{ shell: string, dir: string, suffix: string | null, name: string | null }>} */
   const locations = [...histFileLocation(wanted, env)];
   for (const shell of wanted) {
     if (shell === 'powershell') locations.push(...powershellLocations(env, platform, homeDir));

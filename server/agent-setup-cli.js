@@ -20,6 +20,7 @@ function setupInputs(env = process.env) {
 
 function inspectGrokAgentSetup({ env = process.env, readFileSync = fs.readFileSync } = {}) {
   const inputs = setupInputs(env);
+  /** @type {string|null} */
   let contents = null;
   try {
     contents = readFileSync(inputs.filePath, "utf8");

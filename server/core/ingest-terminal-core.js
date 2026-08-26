@@ -97,6 +97,7 @@ const ERASE_PARAMETERS = new RegExp(`^${CSI_INTRO}(?<parameters>[0-9;]*)[JK]$`);
 function erasesBehindCursor(sequence) {
   const match = ERASE_PARAMETERS.exec(sequence);
   if (!match) return false;
+  if (!match.groups) return false;
   const firstParameter = match.groups.parameters.split(';')[0];
   return Number(firstParameter || 0) >= 1;
 }
@@ -246,6 +247,10 @@ function summarize(text, maxChars = MAX_SUMMARY_CHARS) {
   return folded.slice(folded.length - maxChars);
 }
 
+/**
+ * @param {{ sessionId?: string | null, root?: string | null, accumulatorBytes?: number,
+ *   windowBytes?: number, maxSummaryChars?: number, maxTextChars?: number }} options
+ */
 function createTerminalAccumulator({
   sessionId = null,
   root = null,

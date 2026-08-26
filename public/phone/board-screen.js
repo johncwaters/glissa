@@ -45,8 +45,8 @@ export function createBoardScreen({ onSelectSession }) {
 
   const emptyEl = el('div', 'phone-empty');
   emptyEl.innerHTML = '<p class="phone-empty-title"></p><p class="phone-empty-desc"></p>';
-  const emptyTitleEl = emptyEl.querySelector('.phone-empty-title');
-  const emptyDescEl = emptyEl.querySelector('.phone-empty-desc');
+  const emptyTitleEl = queryTag(emptyEl, '.phone-empty-title', 'p');
+  const emptyDescEl = queryTag(emptyEl, '.phone-empty-desc', 'p');
 
   screen.append(topBar, attentionEl, groupsEl, emptyEl);
 

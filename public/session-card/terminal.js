@@ -197,6 +197,7 @@ export function setupTerminal(termWrap, ui) {
   ui.needsWebGLReload = false;
 
   // This is the only geometry path: visible fit, browser repaint, then PTY resize.
+  /** @type {number|null} */
   let fitRafId = null;
   let lastSentCols = 0;
   let lastSentRows = 0;
@@ -272,6 +273,7 @@ export function setupTerminal(termWrap, ui) {
 
   // Redraw all visible rows on scroll. RAF-coalesced so a burst of wheel
   // events still costs one refresh per frame.
+  /** @type {number|null} */
   let scrollRafId = null;
   term.onScroll(() => {
     if (scrollRafId !== null) return;

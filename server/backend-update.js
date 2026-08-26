@@ -18,8 +18,11 @@ const UPDATE_RECHECK_MS = 24 * 60 * 60 * 1000;
 
 /** @param {BackendUpdateDependencies} dependencies */
 function createBackendUpdateCheck(dependencies) {
+  /** @type {Awaited<ReturnType<NonNullable<BackendUpdateDependencies['checkForUpdate']>>>|null} */
   let updateStatus = null;
+  /** @type {AbortController|null} */
   let updateAbort = null;
+  /** @type {NodeJS.Timeout|null} */
   let updateRecheckInterval = null;
 
   function getStatus() {

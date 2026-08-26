@@ -6,9 +6,9 @@ const { applyEditorNotification, createEditorState } = require('./core/ingest-ed
 const { createLaneLog } = require('./lane-log');
 
 /**
- * @param {{ publish?: (event: Record<string, unknown>) => unknown,
+ * @param {{ publish: (event: Record<string, unknown>) => unknown,
  *   roots?: (() => string[]) | string[],
- *   logger?: Console, nowFn?: () => number, debug?: boolean | (() => boolean) }} [options]
+ *   logger?: Console, nowFn?: () => number, debug?: boolean | (() => boolean) }} options
  */
 function createEditorIngest({
   publish,
@@ -16,8 +16,9 @@ function createEditorIngest({
   logger = console,
   nowFn = Date.now,
   debug = false,
-} = {}) {
+}) {
   const { debugNote, warn } = createLaneLog({ prefix: '[ingest:editor]', logger, debugFlag: debug });
+  const publishEvent = publish;
   let state = createEditorState();
   let stopped = false;
 
@@ -43,7 +44,7 @@ function createEditorIngest({
     if (!applied.event) return null;
     // Debug only: one line per open, save and close on every mirrored buffer.
     debugNote(() => `${applied.event.kind} ${applied.event.summary}`);
-    return publish(applied.event);
+    return publishEvent(applied.event);
   }
 
   function stop() {

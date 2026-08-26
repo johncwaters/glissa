@@ -150,6 +150,7 @@ async function listChangedFiles(root) {
 async function runPostTurnChecks({ cwd, config, sessionId, deps = {} } = {}) {
   const started = Date.now();
   const cfg = config || resolveCheckConfig();
+  /** @type {{ ok: boolean, skipped: string|null, mode: string, root: string|null, filesScanned: number, filesFixed: number, findings: Array<{ file: string, rule: string, count: number }>, errors: Array<{ file: string|null, message: string }>, durationMs: number }} */
   const report = {
     ok: true,
     skipped: null,
@@ -177,6 +178,7 @@ async function runPostTurnChecks({ cwd, config, sessionId, deps = {} } = {}) {
   const _writeFile = deps.writeFile || ((p, c) => fs.writeFileSync(p, c));
   const _stat = deps.stat || ((p) => fs.statSync(p));
 
+  /** @type {string} */
   let root;
   try {
     root = await _gitRoot(cwd);
@@ -186,6 +188,7 @@ async function runPostTurnChecks({ cwd, config, sessionId, deps = {} } = {}) {
   }
   report.root = root;
 
+  /** @type {string[]} */
   let files;
   try {
     files = await _list(root);
@@ -216,6 +219,10 @@ async function runPostTurnChecks({ cwd, config, sessionId, deps = {} } = {}) {
     const abs = path.join(root, rel);
     try {
       const before = _stat(abs); // snapshot BEFORE read (mtime-race guard, PM1)
+      if (!before) {
+        report.errors.push({ file: rel, message: 'skipped-race' });
+        continue;
+      }
       if (before && before.size != null && before.size > cfg.maxFileBytes) continue;
       const buf = _readFile(abs);
       if (looksBinary(buf)) continue;

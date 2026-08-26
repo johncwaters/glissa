@@ -29,6 +29,7 @@ function postPayload(url, body) {
       settled = true;
       resolve();
     };
+    /** @type {URL|null} */
     let target = null;
     try {
       target = new URL(url);
@@ -104,6 +105,7 @@ function parsePayload(raw) {
 // its stdin is fed the blob we already consumed (a stream cannot be read twice).
 function runChain(command, stdinBody) {
   return new Promise((resolve) => {
+    /** @type {import('node:child_process').ChildProcess|null} */
     let child = null;
     try {
       child = spawn(command, { shell: true, stdio: ['pipe', 'inherit', 'inherit'] });

@@ -27,13 +27,14 @@
 function awaitBounded(promises, { capMs = 3000, setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout } = {}) {
   const list = Array.isArray(promises) ? promises.filter((p) => p != null) : [];
   if (list.length === 0) return Promise.resolve({ timedOut: false, settled: [] });
+  /** @type {NodeJS.Timeout|null} */
   let timer = null;
   const TIMED_OUT = Symbol('timed-out');
   const cap = new Promise((resolve) => {
     timer = setTimeoutFn(() => resolve(TIMED_OUT), capMs);
   });
   return Promise.race([Promise.allSettled(list), cap]).then((outcome) => {
-    clearTimeoutFn(timer);
+    if (timer) clearTimeoutFn(timer);
     if (outcome === TIMED_OUT) return { timedOut: true, settled: [] };
     return { timedOut: false, settled: outcome };
   });

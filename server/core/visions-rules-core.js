@@ -18,6 +18,7 @@ function sweepMarkdownWithFixes(text) {
   const fixes = [];
   const lines = splitLines(text);
   let isInFence = false;
+  /** @type {{ line: number, character: number } | null} */
   let lastFence = null;
   let previousHeadingLevel = 0;
 
@@ -73,6 +74,7 @@ function splitLines(text) {
 
 function addRepeatedWordDiagnostics(diagnostics, fixes, line, lineIndex) {
   const inlineCodeMask = maskInlineCode(line);
+  /** @type {{ normalizedWord: string, end: number } | null} */
   let previousWord = null;
 
   WORD_RE.lastIndex = 0;
@@ -113,6 +115,7 @@ function closingFenceFix(unclosed, lines) {
 
 function maskInlineCode(line) {
   const mask = new Array(line.length).fill(false);
+  /** @type {number | null} */
   let spanStart = null;
   for (let index = 0; index < line.length; index++) {
     if (line[index] !== '`') continue;

@@ -118,8 +118,11 @@ function readHeadLines(filePath, fsMod, maxBytes = 262144) {
 
 // Extract { cwd, gitBranch, title } from a transcript's head lines.
 function extractMeta(lines) {
+  /** @type {string | null} */
   let cwd = null;
+  /** @type {string | null} */
   let gitBranch = null;
+  /** @type {string | null} */
   let title = null;
   for (const line of lines) {
     let o;
@@ -147,9 +150,9 @@ async function listRepoConversations({
   git,
   fsMod,
   limit = 60,
-} = /** @type {{ repoPath?: string, projectsDir?: string,
+} = /** @type {{ repoPath?: string, projectsDir: string,
   git?: (args: string[], cwd: string) => Promise<string | Buffer>,
-  fsMod?: { openSync: (path: string, flags: string) => number,
+  fsMod: { openSync: (path: string, flags: string) => number,
     fstatSync: (fd: number) => { size: number },
     readSync: (fd: number, buffer: Buffer, offset: number, length: number, position: number) => number,
     closeSync: (fd: number) => void, readdirSync: (path: string) => string[],
@@ -188,6 +191,7 @@ async function listRepoConversations({
 
   // Pass 2 (bounded): read each survivor's head for the title/cwd/branch shown in the picker.
   return top.map((c) => {
+    /** @type {{ cwd: string | null, gitBranch: string | null, title: string | null }} */
     let meta = { cwd: null, gitBranch: null, title: null };
     try { meta = extractMeta(readHeadLines(c.full, fsMod)); } catch { /* unreadable -> minimal entry */ }
     return {

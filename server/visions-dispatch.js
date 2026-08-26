@@ -42,6 +42,7 @@ const RESULT_FILE = VISIONS_RESULT_FILE;
 const PROMPT_FILE = 'visions-prompt.txt';
 const VISIONS_BOOTSTRAP_PROMPT = 'Read visions-prompt.txt and follow all instructions in that file';
 
+
 // Verbs a visions never needs: no shell, no editing, no network, no sub-agents.
 const VISIONS_DENY_TOOLS = Object.freeze(['Bash', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task']);
 
@@ -60,7 +61,9 @@ function errorResult(reason) {
  * can log a size without a second stat of a file this already has in hand; it rides the options bag
  * rather than the returned shape, which several callers compare field for field.
  */
+/** @param {string} resultPath @param {{ lineCount?: number, onBytesRead?: ((bytes: number) => void) | null }} [options] */
 async function readCommentsResult(resultPath, { lineCount = 0, onBytesRead = null } = {}) {
+  /** @type {{ verdict?: unknown, intent?: unknown, hand?: unknown, diagnostics?: unknown, comments?: unknown } | null} */
   let parsed = null;
   try {
     const raw = await fs.readFile(resultPath, 'utf8');
@@ -105,7 +108,7 @@ async function readCommentsResult(resultPath, { lineCount = 0, onBytesRead = nul
  */
 /**
  * @param {{ sessions?: Map<string, unknown>, closeSessionDataClients?: (id: string) => void,
- *   hookRouter?: unknown, getHookPort?: (() => number | null) | null, spawnGate?: unknown,
+ *   hookRouter?: Pick<InstanceType<typeof import('../detection/hook-source').HookRouter>, 'register' | 'unregister'>|null, getHookPort?: (() => number | null) | null, spawnGate?: unknown,
  *   replayBufferKB?: number, recordLane?: ((...args: unknown[]) => unknown) | null }} [options]
  */
 function createVisionsSpawn({
@@ -166,6 +169,10 @@ function createVisionsDispatcher({
 
   const { note, warn } = createLaneLog({ prefix: '[visions]', logger });
 
+  /**
+   * @param {{ id: string, name: string, cwd: string, uri: string, resultPath: string,
+   *   lineCount: number, onPending?: ((promise: Promise<unknown>) => void) | null }} options
+   */
   function spawnWithTimeout({
     id, name, cwd, uri, resultPath, lineCount, onPending = null,
   }) {
@@ -181,7 +188,7 @@ function createVisionsDispatcher({
         return errorResult('dispatch timed out');
       },
       onEmpty: () => errorResult('no verdict'),
-      start: (signal) => Promise.resolve(spawnSession({
+      start: (signal) => Promise.resolve(startSession({
         id, name, cwd, model, signal, initialPrompt: VISIONS_BOOTSTRAP_PROMPT,
       }))
         .then(async () => {
@@ -191,7 +198,7 @@ function createVisionsDispatcher({
           }
           // Zero whenever the read never got that far, or an injected reader does not report it.
           let bytesRead = 0;
-          const result = await readResult(resultPath, { lineCount, onBytesRead: (bytes) => { bytesRead = bytes; } });
+          const result = await readDispatchResult(resultPath, { lineCount, onBytesRead: (bytes) => { bytesRead = bytes; } });
           note(`dispatch result for ${uri}: ${result.verdict} (${bytesRead} bytes, ${elapsed()}ms)`);
           return result;
         })
@@ -199,7 +206,12 @@ function createVisionsDispatcher({
     });
   }
 
+  const startSession = spawnSession;
+  const readDispatchResult = readResult;
+
+  /** @param {{ uri: string, text: string, findings?: object[], intent?: string, digest?: string, memory?: { text: string, count: number, version: string | null } | null, prompt?: string | null }} options */
   return async function dispatch({ uri, text, findings = [], intent = '', digest = '', memory = null, prompt = null }) {
+    /** @type {string | null} */
     let workDir = null;
     try {
       workDir = await makeWorkDir();
@@ -207,6 +219,7 @@ function createVisionsDispatcher({
       return errorResult(`no work dir: ${firstLine(error.message)}`);
     }
     const resultPath = path.join(workDir, RESULT_FILE);
+    /** @type {Promise<unknown> | null} */
     let pendingSpawn = null;
     try {
       const generatedPrompt = typeof prompt === 'string'

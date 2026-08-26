@@ -26,6 +26,7 @@ function isApplicableViewerSize(cols, rows) {
 // `departingKey` whether or not the caller has already dropped it. Returns the surviving viewer size
 // to re-apply, or null when nobody is left to speak for the PTY (leave it as it is).
 function pickSizeAfterDeparture(viewers, departingKey) {
+  /** @type {{ cols: number, rows: number, resizeSeq: number }|null} */
   let winner = null;
   for (const [key, record] of viewers) {
     if (key === departingKey) continue;

@@ -24,6 +24,8 @@ const DEFAULT_CRON_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 // the PTY trust boundary) evicts the oldest entry instead of growing without limit.
 const MAX_WAKEUPS = 64;
 
+/** @typedef {{ kind: string, fireAt: number | null, reason: string | null, ts: number }} WakeupEntry */
+
 // entry: { kind: 'wakeup'|'cron', fireAt: number|null, reason: string|null, ts: number }
 function addWakeup(map, key, entry) {
   if (!key || !entry) return false;
@@ -58,6 +60,7 @@ function pruneWakeups(map, now, { graceMs = DEFAULT_WAKEUP_GRACE_MS, cronTtlMs =
 // The entry to surface on the card: the soonest timed one, falling back to any cron entry
 // (which has no computed fire time in v1).
 function earliestWakeup(map) {
+  /** @type {WakeupEntry | null} */
   let best = null;
   for (const e of map.values()) {
     if (e.fireAt == null) {

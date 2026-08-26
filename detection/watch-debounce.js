@@ -14,7 +14,9 @@ const fs = require('node:fs');
 const { canonicalizePath } = require('../shared/paths');
 
 function createWatchDebounce({ onChange, debounceMs }) {
+  /** @type {fs.FSWatcher|null} */
   let watcher = null;
+  /** @type {NodeJS.Timeout|null} */
   let timer = null;
   let stopped = false;
 

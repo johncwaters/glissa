@@ -24,6 +24,7 @@ function lookupModelPrice(table, model, { aliases = {} } = {}) {
   if (aliasKey && table.has(aliasKey)) return resolvedPrice(aliasKey, table.get(aliasKey), false);
 
   const normalizedModel = normalizeFuzzyKey(model);
+  /** @type {{ key: string, price: Record<string, unknown>, normalizedLength: number } | null} */
   let best = null;
   for (const [key, price] of table.entries()) {
     if (isExactOnlyKey(key)) continue;

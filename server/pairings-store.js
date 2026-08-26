@@ -61,6 +61,7 @@ function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+/** @returns {PairingsDocument} */
 function emptyDoc() {
   return { version: 1, pending: [], devices: [] };
 }
@@ -102,7 +103,7 @@ function pairingsSignature(doc) {
  * @param {{ filePath?: string, now?: () => number, randomBytes?: (size: number) => Buffer,
  *   warn?: (message: string) => void }} [options]
  */
-function createPairingsStore({ filePath, now = Date.now, randomBytes, warn = console.warn } = {}) {
+function createPairingsStore({ filePath = defaultPairingsPath(), now = Date.now, randomBytes, warn = console.warn } = {}) {
   const pairingsPath = filePath;
   let snapshot = emptyDoc();
 
@@ -234,6 +235,7 @@ function createPairingsStore({ filePath, now = Date.now, randomBytes, warn = con
    */
   function redeem(token, { fallbackName = '' } = {}) {
     const tokenHash = hashSecret(token);
+    /** @type {{ ok: boolean, reason: string|null, device: PairedDevice|null, cookieValue?: string }} */
     let outcome = { ok: false, reason: 'unknown', device: null };
     const written = save((doc) => {
       const record = doc.pending.find((p) => p.tokenHash === tokenHash) || null;
@@ -242,6 +244,7 @@ function createPairingsStore({ filePath, now = Date.now, randomBytes, warn = con
         outcome = { ok: false, reason: verdict.reason, device: null };
         return false;
       }
+      if (!record) return false;
       const credential = mintDeviceCredential({ randomBytes });
       record.usedAt = now();
       const device = {
@@ -308,7 +311,9 @@ function createPairingsStore({ filePath, now = Date.now, randomBytes, warn = con
    * Returns a closer - a leaked watcher or timer keeps the event loop alive and hangs any embedder.
    */
   function watch(onChange) {
+    /** @type {NodeJS.Timeout|null} */
     let timer = null;
+    /** @type {import('node:fs').FSWatcher|null} */
     let watcher = null;
     const dir = path.dirname(pairingsPath);
     // Safe to seed from the snapshot without a fresh read: createPairingsStore calls load()
@@ -338,7 +343,7 @@ function createPairingsStore({ filePath, now = Date.now, randomBytes, warn = con
       // silently detaches a file watcher after the first write.
       watcher = fs.watch(canonicalizePath(dir), (_event, filename) => {
         if (filename && !equalsIgnoringCaseOnWindows(path.basename(String(filename)), path.basename(pairingsPath))) return;
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
         timer = setTimeout(refresh, 200);
         if (timer.unref) timer.unref();
       });
@@ -346,7 +351,7 @@ function createPairingsStore({ filePath, now = Date.now, randomBytes, warn = con
       warn(`[pairings] Failed to watch ${dir}: ${err.message} - falling back to the ${REVOCATION_PROPAGATION_SECONDS}s reload interval`);
     }
     return function stop() {
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       clearInterval(reloadInterval);
       if (watcher) { try { watcher.close(); } catch { /* already closed */ } }
       watcher = null;
@@ -369,8 +374,9 @@ function createPairingsStore({ filePath, now = Date.now, randomBytes, warn = con
  * never surfaced.
  */
 /** @param {{ filePath?: string, throttleMs?: number, now?: () => number }} [options] */
-function createSeenStore({ filePath, throttleMs = 60000, now = Date.now } = {}) {
+function createSeenStore({ filePath = defaultSeenPath(), throttleMs = 60000, now = Date.now } = {}) {
   const lastWriteByDevice = new Map();
+  /** @type {Promise<void>|null} */
   let pending = null;
 
   function readAll() {

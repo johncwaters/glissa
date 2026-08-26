@@ -15,6 +15,7 @@ function resolveRtkPathFromSystem() {
   });
 }
 
+/** @type {string|null} */
 let cachedRtkPath = null;
 
 function getRtkPath(resolve = resolveRtkPathFromSystem) {

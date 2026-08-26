@@ -16,6 +16,10 @@ function confinePath(baseDir, ...segments) {
   return rel.startsWith('..') || path.isAbsolute(rel) ? null : abs;
 }
 
+/**
+ * @returns {{ ok: false, reason: string }
+ *   | { ok: true, issueId: string, reportDir: string, candidates: { format: string, reportPath: string }[] }}
+ */
 function resolvePosthogReportPath(issueId, reportDir = DEFAULT_POSTHOG_REPORT_DIR) {
   const rawIssueId = typeof issueId === 'string' ? issueId.trim() : '';
   if (!POSTHOG_REPORT_ID_RE.test(rawIssueId)) {
@@ -42,7 +46,7 @@ function resolvePosthogReportPath(issueId, reportDir = DEFAULT_POSTHOG_REPORT_DI
 
 async function readPosthogReport(issueId, { reportDir = DEFAULT_POSTHOG_REPORT_DIR } = {}) {
   const resolved = resolvePosthogReportPath(issueId, reportDir);
-  if (!resolved.ok) {
+  if (resolved.ok === false) {
     return { ok: false, found: false, issueId: typeof issueId === 'string' ? issueId : null, error: resolved.reason };
   }
 

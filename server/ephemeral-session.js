@@ -27,7 +27,12 @@ const ABORT_REAP_CAP_MS = 3000;
  * Rejects only when the Session itself errors. With no spawn gate the start still runs off a microtask,
  * so a synchronous throw reaches the same rejection path.
  */
+/**
+ * @param {InstanceType<typeof import('../session/sessions')['Session']>} sess
+ * @param {{ signal?: AbortSignal | null, spawnGate?: unknown, reapCapMs?: number }} [options]
+ */
 async function awaitSessionExit(sess, { signal = null, spawnGate = null, reapCapMs = ABORT_REAP_CAP_MS } = {}) {
+  /** @type {(() => void) | null} */
   let onAbort = null;
   try {
     await /** @type {Promise<void>} */ (new Promise((resolve, reject) => {
@@ -56,7 +61,9 @@ async function awaitSessionExit(sess, { signal = null, spawnGate = null, reapCap
         if (!signal.aborted) signal.addEventListener('abort', onAbort, { once: true });
       }
       const run = () => (signal?.aborted ? undefined : sess.start());
-      const started = spawnGate ? spawnGate.run(run) : Promise.resolve().then(run);
+      /** @type {{ run: (task: () => unknown) => Promise<unknown> } | null} */
+      const activeSpawnGate = spawnGate ? /** @type {{ run: (task: () => unknown) => Promise<unknown> }} */ (spawnGate) : null;
+      const started = activeSpawnGate ? activeSpawnGate.run(run) : Promise.resolve().then(run);
       started.catch(fail);
     }));
   } finally {
@@ -69,11 +76,17 @@ async function awaitSessionExit(sess, { signal = null, spawnGate = null, reapCap
  * On timeout the signal is aborted (the lane's spawn destroys the session) and `onTimeout()` is the
  * verdict; `onEmpty()` covers a start that resolved nothing at all.
  */
+/**
+ * @param {{ start: (signal: AbortSignal) => Promise<unknown>, timeoutMs: number,
+ *   onTimeout: () => unknown, onEmpty: () => unknown, setTimeoutFn?: typeof setTimeout,
+ *   clearTimeoutFn?: typeof clearTimeout, onPending?: ((promise: Promise<unknown>) => void) | null }} options
+ */
 async function raceWithAbort({
   start, timeoutMs, onTimeout, onEmpty, setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout,
   onPending = null,
 }) {
   const controller = new AbortController();
+  /** @type {NodeJS.Timeout | null} */
   let handle = null;
   const timeout = new Promise((resolve) => {
     handle = setTimeoutFn(() => {
@@ -138,6 +151,12 @@ async function createJobResultFile(prefix) {
  * crashed or confused session never masquerades as a finished job. The file is removed either way.
  * `decorate` adds the per-lane extra fields from the same parsed object.
  */
+/**
+ * @param {string} resultPath
+ * @param {Set<string> | null} allowed
+ * @param {CallableFunction | null} [decorate]
+ * @param {{ maxBytes?: number | null, validate?: CallableFunction | null }} [options]
+ */
 function readResultFile(resultPath, allowed, decorate = null, { maxBytes = null, validate = null } = {}) {
   if (allowed && validate) throw new TypeError('readResultFile accepts allowed or validate, not both');
   const failedRead = (kind, reason) => ({ ok: false, kind, reason, verdict: 'ERROR', summary: reason });
@@ -159,7 +178,8 @@ function readResultFile(resultPath, allowed, decorate = null, { maxBytes = null,
     } finally {
       fs.closeSync(fileDescriptor);
     }
-    let obj = null;
+    /** @type {{ verdict?: unknown, summary?: unknown }} */
+    let obj;
     try {
       obj = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     } catch {
@@ -186,6 +206,12 @@ function readResultFile(resultPath, allowed, decorate = null, { maxBytes = null,
 // removal + data-client close on 'exit', and a wrapped destroy() because callers'
 // removeAllListeners can pre-empt the 'exit' cleanup (every orchestrator/poller finish path
 // calls destroy()). logPrefix names the lane in error logs (e.g. 'pr-review', 'posthog').
+/**
+ * @param {{ map: Map<string, unknown>, id: string,
+ *   sess: InstanceType<typeof import('../session/sessions')['Session']>, closeSessionDataClients: (id: string) => void,
+ *   logPrefix: string, name: string,
+ *   recordLane?: ((sessionId: string, lane: string, vendor?: string) => unknown) | null }} options
+ */
 function registerEphemeralSession({ map, id, sess, closeSessionDataClients, logPrefix, name, recordLane = null }) {
   map.set(id, sess);
   /*

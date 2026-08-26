@@ -99,22 +99,36 @@ import {
 
 const REFRESH_STATUS_TIMEOUT_MS = 20000;
 
+/** @typedef {{ ts?: number, daily?: unknown, pricing?: { missing?: unknown, fetchedAt?: unknown, source?: string|null }, activeBlock?: { tokens?: unknown, costUSD?: unknown, burn?: unknown, projection?: unknown }|null, blockHours?: number, totals?: Record<string, unknown>, tokenLimit?: unknown, anomaly?: unknown, blocks?: unknown, tz?: string, savings?: unknown, models?: unknown, sessions?: unknown, scan?: unknown }} UsageReport */
+/** @typedef {{ ts?: number, pricingSource?: string|null }} UsageSessions */
+/** @typedef {import('./usage-view-core.mjs').PlanLimits} PlanLimits */
+/** @typedef {{ kind: 'sort', table: string, key: string } | { kind: 'period', view: string } | { kind: 'day', day: string } | { kind: 'sessions-toggle' }} FocusTarget */
+
+/** @type {UsageReport|null} */
 let _report = null;
+/** @type {UsageSessions|null} */
 let _sessions = null;
+/** @type {PlanLimits|null} */
 let _planLimits = null;
+/** @type {HTMLDivElement|null} */
 let _root = null;
+/** @type {((isActive: boolean) => void)|null} */
 let _activityCallback = null;
+/** @type {((message: Record<string, unknown>) => void)|null} */
 let _sendRequest = null;
 let _requestSeq = 0;
+/** @type {string|null} */
 let _latestRequestId = null;
 let _rangeValue = DEFAULT_RANGE_VALUE;
 let _refreshPending = false;
+/** @type {ReturnType<typeof setTimeout>|null} */
 let _refreshTimer = null;
 
 let _daySort = DEFAULT_DAY_SORT;
 let _modelSort = DEFAULT_MODEL_SORT;
 let _sessionSort = DEFAULT_SESSION_SORT;
 let _sessionsExpanded = false;
+/** @type {FocusTarget|null} */
 let _focusAfterRender = null;
 let _periodView = DEFAULT_PERIOD_VIEW;
 const _expandedDays = new Set();
@@ -127,13 +141,21 @@ const _attention = createAttentionAck({
 
 // Elements the shared tick repaints in place, so a report that has not changed is never rebuilt just to
 // advance a clock.
+/** @type {HTMLParagraphElement|null} */
 let _reportAgeEl = null;
+/** @type {HTMLParagraphElement|null} */
 let _sessionsTsEl = null;
+/** @type {HTMLParagraphElement|null} */
 let _planAgeEl = null;
+/** @type {HTMLSpanElement|null} */
 let _blockElapsedEl = null;
+/** @type {HTMLSpanElement|null} */
 let _blockRemainingEl = null;
+/** @type {HTMLDivElement|null} */
 let _blockMeterEl = null;
+/** @type {HTMLButtonElement|null} */
 let _refreshButtonEl = null;
+/** @type {HTMLSpanElement|null} */
 let _refreshStatusEl = null;
 
 const _ticker = createPollAgoTicker(() => _root);
@@ -428,7 +450,8 @@ function buildLanesSection() {
 // on it, and its two rate numbers get tile weight rather than a sentence.
 function buildActiveBlockSection() {
   const block = _report?.activeBlock;
-  const hours = Number.isFinite(_report?.blockHours) ? _report.blockHours : 5;
+  const blockHours = _report?.blockHours;
+  const hours = Number.isFinite(blockHours) ? blockHours : 5;
   // The 5h window is a Claude subscription concept, so the block numbers exclude other vendors. Said out
   // loud, because otherwise they read as inconsistent with the multi-vendor totals below.
   const claudeOnly = claudeOnlyHint(_report?.totals);
@@ -917,7 +940,10 @@ function restoreFocusAfterRender() {
   if (!target) return;
   const selector = selectorForFocusTarget(target);
   if (!selector) return;
-  _root.querySelector(selector)?.focus();
+  if (!_root) return;
+  const focusTarget = _root.querySelector(selector);
+  if (!(focusTarget instanceof HTMLElement)) return;
+  focusTarget.focus();
 }
 
 function selectorForFocusTarget(target) {
@@ -929,6 +955,7 @@ function selectorForFocusTarget(target) {
 }
 
 function buildBody() {
+  if (!_root) return;
   _root.append(buildHeaderSection());
   // Plan limits come from the statusLine relay, not the transcript scan, so they are shown even when the
   // report itself is missing or unavailable.

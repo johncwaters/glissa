@@ -72,9 +72,12 @@ function createBackendShutdown(dependencies) {
     destroySessions([dependencies.distillSessions, dependencies.investigationSessions], pendingReaps);
     stoppers.add('ingest', () => dependencies.getIngestLane()?.stop());
     stoppers.add('visions', () => dependencies.getVisionsLane()?.stop());
-    if (dependencies.memoryIngest) stoppers.add('memory-ingest', () => dependencies.memoryIngest.stop());
-    if (dependencies.memoryDistiller) stoppers.add('memory-distill', () => dependencies.memoryDistiller.stop());
-    if (dependencies.memoryStore) stoppers.add('memory-store', () => dependencies.memoryStore.stop());
+    const memoryIngest = dependencies.memoryIngest;
+    if (memoryIngest) stoppers.add('memory-ingest', () => memoryIngest.stop());
+    const memoryDistiller = dependencies.memoryDistiller;
+    if (memoryDistiller) stoppers.add('memory-distill', () => memoryDistiller.stop());
+    const memoryStore = dependencies.memoryStore;
+    if (memoryStore) stoppers.add('memory-store', () => memoryStore.stop());
     stoppers.add('telegram-outbox', () => dependencies.telegramOutbox.idle());
     destroySessions([dependencies.visionsSessions, dependencies.memoryDistillSessions], pendingReaps);
     dependencies.heartbeat.stop();

@@ -55,13 +55,18 @@ function writeStandaloneDenySettings(permissions) {
  */
 /**
  * @param {{ sessions?: Map<string, unknown>, closeSessionDataClients?: (id: string) => void,
- *   hookRouter?: unknown, getHookPort?: (() => number | null) | null, spawnGate?: unknown,
+ *   hookRouter?: Pick<InstanceType<typeof import('../detection/hook-source').HookRouter>, 'register' | 'unregister'> | null,
+ *   getHookPort?: (() => number | null) | null, spawnGate?: unknown,
  *   replayBufferKB?: number, recordLane?: ((...args: unknown[]) => unknown) | null }} [options]
  */
 function createMemoryDistillSpawn({
   sessions = new Map(), closeSessionDataClients = () => {}, hookRouter = null, getHookPort = null,
   spawnGate = null, replayBufferKB = undefined, recordLane = null,
 } = {}) {
+  /**
+   * @param {{ id: string, name: string, prompt: string, cwd: string,
+   *   model?: string|null, signal?: AbortSignal|null }} options
+   */
   return async function spawnMemoryDistill({ id, name, prompt, cwd, model = null, signal = null }) {
     const { Session } = require('../session/sessions');
     const posture = buildLanePermissions({ denyTools: MEMORY_DISTILL_DENY_TOOLS });
@@ -176,9 +181,9 @@ function createMemoryDistiller(deps = {}) {
   }
 
   // Fallback bullets are raw records, not standing claims the incremental prompt may reuse.
-  async function readPublished() {
-    const manifest = await store.readPublishedManifest();
-    const documents = await store.readPublishedDocuments(manifest);
+  async function readPublished(memoryStore) {
+    const manifest = await memoryStore.readPublishedManifest();
+    const documents = await memoryStore.readPublishedDocuments(manifest);
     const distilled = manifest?.source === 'distill';
     return {
       manifest,
@@ -189,21 +194,21 @@ function createMemoryDistiller(deps = {}) {
   }
 
   // The cursor advances only after published bytes are re-read, leaving failed deltas available again.
-  async function noteOutcome({ advanced, cursor, failures }) {
+  async function noteOutcome(memoryStore, { advanced, cursor, failures }) {
     if (!advanced) {
-      await store.setDistillFailures(failures + 1);
+      await memoryStore.setDistillFailures(failures + 1);
       return;
     }
-    await store.setDistillCursorSeq(cursor);
-    if (failures > 0) await store.setDistillFailures(0);
+    await memoryStore.setDistillCursorSeq(cursor);
+    if (failures > 0) await memoryStore.setDistillFailures(0);
   }
 
   // A verdict is a claim; the published bytes are the evidence, so the stamp is re-read off what landed.
-  async function verifyPublished(watermark) {
-    const manifest = await store.readPublishedManifest();
+  async function verifyPublished(memoryStore, watermark) {
+    const manifest = await memoryStore.readPublishedManifest();
     if (!manifest) return { ok: false, reason: 'nothing was published' };
     const expected = core.projectionStampSources(watermark);
-    for (const document of await store.readPublishedDocuments(manifest)) {
+    for (const document of await memoryStore.readPublishedDocuments(manifest)) {
       const drift = needsDistill(expected, document);
       if (drift.stale) return { ok: false, reason: drift.reason };
     }
@@ -211,6 +216,7 @@ function createMemoryDistiller(deps = {}) {
   }
 
   async function spawnForResult({ prompt }) {
+    /** @type {string|null} */
     let workDir = null;
     try {
       workDir = await makeWorkDir();
@@ -218,8 +224,10 @@ function createMemoryDistiller(deps = {}) {
       return { error: `no work dir: ${firstLine(error.message)}`, parsed: null };
     }
     const resultPath = path.join(workDir, RESULT_FILE);
+    /** @type {Promise<unknown>|null} */
     let pendingSpawn = null;
-    let outcome = null;
+    /** @type {{ timedOut: boolean, parsed: Record<string, unknown>|null, error?: string }} */
+    let outcome;
     try {
       outcome = await spawnWithTimeout({
         prompt: prompt(resultPath), cwd: workDir, resultPath, onPending: (promise) => { pendingSpawn = promise; },
@@ -234,13 +242,14 @@ function createMemoryDistiller(deps = {}) {
   }
 
   async function publishMerged({
-    merged, valid, watermark, verdict, mode, cursor, failures, advances, proposed = null,
+    memoryStore, merged, valid, watermark, verdict, mode, cursor, failures, advances,
+    proposed = /** @type {unknown[]|null} */ (null),
   }) {
     const built = filesFor(merged.claims, valid);
     if (merged.lockedTouched.length > 0) {
       // The held build renders what the run PROPOSED, which is the only place an operator can see it.
-      const pending = await store.publishPending({ ...filesFor(proposed || merged.claims, valid), watermark });
-      await noteOutcome({ advanced: false, cursor, failures });
+      const pending = await memoryStore.publishPending({ ...filesFor(proposed || merged.claims, valid), watermark });
+      await noteOutcome(memoryStore, { advanced: false, cursor, failures });
       log.warn(`a distilled projection changed ${merged.lockedTouched.length} locked record(s): it was queued for review, not published`);
       return report({
         status: 'pending', verdict, pending: true, newClaims: merged.newClaims, mode, cursor,
@@ -248,18 +257,18 @@ function createMemoryDistiller(deps = {}) {
         version: pending ? pending.version : null, reason: 'a locked record would be re-rendered',
       });
     }
-    const published = await store.publishProjection({
+    const published = await memoryStore.publishProjection({
       ...built, source: 'distill', verdict, distilledAt: now(), watermark,
     });
     if (!published) return report({ status: 'error', reason: 'the store is stopping', mode });
-    const verified = await verifyPublished(watermark);
+    const verified = await verifyPublished(memoryStore, watermark);
     if (!verified.ok) {
-      await noteOutcome({ advanced: false, cursor, failures });
+      await noteOutcome(memoryStore, { advanced: false, cursor, failures });
       return report({
         status: 'error', reason: `published but ${verified.reason}`, version: published.version, mode,
       });
     }
-    await noteOutcome({ advanced: advances, cursor, failures });
+    await noteOutcome(memoryStore, { advanced: advances, cursor, failures });
     log.note(`distilled ${built.claimCount} claim(s) from ${built.recordCount} record(s) in ${mode} mode: ${published.published ? 'published' : 'unchanged'} ${published.version.slice(0, 12)}`);
     return report({
       status: 'published',
@@ -269,13 +278,13 @@ function createMemoryDistiller(deps = {}) {
       newClaims: merged.newClaims,
       claims: built.claimCount,
       mode,
-      cursor: advances ? cursor : store.distillCursorSeq(),
+      cursor: advances ? cursor : memoryStore.distillCursorSeq(),
     });
   }
 
   // A full project re-distill is the only operation that can shrink that project's claim set.
   async function compact({
-    valid, watermark, published, project, failures,
+    memoryStore, valid, watermark, published, project, failures,
   }) {
     const own = valid.filter((record) => (record.project || null) === project);
     const selection = distillCore.selectCanonForPrompt(own, {
@@ -288,25 +297,25 @@ function createMemoryDistiller(deps = {}) {
       }),
     });
     if (spawned.error) {
-      await noteOutcome({ advanced: false, cursor: 0, failures });
+      await noteOutcome(memoryStore, { advanced: false, cursor: 0, failures });
       return report({ status: 'error', reason: spawned.error, mode: 'full' });
     }
     const checked = distillCore.validateDistillResult(spawned.parsed, {
       records: valid, previousTexts: published.previousTexts, maxNewClaims: distillCore.MAX_CLAIMS,
     });
     if (!checked.ok) {
-      await noteOutcome({ advanced: false, cursor: 0, failures });
+      await noteOutcome(memoryStore, { advanced: false, cursor: 0, failures });
       return report({ status: 'error', reason: `${checked.reason}: ${checked.detail}`, mode: 'full' });
     }
     if (checked.verdict !== 'DISTILLED') return report({ status: 'current', verdict: checked.verdict, mode: 'full' });
     const stray = checked.claims.filter((claim) => (claim.project || null) !== project);
     if (stray.length > 0) {
-      await noteOutcome({ advanced: false, cursor: 0, failures });
+      await noteOutcome(memoryStore, { advanced: false, cursor: 0, failures });
       return report({ status: 'error', reason: `${stray.length} compaction claim(s) fell outside ${project || 'global'}`, mode: 'full' });
     }
     const before = distillCore.claimsByProject(published.claims).get(project) || 0;
     if (checked.claims.length >= before) {
-      await noteOutcome({ advanced: false, cursor: 0, failures });
+      await noteOutcome(memoryStore, { advanced: false, cursor: 0, failures });
       return report({ status: 'error', reason: `compaction returned ${checked.claims.length} claim(s), no fewer than the ${before} it replaced`, mode: 'full' });
     }
     // Full re-distills rewrite standing ground, so their shrink gate replaces the net-new cap.
@@ -318,11 +327,12 @@ function createMemoryDistiller(deps = {}) {
       lockedTouched: checked.lockedTouched,
     });
     if (!merged.ok) {
-      await noteOutcome({ advanced: false, cursor: 0, failures });
+      await noteOutcome(memoryStore, { advanced: false, cursor: 0, failures });
       return report({ status: 'error', reason: `${merged.reason}: ${merged.detail}`, mode: 'full' });
     }
     // A compaction read every record of one project, not the delta, so the cursor is not its to move.
     return publishMerged({
+      memoryStore,
       merged,
       valid,
       watermark,
@@ -337,23 +347,23 @@ function createMemoryDistiller(deps = {}) {
 
   // A supersession or forget can prune claims mechanically without a model run.
   async function reconcile({
-    valid, watermark, published, cursor, failures,
+    memoryStore, valid, watermark, published, cursor, failures,
   }) {
     if (published.claims.length === 0) return report({ status: 'current', verdict: 'NO_CHANGE', mode: 'incremental', cursor });
     const merged = distillCore.finalizeMergedClaims(published.claims, {
       records: valid, previousTexts: published.previousTexts, maxNewClaims: config.maxNewClaims,
     });
     if (!merged.ok) {
-      await noteOutcome({ advanced: false, cursor, failures });
+      await noteOutcome(memoryStore, { advanced: false, cursor, failures });
       return report({ status: 'error', reason: `${merged.reason}: ${merged.detail}`, mode: 'incremental' });
     }
     return publishMerged({
-      merged, valid, watermark, verdict: 'NO_CHANGE', mode: 'incremental', cursor, failures, advances: true,
+      memoryStore, merged, valid, watermark, verdict: 'NO_CHANGE', mode: 'incremental', cursor, failures, advances: true,
     });
   }
 
   async function distillDelta({
-    valid, watermark, published, delta, failures,
+    memoryStore, valid, watermark, published, delta, failures,
   }) {
     const cursor = delta.nextCursor;
     const spawned = await spawnForResult({
@@ -365,19 +375,19 @@ function createMemoryDistiller(deps = {}) {
       }),
     });
     if (spawned.error) {
-      await noteOutcome({ advanced: false, cursor, failures });
+      await noteOutcome(memoryStore, { advanced: false, cursor, failures });
       return report({ status: 'error', reason: spawned.error, mode: 'incremental', delta: delta.records.length });
     }
     const checked = distillCore.validateDistillOps(spawned.parsed, {
       records: valid, published: published.claims,
     });
     if (!checked.ok) {
-      await noteOutcome({ advanced: false, cursor, failures });
+      await noteOutcome(memoryStore, { advanced: false, cursor, failures });
       return report({ status: 'error', reason: `${checked.reason}: ${checked.detail}`, mode: 'incremental', delta: delta.records.length });
     }
     if (checked.verdict !== 'DISTILLED') {
       // The delta was read and said nothing new, so re-reading it could only say nothing new twice.
-      await noteOutcome({ advanced: true, cursor, failures });
+      await noteOutcome(memoryStore, { advanced: true, cursor, failures });
       return report({
         status: 'current', verdict: checked.verdict, mode: 'incremental', cursor, delta: delta.records.length,
       });
@@ -390,10 +400,11 @@ function createMemoryDistiller(deps = {}) {
       lockedTouched: checked.lockedTouched,
     });
     if (!merged.ok) {
-      await noteOutcome({ advanced: false, cursor, failures });
+      await noteOutcome(memoryStore, { advanced: false, cursor, failures });
       return report({ status: 'error', reason: `${merged.reason}: ${merged.detail}`, mode: 'incremental', delta: delta.records.length });
     }
     const outcome = await publishMerged({
+      memoryStore,
       merged,
       valid,
       watermark,
@@ -410,15 +421,16 @@ function createMemoryDistiller(deps = {}) {
   /** One pass. Never throws: the lane reports a reason and leaves the published build untouched. */
   async function runOnce({ dryRun = false, force = false } = {}) {
     if (!store) return report({ status: 'disabled', reason: 'no memory store' });
+    const memoryStore = store;
     if (running) return report({ status: 'skipped', reason: 'a run is already in flight' });
     running = true;
     try {
-      const valid = store.validRecords();
-      const watermark = store.watermark();
-      const failures = store.distillFailures();
-      const published = await readPublished();
+      const valid = memoryStore.validRecords();
+      const watermark = memoryStore.watermark();
+      const failures = memoryStore.distillFailures();
+      const published = await readPublished(memoryStore);
       // A fallback publish drops standing claims, so the cursor resets to avoid resuming mid-canon.
-      const cursor = published.distilled ? store.distillCursorSeq() : 0;
+      const cursor = published.distilled ? memoryStore.distillCursorSeq() : 0;
       const standing = distillCore.renderPublishedForPrompt(published.claims).length;
       const delta = distillCore.selectDeltaForPrompt(valid, {
         sinceSeq: cursor,
@@ -433,7 +445,7 @@ function createMemoryDistiller(deps = {}) {
         now: now(),
         watermark,
         manifest: published.manifest,
-        lastAppendAt: store.lastAppendAt(),
+        lastAppendAt: memoryStore.lastAppendAt(),
         intervalMs,
         quietMs: config.quietMs,
         workPending: delta.pending > 0 || mode.mode === 'full',
@@ -452,16 +464,16 @@ function createMemoryDistiller(deps = {}) {
       }
       if (mode.mode === 'full') {
         return await compact({
-          valid, watermark, published, project: mode.project, failures,
+          memoryStore, valid, watermark, published, project: mode.project, failures,
         });
       }
       if (delta.records.length === 0) {
         return await reconcile({
-          valid, watermark, published, cursor, failures,
+          memoryStore, valid, watermark, published, cursor, failures,
         });
       }
       return await distillDelta({
-        valid, watermark, published, delta, failures,
+        memoryStore, valid, watermark, published, delta, failures,
       });
     } catch (error) {
       // Reported as `locked` because that is what the operator is being told: another writer holds it.

@@ -6,10 +6,10 @@ const { isSameDirectoryPath } = require('../shared/paths');
 const { pickAutoResume } = require('../session/core/auto-resume');
 const { diffProjects, shouldStartAfterModify } = require('./core/session-registry-core');
 
-/** @typedef {Record<string, unknown> & { id: string, name: string, path: string }} RegistryProject */
+/** @typedef {Record<string, unknown> & { id: string, name: string, path: string, agent?: string }} RegistryProject */
 /** @typedef {Record<string, unknown> & { projects: RegistryProject[], integrationBranch?: string }} RegistryConfig */
 /** @typedef {{ id: string, cwd: string, branch: string, integrationBranch?: string, hasWork: boolean }} RegistryWorktree */
-/** @typedef {{ id: string, name: string, path: string, state: string, stateSince: number, pendingRestart?: boolean, dangerouslySkipPermissions?: boolean, isWorktree?: boolean, resumeSessionId?: string|null, _killReap?: Promise<unknown>, start: () => unknown, destroy: () => void, toSnapshot: () => Record<string, unknown>, getWorktreeCarry?: () => Record<string, unknown>|null, adoptWorktree: (worktree: Record<string, unknown>) => void, discardWorktree?: () => unknown, discardWorktreeIfClean: () => unknown }} RegistrySession */
+/** @typedef {{ id: string, name: string, path: string, state: string, stateSince: number, pendingRestart?: boolean, dangerouslySkipPermissions?: boolean, isWorktree?: boolean, resumeSessionId?: string|null, _killReap?: Promise<unknown>|null, start: () => unknown, destroy: () => void, toSnapshot: () => Record<string, unknown>, getWorktreeCarry?: () => Record<string, unknown>|null, adoptWorktree: (worktree: Record<string, unknown>) => void, discardWorktree?: () => unknown, discardWorktreeIfClean: () => unknown }} RegistrySession */
 /** @typedef {{ listSessionWorktrees: (input: { projectPath: string, integrationBranch: string }) => RegistryWorktree[], removeWorktreeByPath: (input: { projectPath: string, cwd: string, branch: string }) => void }} RegistryGitWorkspace */
 
 /**
@@ -30,7 +30,7 @@ const { diffProjects, shouldStartAfterModify } = require('./core/session-registr
  * @property {(input: { projects: RegistryProject[], sessions: Map<string, RegistrySession>, gitWorkspaceSync: RegistryGitWorkspace, integrationBranch: string }) => void} reconcileSessionWorktrees
  * @property {(oldSession: RegistrySession, newSession: RegistrySession) => unknown} carryWorktreeAcrossRecreate
  * @property {(projects: RegistryProject[]) => boolean} ensureProjectIds
- * @property {(agent: unknown) => string} resolveAgentId
+ * @property {(agent?: string) => string} resolveAgentId
  * @property {Pick<Console, 'log'|'warn'>} logger
  */
 
@@ -136,6 +136,7 @@ function reconcileSessionWorktrees({
 /** @param {SessionRegistryDependencies} dependencies */
 function createSessionRegistry(dependencies) {
   const { sessions, config } = dependencies;
+  /** @type {(() => void)|null} */
   let pendingAutoResumeOnListening = null;
 
   function getSession(id) {
@@ -243,6 +244,7 @@ function createSessionRegistry(dependencies) {
   function modifySessions(modified, newConfig) {
     for (const project of modified) {
       const oldSession = sessions.get(project.id);
+      if (!oldSession) continue;
       const wasDormant = !shouldStartAfterModify(oldSession.state);
       dependencies.closeSessionDataClients(project.id);
       dependencies.notificationManager.acknowledge(project.id);
@@ -270,6 +272,7 @@ function createSessionRegistry(dependencies) {
   function renameSessions(renamed) {
     for (const project of renamed) {
       const session = sessions.get(project.id);
+      if (!session) continue;
       const oldName = session.name;
       session.name = project.name;
       dependencies.broadcastControl({ type: 'session-renamed', id: project.id, oldName, newName: project.name });

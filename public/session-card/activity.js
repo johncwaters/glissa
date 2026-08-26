@@ -36,6 +36,7 @@ const QUIET_AFTER_MS = 8000;   // silence past this reads as "gone quiet" (think
 // 'beat' (one liveness ping on the glyph) or 'flag' (the active/quiet flag on ui._activity
 // changed). With no renderer registered yet the compute still runs and the flag stays on the ui,
 // so a later paint picks up the current state without a missed signal.
+/** @type {((ui: object, kind: string) => void)|null} */
 let renderer = null;
 export function setActivityRenderer(fn) { renderer = fn; }
 

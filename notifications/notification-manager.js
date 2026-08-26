@@ -267,6 +267,7 @@ class NotificationManager extends EventEmitter {
 
   // -- Channel delivery --
 
+  /** @param {{ phoneEscalation?: boolean }|null} extraContext @param {((channel: { offDashboard: boolean }) => boolean)|null} channelFilter */
   _deliverViaChannels(sessionName, entry, extraContext = null, channelFilter = null) {
     const context = {
       escalationCount: entry.escalationCount,

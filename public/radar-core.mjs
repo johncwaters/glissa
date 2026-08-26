@@ -171,6 +171,7 @@ export function partitionRadarProjects(projects, nowTs, opts = {}) {
 // `locallyArchivedIds` is the panel's own record of what the operator archived in this page session.
 // It is a SECOND filter, not a replacement for `archived`: a payload the server built before (or a
 // cached one it replayed after) the archive still carries the record, and the row must stay gone.
+/** @param {Set<string>|null} locallyArchivedIds */
 export function investigationRows(snapshot, locallyArchivedIds = null) {
   const list = Array.isArray(snapshot?.investigations) ? snapshot.investigations : [];
   return list

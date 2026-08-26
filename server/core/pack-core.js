@@ -989,6 +989,7 @@ function planPackBuild(spec, files, { builtAt, variant = null, sourceRoots = [] 
   if (errors.length > 0) return { ok: false, outputs: [], manifest: null, errors };
 
   const projectSourceIndexes = new Set(Array.isArray(variant?.projectSourceIndexes) ? variant.projectSourceIndexes : []);
+  /** @type {Array<{relPath: string, content: string, origin: string, sourceFiles: Array<{relPath: string, content: string, sourcePath?: string}>, isData: boolean, isProjectScoped: boolean}>} */
   const plannedOutputs = [{
     relPath: INDEX_FILE,
     content: buildIndexFile(spec, groups, skills),
@@ -1048,7 +1049,9 @@ function planPackBuild(spec, files, { builtAt, variant = null, sourceRoots = [] 
     tokenEstimate: estimateTokens(file.content),
   }));
   const tokenEstimate = outputRecords.reduce((total, file) => total + file.tokenEstimate, 0);
-  const indexTokens = outputRecords.find((file) => file.relPath === INDEX_FILE).tokenEstimate;
+  const indexRecord = outputRecords.find((file) => file.relPath === INDEX_FILE);
+  if (!indexRecord) return { ok: false, outputs: [], manifest: null, errors: [...errors, 'pack index output missing'] };
+  const indexTokens = indexRecord.tokenEstimate;
 
   // The version covers every DELIVERED byte (sources, rules, description, skills), not just the source
   // hashes, so an edited rule cannot ride out under an unchanged version. manifest.json is excluded

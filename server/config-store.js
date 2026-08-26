@@ -173,6 +173,7 @@ function generateProjectId() {
   return crypto.randomUUID();
 }
 
+/** @returns {{ ok: true }|{ ok: false, errors: string[] }} */
 function validateConfig(candidate) {
   if (!isPlainObject(candidate)) return { ok: false, errors: ['config must be a plain object'] };
   const parsedConfig = Config.safeParse(candidate);
@@ -208,7 +209,7 @@ function normalizeConfigFile(candidate) {
     candidate[key] = fallback;
   }
   const validation = validateConfig(candidate);
-  if (!validation.ok) throw new Error(`validation failed: ${validation.errors.join('; ')}`);
+  if ('errors' in validation) throw new Error(`validation failed: ${validation.errors.join('; ')}`);
   return candidate;
 }
 
@@ -367,7 +368,9 @@ function createConfigStore({ settingsDefaults } = {}) {
    * even immediately after a save. Suppression keyed on that would never match, and every save would
    * reload its own write back through the whole settings-reload path.
    */
+  /** @type {string|null} */
   let _lastWrittenContent = null;
+  /** @type {string|null} */
   let _lastAppliedContent = null;
 
   /**
@@ -515,7 +518,9 @@ function createConfigStore({ settingsDefaults } = {}) {
    * Returns a closer so shutdown can release the fs.watch handle (a leaked watcher
    * keeps the event loop alive, which hangs any embedder that expects exit). */
   function watchForChanges(callback) {
+    /** @type {NodeJS.Timeout|null} */
     let reloadTimer = null;
+    /** @type {fs.FSWatcher|null} */
     let watcher = null;
 
     function handleConfigChange(err, data) {
@@ -560,7 +565,7 @@ function createConfigStore({ settingsDefaults } = {}) {
         // The debounce stays: one write is several fs events, and an editor's save is a burst. What
         // it no longer does is DECIDE anything - the self-write test moved to a content signature in
         // handleConfigChange, so an edit landing inside this window is read and applied like any other.
-        clearTimeout(reloadTimer);
+        if (reloadTimer) clearTimeout(reloadTimer);
         reloadTimer = setTimeout(() => {
           fs.readFile(configPath, 'utf8', handleConfigChange);
         }, 500);
@@ -570,7 +575,7 @@ function createConfigStore({ settingsDefaults } = {}) {
       console.warn('[config] Failed to watch config.json:', watchErr.message);
     }
     return function stop() {
-      clearTimeout(reloadTimer);
+      if (reloadTimer) clearTimeout(reloadTimer);
       if (watcher) { try { watcher.close(); } catch { /* already closed */ } }
       watcher = null;
     };

@@ -55,7 +55,7 @@ function decideAutoRebase({
   if (teardownPending) return skip("teardown");
   if (mergeStatus === "merging") return skip("merging");
   if (mergeStatus === "parked") return skip("parked");
-  if (!AUTO_REBASE_STATES.includes(state)) return skip("busy");
+  if (typeof state !== "string" || !AUTO_REBASE_STATES.includes(state)) return skip("busy");
   if (rebaseInProgress) return skip("rebase-in-progress");
   if (dirty) return skip("dirty");
   if (isZeroCount(behind)) return skip("current");

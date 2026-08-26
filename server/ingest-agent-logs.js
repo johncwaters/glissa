@@ -77,6 +77,7 @@ function rootFromPath(vendor, dir) {
 // Codex nests its rollouts under date directories that name no project, so the cwd is read once from
 // the head of the file. Without it every event of a session joined mid-file would be machine scope.
 async function readCodexRoot(filePath, fsPromises = fsNode.promises) {
+  /** @type {import('node:fs/promises').FileHandle | null} */
   let handle = null;
   try {
     handle = await fsPromises.open(filePath, 'r');
@@ -87,6 +88,7 @@ async function readCodexRoot(filePath, fsPromises = fsNode.promises) {
     if (bytesRead === CODEX_HEAD_BYTES) lines.pop();
     for (const line of lines) {
       if (!line) continue;
+      /** @type {{ payload?: { cwd?: unknown } } | null} */
       let parsed = null;
       try {
         parsed = JSON.parse(line);
@@ -203,16 +205,23 @@ function createAgentLogIngest({
   const probes = new Set();
   const dirCache = new Map();
   const watchers = new Map();
+  /** @type {NodeJS.Timeout | null} */
   let pollTimer = null;
+  /** @type {NodeJS.Timeout | null} */
   let discoverTimer = null;
+  /** @type {NodeJS.Timeout | null} */
   let pokeTimer = null;
+  /** @type {NodeJS.Timeout | null} */
   let sweepTimer = null;
   let running = false;
   let disabled = false;
   // In-flight guards that HAND BACK the running pass rather than dropping the call, so a watcher wakeup
   // arriving mid-sweep still resolves after the work it asked for is done.
+  /** @type {Promise<void> | null} */
   let drainInFlight = null;
+  /** @type {Promise<void> | null} */
   let sweepInFlight = null;
+  /** @type {Promise<void> | null} */
   let startPromise = null;
   let watchSupportChecked = false;
 
@@ -560,6 +569,7 @@ function createAgentLogIngest({
   // --- Tailing -------------------------------------------------------------
 
   async function readRange(filePath, start, length) {
+    /** @type {import('node:fs/promises').FileHandle | null} */
     let handle = null;
     try {
       handle = await fsPromises.open(filePath, 'r');

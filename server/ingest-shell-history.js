@@ -84,6 +84,8 @@ function createShellHistoryIngest({
   maxCatchUpBytes = MAX_CATCH_UP_BYTES,
 } = {}) {
   if (typeof publish !== 'function') throw new Error('createShellHistoryIngest requires publish');
+  /** @type {(event: Record<string, unknown>) => unknown} */
+  const publishEvent = publish;
   // Timing comes from the RESOLVED source config and nowhere else, the M8 rule: a constructor override
   // would be a second place to set it and, since the resolver materializes the key from its defaults, a
   // silently dead one.
@@ -108,17 +110,24 @@ function createShellHistoryIngest({
   // The location directories that actually existed on the last sweep, which is exactly the set worth
   // watching: watching a directory fish never created would fail on every reconcile.
   let reachableDirs = [];
+  /** @type {NodeJS.Timeout | null} */
   let pollTimer = null;
+  /** @type {NodeJS.Timeout | null} */
   let discoverTimer = null;
+  /** @type {NodeJS.Timeout | null} */
   let pokeTimer = null;
+  /** @type {NodeJS.Timeout | null} */
   let sweepTimer = null;
   let running = false;
   let disabled = false;
   let warnedWatchFailure = false;
   // In-flight guards that HAND BACK the running pass rather than dropping the call, so a watcher wakeup
   // arriving mid-sweep still resolves after the work it asked for is done.
+  /** @type {Promise<void> | null} */
   let drainInFlight = null;
+  /** @type {Promise<void> | null} */
   let sweepInFlight = null;
+  /** @type {Promise<void> | null} */
   let startPromise = null;
 
   // Every pass re-reads this after each await: stop() must not be undone by work already in flight.
@@ -341,6 +350,7 @@ function createShellHistoryIngest({
 
   // The head is sampled AFTER the range, so a rewrite landing between the two reads is caught by the head rather than published as the range.
   async function readWindow(filePath, { start = 0, length = 0, sampleHead = false } = {}) {
+    /** @type {import('node:fs/promises').FileHandle | null} */
     let handle = null;
     try {
       handle = await fsPromises.open(filePath, 'r');
@@ -390,7 +400,7 @@ function createShellHistoryIngest({
       recent[0].summary = `${recent[0].summary} [${dropped} earlier commands dropped]`;
       recent[0].detail = { ...recent[0].detail, droppedCommands: dropped };
     }
-    for (const event of recent) publish(event);
+    for (const event of recent) publishEvent(event);
   }
 
   async function reseed(filePath, stat) {

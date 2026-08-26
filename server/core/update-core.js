@@ -62,6 +62,7 @@ function parseLsRemoteTags(stdout) {
     if (existing && !ref.endsWith('^{}')) continue;
     tagsByVersion.set(version, { version, sha });
   }
+  /** @type {{ version: string, sha: string }|null} */
   let latest = null;
   for (const entry of tagsByVersion.values()) {
     if (!latest) {

@@ -10,8 +10,13 @@ import { createPollAgoTicker } from './poll-ago.js';
 import { createSettingsLink } from './settings-link.js';
 import { getPrsAttentionAck, setPrsAttentionAck } from './ui-prefs.js';
 
+/** @typedef {{ projects?: unknown }} PrStatus */
+
+/** @type {PrStatus|null} */
 let _latest = null;
+/** @type {HTMLDivElement|null} */
 let _root = null;
+/** @type {((isActive: boolean) => void)|null} */
 let _activityCallback = null;
 const _pollTicker = createPollAgoTicker(() => _root);
 const _attention = createAttentionAck({

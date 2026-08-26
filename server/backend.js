@@ -44,6 +44,18 @@ const { createBackendControl } = require('./backend-control');
 const { createBackendUpdateCheck } = require('./backend-update');
 const { createBackendSessionRuntime } = require('./backend-session-runtime');
 
+/** @typedef {{ id: string, name: string, path: string, state: string, stateSince: number, pendingRestart?: boolean, dangerouslySkipPermissions?: boolean, isWorktree?: boolean, resumeSessionId?: string|null, _killReap?: Promise<unknown>, start: () => unknown, destroy: () => void, toSnapshot: () => Record<string, unknown>, getWorktreeCarry?: () => Record<string, unknown>|null, adoptWorktree: (worktree: Record<string, unknown>) => void, discardWorktree?: () => unknown, discardWorktreeIfClean: () => unknown }} BackendRegistrySession */
+/** @typedef {Record<string, unknown> & { id: string, name: string, path: string }} BackendRegistryProject */
+/** @typedef {Record<string, unknown> & { projects: BackendRegistryProject[], integrationBranch?: string }} BackendRegistryConfig */
+/** @typedef {{ snapshotMessage: () => Record<string, unknown> }} BackendSnapshotLane */
+/** @typedef {BackendSnapshotLane & { noteRepos: () => unknown, detachSessionTap: (session: BackendRegistrySession) => void, releaseSessionRoots: (session: BackendRegistrySession) => void, stop: () => unknown }} BackendIngestRuntimeLane */
+/** @typedef {BackendSnapshotLane & { handleUpgrade: (request: object, socket: object, head: Buffer) => void, stop: () => unknown }} BackendVisionsRuntimeLane */
+/** @typedef {{ getStatus: () => Record<string, unknown>|null, setIssueStatus: (args: { projectId: string, issueId: string, action: string }) => Promise<Record<string, unknown>>, archiveInvestigation: (args: { id: string }) => Promise<Record<string, unknown>> }} BackendPosthogControl */
+/** @typedef {{ getStatus: () => Record<string, unknown>|null }} BackendPrReviewControl */
+/** @typedef {{ getVersions: () => Record<string, string>, ensureBuilt: (names: string[], options: { projects: Record<string, unknown>[] }) => Promise<unknown> }} BackendPackControl */
+/** @typedef {{ getSessionsMessage: () => Record<string, unknown>|null, getCachedReport: () => Record<string, unknown>|null, requestReport: (args: { days?: number, force?: boolean, requestId?: string|null }) => Promise<Record<string, unknown>>, getPlanLimitsMessage: () => Record<string, unknown>|null }} BackendUsageControl */
+
+
 /**
  * Create and wire the Glissa backend onto an existing HTTP server.
  *
@@ -91,7 +103,9 @@ function createBackend(httpServer, options = {}) {
   // visible at all.
   const serverBuild = `${require('../package.json').version}+${crypto.randomBytes(4).toString('hex')}`;
 
+  /** @type {((message: Record<string, unknown>) => void)|null} */
   let broadcastControl = null;
+  /** @type {object|null} */
   let gitWorkspace = null;
   const sessionRuntime = createBackendSessionRuntime({
     httpServer,
@@ -102,6 +116,9 @@ function createBackend(httpServer, options = {}) {
     logger: console,
   });
   const { getHookPort, hookRouter, makeSession, rtkInstall } = sessionRuntime;
+
+  const getCurrentIngestLane = () => laneAssembly.currentIngest();
+  const getCurrentVisionsLane = () => laneAssembly.currentVisions();
 
   const app = createBackendHttpApp({
     staticDir,
@@ -124,7 +141,7 @@ function createBackend(httpServer, options = {}) {
     listenerPortsFor,
     tokenMatches,
     getSession: getSessionAny,
-    getVisionsLane: () => laneAssembly.current('visions'),
+    getVisionsLane: getCurrentVisionsLane,
     logger: console,
   });
   const {
@@ -150,7 +167,7 @@ function createBackend(httpServer, options = {}) {
       ...memoryDistillSessions.values(),
     ],
     sessionDataClients,
-    getIngestLane: () => laneAssembly.current('ingest'),
+    getIngestLane: getCurrentIngestLane,
     controlWss,
     dataWss,
     broadcastControl,
@@ -242,7 +259,7 @@ function createBackend(httpServer, options = {}) {
     wireSessionEvents,
     closeSessionDataClients,
     notificationManager,
-    getIngestLane: () => laneAssembly.current('ingest'),
+    getIngestLane: getCurrentIngestLane,
     broadcastControl,
     applySettingsReload,
     spawnGate,
@@ -250,7 +267,11 @@ function createBackend(httpServer, options = {}) {
     reconcileSessionWorktrees,
     carryWorktreeAcrossRecreate,
     ensureProjectIds,
-    resolveAgentId: (agent) => resolveAdapter(agent).id,
+    resolveAgentId: (agent) => {
+      const adapter = resolveAdapter(agent);
+      if (!adapter) throw new Error('Default agent adapter is unavailable');
+      return adapter.id;
+    },
     logger: console,
   });
   sessionRegistry.initialize();
@@ -276,11 +297,12 @@ function createBackend(httpServer, options = {}) {
     config,
     isLocalConfig: configStore.isLocalConfig,
     currentVersion: require('../package.json').version,
-    checkForUpdate: options.checkForUpdate,
+    checkForUpdate: options.checkForUpdate || undefined,
     getControlClientCount: () => controlWss.clients.size,
     broadcastControl,
     logger: console,
   });
+  /** @type {(() => void)|null} */
   let stopConfigWatch = null;
   const shutdown = createBackendShutdown({
     cancelAutoResume: sessionRegistry.cancelAutoResume,
@@ -302,8 +324,8 @@ function createBackend(httpServer, options = {}) {
     packService,
     usage,
     packDistiller,
-    getIngestLane: () => laneAssembly.current('ingest'),
-    getVisionsLane: () => laneAssembly.current('visions'),
+    getIngestLane: getCurrentIngestLane,
+    getVisionsLane: getCurrentVisionsLane,
     memoryIngest,
     memoryDistiller,
     memoryStore,
@@ -319,6 +341,8 @@ function createBackend(httpServer, options = {}) {
     spawn,
   });
 
+  /** @type {{ current: (name: string) => BackendSnapshotLane|null }} */
+  /** @type {BackendPackControl} */
   createBackendControl({
     controlWss,
     sessions,

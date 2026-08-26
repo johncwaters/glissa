@@ -45,10 +45,12 @@ function createBackendNotifications(dependencies) {
     filePath: configSiblingPath(configStore.configPath, 'telegram-outbox.json'),
     send: (entry) => {
       const telegram = config.telegram || {};
-      if (!telegram.botToken || !telegram.chatId) return Promise.resolve({ ok: false });
+      const botToken = telegram.botToken;
+      const chatId = telegram.chatId;
+      if (!botToken || !chatId) return Promise.resolve({ ok: false });
       return sendTelegramMessage({
-        botToken: telegram.botToken,
-        chatId: telegram.chatId,
+        botToken,
+        chatId,
         text: entry.text,
         tag: 'channel:telegram',
       });

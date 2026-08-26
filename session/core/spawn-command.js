@@ -112,6 +112,11 @@ function resolveAgentCommand({ name, platform = process.platform, exec }) {
 // shell path byte-identical to the historical behavior for shim/unresolved installs.
 // argGroups are concatenated in order; the last group's last element may be the
 // initial-prompt positional, so nothing may be appended after them.
+/**
+ * @param {{ name: string, platform: NodeJS.Platform,
+ *   resolved?: { path: string | null, kind: string } | null,
+ *   argGroups?: Array<string[] | null | undefined> }} options
+ */
 function buildAgentSpawnCommand({ name, platform, resolved, argGroups = [] }) {
   const childArgs = argGroups.flatMap((group) => group || []);
   if (platform !== "win32") {
@@ -128,6 +133,10 @@ function buildAgentSpawnCommand({ name, platform, resolved, argGroups = [] }) {
 // live consumer; these keep `claude` bound to the old names.
 const classifyClaudeKind = classifyCommandKind;
 const resolveClaudeCommand = (opts = {}) => resolveAgentCommand({ name: "claude", ...opts });
+/**
+ * @param {{ platform: NodeJS.Platform, resolved?: { path: string | null, kind: string } | null,
+ *   settingsArgs?: string[], packArgs?: string[], claudeArgs?: string[] }} options
+ */
 const buildSpawnCommand = ({ platform, resolved, settingsArgs = [], packArgs = [], claudeArgs = [] }) =>
   buildAgentSpawnCommand({ name: "claude", platform, resolved, argGroups: [settingsArgs, packArgs, claudeArgs] });
 

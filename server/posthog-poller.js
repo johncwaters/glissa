@@ -54,10 +54,17 @@ const TRAFFIC_PING_KIND = {
 
 const META_KEY = '_meta';
 
+/**
+ * @typedef {{ start: () => Promise<void>, stop: () => Promise<void>, tick: () => Promise<void>,
+ *   archiveInvestigation: (id?: string) => Promise<{ ok: boolean, error?: string, investigations?: unknown[] }>,
+ *   investigations: () => unknown[], _state: () => Record<string, unknown> }} PosthogPoller
+ */
+
 function isIssueKey(key) {
   return !key.startsWith('_');
 }
 
+/** @returns {PosthogPoller} */
 function createPosthogPoller(deps) {
   const {
     api,
@@ -308,7 +315,7 @@ function createPosthogPoller(deps) {
   // planned investigations and the operator's manual re-investigation, so both take the same
   // concurrency slot, the same never-rejecting tracking promise, and the same state bookkeeping.
   // A fix job and an investigation are indistinguishable here on purpose: one slot pool, one drain.
-  function startInvestigation(change, decision = null) {
+  function startInvestigation(change, decision = /** @type {{ matchKey?: string }|null} */ (null)) {
     const mode = core.decideJobMode(change, { autoFix });
     state[change.key].inFlight = true;
     if (decision?.matchKey) state[change.key].recurrenceOf = decision.matchKey;

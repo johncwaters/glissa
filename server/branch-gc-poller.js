@@ -60,6 +60,7 @@ function createBranchGcPoller(deps) {
   }
 
   async function tickProject(projectPath, config) {
+    /** @type {{ projectPath: string, deletions: string[], kept: unknown[], errors: number }} */
     const summary = { projectPath, deletions: [], kept: [], errors: 0 };
     const fetched = await callGit(gitWorkspace.fetchOrigin, { projectPath });
     if (!fetched.ok) {
@@ -95,6 +96,7 @@ function createBranchGcPoller(deps) {
       return summary;
     }
 
+    /** @type {Array<{ name: string, tipSha: string, tipCommitTimeMs: number, mergedIntoIntegration: boolean }>} */
     const checkedBranches = [];
     const resolvedIntegrationTips = tipsResult.integrationTips.filter((integrationTip) => integrationTip.sha);
     for (const remoteBranch of listed.branches) {
@@ -146,7 +148,7 @@ function createBranchGcPoller(deps) {
     }
     onTickComplete({ type: 'branch-gc-status', ts: now(), projects });
     if (failures > 0) return { failed: true };
-    return null;
+    return undefined;
   }
 
   const loop = createTickLoop({

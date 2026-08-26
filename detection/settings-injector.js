@@ -116,6 +116,9 @@ function buildStatuslineCommand({ relayPath = RELAY_PATH, postUrl, userCommand =
 // guard), plus the `acceptEdits` mode that is the actual write boundary for the two prompt-embedding
 // lanes (server/core/lane-permissions-core.js). A lane passing neither leaves the file as it was, so
 // ordinary user sessions stay byte-identical to before.
+/**
+ * @param {{ port: number, glissaId: string, token: string, timeoutSec?: number, permissions?: { deny?: string[], defaultMode?: string } | null, detectScheduledWakeups?: boolean, enableProjectMcp?: boolean, rtkPath?: string | null, planLimits?: boolean, userSettingsPath?: string | null, relayPath?: string }} options
+ */
 function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, enableProjectMcp = false, rtkPath = null, planLimits = false, userSettingsPath = null, relayPath = RELAY_PATH }) {
   if (!port || !glissaId || !token) {
     throw new Error('buildHookSettings requires port, glissaId, token');
@@ -135,6 +138,7 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
   if (rtkPath) {
     hooks.PreToolUse = [buildRtkHookEntry(rtkPath)];
   }
+  /** @type {{ hooks: Record<string, unknown>, permissions?: { deny?: string[], defaultMode?: string }, enableAllProjectMcpServers?: boolean, statusLine?: { type: string, command: string } }} */
   const settings = { hooks };
   const denyRules = permissions && Array.isArray(permissions.deny) ? permissions.deny.slice() : [];
   const defaultMode = permissions && typeof permissions.defaultMode === 'string' ? permissions.defaultMode : null;

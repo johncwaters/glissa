@@ -30,9 +30,13 @@ function pickFlight(rng = Math.random) {
   return { topVh, durationS, gapMs, firstDelayS };
 }
 
+/** @type {HTMLDivElement|null} */
 let _el = null;
+/** @type {HTMLDivElement|null} */
 let _sprite = null;
+/** @type {HTMLDivElement|null} */
 let _trail = null;
+/** @type {number|null} */
 let _timeoutId = null;
 let _lastAnimal = -1; // index into ANIMALS; -1 means no flight has run yet
 

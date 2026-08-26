@@ -8,10 +8,16 @@ function sessionIdFromBranch(branchName) {
   return branchName.slice(SESSION_BRANCH_PREFIX.length);
 }
 
+/** @param {Array<{ branch: string }>} integrationTips */
 function protectedBranchNames(integrationTips) {
   return new Set(['main', 'master', ...integrationTips.map((tip) => tip.branch)]);
 }
 
+/**
+ * @param {{ remoteBranches?: Array<{ name: string, tipCommitTimeMs: number, mergedIntoIntegration?: boolean }>,
+ *   integrationTips?: Array<{ branch: string }>, liveSessionIds?: Set<string>, nowMs: number,
+ *   staleDays?: number }} options
+ */
 function planBranchGc({
   remoteBranches = [],
   integrationTips = [],

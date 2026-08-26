@@ -36,6 +36,11 @@ const { normalizeShapePath } = require('./core/visions-scope-core');
 /** @typedef {{ path?: string, worktreeDir?: string, toSnapshot: () => Record<string, unknown>, notePackUpdate: (name: string, version: string) => void }} BackendLaneSession */
 /** @typedef {{ branchGcWiringOptions?: Record<string, unknown>, ingestLaneOptions?: Record<string, unknown>, packServiceOptions?: Record<string, unknown>, millWiringOptions?: Record<string, unknown>, usageWiringOptions?: Record<string, unknown> }} BackendLaneOptions */
 /** @typedef {InstanceType<typeof import('../detection/hook-source')['HookRouter']>} BackendHookRouter */
+/** @typedef {{ startPoller: () => void, restartIfConfigChanged: () => void, stopPoller: () => unknown, getStatus: () => Record<string, unknown>|null }} BackendPollingLane */
+/** @typedef {BackendPollingLane & { setIssueStatus: (args: { projectId: string, issueId: string, action: string }) => Promise<Record<string, unknown>>, archiveInvestigation: (args: { id: string }) => Promise<Record<string, unknown>> }} BackendPosthogLane */
+/** @typedef {{ buildDigest: (...args: unknown[]) => string, latestSeq: () => number|null, noteEditorEvent: (event: unknown) => unknown, noteActivity?: () => unknown, agentLogsEnabled: boolean, terminalEnabled: boolean, attachSessionTap: (session: BackendLaneSession) => void, detachSessionTap: (session: BackendLaneSession) => void, fsEnabled: boolean, noteSessionRoots: (session: BackendLaneSession) => void, releaseSessionRoots: (session: BackendLaneSession) => void, noteRepos: () => unknown, stop: () => unknown, snapshotMessage: () => Record<string, unknown> }} BackendIngestLane */
+/** @typedef {{ noteActivity: () => unknown, stop: () => unknown, snapshotMessage: () => Record<string, unknown>, handleUpgrade: (request: object, socket: object, head: Buffer) => void }} BackendVisionsLane */
+
 
 /**
  * @typedef {object} BackendLaneDependencies
@@ -199,7 +204,9 @@ function createBackendLanes(dependencies) {
     })
     : null;
 
+  /** @type {ReturnType<typeof buildIngestLane>} */
   let ingestLane = null;
+  /** @type {ReturnType<typeof buildVisionsLane>} */
   let visionsLane = null;
   const visionsSessions = new Map();
 
@@ -371,6 +378,11 @@ function createBackendLanes(dependencies) {
     return fixedLanes.get(name) || null;
   }
 
+  // current() is the stringly-typed snapshot reader the control plane uses; these two are the typed
+  // readers, so a caller that needs the lane's own API does not have to assert its way back to it.
+  const currentIngest = () => ingestLane;
+  const currentVisions = () => visionsLane;
+
   function startMemoryLanes() {
     if (memoryIngest) {
       memoryIngest.backfill().catch((error) => logger.warn(`[memory-ingest] backfill failed: ${error.message}`));
@@ -411,6 +423,8 @@ function createBackendLanes(dependencies) {
   return {
     branchGc,
     current,
+    currentIngest,
+    currentVisions,
     distillSessions,
     gitWorkspace,
     gitWorkspaceSync,

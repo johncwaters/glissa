@@ -79,16 +79,21 @@ function createPrPoller(deps) {
     return persist();
   }
 
-  function spawnWithTimeout(args, { onPending = null } = {}) {
+  function spawnWithTimeout(args, {
+    onPending = /** @type {((promise: Promise<unknown>) => void)|null} */ (null),
+  } = {}) {
     return raceWithAbort({
       timeoutMs: args.timeoutMs,
       setTimeoutFn,
       clearTimeoutFn,
-      onPending,
       onTimeout: () => ({ verdict: 'ERROR', summary: 'review timed out' }),
       onEmpty: () => ({ verdict: 'ERROR', summary: 'no verdict' }),
-      start: (signal) => Promise.resolve(spawnReview({ ...args, signal }))
-        .catch((e) => ({ verdict: 'ERROR', summary: firstLine(e.message) })),
+      start: (signal) => {
+        const pending = Promise.resolve(spawnReview({ ...args, signal }))
+          .catch((e) => ({ verdict: 'ERROR', summary: firstLine(e.message) }));
+        if (typeof onPending === 'function') onPending(pending);
+        return pending;
+      },
     });
   }
 
@@ -126,6 +131,7 @@ function createPrPoller(deps) {
       cwd = ws.cwd;
     }
 
+    /** @type {Promise<unknown>|null} */
     let pendingSpawn = null;
     try {
       const res = await spawnWithTimeout({
@@ -299,7 +305,7 @@ function createPrPoller(deps) {
     // cadence for the length of the outage is what the backoff exists to stop. One project failing
     // among several is that repo's problem and must not slow the others down.
     if (projects.length > 0 && failures === projects.length) return { failed: true };
-    return null;
+    return undefined;
   }
 
   async function pruneOrphanWorktrees() {

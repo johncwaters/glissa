@@ -28,9 +28,35 @@ const BATCH_INTERVAL_MS = 1000;
 const MAX_EVENTS_PER_FRAME = 50;
 const SNAPSHOT_EVENT_LIMIT = 100;
 
+/**
+ * @param {{
+ *   config?: ReturnType<typeof resolveIngestConfig> | null,
+ *   broadcast?: ((message: Record<string, unknown>) => void) | null,
+ *   logger?: Console,
+ *   laneMap?: (() => Map<string, string>) | null,
+ *   agentLogConsumers?: Array<{ name?: string, publish: (event: Record<string, unknown>) => unknown,
+ *     noteTail?: (entry: Record<string, unknown>) => void, userPrompts?: boolean }>,
+ *   agentLogOptions?: NonNullable<Parameters<typeof createAgentLogIngest>[0]> | null,
+ *   fsOptions?: NonNullable<Parameters<typeof createFsIngest>[0]> | null,
+ *   shellHistoryOptions?: NonNullable<Parameters<typeof createShellHistoryIngest>[0]> | null,
+ *   configPath?: string | null,
+ *   repoRoots?: (() => string[]) | null,
+ *   editorRoots?: (() => string[]) | string[],
+ *   onActivity?: (() => void) | null,
+ *   nowFn?: () => number,
+ *   setIntervalFn?: typeof setInterval,
+ *   clearIntervalFn?: typeof clearInterval,
+ *   setTimeoutFn?: typeof setTimeout,
+ *   clearTimeoutFn?: typeof clearTimeout,
+ *   batchIntervalMs?: number,
+ *   maxEventsPerFrame?: number,
+ *   snapshotEventLimit?: number,
+ *   debug?: boolean | (() => boolean),
+ * }} [options]
+ */
 function createIngestLane({
-  config = null,
-  broadcast = null,
+  config = /** @type {ReturnType<typeof resolveIngestConfig>|null} */ (null),
+  broadcast = /** @type {((message: Record<string, unknown>) => void)|null} */ (null),
   logger = console,
   laneMap = null,
   // The M14 fan-out, forwarded untouched: one source serves both consumers rather than two sources existing.
@@ -48,7 +74,7 @@ function createIngestLane({
   editorRoots = () => [],
   // Told once per batch that carried events, so a consumer learns the machine moved without polling
   // (docs/plan-ingestion.md, M7.5). Absent by default, and then nothing is ever called.
-  onActivity = null,
+  onActivity = /** @type {(() => void)|null} */ (null),
   nowFn = Date.now,
   setIntervalFn = setInterval,
   clearIntervalFn = clearInterval,
@@ -116,6 +142,7 @@ function createIngestLane({
     return message;
   }
 
+  /** @type {NodeJS.Timeout | null} */
   let batchTimer = setIntervalFn(flushBatch, batchIntervalMs);
   if (batchTimer && typeof batchTimer.unref === 'function') batchTimer.unref();
 
@@ -143,6 +170,7 @@ function createIngestLane({
 
   // Synchronous by contract: the Visions lane builds this exactly once per dispatch, and a digest that
   // awaited between ring reads could describe two different moments.
+  /** @param {{ scopes?: string[] | null, budgetChars?: number, now?: number | null }} [options] */
   function buildDigest({ scopes = null, budgetChars = DEFAULT_DIGEST_BUDGET_CHARS, now = null } = {}) {
     return buildContextDigest(store, { scopes, budgetChars, now: now == null ? nowFn() : now });
   }

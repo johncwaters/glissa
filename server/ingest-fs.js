@@ -67,6 +67,8 @@ function createFsIngest({
   maxRoots = DEFAULT_MAX_ROOTS,
 } = {}) {
   if (typeof publish !== 'function') throw new Error('createFsIngest requires publish');
+  /** @type {(event: Record<string, unknown>) => unknown} */
+  const publishEvent = publish;
   // Timing comes from the RESOLVED source config and nowhere else, the M8 rule: a constructor override
   // would be a second place to set it and, since the resolver materializes the key from its defaults, a
   // silently dead one.
@@ -88,12 +90,14 @@ function createFsIngest({
   const failedRoots = new Set();
   const warnedOverflow = new Set();
 
+  /** @type {{ subscribe: Function } | null} */
   let watcherModule = null;
   let running = false;
   let disabled = false;
   let stopped = false;
   let warnedRestart = false;
   let chain = Promise.resolve();
+  /** @type {Promise<void> | null} */
   let startPromise = null;
 
   function alive() {
@@ -133,7 +137,7 @@ function createFsIngest({
     const events = decideFsEvents(entry.batch, { root, now: nowFn() });
     entry.batch = createBatch();
     if (!alive()) return;
-    for (const event of events) publish(event);
+    for (const event of events) publishEvent(event);
   }
 
   // Trailing, never leading: the window exists so the create-then-update pair a single save produces

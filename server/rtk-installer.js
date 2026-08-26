@@ -27,6 +27,8 @@ async function downloadCapped(url, { fetchImpl, timeoutMs = DOWNLOAD_TIMEOUT_MS 
     if (Number.isFinite(declared) && declared > MAX_DOWNLOAD_BYTES) {
       return { ok: false, reason: `download failed: asset is ${declared} bytes, over the ${MAX_DOWNLOAD_BYTES} byte cap` };
     }
+    if (!response.body) return { ok: false, reason: 'download failed: response had no body' };
+    /** @type {Buffer[]} */
     const chunks = [];
     let total = 0;
     for await (const chunk of response.body) {
@@ -114,7 +116,7 @@ async function installRtk({
   try {
     log?.log?.(`[rtk] installing rtk ${asset.version} from ${asset.url}`);
     const downloaded = await downloadCapped(asset.url, { fetchImpl, timeoutMs });
-    if (!downloaded.ok) return { ok: false, reason: downloaded.reason };
+    if (!downloaded.ok || !downloaded.bytes) return { ok: false, reason: downloaded.reason };
 
     const actualHex = crypto.createHash('sha256').update(downloaded.bytes).digest('hex');
     if (!verifyDigest(asset.sha256, actualHex)) {

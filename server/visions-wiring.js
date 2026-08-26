@@ -94,6 +94,7 @@ function hasId(parsed) {
 
 // One relay frame, or the reason it is unusable.
 function readFrame(raw) {
+  /** @type {{ type?: unknown, id?: unknown, result?: unknown, method?: unknown, params?: unknown } | null} */
   let parsed = null;
   try {
     parsed = JSON.parse(raw);
@@ -101,7 +102,7 @@ function readFrame(raw) {
     return { ok: false, reason: 'unparsable JSON' };
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { ok: false, reason: 'not an object' };
-  if (!FRAME_TYPES.has(parsed.type)) return { ok: false, reason: `unsupported frame type ${JSON.stringify(parsed.type)}` };
+  if (typeof parsed.type !== 'string' || !FRAME_TYPES.has(parsed.type)) return { ok: false, reason: `unsupported frame type ${JSON.stringify(parsed.type)}` };
   if (parsed.type === 'lsp-response') {
     if (!hasId(parsed)) return { ok: false, reason: 'missing id' };
     return { ok: true, type: parsed.type, id: parsed.id, result: parsed.result };
@@ -166,6 +167,18 @@ function changeFailureReason(uri, version, result) {
   return `${result.reason} (uri=${uri} version=${version})`;
 }
 
+/**
+ * @param {{ debounceMs?: number, setTimeoutFn?: typeof setTimeout, clearTimeoutFn?: typeof clearTimeout, nowFn?: () => number,
+ *   sweep?: (text: string) => { diagnostics: object[], fixes: object[] }, maxPayload?: number, autoFix?: boolean, fixLogMax?: number,
+ *   applyEditTimeoutMs?: number, logger?: Console, broadcast?: ((message: unknown) => void) | null, dispatchConfig?: object | null,
+ *   dispatch?: ((options: { uri: string, text: string, findings: object[], intent: string, digest: string, memory: { text: string, count: number, version: string | null } | null, prompt: string }) => Promise<{ verdict: string, reason?: string | null, diagnostics?: unknown, comments?: unknown, hand?: unknown, intent?: unknown }>) | null,
+ *   contextDigest?: ((options: { scopes: null, budgetChars: number, now: number }) => string | null) | null, contextSeq?: (() => number | null) | null,
+ *   scopeProjects?: { id: string, path: string }[] | null, knownProjectIds?: string[] | null,
+ *   getMemoryStore?: (() => { append: (input: object) => Promise<{ id: string } | null>, records?: () => object[], retrieve?: (options: { query: string, project: string | null, limit: number }) => object[], noteDelivered?: (text: string) => void, readPublishedManifest?: () => Promise<{ version?: string } | null> } | null) | null,
+ *   onEditorEvent?: ((event: { method: string, uri: string }) => void) | null, memoryDeliveryLimit?: number, intentStatePath?: string | null,
+ *   fsFns?: typeof fs, fsPromises?: typeof fsPromisesDefault, digestBudgetChars?: number, hashFn?: (text: string) => string,
+ *   buildPrompt?: typeof buildVisionsPrompt, debug?: boolean | (() => boolean) }} [options]
+ */
 function createVisionsWiring({
   debounceMs = VISIONS_DEBOUNCE_MS,
   setTimeoutFn = setTimeout,
@@ -425,6 +438,7 @@ function createVisionsWiring({
   }
 
   // Wholesale replacement, like a sweep's findings: a uri with no comments is absent, never stored empty.
+  /** @param {string} uri @param {object[]} comments @param {{ text?: string } | null} [doc] */
   function recordComments(uri, comments, doc = null) {
     const list = Array.isArray(comments) ? comments : [];
     if (list.length === 0) commentsByUri.delete(uri);
@@ -694,10 +708,11 @@ function createVisionsWiring({
      * which boundary opened this window, and the gate uses it only to classify a buffer it has no
      * recorded hash for.
      */
+    /** @param {string} uri @param {'activity' | 'edit'} [armedBy] */
     async function runDispatch(uri, armedBy = 'edit') {
       if (!dispatchEnabled || closed) return;
       const doc = getDoc(store, uri);
-      if (!isMarkdownDoc(doc)) return;
+      if (!doc || !isMarkdownDoc(doc)) return;
       const text = typeof doc.text === 'string' ? doc.text : '';
       const textHash = hashFn(text);
       const projectId = projectForUri(uri, scopeProjects);
@@ -724,6 +739,7 @@ function createVisionsWiring({
         return;
       }
       dispatchInFlight = true;
+      /** @type {{ verdict: string, reason?: string | null, diagnostics?: unknown, comments?: unknown, hand?: unknown, intent?: unknown } | null} */
       let result = null;
       try {
         const memory = memoryStoreOf() ? await readMemorySection(uri, text) : null;
@@ -805,7 +821,7 @@ function createVisionsWiring({
     function noteActivity() {
       if (!dispatchEnabled || closed) return;
       for (const doc of listDocs(store)) {
-        if (!isMarkdownDoc(doc)) continue;
+        if (!doc || !isMarkdownDoc(doc)) continue;
         if (dispatchTimersByUri.has(doc.uri)) continue;
         armDispatch(doc.uri, 'activity');
       }
@@ -859,6 +875,7 @@ function createVisionsWiring({
       settleApplyEdit(frame.id, frame.result, 'the editor refused the edit');
     }
 
+    /** @param {string} reason @param {string | null} [uri] */
     function failPendingApplyEdits(reason, uri = null) {
       for (const id of [...pendingApplyEditById.keys()]) {
         const pending = pendingApplyEditById.get(id);
@@ -898,7 +915,7 @@ function createVisionsWiring({
      */
     function publishDiagnostics(uri, armedBy = 'edit') {
       const doc = getDoc(store, uri);
-      if (!isMarkdownDoc(doc)) return;
+      if (!doc || !isMarkdownDoc(doc)) return;
       if (!isUriInScope(uri)) return;
       const { diagnostics, fixes } = readSweepResult(sweep(doc.text));
       recordRuleFindings(uri, diagnostics);
@@ -952,7 +969,7 @@ function createVisionsWiring({
         // Debug only: this fires once per keystroke burst on every open buffer.
         debugNote(() => `didChange ${uri} v${version} (${result.changeCount} changes, ${result.size} chars)`);
         scheduleSweep(uri);
-        if (!isMarkdownDoc(doc)) return null;
+        if (!uri || !previousDoc || !doc || !isMarkdownDoc(doc)) return null;
         if (!detectBlankLineBoundary({
           previousText: previousDoc.text,
           nextText: doc.text,
@@ -1040,6 +1057,7 @@ function createVisionsWiring({
       failPendingApplyEdits('the relay disconnected');
       const dropped = listDocs(store);
       for (const doc of dropped) {
+        if (!doc) continue;
         applyDidClose(store, { textDocument: { uri: doc.uri } });
         if (releaseUri(doc.uri, connection)) clearUriState(doc.uri);
       }

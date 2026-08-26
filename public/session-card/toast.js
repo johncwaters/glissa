@@ -48,6 +48,7 @@ export function showErrorToast(message, opts = {}) {
   const newest = region.firstElementChild;
   const newestState = newest ? toastState.get(newest) : null;
   if (newestState && newestState.message === message && !newestState.dismissed) {
+    if (!newest) throw new Error('Toast state exists without a notice element');
     newestState.count++;
     const counter = queryTag(newest, '.notice-count', 'span');
     counter.textContent = `x${newestState.count}`;

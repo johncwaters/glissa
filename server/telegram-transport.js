@@ -26,11 +26,12 @@ function defaultTransport(url, bodyObject) {
       (res) => {
         res.resume();
         res.on('end', () => {
-          if (res.statusCode >= 200 && res.statusCode < 300) {
+          const statusCode = res.statusCode ?? 0;
+          if (statusCode >= 200 && statusCode < 300) {
             resolve();
             return;
           }
-          reject(new Error(`non-2xx status ${res.statusCode}`));
+          reject(new Error(`non-2xx status ${statusCode}`));
         });
       },
     );

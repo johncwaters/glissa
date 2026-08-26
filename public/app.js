@@ -50,13 +50,13 @@ initFormFactor();
 
 // ── Connection status UI ─────────────────────────────────────
 
-const connectionEl = document.getElementById('connection-status');
-const connectionLabel = connectionEl.querySelector('.connection-label');
+const connectionEl = queryTag(document, '#connection-status', 'span');
+const connectionLabel = queryTag(connectionEl, '.connection-label', 'span');
 
-const loadingScreen = document.getElementById('loading-screen');
-const loadingStatus = document.getElementById('loading-status');
-const shutdownScreen = document.getElementById('shutdown-screen');
-const shutdownStatus = document.getElementById('shutdown-status');
+const loadingScreen = queryTag(document, '#loading-screen', 'div');
+const loadingStatus = queryTag(document, '#loading-status', 'div');
+const shutdownScreen = queryTag(document, '#shutdown-screen', 'div');
+const shutdownStatus = queryTag(document, '#shutdown-status', 'div');
 let appRevealed = false;
 
 function revealApp() {
@@ -114,6 +114,7 @@ setConnectionStateCallback((state, label) => {
 
 // The backend the page is talking to, remembered across reconnects. The rule is pure
 // (server-build-core.mjs); this is the two-line shell that holds the value and does the reload.
+/** @type {string|null} */
 let knownServerBuild = null;
 
 function noteServerBuild(serverBuild) {
@@ -264,6 +265,7 @@ function requestUsageReportIfVisible() {
 // One sweep republishes every pack it rebuilt, so the pulls are coalesced into a trailing one rather
 // than costing a full spec walk per pack. The snapshot-time pull stays immediate: it is one event.
 const MILL_PULL_DEBOUNCE_MS = 500;
+/** @type {number|null} */
 let millPullTimer = null;
 let shouldResolveSettingsHashOnMillReport = location.hash.startsWith('#settings/');
 
@@ -392,17 +394,16 @@ function showUpdateBanner(msg) {
   if (updateBannerDismissed) return;
   const identity = updateIdentity(msg);
   if (identity && getDismissedUpdate() === identity) return;
-  const banner = document.getElementById('update-banner');
-  if (!banner) return;
+  const banner = queryTag(document, '#update-banner', 'div');
   const command = msg.command;
-  document.getElementById('update-banner-text').textContent = updateBannerText(msg);
-  document.getElementById('update-banner-cmd').textContent = command;
+  queryTag(document, '#update-banner-text', 'span').textContent = updateBannerText(msg);
+  queryTag(document, '#update-banner-cmd', 'code').textContent = command;
   const link = queryTag(document, '#update-banner-link', 'a');
   link.hidden = !msg.releaseUrl;
   link.href = msg.releaseUrl || '';
   banner.hidden = false;
 
-  const copyBtn = document.getElementById('update-banner-copy');
+  const copyBtn = queryTag(document, '#update-banner-copy', 'button');
   const flashLabel = (text) => {
     copyBtn.textContent = text;
     setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
@@ -417,7 +418,7 @@ function showUpdateBanner(msg) {
       .then(() => flashLabel('Copied'))
       .catch(() => flashLabel('Copy failed'));
   };
-  document.getElementById('update-banner-dismiss').onclick = () => {
+  queryTag(document, '#update-banner-dismiss', 'button').onclick = () => {
     updateBannerDismissed = true;
     setDismissedUpdate(identity);
     banner.hidden = true;
@@ -426,12 +427,12 @@ function showUpdateBanner(msg) {
 
 // ── Toolbar buttons ──────────────────────────────────────────
 
-document.getElementById('btn-add-session-header').addEventListener('click', createAddSessionDialog);
+queryTag(document, '#btn-add-session-header', 'button').addEventListener('click', createAddSessionDialog);
 
 // ── Header menu ──────────────────────────────────────────────
 
-const headerMenu = document.getElementById('header-menu');
-const btnMenu = document.getElementById('btn-menu');
+const headerMenu = queryTag(document, '#header-menu', 'div');
+const btnMenu = queryTag(document, '#btn-menu', 'button');
 
 function syncMenuAria() {
   btnMenu.setAttribute('aria-expanded', headerMenu.classList.contains('open') ? 'true' : 'false');
@@ -478,37 +479,37 @@ function activateSettingsHash() {
   return activateSettingsTarget(target);
 }
 
-document.getElementById('btn-settings').addEventListener('click', () => {
+queryTag(document, '#btn-settings', 'button').addEventListener('click', () => {
   headerMenu.classList.remove('open');
   syncMenuAria();
   openSettings();
 });
 
-document.getElementById('btn-help').addEventListener('click', () => {
+queryTag(document, '#btn-help', 'button').addEventListener('click', () => {
   openSettings('browser-shortcuts');
 });
 
 // ── Primary view tabs (Focus / Radar / PRs / Usage / Mill / Visions) ────────
 
-const viewFocusEl = document.getElementById('view-focus');
-const viewRadarEl = document.getElementById('view-radar');
-const viewPrsEl = document.getElementById('view-prs');
-const viewUsageEl = document.getElementById('view-usage');
-const viewMillEl = document.getElementById('view-mill');
-const viewVisionsEl = document.getElementById('view-visions');
-const viewSettingsEl = document.getElementById('view-settings');
-const tabFocus = document.getElementById('tab-focus');
-const tabRadar = document.getElementById('tab-radar');
-const tabPrs = document.getElementById('tab-prs');
-const tabUsage = document.getElementById('tab-usage');
-const tabMill = document.getElementById('tab-mill');
-const tabVisions = document.getElementById('tab-visions');
-const tabSettings = document.getElementById('tab-settings');
-const tabRadarActivityEl = document.getElementById('tab-radar-activity');
-const tabPrsActivityEl = document.getElementById('tab-prs-activity');
-const tabUsageActivityEl = document.getElementById('tab-usage-activity');
-const tabMillActivityEl = document.getElementById('tab-mill-activity');
-const tabVisionsActivityEl = document.getElementById('tab-visions-activity');
+const viewFocusEl = queryTag(document, '#view-focus', 'section');
+const viewRadarEl = queryTag(document, '#view-radar', 'section');
+const viewPrsEl = queryTag(document, '#view-prs', 'section');
+const viewUsageEl = queryTag(document, '#view-usage', 'section');
+const viewMillEl = queryTag(document, '#view-mill', 'section');
+const viewVisionsEl = queryTag(document, '#view-visions', 'section');
+const viewSettingsEl = queryTag(document, '#view-settings', 'section');
+const tabFocus = queryTag(document, '#tab-focus', 'button');
+const tabRadar = queryTag(document, '#tab-radar', 'button');
+const tabPrs = queryTag(document, '#tab-prs', 'button');
+const tabUsage = queryTag(document, '#tab-usage', 'button');
+const tabMill = queryTag(document, '#tab-mill', 'button');
+const tabVisions = queryTag(document, '#tab-visions', 'button');
+const tabSettings = queryTag(document, '#tab-settings', 'button');
+const tabRadarActivityEl = queryTag(document, '#tab-radar-activity', 'span');
+const tabPrsActivityEl = queryTag(document, '#tab-prs-activity', 'span');
+const tabUsageActivityEl = queryTag(document, '#tab-usage-activity', 'span');
+const tabMillActivityEl = queryTag(document, '#tab-mill-activity', 'span');
+const tabVisionsActivityEl = queryTag(document, '#tab-visions-activity', 'span');
 
 setRadarActivityCallback((active) => {
   tabRadarActivityEl.classList.toggle('active', active);
@@ -635,7 +636,7 @@ function activateView(view, { section, setting, persist = true } = {}) {
     requestMillReport();
   }
   if (prev === 'settings' && view !== 'settings') clearSettingsHash();
-  if (view === 'settings' && section) activateSettingsSection(section, setting);
+  if (view === 'settings' && section) activateSettingsSection(section, setting ?? null);
   acknowledgeViewAttention(view);
 }
 
@@ -694,9 +695,9 @@ mountPhoneShell({
   // top bar rather than being rebuilt there. Every listener, and the client-trust gating on Shut Down,
   // travels with them.
   headerControls: [
-    document.getElementById('status-indicator'),
-    document.getElementById('btn-add-session-header'),
-    document.getElementById('btn-help'),
+    queryTag(document, '#status-indicator', 'div'),
+    queryTag(document, '#btn-add-session-header', 'button'),
+    queryTag(document, '#btn-help', 'button'),
     headerMenu,
   ],
 });
@@ -722,7 +723,7 @@ if (isPhoneLayout()) applyFormFactorLayout('phone');
 onLayoutChange(applyFormFactorLayout);
 window.addEventListener('hashchange', activateSettingsHash);
 
-document.getElementById('btn-restart').addEventListener('click', () => {
+queryTag(document, '#btn-restart', 'button').addEventListener('click', () => {
   headerMenu.classList.remove('open');
   syncMenuAria();
   const count = getSessionCount();
@@ -744,11 +745,11 @@ document.getElementById('btn-restart').addEventListener('click', () => {
 // stays: production respawns the process detached and the dashboard reconnects on its own.
 function applyClientTrust(trust) {
   const showShutdown = shouldShowServerAction('shutdown', trust);
-  document.getElementById('btn-shutdown').hidden = !showShutdown;
-  document.getElementById('menu-divider-shutdown').hidden = !showShutdown;
+  queryTag(document, '#btn-shutdown', 'button').hidden = !showShutdown;
+  queryTag(document, '#menu-divider-shutdown', 'div').hidden = !showShutdown;
 }
 
-document.getElementById('btn-shutdown').addEventListener('click', () => {
+queryTag(document, '#btn-shutdown', 'button').addEventListener('click', () => {
   headerMenu.classList.remove('open');
   syncMenuAria();
   const count = getSessionCount();
@@ -767,7 +768,7 @@ document.getElementById('btn-shutdown').addEventListener('click', () => {
 
 // ── Sound controls ──────────────────────────────────────────
 
-const btnMute = document.getElementById('btn-mute');
+const btnMute = queryTag(document, '#btn-mute', 'button');
 
 function updateMuteButton() {
   const muted = !isSoundEnabled();
@@ -882,10 +883,11 @@ document.addEventListener('keydown', (e) => {
 
 // ── Window focus tracking (suppress server notifications when dashboard is visible) ──
 
+/** @type {number|null} */
 let _focusDebounce = null;
 
 function sendFocusState() {
-  clearTimeout(_focusDebounce);
+  if (_focusDebounce !== null) clearTimeout(_focusDebounce);
   _focusDebounce = setTimeout(() => {
     sendControlMsg({ type: 'focus-change', focused: document.hasFocus() });
   }, 150);
@@ -921,7 +923,7 @@ window.addEventListener('pageshow', (event) => {
 
 // ── Health monitor ──────────────────────────────────────────
 
-mountHealthMonitor(document.getElementById('health-footer-mount'));
+mountHealthMonitor(queryTag(document, '#health-footer-mount', 'div'));
 
 // ── Desktop notifications ────────────────────────────────────
 

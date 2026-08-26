@@ -24,11 +24,32 @@ const {
 const WORKTREE_CHECK_DEBOUNCE_MS = 400;
 
 /**
- * @typedef {{ cwd: string, isGit: boolean, branch?: string | null, base?: string | null, baseSha?: string | null }} Workspace
+ * @typedef {{ cwd: string, isGit: boolean, branch?: string | null, base?: string | null, baseSha?: string | null, reason?: string, conflictPath?: string }} Workspace
  * @typedef {{ state: import('../shared/states').SessionState, isDestroyed: boolean, isTeardownPending: boolean, hasLivePty: boolean }} SessionSnapshot
- * @typedef {{ create: (...args: unknown[]) => unknown, populate: (...args: unknown[]) => unknown, hasUnmergedWork: (...args: unknown[]) => unknown, discard: (...args: unknown[]) => unknown, mergeBack: (...args: unknown[]) => unknown, mergeKeep: (...args: unknown[]) => unknown, rebaseOnly: (...args: unknown[]) => Promise<{ ok?: boolean, rebased?: boolean, baseSha?: string, headSha?: string, rerereReplayed?: boolean, reason?: string, conflicts?: string[] }> }} GitWorkspace
+ * @typedef {{ merged: boolean, parked?: boolean, refused?: boolean, reason?: string, conflicts?: string[], baseSha?: string, restoreConflict?: boolean }} MergeResult
+ * @typedef {{ branch: string | null, upstream: string | null, state: string, ahead: number, behind: number, fetched: boolean | null, action: string, error: string | null }} BranchSyncResult
+ * @typedef {{ create: (...args: unknown[]) => Workspace | Promise<Workspace>, populate: (...args: unknown[]) => unknown, hasUnmergedWork: (...args: unknown[]) => boolean | Promise<boolean>, discard: (...args: unknown[]) => unknown, mergeBack: (...args: unknown[]) => MergeResult | Promise<MergeResult>, mergeKeep: (...args: unknown[]) => MergeResult | Promise<MergeResult>, rebaseOnly: (...args: unknown[]) => Promise<{ ok?: boolean, rebased?: boolean, baseSha?: string, headSha?: string, rerereReplayed?: boolean, reason?: string, conflicts?: string[] }> }} GitWorkspace
  * @typedef {{ state: () => SessionSnapshot, projectPath?: () => string, emit: (event: string, detail: Record<string, unknown>) => void, recordDecision: (entry: Record<string, unknown>) => void, pasteText: (text: string) => Record<string, unknown> }} SessionPort
  * @typedef {{ id: string, projectPath: string, integrationBranch?: string | null, gitWorkspace?: GitWorkspace | null, autoRebase?: boolean, liveWorktreeReview?: boolean, worktreeRoot?: string | null, worktreeShare?: string[] | null, port: SessionPort }} WorktreeLifecycleOptions
+ * @typedef {object} WorktreeLifecycleState
+ * @property {string | null} worktreeDir
+ * @property {string | null} commonGitDir
+ * @property {string | null} baseSha
+ * @property {Workspace | null} workspace
+ * @property {string} mergeStatus
+ * @property {string | null} mergeReason
+ * @property {string[]} mergeConflicts
+ * @property {string | null} worktreeNotice
+ * @property {string | null} effectiveBase
+ * @property {boolean} isWorktree
+ * @property {boolean} autoRebasing
+ * @property {string | null} rebaseConflictKey
+ * @property {Promise<BranchSyncResult> | null} resyncPromise
+ * @property {ReturnType<typeof createWorktreeWatcher> | null} worktreeWatcher
+ * @property {ReturnType<typeof createIntegrationRefWatcher> | null} integrationWatcher
+ * @property {ReturnType<typeof createRerereWatcher> | null} rerereWatcher
+ * @property {NodeJS.Timeout | null} checkTimer
+ * @property {string | null} lastSignature
  */
 
 function gitOut(args, opts) {
@@ -79,6 +100,7 @@ function createSessionWorktreeLifecycle({
   port,
 }) {
   const currentProjectPath = () => port.projectPath ? port.projectPath() : projectPath;
+  /** @type {WorktreeLifecycleState} */
   const lifecycleState = {
     worktreeDir: null,
     commonGitDir: null,
@@ -348,11 +370,11 @@ function createSessionWorktreeLifecycle({
     if (lifecycleState.mergeStatus !== "parked") return { ok: false, reason: "not-parked" };
     if (!session.hasLivePty) return { ok: false, reason: "no-pty" };
     return port.pasteText(buildMergePrompt({
-      branch: lifecycleState.workspace?.branch || null,
-      target: integrationBranch,
-      reason: lifecycleState.mergeReason,
+      branch: lifecycleState.workspace?.branch || undefined,
+      target: integrationBranch || undefined,
+      reason: lifecycleState.mergeReason || undefined,
       conflicts: lifecycleState.mergeConflicts,
-      worktreeDir: lifecycleState.worktreeDir,
+      worktreeDir: lifecycleState.worktreeDir || undefined,
     }));
   }
 
@@ -482,8 +504,9 @@ function createSessionWorktreeLifecycle({
   }
 
   async function computeWorktreeSignature() {
-    if (!lifecycleState.worktreeDir) return null;
-    const opts = { cwd: lifecycleState.worktreeDir, encoding: "utf8", timeout: 10000, maxBuffer: 16 * 1024 * 1024 };
+    const worktreeDir = lifecycleState.worktreeDir;
+    if (!worktreeDir) return null;
+    const opts = { cwd: worktreeDir, encoding: "utf8", timeout: 10000, maxBuffer: 16 * 1024 * 1024 };
     const run = (args) => gitStrict(["--no-optional-locks", ...args], opts);
     let status;
     let head;
@@ -506,7 +529,7 @@ function createSessionWorktreeLifecycle({
       } catch {}
       const rebaseMerge = (await run(["rev-parse", "--git-path", "rebase-merge"])).trim();
       const rebaseApply = (await run(["rev-parse", "--git-path", "rebase-apply"])).trim();
-      const resolveGitPath = (gitPath) => path.isAbsolute(gitPath) ? gitPath : path.resolve(lifecycleState.worktreeDir, gitPath);
+      const resolveGitPath = (gitPath) => path.isAbsolute(gitPath) ? gitPath : path.resolve(worktreeDir, gitPath);
       rebaseInProgress = fs.existsSync(resolveGitPath(rebaseMerge)) || fs.existsSync(resolveGitPath(rebaseApply));
     } catch {
       return null;
@@ -531,11 +554,13 @@ function createSessionWorktreeLifecycle({
       lastConflictKey: lifecycleState.rebaseConflictKey,
     });
     if (verdict.action !== "rebase") return;
+    if (!gitWorkspace || !lifecycleState.workspace) return;
+    const workspace = lifecycleState.workspace;
     lifecycleState.autoRebasing = true;
     try {
       const rebase = await gitWorkspace.rebaseOnly({
         projectPath: currentProjectPath(),
-        workspace: lifecycleState.workspace,
+        workspace,
         targetBranch: integrationBranch,
       });
       const currentSession = port.state();
@@ -546,7 +571,7 @@ function createSessionWorktreeLifecycle({
         lifecycleState.rebaseConflictKey = null;
         if (rebase.baseSha) {
           lifecycleState.baseSha = rebase.baseSha;
-          lifecycleState.workspace.baseSha = rebase.baseSha;
+          workspace.baseSha = rebase.baseSha;
         }
         port.recordDecision({
           kind: "rebase",
@@ -588,12 +613,13 @@ function createSessionWorktreeLifecycle({
     port.emit("worktree-changed", { id, sig: signature.sig });
   }
 
-  async function runMergeEngine(method) {
+  /** @param {GitWorkspace} workspaceApi @param {Workspace} workspace @param {"mergeBack" | "mergeKeep"} method */
+  async function runMergeEngine(workspaceApi, workspace, method) {
     setMergeStatus("merging");
     try {
-      return { result: await gitWorkspace[method]({
+      return { result: await workspaceApi[method]({
         projectPath: currentProjectPath(),
-        workspace: lifecycleState.workspace,
+        workspace,
         targetBranch: integrationBranch,
       }) };
     } catch (error) {
@@ -613,8 +639,9 @@ function createSessionWorktreeLifecycle({
 
   async function mergeWorktree() {
     if (!gitWorkspace || !lifecycleState.workspace) return { merged: false, refused: true, reason: "no-worktree" };
+    const workspace = lifecycleState.workspace;
     if (lifecycleState.mergeStatus === "merging") return { merged: false, refused: true, reason: "merge-in-progress" };
-    const { result, failure } = await runMergeEngine("mergeBack");
+    const { result, failure } = await runMergeEngine(gitWorkspace, workspace, "mergeBack");
     if (failure) return failure;
     if (!result.merged) return applyParkedOrPending(result);
     stopWatching();
@@ -626,17 +653,18 @@ function createSessionWorktreeLifecycle({
     const session = port.state();
     if (session.isDestroyed) return { merged: false, refused: true, reason: "destroyed" };
     if (!gitWorkspace || !lifecycleState.workspace) return { merged: false, refused: true, reason: "no-worktree" };
+    const workspace = lifecycleState.workspace;
     const runningOverride = force && session.state === STATES.RUNNING;
     if (!MERGEABLE_LIVE_STATES.includes(session.state) && !runningOverride) {
       return { merged: false, refused: true, reason: "not-continuable" };
     }
     if (lifecycleState.mergeStatus === "merging") return { merged: false, refused: true, reason: "merge-in-progress" };
-    const { result, failure } = await runMergeEngine("mergeKeep");
+    const { result, failure } = await runMergeEngine(gitWorkspace, workspace, "mergeKeep");
     if (failure) return failure;
     if (result.merged) {
       if (result.baseSha) {
         lifecycleState.baseSha = result.baseSha;
-        lifecycleState.workspace.baseSha = result.baseSha;
+        workspace.baseSha = result.baseSha;
       }
       if (!result.restoreConflict) {
         setMergeStatus("none");

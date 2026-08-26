@@ -143,12 +143,13 @@ function latestIntentHeads(records) {
   return heads;
 }
 
+/** @param {{ uri: string, project?: string | null, comments?: { line?: unknown, message?: unknown }[] | null, hand?: unknown }} options */
 function dispatchMemoryInputs({
   uri, project = null, comments = null, hand = null,
 }) {
   const basename = basenameOfUri(uri);
   const inputs = [];
-  for (const comment of Array.isArray(comments) ? comments : []) {
+  for (const comment of /** @type {{ line?: unknown, message?: unknown }[]} */ (Array.isArray(comments) ? comments : [])) {
     const line = positiveInteger(comment?.line);
     const message = sanitizeOneLine(comment?.message, 600);
     if (line === null || !message) continue;
@@ -166,6 +167,7 @@ function dispatchMemoryInputs({
 }
 
 // Applications only: the editor also refuses on a version race or a timeout, which is no operator verdict.
+/** @param {{ uri: string, project?: string | null, fix: { code?: unknown } }} options */
 function fixFeedbackInput({ uri, project = null, fix }) {
   const code = sanitizeOneLine(fix?.code == null ? '' : fix.code, 60);
   if (!code) return null;
@@ -178,6 +180,7 @@ function fixFeedbackInput({ uri, project = null, fix }) {
   });
 }
 
+/** @param {{ uri: string, project?: string | null, id: string, line?: number | null }} options */
 function servedFeedbackInput({
   uri, project = null, id, line = null,
 }) {
@@ -193,6 +196,7 @@ function servedFeedbackInput({
   });
 }
 
+/** @param {{ uri: string, project?: string | null, id: string }} options */
 function dismissFeedbackInput({ uri, project = null, id }) {
   const finding = sanitizeOneLine(id, MAX_FINDING_ID_CHARS);
   if (!finding) return null;

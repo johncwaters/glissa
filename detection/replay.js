@@ -48,6 +48,7 @@ async function replayDetection(records, opts = {}) {
   const conflictWindowMs = opts.conflictWindowMs ?? 750;
   const dedupWindowMs = opts.dedupWindowMs ?? 500;
   const adapter = resolveAdapter(opts.agent ?? null);
+  if (!adapter) throw new Error(`unknown agent adapter: ${opts.agent}`);
 
   const title = createOscTitleSource({ stabilizationMs, titleProfile: adapter.titleProfile });
   // What the live session's title source is told at spawn (codex reads its idle title by comparing it

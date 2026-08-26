@@ -270,6 +270,7 @@ const DEFAULT_THEME = 'phyrexian';
 
 // ── Application ──────────────────────────────────────────────
 
+/** @type {string|null} */
 let _currentThemeId = null;
 
 /**

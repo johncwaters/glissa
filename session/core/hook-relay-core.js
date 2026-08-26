@@ -39,10 +39,16 @@ function normalizeEvent(event) {
   return trimmed.toLowerCase();
 }
 
+/** @param {unknown} value @returns {value is Record<string, unknown>} */
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 // The loopback refusal mirrors session/statusline-relay.js: this process only ever talks to the local
 // Glissa, so a target that is not plain http on a loopback host is a misconfiguration or an attempt to
 // exfiltrate the hook payload, and either way it is refused rather than sent.
 function resolveHookTarget(baseUrl, event) {
+  /** @type {URL | null} */
   let target = null;
   try {
     target = new URL(baseUrl);
@@ -59,6 +65,7 @@ function resolveHookTarget(baseUrl, event) {
 
 // The whole relay contract in one verdict. `post: false` is never an error the agent hears about: the
 // relay exits 0 regardless, because a hook that fails must not fail the turn it was called from.
+/** @param {{ env?: Record<string, string | undefined>, event?: unknown, payloadBytes?: number }} [options] */
 function decideRelayPost({ env = {}, event = null, payloadBytes = 0 } = {}) {
   const baseUrl = readHookUrl(env);
   if (!baseUrl) return { post: false, url: null, reason: "no-hook-url" };
@@ -71,20 +78,23 @@ function decideRelayPost({ env = {}, event = null, payloadBytes = 0 } = {}) {
   return { post: true, url: target.url, reason: "ok" };
 }
 
+/** @param {unknown} event @param {unknown} status @param {unknown} body */
 function decideHookStdout(event, status, body) {
   const normalizedEvent = normalizeEvent(event);
   if (normalizedEvent !== "userpromptsubmit" && normalizedEvent !== "stop") return null;
   if (status !== 200) return null;
   const bodyBytes = Buffer.isBuffer(body) ? body.length : Buffer.byteLength(String(body || ""));
   if (bodyBytes === 0 || bodyBytes > MAX_RESPONSE_BYTES) return null;
+  /** @type {unknown} */
   let parsed = null;
   try {
     parsed = JSON.parse(String(body));
   } catch {
     return null;
   }
-  const hookSpecificOutput = parsed?.hookSpecificOutput;
-  if (!hookSpecificOutput || Array.isArray(hookSpecificOutput)) return null;
+  if (!isPlainObject(parsed)) return null;
+  const hookSpecificOutput = parsed.hookSpecificOutput;
+  if (!isPlainObject(hookSpecificOutput)) return null;
   if (normalizeEvent(hookSpecificOutput.hookEventName) !== normalizedEvent) return null;
   const additionalContext = hookSpecificOutput.additionalContext;
   if (typeof additionalContext !== "string") return null;

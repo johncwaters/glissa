@@ -31,6 +31,7 @@ function createRerereWatcher({ commonGitDir, onChange, debounceMs = 400 }) {
   const cacheDir = commonGitDir ? path.join(commonGitDir, RR_CACHE_DIR) : null;
   const inner = createWatchDebounce({ onChange, debounceMs });
   // The outer watch exists only to notice rr-cache being CREATED; it hands over and stops itself.
+  /** @type {ReturnType<typeof createWatchDebounce>|null} */
   let outer = null;
 
   function watchCache() {
@@ -51,12 +52,14 @@ function createRerereWatcher({ commonGitDir, onChange, debounceMs = 400 }) {
          */
         if (!watchCache()) return;
         onChange();
-        outer.stop();
+        if (outer) outer.stop();
       },
       debounceMs,
     });
-    return outer.watch(commonGitDir, (_evt, filename) => {
-      if (!filename || filename === RR_CACHE_DIR) outer.fire();
+    const outerWatch = outer;
+    if (!outerWatch) return false;
+    return outerWatch.watch(commonGitDir, (_evt, filename) => {
+      if (!filename || filename === RR_CACHE_DIR) outerWatch.fire();
     });
   }
 

@@ -1,9 +1,10 @@
 'use strict';
 
-// The gate only ever widens. Two escape hatches previously made it look stronger than it was: the
-// checked set was pinned by glob (so nothing noticed public/ was absent entirely), and server/backend.js
-// and session/sessions.js each carried a `// @ts-nocheck` on line 1, which excused the two largest files
-// in the repo from a gate reported as covering them. Both are now failures, not omissions.
+// The gate only ever widens. Three escape hatches previously made it look stronger than it was: the
+// checked set was pinned by glob (so nothing noticed public/ was absent entirely), server/backend.js and
+// session/sessions.js each carried a `// @ts-nocheck` on line 1, which excused the two largest files in
+// the repo from a gate reported as covering them, and a cast through `unknown` asserted a hand-written
+// shape onto an imported factory without checking either side. All three are now failures, not omissions.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -24,10 +25,15 @@ const SERVER_INCLUDE_GLOBS = [
 const PUBLIC_INCLUDE_GLOBS = ['public/**/*.js', 'public/**/*.mjs', 'public/**/*.d.ts'];
 
 // Turning any of these off makes tsc pass by checking less, not by the code being sound.
-const REQUIRED_OPTIONS = { allowJs: true, checkJs: true, noEmit: true };
+const REQUIRED_OPTIONS = { allowJs: true, checkJs: true, noEmit: true, strictNullChecks: true };
 
 const CHECKED_TREES = ['server', 'session', 'detection', 'notifications', 'shared', 'public'];
 const SUPPRESSIONS = ['@ts-nocheck', '@ts-ignore', '@ts-expect-error'];
+
+// `/** @type {X} */ (/** @type {unknown} */ (y))` launders an unchecked assertion past the gate the way
+// @ts-ignore does: it turns off checking of BOTH the value and the asserted shape, so the two drift
+// apart in silence. A bare `/** @type {unknown} */` on a declaration is fine, and stays legal here.
+const UNKNOWN_LAUNDER = /@type\s*\{unknown\}\s*\*\/\s*\(/;
 
 function readConfig(name) {
   return JSON.parse(fs.readFileSync(path.join(repoRoot, name), 'utf8'));
@@ -68,6 +74,17 @@ test('npm run typecheck runs both gates', () => {
   const script = readConfig('package.json').scripts.typecheck;
   assert.match(script, /tsconfig\.json/);
   assert.match(script, /tsconfig\.public\.json/);
+});
+
+test('no checked file launders an assertion through unknown', () => {
+  const offenders = [];
+  for (const tree of CHECKED_TREES) {
+    for (const file of sourceFilesUnder(path.join(repoRoot, tree))) {
+      const source = fs.readFileSync(file, 'utf8');
+      if (UNKNOWN_LAUNDER.test(source)) offenders.push(path.relative(repoRoot, file));
+    }
+  }
+  assert.deepEqual(offenders, []);
 });
 
 test('no checked file opts itself out of the gate', () => {

@@ -27,7 +27,7 @@ function parseGrokUsageLine(line) {
   const costUsdTicks = numberOrNull(modelCounts.costUsdTicks) ?? numberOrNull(usage.costUsdTicks);
   const uncachedInput = Math.max(0, inputTokens - cacheRead - cacheCreate);
   const outputTokens = safeNumber(modelCounts.outputTokens);
-  return vendorUsageEntry({
+  const entry = vendorUsageEntry({
     timestampMs,
     sessionId: stringOrNull(parsed.params?.sessionId),
     model,
@@ -39,8 +39,10 @@ function parseGrokUsageLine(line) {
       ? grokFallbackCostUSD(model, uncachedInput, outputTokens, cacheRead, cacheCreate)
       : costUsdTicks / 10000000000,
     vendor: 'grok',
-    messageId: stringOrNull(update.prompt_id),
   });
+  const messageId = stringOrNull(update.prompt_id);
+  if (messageId === null) return entry;
+  return { ...entry, messageId };
 }
 
 function grokDedupIdentity(entry) {

@@ -11,10 +11,22 @@ const STATE_ABBREV = {
   COMPLETE: 'CMP', DONE: 'DON', FAILED: 'FAI',
 };
 
+/**
+ * @typedef {{ name: string, state: string, hasPty: boolean, ptyPid: number|null, outputBufferBytes: number, outputBufferEntries: number, dataListenerCount: number, sleeping: boolean, autoKilled: boolean, destroyed: boolean, pendingRestart: boolean, timers: Record<string, unknown> }} HealthSession
+ */
+
+/**
+ * @typedef {{ uptimeSeconds: number, process: { rss: number, heapUsed: number, heapTotal: number, external: number, arrayBuffers: number, activeResources: number }, sessions: { total: number, alivePty: number, sleeping: number, totalDataListeners: number, totalOutputBufferBytes: number, list: HealthSession[] }, websockets: { control: number, data: number, dataPerSessionTotal: number }, anomalies: { listenerMismatch: boolean, orphanPty: boolean, destroyedReachable: boolean } }} HealthSnapshot
+ */
+
+/** @type {HealthSnapshot|null} */
 let _latest = null;
 let _expanded = false;
+/** @type {HTMLDivElement|null} */
 let _root = null;
+/** @type {HTMLButtonElement|null} */
 let _summaryEl = null;
+/** @type {HTMLDivElement|null} */
 let _detailEl = null;
 
 // House style forbids literal dash characters in source; built here so the rendered
@@ -102,7 +114,7 @@ function renderDetail() {
   const p = s.process;
   const w = s.websockets;
   const sess = s.sessions;
-  const a = s.anomalies || {};
+  const a = s.anomalies;
 
   let anomaliesHtml = '';
   if (anomalyCount(a) > 0) {
@@ -195,6 +207,7 @@ export function mountHealthMonitor(parent) {
   return panel;
 }
 
+/** @param {HealthSnapshot} stats */
 export function applyHealthSnapshot(stats) {
   _latest = stats;
   if (!_root || _root.hidden) return;

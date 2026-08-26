@@ -41,6 +41,7 @@ function yieldTick() {
 // The oldest moment the lane ledger can speak for, or null when it holds nothing to speak with.
 function earliestLaneEntryMs(ledger) {
   if (!ledger || typeof ledger.snapshot !== 'function') return null;
+  /** @type {number|null} */
   let earliest = null;
   for (const entry of ledger.snapshot()) {
     const ts = Number(entry?.ts);
@@ -89,6 +90,7 @@ function createMemoryIngest({
   knownProjects = [],
 } = {}) {
   if (!store || typeof store.append !== 'function') throw new Error('createMemoryIngest requires a memory store');
+  const memoryStore = store;
   const log = createLaneLog({ prefix: '[memory-ingest]', logger, debugFlag: debug });
   const statePath = store.dbPath || null;
 
@@ -106,9 +108,12 @@ function createMemoryIngest({
    */
   const holedPaths = new Set();
   let tailState = core.normalizeTailState(null);
+  /** @type {Promise<{ version: number, files: Record<string, unknown> }>|null} */
   let loadPromise = null;
+  /** @type {NodeJS.Timeout|null} */
   let flushTimer = null;
   let flushChain = Promise.resolve();
+  /** @type {ReturnType<typeof createAgentLogIngest>|null} */
   let ownSource = null;
   let stopped = false;
 
@@ -117,7 +122,7 @@ function createMemoryIngest({
     if (loadPromise) return loadPromise;
     loadPromise = (async () => {
       try {
-        tailState = core.normalizeTailState(store.tailState());
+        tailState = core.normalizeTailState(memoryStore.tailState());
       } catch (error) {
         log.warn(`tail state unreadable, starting empty: ${error.message}`);
         tailState = core.normalizeTailState(null);
@@ -139,7 +144,7 @@ function createMemoryIngest({
     }
     const entry = { ...tail, ts: nowFn() };
     tailState = core.recordTailOffset(tailState, entry, { maxEntries: maxTailEntries });
-    if (store.saveTailOffset(entry, { maxEntries: maxTailEntries })) return;
+    if (memoryStore.saveTailOffset(entry, { maxEntries: maxTailEntries })) return;
     counts.offsetsSkipped += 1;
     log.debugNote(() => `tail state write skipped for ${tail.path}`);
   }
@@ -149,7 +154,7 @@ function createMemoryIngest({
   function enqueue(event, tailPath) {
     counts.seen += 1;
     const input = core.memoryInputFromEvent(event, {
-      deliveredHashes: store.deliveredHashes?.() || null,
+      deliveredHashes: memoryStore.deliveredHashes?.() || null,
       knownProjects: readKnownProjects(knownProjects),
     });
     if (!input) return false;
@@ -226,7 +231,7 @@ function createMemoryIngest({
   async function appendBatch(inputs) {
     const records = inputs.map(({ tailPath, ...record }) => record);
     try {
-      const outcome = await store.appendMany(records);
+      const outcome = await memoryStore.appendMany(records);
       const written = (Array.isArray(outcome?.records) ? outcome.records : []).filter(Boolean).length;
       return { written, refused: outcome?.refused === true };
     } catch (error) {
@@ -288,6 +293,7 @@ function createMemoryIngest({
 
   async function collectFiles(root, dir, depth, found, budget) {
     if (budget <= 0 || found.length >= maxBackfillFiles) return budget;
+    /** @type {import('node:fs').Dirent[]|null} */
     let entries = null;
     try {
       entries = await fsPromises.readdir(dir, { withFileTypes: true });
@@ -322,6 +328,7 @@ function createMemoryIngest({
   }
 
   async function readRange(filePath, start, length) {
+    /** @type {import('node:fs/promises').FileHandle|null} */
     let handle = null;
     try {
       handle = await fsPromises.open(filePath, 'r');
@@ -448,7 +455,7 @@ function createMemoryIngest({
     }
     if (gone.length > 0) {
       tailState = core.tailStateForget(tailState, gone);
-      store.forgetTails(gone);
+      memoryStore.forgetTails(gone);
     }
     await whenIdle();
     log.note(

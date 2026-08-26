@@ -10,6 +10,9 @@ const { classifyUpgradePath, dataSessionIdFromUrl, upgradeTokenFromUrl } = requi
 const { isApplicableViewerSize, pickSizeAfterDeparture } = require('./core/viewer-size-core');
 const { createWsSender } = require('./ws-sender');
 
+/** @type {(options: { remoteEnabled: boolean, trust: string, origin?: string, allowedOrigins: string[], authenticated: boolean, listenerPorts?: number[], dashboardRoute?: boolean, tokenOk?: boolean }) => { allow: boolean, reason: string|null }} */
+const decideWebSocketUpgradeAccess = /** @type {(options: { remoteEnabled: boolean, trust: string, origin?: string, allowedOrigins: string[], authenticated: boolean, listenerPorts?: number[], dashboardRoute?: boolean, tokenOk?: boolean }) => { allow: boolean, reason: string|null }} */ (decideUpgradeAccess);
+
 /**
  * @typedef {object} BackendWebSocketDependencies
  * @property {{ enabled: boolean, allowedOrigins: string[] }} remote
@@ -53,6 +56,7 @@ function createBackendWebSockets(dependencies) {
   const controlWss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
   const dataWss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024 * 1024 });
   const controlReplayLog = createReplayLog();
+  /** @type {Map<string, Map<import('ws').WebSocket, { cols: number, rows: number, resizeSeq: number }|null>>} */
   const sessionDataClients = new Map();
   let nextViewerResizeSeq = 0;
 
@@ -95,17 +99,20 @@ function createBackendWebSockets(dependencies) {
         return;
       }
 
-      if (!sessionDataClients.has(sessionId)) {
-        sessionDataClients.set(sessionId, new Map());
+      let viewerSizes = sessionDataClients.get(sessionId);
+      if (!viewerSizes) {
+        viewerSizes = new Map();
+        sessionDataClients.set(sessionId, viewerSizes);
       }
-      const viewerSizes = sessionDataClients.get(sessionId);
-      viewerSizes.set(socket, null);
+      const activeSessionId = sessionId;
+      const viewerSizeMap = viewerSizes;
+      viewerSizeMap.set(socket, null);
 
       function releaseViewerSize() {
-        if (!viewerSizes.get(socket)) return;
-        viewerSizes.set(socket, null);
-        if (sessionDataClients.get(sessionId) !== viewerSizes) return;
-        const successor = pickSizeAfterDeparture(viewerSizes, socket);
+        if (!viewerSizeMap.get(socket)) return;
+        viewerSizeMap.set(socket, null);
+        if (sessionDataClients.get(activeSessionId) !== viewerSizeMap) return;
+        const successor = pickSizeAfterDeparture(viewerSizeMap, socket);
         if (!successor) return;
         session.resize(successor.cols, successor.rows);
       }
@@ -121,12 +128,14 @@ function createBackendWebSockets(dependencies) {
       const dataListener = (data) => sender.onData(data);
       session.on('data', dataListener);
       socket.on('message', (raw) => {
+        /** @type {Record<string, unknown>|null} */
         let message = null;
         try {
           message = JSON.parse(raw);
         } catch {
           return;
         }
+        if (!message || typeof message !== 'object') return;
 
         if (message.type === 'input' && typeof message.data === 'string') {
           if (message.data.length > 16384) {
@@ -150,7 +159,7 @@ function createBackendWebSockets(dependencies) {
           const rows = Number(message.rows);
           if (isApplicableViewerSize(cols, rows)) {
             nextViewerResizeSeq += 1;
-            viewerSizes.set(socket, { cols, rows, resizeSeq: nextViewerResizeSeq });
+            viewerSizeMap.set(socket, { cols, rows, resizeSeq: nextViewerResizeSeq });
             session.resize(cols, rows);
           }
           return;
@@ -175,10 +184,10 @@ function createBackendWebSockets(dependencies) {
         session.removeListener('data', dataListener);
         sender.destroy();
         releaseViewerSize();
-        const clients = sessionDataClients.get(sessionId);
+        const clients = sessionDataClients.get(activeSessionId);
         if (!clients) return;
         clients.delete(socket);
-        if (clients.size === 0) sessionDataClients.delete(sessionId);
+        if (clients.size === 0) sessionDataClients.delete(activeSessionId);
       });
     });
   }
@@ -191,10 +200,11 @@ function createBackendWebSockets(dependencies) {
       if (trust === 'remote') socket.destroy();
       return;
     }
-    if (route === 'visions' && trust === 'remote') {
+    if (route === 'visions' && (!visionsLane || trust === 'remote')) {
       socket.destroy();
       return;
     }
+    if (route === 'visions' && !visionsLane) return;
     if (!decideHostAllowed(request.headers.host, allowedHosts)) {
       socket.destroy();
       return;
@@ -202,7 +212,7 @@ function createBackendWebSockets(dependencies) {
 
     const authenticated = trust === 'remote' && remoteAuth ? remoteAuth.isUpgradeAuthorized(request) : false;
     const dashboardRoute = route === 'control' || route === 'data';
-    const decision = decideUpgradeAccess({
+    const decision = decideWebSocketUpgradeAccess({
       remoteEnabled: remote.enabled,
       trust,
       origin: request.headers.origin,
@@ -226,6 +236,7 @@ function createBackendWebSockets(dependencies) {
       return;
     }
     if (route === 'visions') {
+      if (!visionsLane) return;
       visionsLane.handleUpgrade(request, socket, head);
       return;
     }

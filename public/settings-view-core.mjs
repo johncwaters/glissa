@@ -129,13 +129,17 @@ export function hydrateFromSettings(map, settingsPayload = {}) {
   return values;
 }
 
+/**
+ * @param {{ rehydrateSectionIds?: string[] }} [options]
+ */
 export function rehydratePreservingDirtySections(
   map,
   settingsPayload,
   currentOriginal,
   currentEdited,
-  { rehydrateSectionIds = [] } = {},
+  options = {},
 ) {
+  const { rehydrateSectionIds = [] } = options;
   const original = hydrateFromSettings(map, settingsPayload);
   const edited = hydrateFromSettings(map, settingsPayload);
   if (!currentOriginal || !currentEdited) return { original, edited };
@@ -183,6 +187,7 @@ export function collectDirtyBlocks(map, original, edited) {
         : {};
       initializedBlocks.add(topLevel);
     }
+    /** @type {unknown} */
     let value = wireValue(setting, edited[setting.path]);
     if (setting.control === 'projects') {
       value = unionProjectSelection({
@@ -238,6 +243,7 @@ export function validateLocally(map, edited, settingsRanges = {}) {
   const errors = {};
   for (const setting of settingsOf(map)) {
     if (isReadOnlySetting(setting)) continue;
+    /** @type {string|null} */
     let error = null;
     if (setting.control === 'number') error = numberError(setting, edited[setting.path], settingsRanges);
     if (setting.valueKind === 'posthog-projects') error = posthogProjectsError(edited[setting.path]);

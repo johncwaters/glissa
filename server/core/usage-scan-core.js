@@ -19,6 +19,12 @@ function splitLines(carry, chunkText) {
   return { lines: lines.filter((line) => line.length > 0), carry: nextCarry || '' };
 }
 
+/**
+ * @param {NodeJS.ProcessEnv} [env]
+ * @param {string[]} [extraDirs]
+ * @param {(candidate: string) => boolean} [isDirectory]
+ * @param {string|null} [homeDir]
+ */
 function resolveProjectsDirs(env = process.env, extraDirs = [], isDirectory, homeDir = null) {
   if (typeof isDirectory !== 'function') throw new TypeError('resolveProjectsDirs requires an isDirectory function');
   const surviving = projectDirCandidates(env, extraDirs, homeDir).filter(isDirectory);
@@ -28,6 +34,7 @@ function resolveProjectsDirs(env = process.env, extraDirs = [], isDirectory, hom
   return surviving;
 }
 
+/** @param {NodeJS.ProcessEnv} [env] @param {string[]} [extraDirs] @param {string|null} [homeDir] */
 function projectDirCandidates(env = process.env, extraDirs = [], homeDir = null) {
   const override = configDirOverride(env);
   const extraHomes = normalizeHomeCandidates(extraDirs, env, homeDir);
@@ -37,6 +44,7 @@ function projectDirCandidates(env = process.env, extraDirs = [], homeDir = null)
   }
 
   const resolvedHomeDir = resolveHomeDir(env, homeDir);
+  if (!resolvedHomeDir) return uniqueStrings(projectsDirsFromHomes(extraHomes));
   const xdgConfigHome = stringOrNull(env.XDG_CONFIG_HOME) || path.join(resolvedHomeDir, '.config');
   const defaultHomes = [path.join(xdgConfigHome, 'claude'), path.join(resolvedHomeDir, '.claude')];
   return uniqueStrings([...projectsDirsFromHomes(defaultHomes), ...projectsDirsFromHomes(extraHomes)]);
@@ -57,6 +65,7 @@ function projectsDirsFromHomes(homes) {
   return projectsDirs;
 }
 
+/** @param {unknown} candidates @param {NodeJS.ProcessEnv} env @param {string|null} homeDir */
 function normalizeHomeCandidates(candidates, env, homeDir) {
   if (!Array.isArray(candidates)) return [];
   return candidates
@@ -64,12 +73,17 @@ function normalizeHomeCandidates(candidates, env, homeDir) {
     .filter(Boolean);
 }
 
+/** @param {string} candidate @param {NodeJS.ProcessEnv} env @param {string|null} homeDir */
 function expandTilde(candidate, env, homeDir) {
-  if (candidate === '~') return resolveHomeDir(env, homeDir);
+  if (!candidate.startsWith('~')) return candidate;
+  const home = resolveHomeDir(env, homeDir);
+  if (!home) return '';
+  if (candidate === '~') return home;
   if (!candidate.startsWith(`~${path.sep}`) && !candidate.startsWith('~/')) return candidate;
-  return path.join(resolveHomeDir(env, homeDir), candidate.slice(2));
+  return path.join(home, candidate.slice(2));
 }
 
+/** @param {NodeJS.ProcessEnv} env @param {string|null} homeDir */
 function resolveHomeDir(env, homeDir) {
   return stringOrNull(env.HOME) || stringOrNull(env.USERPROFILE) || homeDir;
 }
@@ -84,16 +98,26 @@ function uniqueStrings(values) {
 // nothing rather than erroring (unlike CLAUDE_CONFIG_DIR, which is an explicit claim that a dir exists).
 
 // The env override is comma-split like CLAUDE_CONFIG_DIR, so several homes can be scanned.
+/**
+ * @param {NodeJS.ProcessEnv} env
+ * @param {string} varName
+ * @param {string} defaultDirName
+ * @param {string|null} homeDir
+ */
 function vendorHomes(env, varName, defaultDirName, homeDir) {
   const override = typeof env?.[varName] === 'string' ? env[varName].trim() : '';
   if (override) return normalizeHomeCandidates(override.split(','), env, homeDir);
-  return [path.join(resolveHomeDir(env, homeDir), defaultDirName)];
+  const home = resolveHomeDir(env, homeDir);
+  if (!home) return [];
+  return [path.join(home, defaultDirName)];
 }
 
+/** @param {NodeJS.ProcessEnv} [env] @param {string|null} [homeDir] */
 function codexHomes(env = process.env, homeDir = null) {
   return vendorHomes(env, 'CODEX_HOME', '.codex', homeDir);
 }
 
+/** @param {NodeJS.ProcessEnv} [env] @param {string|null} [homeDir] */
 function grokHomes(env = process.env, homeDir = null) {
   return vendorHomes(env, 'GROK_HOME', '.grok', homeDir);
 }

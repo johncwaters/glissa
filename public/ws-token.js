@@ -9,6 +9,7 @@
 // here, not two.
 
 let token = '';
+/** @type {Promise<string>|null} */
 let inflight = null;
 
 export function pageToken() {

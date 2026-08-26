@@ -69,6 +69,14 @@ function closeExtraServers(extraServers) {
   }
 }
 
+/**
+ * @param {{ shutdown: () => unknown, httpServer: { close: (callback: () => void) => void },
+ *   extraServers?: Array<{ close: () => void, closeAllConnections?: () => void }>,
+ *   onRestart?: (() => void) | null, spawn: typeof import('./child-process-safe').spawn,
+ *   exit?: (code?: number) => unknown, getArgv?: () => string[], cwd?: () => string,
+ *   env?: NodeJS.ProcessEnv, log?: (message: string) => void, capMs?: number,
+ *   closeTimeoutMs?: number }} options
+ */
 function createLifecycle({
   shutdown,
   httpServer,
@@ -120,9 +128,10 @@ function createLifecycle({
     // Release the guard and rethrow if the in-process restart throws, so a thrown onRestart does not
     // latch `requested` and permanently no-op every later restart/shutdown. Production never reaches
     // here (it exits below), so the guard latching on the production path is moot by design.
-    if (onRestart) {
+    const restartInPlace = onRestart;
+    if (restartInPlace) {
       try {
-        onRestart();
+        restartInPlace();
       } catch (err) {
         requested = false;
         throw err;

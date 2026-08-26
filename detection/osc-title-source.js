@@ -138,7 +138,7 @@ class OscTitleSource extends EventEmitter {
       if (!this._warnedUnknown) {
         this._warnedUnknown = true;
         console.warn(
-          `[osc-title-source] unknown leading title glyph U+${char.codePointAt(0).toString(16)} ` +
+          `[osc-title-source] unknown leading title glyph U+${(char.codePointAt(0) ?? 0).toString(16)} ` +
             `(${JSON.stringify(char)}), treating as 'unknown', not 'ready'. ` +
             (this._profile.unknownGlyphHint || ''),
         );

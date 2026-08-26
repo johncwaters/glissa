@@ -43,17 +43,26 @@ const resyncingIds = new Set();
 const openFiles = new Set();
 const expanded = new Set();
 
+/** @type {HTMLElement|null} */
 let panelEl = null;
+/** @type {HTMLElement|null} */
 let branchSyncEl = null;
+/** @type {HTMLElement|null} */
 let controlsEl = null;
+/** @type {HTMLElement|null} */
 let bodyEl = null;
+/** @type {HTMLElement|null} */
 let sessionNameEl = null;
 let resolveJustSent = false;
+/** @type {string|null} */
 let resolveJustSentFor = null;
+/** @type {ReturnType<typeof setTimeout>|null} */
 let resolveSentTimer = null;
 // Latest resync outcome, keyed to the session it came from: { forId, text, isError } | null. A success/
 // diverged/in-sync result auto-fades (see applyResyncResult); an error persists until the next resync.
+/** @type {{ forId: string, text: string, isError: boolean }|null} */
 let resyncResult = null;
+/** @type {ReturnType<typeof setTimeout>|null} */
 let resyncResultTimer = null;
 
 // ── Mount ──
@@ -66,6 +75,7 @@ let resyncResultTimer = null;
 export function mountReviewSidebar({ panel }) {
   panelEl = panel;
   if (!panelEl) return;
+  const mountedPanel = panelEl;
 
   const head = el('div', 'review-sidebar-head');
   const title = el('span', 'review-sidebar-title', 'Review');
@@ -89,14 +99,14 @@ export function mountReviewSidebar({ panel }) {
   // panel is a full-width screen and there is nothing to resize against.
   const handle = el('div', 'review-resize-handle');
   handle.setAttribute('aria-hidden', 'true');
-  panelEl.append(head, branchSyncEl, controlsEl, bodyEl, handle);
+  mountedPanel.append(head, branchSyncEl, controlsEl, bodyEl, handle);
 
   let dragStartX = 0, dragStartWidth = 0;
 
   const applyWidth = (px) => {
     const w = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, px));
     if (!Number.isFinite(w)) return null;
-    panelEl.style.setProperty('--sidebar-width', `${w}px`);
+    mountedPanel.style.setProperty('--sidebar-width', `${w}px`);
     return w;
   };
 
@@ -117,7 +127,7 @@ export function mountReviewSidebar({ panel }) {
     if (handle.hasPointerCapture(e.pointerId)) handle.releasePointerCapture(e.pointerId);
     document.documentElement.style.cursor = '';
     document.documentElement.style.userSelect = '';
-    const w = panelEl.style.getPropertyValue('--sidebar-width');
+    const w = mountedPanel.style.getPropertyValue('--sidebar-width');
     if (w) setSidebarWidth(parseInt(w, 10));
   };
 
@@ -125,7 +135,7 @@ export function mountReviewSidebar({ panel }) {
     if (e.button !== 0) return;
     e.preventDefault();
     dragStartX = e.clientX;
-    dragStartWidth = panelEl.getBoundingClientRect().width;
+    dragStartWidth = mountedPanel.getBoundingClientRect().width;
     handle.setPointerCapture(e.pointerId);
     dragging = true;
     document.documentElement.style.cursor = 'col-resize';
@@ -221,7 +231,7 @@ export function setReviewBranchSync(id, payload) {
 // resync attempt for this session, since the operator needs time to actually read it.
 function applyResyncResult(id, payload) {
   resyncingIds.delete(id);
-  clearTimeout(resyncResultTimer);
+  clearTimeout(resyncResultTimer ?? undefined);
   const text = resyncOutcomeText(payload);
   resyncResult = text ? { forId: id, text, isError: !!payload.error } : null;
   if (resyncResult && !resyncResult.isError) {
@@ -273,7 +283,7 @@ export function forgetReviewSession(id) {
   diffById.delete(id);
   syncById.delete(id);
   resyncingIds.delete(id);
-  if (resyncResult && resyncResult.forId === id) { clearTimeout(resyncResultTimer); resyncResult = null; }
+  if (resyncResult && resyncResult.forId === id) { clearTimeout(resyncResultTimer ?? undefined); resyncResult = null; }
   if (id === getSelectedId()) { setSelectedId(null); return; } // setSelectedId fires render
   render();
 }
@@ -395,7 +405,7 @@ function requestBranchSync(id) {
 // the server additionally coalesces concurrent resyncs per session as a backstop.
 function requestResyncBranch(id) {
   resyncingIds.add(id);
-  clearTimeout(resyncResultTimer);
+  clearTimeout(resyncResultTimer ?? undefined);
   if (resyncResult && resyncResult.forId === id) resyncResult = null; // a fresh attempt supersedes the last outcome
   sendControlMsg({ type: 'resync-branch', id });
   if (id === getSelectedId()) render();
@@ -564,6 +574,7 @@ function render() {
 }
 
 function renderEmpty(title, desc) {
+  if (!bodyEl) return;
   const wrap = el('div', 'review-empty');
   wrap.append(el('div', 'review-empty-title', title), el('div', 'review-empty-desc', desc));
   bodyEl.append(wrap);
@@ -746,7 +757,7 @@ function renderActions(id, { status, reviewable, mergeEnabled, live, state, sync
         sendControlMsg({ type: 'resolve-session-merge', id });
         resolveJustSent = true;
         resolveJustSentFor = id;
-        clearTimeout(resolveSentTimer);
+        clearTimeout(resolveSentTimer ?? undefined);
         resolveSentTimer = setTimeout(() => { resolveJustSent = false; resolveJustSentFor = null; render(); }, 3000);
         render();
       },
@@ -762,7 +773,7 @@ function renderActions(id, { status, reviewable, mergeEnabled, live, state, sync
   actions.append(actionButton({
     id: 'review-resync-btn',
     label: 'Resync',
-    shortcut: resolveShown ? null : 'alt+r',
+    shortcut: resolveShown ? undefined : 'alt+r',
     title: resolveShown
       ? 'Fetch and fast-forward/push the local base branch against its remote upstream'
       : 'Fetch and fast-forward/push the local base branch against its remote upstream (alt+r)',

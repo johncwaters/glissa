@@ -615,6 +615,7 @@ function registerControlHandlers(controlWss, deps) {
   function handleListAgents(msg, ws) {
     const agents = listAgentIds().map((id) => {
       const adapter = getAdapter(id);
+      if (!adapter) return { id, label: id, resolvable: false };
       const resolved = commandFor(adapter);
       return { id, label: adapter.label || id, resolvable: !!resolved?.path };
     });
@@ -825,20 +826,22 @@ function registerControlHandlers(controlWss, deps) {
 
     // The mutator cannot abort a save, so its verdict comes back out here and a refusal simply leaves
     // the record untouched.
-    let outcome = null;
+    /** @type {{ error: string }|{ packs: string[] }|null} */
+    /** @type {{ value: { error: string }|{ packs: string[] }|null }} */
+    const outcome = { value: null };
     const freshConfig = configStore.save((cfg) => {
       const records = Array.isArray(cfg.projects) ? cfg.projects : [];
       const record = records.find((p) => p.id === projectId);
-      if (!record) { outcome = { error: 'Unknown project' }; return; }
+      if (!record) { outcome.value = { error: 'Unknown project' }; return; }
       // Delivery is addressed per PROJECT: every card on this checkout moves together, or one project
       // would deliver a pack to whichever of its cards happened to be ticked.
       const planned = [];
       for (const member of sameProjectRecords(records, record)) {
         const next = applyPackDelta(member.packs, pack, msg.deliver);
-        if (!next.ok) { outcome = { error: next.error }; return; }
+        if (!next.ok) { outcome.value = { error: next.error || 'Could not update project packs' }; return; }
         planned.push({ member, packs: next.packs });
       }
-      outcome = { packs: planned.find((entry) => entry.member === record).packs };
+      outcome.value = { packs: planned.find((entry) => entry.member === record).packs };
       for (const { member, packs } of planned) {
         // An empty list REMOVES the key, so a project that delivers nothing reads exactly as one that
         // never named a pack.
@@ -849,13 +852,15 @@ function registerControlHandlers(controlWss, deps) {
     if (!freshConfig) { reply({ error: 'Could not write config.json' }); return; }
     // A save whose mutator refused still WROTE (the bytes are unchanged), so the refusal has to be
     // reported here rather than read as success.
-    if (outcome?.error) { reply({ error: outcome.error }); return; }
+    const savedOutcome = outcome.value;
+    if (!savedOutcome) { reply({ error: 'Could not update project packs' }); return; }
+    if ('error' in savedOutcome) { reply({ error: savedOutcome.error }); return; }
 
     // Answered before the reload: the write has already landed, and a throw further down must not leave
     // the requester with no frame and a checkbox disabled forever.
-    reply({ ok: true, projectId, pack, deliver: msg.deliver, packs: outcome.packs });
+    reply({ ok: true, projectId, pack, deliver: msg.deliver, packs: savedOutcome.packs });
     // The Mill tab is a pull surface, so this says "your report is out of date" rather than carrying one.
-    broadcastControl({ type: 'project-packs-updated', projectId, packs: outcome.packs });
+    broadcastControl({ type: 'project-packs-updated', projectId, packs: savedOutcome.packs });
     console.log(`[control] set-project-packs: ${project.name} ${msg.deliver ? '+' : '-'}${pack}`);
 
     // Built BEFORE the reload: the respawn resolves packs at spawn, and a first delivery is never yet built.

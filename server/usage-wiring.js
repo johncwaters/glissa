@@ -209,22 +209,32 @@ function createUsageWiring({
 }) {
   let cfg = resolveUsageConfig(config.usage);
   let lastKey = usageCfgKey(config);
+  /** @type {ReturnType<typeof createUsageScanner> | null} */
   let scanner = null;
+  /** @type {Awaited<ReturnType<typeof loadPricingSafely>> | null} */
   let pricing = null;
+  /** @type {Promise<void> | null} */
   let startPromise = null;
   let startRequested = false;
   let stopped = false;
   let passInFlight = false;
+  /** @type {NodeJS.Timeout | null} */
   let intervalTimer = null;
+  /** @type {NodeJS.Timeout | null} */
   let nudgeTimer = null;
+  /** @type {NodeJS.Timeout | null} */
   let continueTimer = null;
   let restartChain = Promise.resolve();
+  /** @type {{ type: string, ts: number, pricingSource: string | null, sessions: { id: string, tokens: number, costUSD: number, lastTs: number | null, officialCostUSD: number | null | undefined }[] } | null} */
   let lastSessionsMessage = null;
+  /** @type {string | null} */
   let lastSessionsSignature = null;
+  /** @type {Record<string, unknown> | null} */
   let lastReportMessage = null;
   let lastForcedPassMs = 0;
   // Plan limits are a property of the ACCOUNT, not of a session, so one freshest snapshot serves every
   // card and every connected client.
+  /** @type {ReturnType<typeof normalizeStatuslinePayload>} */
   let planLimits = null;
   const officialCostByClaudeId = new Map();
   let budgetFiredState = {};
@@ -236,6 +246,7 @@ function createUsageWiring({
       warn: (error) => warn(`budget state write failed: ${error instanceof Error ? error.message : String(error)}`),
     })
     : null;
+  /** @type {{ available: boolean, commands: number, inputTokens: number, outputTokens: number, savedTokens: number, savingsPct: number, daily: unknown[] } | null} */
   let rtkSavingsCache = null;
   let rtkSavingsCacheMs = 0;
   let warnedRtkGain = false;
@@ -267,10 +278,11 @@ function createUsageWiring({
     lastKey = usageCfgKey(config);
     if (!usageShouldStart(config)) return Promise.resolve();
     startPromise = (async () => {
-      pricing = await loadPricingSafely();
+      const loadedPricing = await loadPricingSafely();
+      pricing = loadedPricing;
       if (stopped) return;
       scanner = createScanner({
-        pricingTable: pricing.table,
+        pricingTable: loadedPricing.table,
         costMode: cfg.costMode,
         blockHours: cfg.sessionBlockHours,
         retainDays: cfg.retainDays,
@@ -307,6 +319,7 @@ function createUsageWiring({
   async function runPassAndPush({ force }) {
     if (stopped || !scanner) return null;
     passInFlight = true;
+    /** @type {Awaited<ReturnType<ReturnType<typeof createUsageScanner>['runPass']>> | null} */
     let result = null;
     try {
       result = await scanner.runPass({ force });
@@ -449,6 +462,7 @@ function createUsageWiring({
   async function loadBudgetState() {
     if (budgetStateLoaded || !budgetStatePath) return;
     budgetStateLoaded = true;
+    /** @type {string | null} */
     let text = null;
     try {
       text = await fsPromises.readFile(budgetStatePath, 'utf8');
@@ -510,14 +524,16 @@ function createUsageWiring({
   function deliverBudgetTelegram(alert) {
     const decision = decideTelegramNotification({
       enabled: config.telegramNotifications === true,
-      botToken: config.telegram?.botToken,
-      chatId: config.telegram?.chatId,
+      botToken: config.telegram?.botToken || '',
+      chatId: config.telegram?.chatId || '',
       connectionCount: controlClientCount(),
     });
     if (!decision.send) return;
+    const telegram = config.telegram;
+    if (!telegram?.botToken || !telegram.chatId) return;
     void Promise.resolve(sendTelegram({
-      botToken: config.telegram.botToken,
-      chatId: config.telegram.chatId,
+      botToken: telegram.botToken,
+      chatId: telegram.chatId,
       text: budgetAlertText(alert),
     })).catch(() => {});
   }
@@ -585,12 +601,13 @@ function createUsageWiring({
   /** @param {{ days?: number, force?: boolean, requestId?: string | null }} [options] */
   async function requestReport({ days, force = false, requestId = null } = {}) {
     await start();
-    if (!scanner) return unavailableReport(requestId, 'Usage tracking is disabled');
+    if (!scanner || !pricing) return unavailableReport(requestId, 'Usage tracking is disabled');
     // A forced pass rebuilds the whole store; rate-limit it so a looping client cannot queue
     // back-to-back full rescans onto the shared event loop (posthog FORCE_TICK_DEBOUNCE_MS precedent).
     const allowForce = force && nowFn() - lastForcedPassMs >= FORCE_PASS_MIN_INTERVAL_MS;
     if (allowForce) lastForcedPassMs = nowFn();
     if (force) await runPassAndPush({ force: allowForce });
+    /** @type {ReturnType<ReturnType<typeof createUsageScanner>['buildReport']> | null} */
     let report = null;
     try {
       report = scanner.buildReport({ days });

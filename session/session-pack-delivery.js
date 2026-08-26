@@ -1,6 +1,9 @@
 "use strict";
 
-const { decidePackDelivery, normalizePackNames, variantPackName } = require("../server/core/pack-core");
+const packCore = require("../server/core/pack-core");
+/** @type {(options?: { manifest?: object | Record<string, unknown> | null, projectPath?: string | null, packsDir?: string | null }) => { deliver: boolean, reason: string | null, detail: string | null }} */
+const decidePackDelivery = packCore.decidePackDelivery;
+const { normalizePackNames, variantPackName } = packCore;
 const { DEFAULT_PACKS_DIR, defaultBuiltRoot, resolveBuiltPack } = require("../server/pack-builder");
 const { buildPackNotice, listStalePacks } = require("./core/pack-notice");
 

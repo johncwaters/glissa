@@ -7,6 +7,7 @@ const HOUR_MS = 60 * 60 * 1000;
 function buildBlocks(entriesAsc, { blockHours = 5, now = Date.now() } = {}) {
   const duration = blockHours * HOUR_MS;
   const blocks = [];
+  /** @type {ReturnType<typeof newUsageBlock> | null} */
   let current = null;
   let previousEntryTs = null;
   const sortedEntries = (entriesAsc || [])

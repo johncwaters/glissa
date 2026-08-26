@@ -4,6 +4,7 @@ const RTK_PATH_ENV = "GLISSA_RTK_PATH";
 
 const MAX_RTK_STDOUT_BYTES = 65536;
 
+/** @param {unknown} value @returns {value is Record<string, unknown>} */
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -14,6 +15,7 @@ function normalizeRtkHookResponse(stdoutText) {
   const trimmed = stdoutText.trim();
   if (!trimmed) return "";
   if (Buffer.byteLength(trimmed) > MAX_RTK_STDOUT_BYTES) return "";
+  /** @type {unknown} */
   let parsed = null;
   try {
     parsed = JSON.parse(trimmed);

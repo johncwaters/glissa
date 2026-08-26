@@ -7,11 +7,11 @@ const { packVariantProjects } = require('./core/pack-core');
 /** @typedef {{ toSnapshot: () => Record<string, unknown> }} BackendControlSession */
 /** @typedef {{ stamp: (message: Record<string, unknown>) => Record<string, unknown>, entriesSince: (since: number) => { entries: Record<string, unknown>[], evicted: boolean }, currentSeq: () => number }} ControlReplayLog */
 /** @typedef {{ snapshotMessage: () => Record<string, unknown> }} SnapshotLane */
-/** @typedef {{ current: (name: string) => SnapshotLane|null }} LaneReader */
+/** @typedef {{ currentIngest: () => SnapshotLane|null, currentVisions: () => SnapshotLane|null }} LaneReader */
 /** @typedef {{ getStatus: () => Record<string, unknown>|null, setIssueStatus: (args: { projectId: string, issueId: string, action: string }) => Promise<Record<string, unknown>>, archiveInvestigation: (args: { id: string }) => Promise<Record<string, unknown>> }} PosthogControl */
 /** @typedef {{ getStatus: () => Record<string, unknown>|null }} PrReviewControl */
-/** @typedef {{ getVersions: () => Record<string, string>, ensureBuilt: (names: string[], options: { projects: Record<string, unknown>[] }) => Promise<unknown> }} PackControl */
-/** @typedef {{ getSessionsMessage: () => Record<string, unknown>, getCachedReport: () => Record<string, unknown>|null, requestReport: (args: Record<string, unknown>) => Promise<Record<string, unknown>>, getPlanLimitsMessage: () => Record<string, unknown>|null }} UsageControl */
+/** @typedef {{ getVersions: () => Record<string, string>, ensureBuilt: (names: string[], options?: { projects?: Record<string, unknown>[]|null }) => Promise<unknown> }} PackControl */
+/** @typedef {{ getSessionsMessage: () => Record<string, unknown>|null, getCachedReport: () => Record<string, unknown>|null, requestReport: (args: { days?: number, force?: boolean, requestId?: string|null }) => Promise<Record<string, unknown>>, getPlanLimitsMessage: () => Record<string, unknown>|null }} UsageControl */
 /** @typedef {{ requestReport: (message: Record<string, unknown>, send: (payload: Record<string, unknown>) => void) => Promise<void>, getCachedReport: () => Record<string, unknown>|null, listPackNames: () => Promise<string[]>, resolvePackSourceRoots: (name: string) => Promise<string[]> }} MillControl */
 
 /**
@@ -101,11 +101,11 @@ function createBackendControl(dependencies) {
 
   // Registered unconditionally and resolved live: a lane switched on by a later settings save rebuilds,
   // but no rebuild ever revisits this listener, so a boot-time gate left connect-time repair off for good.
-  const sendLaneSnapshotOnConnect = (laneName, refuseRemote) => {
+  const sendLaneSnapshotOnConnect = (laneName, readLane, refuseRemote) => {
     controlWss.on('connection', (socket) => {
       if (socket.readyState !== 1) return;
       if (refuseRemote && socket.glissaTrust === 'remote') return;
-      const lane = laneAssembly.current(laneName);
+      const lane = readLane();
       if (!lane) return;
       try {
         socket.send(JSON.stringify(lane.snapshotMessage()));
@@ -115,8 +115,8 @@ function createBackendControl(dependencies) {
     });
   };
 
-  sendLaneSnapshotOnConnect('visions', false);
-  sendLaneSnapshotOnConnect('ingest', true);
+  sendLaneSnapshotOnConnect('visions', laneAssembly.currentVisions, false);
+  sendLaneSnapshotOnConnect('ingest', laneAssembly.currentIngest, true);
 }
 
 module.exports = { createBackendControl };

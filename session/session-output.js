@@ -28,8 +28,11 @@ const PASTE_READY_STATES = new Set([
 /** @param {SessionOutputOptions} options */
 function createSessionOutput(options) {
   const ring = createOutputRing(options.maxBytes);
+  /** @type {{ timer: NodeJS.Timeout, onStateChange: (change: { to: typeof STATES[keyof typeof STATES] }) => void, onExit: () => void } | null} */
   let pendingPaste = null;
+  /** @type {number | null} */
   let lastCols = null;
+  /** @type {number | null} */
   let lastRows = null;
 
   function clearPendingPaste() {

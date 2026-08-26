@@ -9,11 +9,14 @@ import controlContracts from '/shared/control-messages.mjs';
 
 const { ServerMessage } = controlContracts;
 
+/** @type {WebSocket|null} */
 let controlWs = null;
+/** @type {number|null} */
 let controlRetryTimer = null;
 // Consecutive failed attempts since the last connection that actually opened; drives the backoff.
 let controlRetryAttempt = 0;
 const pendingRequests = new Map(); // requestId -> { resolve, timer }
+/** @type {Promise<'ok'|'dead'>|null} */
 let livenessProbePromise = null;
 let connectingSince = 0;
 // True while the page token is being fetched: connectControl has no socket yet and must not open a
@@ -25,7 +28,9 @@ let tokenFetchPending = false;
 // recover exactly the transient broadcasts (notify, ...) missed during the gap.
 let lastSeq = 0;
 
+/** @type {((message: unknown) => void)|null} */
 let _messageHandler = null;
+/** @type {((state: string, label: string) => void)|null} */
 let _connectionStateCallback = null;
 
 // ── Public API ────────────────────────────────────────────────
@@ -64,7 +69,7 @@ export function sendControlRequest(type, payload) {
 
 export function connectControl() {
   if (controlRetryTimer !== null) {
-    clearTimeout(controlRetryTimer);
+    if (controlRetryTimer !== null) clearTimeout(controlRetryTimer);
     controlRetryTimer = null;
   }
   // The server refuses a tokenless control socket, so the first connect of a page load fetches the
@@ -169,7 +174,7 @@ export async function checkControlLiveness() {
     connectingAgeMs: Date.now() - connectingSince,
   });
   if (action === 'retry-now') {
-    clearTimeout(controlRetryTimer);
+    if (controlRetryTimer !== null) clearTimeout(controlRetryTimer);
     controlRetryTimer = null;
     controlRetryAttempt = 0;
     connectControl();
@@ -186,10 +191,10 @@ export async function checkControlLiveness() {
   if (action === 'wait') return 'reconnecting';
   const probedSocket = controlWs;
   livenessProbePromise = sendControlRequest('ping', {})
-    .then(() => 'ok')
+    .then(() => /** @type {'ok'} */ ('ok'))
     .catch(() => {
-      if (controlWs === probedSocket) probedSocket.close();
-      return 'dead';
+      if (controlWs === probedSocket && probedSocket) probedSocket.close();
+      return /** @type {'dead'} */ ('dead');
     })
     .finally(() => {
       livenessProbePromise = null;

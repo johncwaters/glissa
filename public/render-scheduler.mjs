@@ -38,6 +38,7 @@ export function createScheduler({
   const sinks = new Map(); // id -> { write, pending: string[], readIdx, pendingBytes, inFlight, dirty, live }
   const order = []; // ids in round-robin order
   let rr = 0;
+  /** @type {number|null} */
   let frameId = null;
 
   function arm() {

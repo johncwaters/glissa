@@ -33,6 +33,7 @@ function postPayload(url, body) {
       settled = true;
       resolve(response);
     };
+    /** @type {URL | null} */
     let target = null;
     try {
       target = new URL(url);
@@ -53,6 +54,7 @@ function postPayload(url, body) {
           },
         },
         (res) => {
+          /** @type {Buffer[]} */
           const responseChunks = [];
           let responseBytes = 0;
           res.on('data', (chunk) => {

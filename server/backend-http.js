@@ -44,6 +44,7 @@ function isStatuslineEvent(event) {
 }
 
 async function sweepSessionUploads(dir, justWritten) {
+  /** @type {string[]|null} */
   let entries = null;
   try {
     entries = await fsp.readdir(dir);

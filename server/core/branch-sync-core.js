@@ -29,6 +29,7 @@ function parseLeftRightCount(output) {
 function decideBranchSyncState({ hasUpstream, ahead, behind }) {
   if (!hasUpstream) return 'no-upstream';
   if (!Number.isInteger(ahead) || !Number.isInteger(behind)) return 'unknown';
+  if (ahead === undefined || behind === undefined) return 'unknown';
   if (ahead > 0 && behind > 0) return 'diverged';
   if (ahead > 0) return 'ahead';
   if (behind > 0) return 'behind';

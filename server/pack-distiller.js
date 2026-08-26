@@ -52,7 +52,7 @@ function readDistillResult(resultPath) {
     maxBytes: MAX_DISTILL_RESULT_BYTES,
     validate: validateDistillResult,
   });
-  if (result.ok) return result;
+  if (!('kind' in result)) return result;
   return failedResult(result.kind === 'missing' ? undefined : result.reason);
 }
 
@@ -64,6 +64,7 @@ async function writeOutputNoFollow(fullPath, content) {
     | fs.constants.O_CREAT
     | fs.constants.O_EXCL
     | fs.constants.O_NOFOLLOW;
+  /** @type {import('node:fs/promises').FileHandle|null} */
   let handle = null;
   try {
     handle = await fs.promises.open(tempPath, flags, 0o666);
@@ -72,6 +73,7 @@ async function writeOutputNoFollow(fullPath, content) {
     await handle.close();
     handle = null;
 
+    /** @type {import('node:fs').Stats|null} */
     let outputStats = null;
     try {
       outputStats = await fs.promises.lstat(fullPath);
@@ -101,7 +103,7 @@ function writeStandaloneLaneSettings(permissions) {
 
 /**
  * @param {{ sessions?: Map<string, unknown>, closeSessionDataClients?: (id: string) => void,
- *   hookRouter?: unknown, getHookPort?: (() => number | null) | null, spawnGate?: unknown,
+ *   hookRouter?: Pick<InstanceType<typeof import('../detection/hook-source').HookRouter>, 'register' | 'unregister'>|null, getHookPort?: (() => number | null) | null, spawnGate?: unknown,
  *   replayBufferKB?: number, recordLane?: ((...args: unknown[]) => unknown) | null }} [options]
  */
 function createDistillSpawn({
@@ -180,6 +182,7 @@ function createPackDistiller(deps = {}) {
     log = console,
   } = deps;
 
+  /** @type {NodeJS.Timeout|null} */
   let timer = null;
   let stopped = false;
   let tickRunning = false;
@@ -206,17 +209,22 @@ function createPackDistiller(deps = {}) {
     }
   }
 
-  function spawnWithTimeout(spawnArgs, resultPath, { onPending = null } = {}) {
+  function spawnWithTimeout(spawnArgs, resultPath, {
+    onPending = /** @type {((promise: Promise<unknown>) => void)|null} */ (null),
+  } = {}) {
     return raceWithAbort({
       timeoutMs: timeoutSeconds * 1000,
       setTimeoutFn,
       clearTimeoutFn,
-      onPending,
       onTimeout: () => ({ verdict: 'ERROR', summary: 'distill timed out' }),
       onEmpty: () => ({ verdict: 'ERROR', summary: 'no verdict' }),
-      start: (signal) => Promise.resolve(spawnDistill({ ...spawnArgs, signal }))
-        .then(() => readResult(resultPath))
-        .catch((err) => ({ verdict: 'ERROR', summary: firstLine(err.message) })),
+      start: (signal) => {
+        const pending = Promise.resolve(spawnDistill({ ...spawnArgs, signal }))
+          .then(() => readResult(resultPath))
+          .catch((err) => ({ verdict: 'ERROR', summary: firstLine(err.message) }));
+        if (typeof onPending === 'function') onPending(pending);
+        return pending;
+      },
     });
   }
 
@@ -240,7 +248,9 @@ function createPackDistiller(deps = {}) {
 
     let result;
     // The prompt builder runs inside the try too, so a throw there cannot strand the directory.
+    /** @type {{ path: string, cleanup: () => Promise<void> | void }|null} */
     let resultFile = null;
+    /** @type {Promise<unknown>|null} */
     let pendingSpawn = null;
     try {
       resultFile = await createResultFile(spec.name, index);

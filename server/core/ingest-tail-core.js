@@ -49,6 +49,10 @@ function headChanged(state, head) {
   return !head.startsWith(recorded);
 }
 
+/**
+ * @param {{ size?: number, mtimeMs?: number, ino?: number, birthtimeMs?: number } | null | undefined} stat
+ * @param {{ path?: string | null, head?: string | null }} options
+ */
 function createTailState(stat, { path: filePath = null, head = null } = {}) {
   const size = Math.max(0, Math.floor(finiteOr(stat?.size, 0)));
   return {
@@ -132,6 +136,11 @@ function afterFirstBreak(text) {
 /**
  * Fold one read into the state and hand back the COMPLETE lines it produced. A trailing partial line
  * becomes the carry, which the next read prepends, so a line split across two reads arrives whole once.
+ * @param {{ carry: string, vendorState: unknown, head: string | null, offset: number, size: number,
+ *   mtimeMs: number, identity: string }} state
+ * @param {{ text?: string, end?: number, stat?: { size?: number, mtimeMs?: number, ino?: number,
+ *   birthtimeMs?: number } | null, head?: string | null, reset?: boolean, dropPartial?: boolean,
+ *   keepEmptyLines?: boolean }} options
  */
 function applyRead(state, {
   text = '', end = 0, stat = null, head = null, reset = false, dropPartial = false, keepEmptyLines = false,

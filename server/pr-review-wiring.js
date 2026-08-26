@@ -45,6 +45,11 @@ const PR_REVIEW_DENY = {
   ],
 };
 
+/** @typedef {{ replayBufferKB?: number, worktreeRoot?: string,
+ *   prReview?: { enabled?: boolean, packs?: unknown, projects?: unknown[], intervalMinutes?: number,
+ *     mergeMethod?: string, maxConcurrentReviews?: number, reviewTimeoutSeconds?: number } | null,
+ *   telegram?: { botToken?: string, chatId?: string } | null }} PrReviewWiringConfig */
+
 // The seed prompt for one headless PR review. Pure string building (unit-coverable via the poller's
 // integration path). The verdict travels back through a result FILE, not stdout, mirroring the teams
 // file-handoff convention. Self-review via `gh pr review` is impossible on your own PR, so findings go
@@ -125,6 +130,15 @@ function prReviewPackNames(cfg) {
   return normalizePackNames(cfg.prReview ? cfg.prReview.packs : null).names;
 }
 
+/**
+ * @param {{ config: PrReviewWiringConfig, reviewSessions: Map<string, unknown>,
+ *   closeSessionDataClients: (id: string) => void, hookRouter: Pick<InstanceType<typeof import('../detection/hook-source').HookRouter>, 'register' | 'unregister'>|null,
+ *   getHookPort: (() => number | null) | null, spawnGate: { run: (callback: () => unknown) => Promise<unknown> },
+ *   gitWorkspace: object, getProjectPathById: (projectId: string) => string | null,
+ *   getProjectNameById?: (projectId: string) => string | null,
+ *   broadcast?: (message: Record<string, unknown>) => void,
+ *   recordLane?: ((sessionId: string, lane: string, vendor?: string) => unknown) | null }} options
+ */
 function createPrReviewWiring({
   config, reviewSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate, gitWorkspace,
   getProjectPathById, getProjectNameById = () => null,
@@ -162,6 +176,7 @@ function createPrReviewWiring({
     // Everything after the result directory exists runs INSIDE the try, so a throw from the prompt
     // builder or the Session constructor cannot strand it, and the "never rejects" contract above holds
     // for those two as well.
+    /** @type {{ path: string, cleanup: () => Promise<void> }|null} */
     let resultFile = null;
     try {
       resultFile = await createJobResultFile(`glissa-pr-${safeSlug}-${pr.number}-${pr.headRefOid}`);
@@ -199,28 +214,39 @@ function createPrReviewWiring({
   // restart serialization and the cached last status live in server/lane-runner.js.
   const runner = createLaneRunner({
     tag: 'pr-poller',
-    gate: () => prPollerShouldStart(config),
+    gate: () => {
+      const verdict = prPollerShouldStart(config);
+      if (verdict.reason) return verdict;
+      return { start: verdict.start };
+    },
     cfgKey: () => prReviewCfgKey(config),
     emptyStatus: () => emptyLaneStatus('pr-status', prPollerShouldStart(config)),
     broadcast,
-    createPoller: ({ onTickComplete }) => createPrPoller({
-      projects: config.prReview.projects || [],
-      getProjectPathById,
-      getProjectNameById,
-      makePrGh: (projectPath) => createPrGh(projectPath),
-      gitWorkspace,
-      getWorktreeBase: (projectPath) => config.worktreeRoot
-        || path.join(path.dirname(path.resolve(projectPath)), '.glissa-worktrees'),
-      spawnReview: prReviewSpawn,
-      telegram: (text) => sendPrPing(config.telegram.botToken, config.telegram.chatId, text),
-      readState: readPrState,
-      writeState: writePrState,
-      intervalMinutes: config.prReview.intervalMinutes || 15,
-      mergeMethod: config.prReview.mergeMethod || 'rebase',
-      maxConcurrentReviews: config.prReview.maxConcurrentReviews || 3,
-      reviewTimeoutSeconds: config.prReview.reviewTimeoutSeconds || 900,
-      onTickComplete,
-    }),
+    createPoller: ({ onTickComplete }) => {
+      const prReviewConfig = config.prReview;
+      const telegramConfig = config.telegram;
+      if (!prReviewConfig || !telegramConfig?.botToken || !telegramConfig.chatId) {
+        throw new Error('PR review poller started without its required configuration');
+      }
+      return createPrPoller({
+        projects: prReviewConfig.projects || [],
+        getProjectPathById,
+        getProjectNameById,
+        makePrGh: (projectPath) => createPrGh(projectPath),
+        gitWorkspace,
+        getWorktreeBase: (projectPath) => config.worktreeRoot
+          || path.join(path.dirname(path.resolve(projectPath)), '.glissa-worktrees'),
+        spawnReview: prReviewSpawn,
+        telegram: (text) => sendPrPing(telegramConfig.botToken, telegramConfig.chatId, text),
+        readState: readPrState,
+        writeState: writePrState,
+        intervalMinutes: prReviewConfig.intervalMinutes || 15,
+        mergeMethod: prReviewConfig.mergeMethod || 'rebase',
+        maxConcurrentReviews: prReviewConfig.maxConcurrentReviews || 3,
+        reviewTimeoutSeconds: prReviewConfig.reviewTimeoutSeconds || 900,
+        onTickComplete,
+      });
+    },
   });
 
   // Exposed for tests only (the pack-service `_watcherCount` precedent): the session factory is the

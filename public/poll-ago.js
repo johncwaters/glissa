@@ -32,6 +32,7 @@ const polledText = (ts) => `polled ${formatAgo(ts)}`;
 export function createPollAgoTicker(getRoot) {
   let tracked = [];
   let painters = [];
+  /** @type {(() => boolean)|null} */
   let unsubscribe = null;
 
   const paint = (item) => {

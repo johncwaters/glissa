@@ -45,7 +45,9 @@ const AGGREGATE_GLYPHS = {
 };
 
 // Last rendered aggregate summary - gates DOM writes + the aria-live re-announce.
+/** @type {string|null} */
 let _lastAggregateText = null;
+/** @type {string|null} */
 let _lastAggregateSeverity = null;
 
 // Latest built version per context pack (server-wide, not per session): the baseline each card's
@@ -202,6 +204,7 @@ export function applyTerminalSettings(settings) {
 }
 
 export function updateAggregateStatus() {
+  if (!aggregateEl) return;
   let waiting = 0, failed = 0, done = 0, complete = 0, dormant = 0, total = 0;
 
   for (const [, ui] of sessionUIs) {
@@ -234,6 +237,7 @@ export function updateAggregateStatus() {
 }
 
 export function createSessionCard(sessionId, sessionName, initialState, options = {}) {
+  if (!container) return;
   const state = initialState || STATES.DORMANT;
   const dom = buildCardDOM(sessionId, sessionName, state, options);
 
@@ -467,6 +471,7 @@ export function setSessionPostTurn(sessionId, report) {
   const r = report || {};
   const findings = Array.isArray(r.findings) ? r.findings : [];
   const fixed = r.filesFixed || 0;
+  /** @type {'fixed'|'flagged'|null} */
   let kind = null;
   let count = 0;
   if (!r.skipped && r.mode === 'fix' && fixed > 0) {
@@ -484,7 +489,7 @@ export function setSessionPostTurn(sessionId, report) {
   const glyph = kind === 'fixed' ? '✓' : '⚠'; // check mark / warning sign
   paintCardBadge(ui, '.post-turn-badge', 'pt', {
     on: !!kind,
-    value: kind,
+    value: kind || undefined,
     text: `${glyph} ${count}`,
     title: `Post-turn ${verb} ${count} file(s)${detail ? ` (${detail})` : ''}`,
   });

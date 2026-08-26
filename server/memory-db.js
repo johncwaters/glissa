@@ -121,8 +121,19 @@ function ensureSeqColumn(db) {
   return true;
 }
 
-/** @param {{ dbPath?: string, busyTimeoutMs?: number }} [options] */
-function createMemoryDb({ dbPath, busyTimeoutMs = undefined } = {}) {
+/**
+ * @template T
+ * @param {T|undefined} row
+ * @returns {T}
+ */
+function requiredAggregateRow(row) {
+  if (!row) throw new Error('memory database aggregate returned no row');
+  return row;
+}
+
+function createMemoryDb({
+  dbPath, busyTimeoutMs = undefined,
+} = /** @type {{ dbPath: string, busyTimeoutMs?: number }} */ ({})) {
   const db = openDatabase(dbPath, { busyTimeoutMs });
   ensureSeqColumn(db);
   applySchema(db, SCHEMA);
@@ -182,7 +193,10 @@ function createMemoryDb({ dbPath, busyTimeoutMs = undefined } = {}) {
 
   // The write lock and row max keep hand-edited or pre-migration databases from receiving a dead seq.
   function allocateSeq() {
-    const next = Math.max(readMetaInteger(SEQ_HIGH_KEY), Number(statements.maxSeq.get().high) || 0) + 1;
+    const next = Math.max(
+      readMetaInteger(SEQ_HIGH_KEY),
+      Number(requiredAggregateRow(statements.maxSeq.get()).high) || 0,
+    ) + 1;
     statements.writeMeta.run(SEQ_HIGH_KEY, String(next));
     return next;
   }
@@ -211,7 +225,7 @@ function createMemoryDb({ dbPath, busyTimeoutMs = undefined } = {}) {
 
   // A pre-M18 database carries backfilled ordinals with no high water mark, and a fresh one carries none.
   function ensureSeqHighWater() {
-    const rowMax = Number(statements.maxSeq.get().high) || 0;
+    const rowMax = Number(requiredAggregateRow(statements.maxSeq.get()).high) || 0;
     if (rowMax <= readMetaInteger(SEQ_HIGH_KEY)) return;
     statements.writeMeta.run(SEQ_HIGH_KEY, String(rowMax));
   }
@@ -249,7 +263,7 @@ function createMemoryDb({ dbPath, busyTimeoutMs = undefined } = {}) {
     statements.clearFts.run();
     for (const row of statements.listRecords.all()) statements.insertFts.run(row.id, row.body);
     scrubSearchIndex();
-    return Number(statements.countFts.get().total);
+    return Number(requiredAggregateRow(statements.countFts.get()).total);
   }
 
   // Frees the WAL frames a committed expunge left behind; a reader holding the log only defers it.
@@ -317,30 +331,31 @@ function createMemoryDb({ dbPath, busyTimeoutMs = undefined } = {}) {
    * Mirrored in memory because the echo check runs once per LINE of every ingested event, on the one
    * event loop every session shares. The rows stay the durable copy; the mirror is dropped on write.
    */
+  /** @type {Set<string>|null} */
   let deliveredCache = null;
 
   function deliveredSet() {
-    if (!deliveredCache) deliveredCache = new Set(statements.listDelivered.all().map((row) => row.hash));
+    if (!deliveredCache) deliveredCache = new Set(statements.listDelivered.all().map((row) => String(row.hash)));
     return deliveredCache;
   }
 
   function noteDelivered(hashes, { maxHashes = 0 } = {}) {
     deliveredCache = null;
     transaction(() => {
-      let seq = Number(statements.nextDeliveredSeq.get().next);
+      let seq = Number(requiredAggregateRow(statements.nextDeliveredSeq.get()).next);
       for (const hash of hashes) {
         statements.saveDelivered.run(hash, seq);
         seq += 1;
       }
       if (maxHashes > 0) statements.pruneDelivered.run(Math.floor(maxHashes));
     });
-    return Number(statements.countDelivered.get().total);
+    return Number(requiredAggregateRow(statements.countDelivered.get()).total);
   }
 
   // The FTS table is derived, so a count that disagrees with the canon is answered by a rebuild, not a repair.
   function ensureSearchIndex() {
-    const records = Number(statements.countRecords.get().total);
-    if (records === Number(statements.countFts.get().total)) return 0;
+    const records = Number(requiredAggregateRow(statements.countRecords.get()).total);
+    if (records === Number(requiredAggregateRow(statements.countFts.get()).total)) return 0;
     return rebuildSearchIndex();
   }
 
@@ -365,7 +380,7 @@ function createMemoryDb({ dbPath, busyTimeoutMs = undefined } = {}) {
       checkpoint();
       return removed;
     },
-    deliveredCount: () => Number(statements.countDelivered.get().total),
+    deliveredCount: () => Number(requiredAggregateRow(statements.countDelivered.get()).total),
     distillCursorSeq: () => readMetaInteger(DISTILL_CURSOR_KEY),
     distillFailures: () => readMetaInteger(DISTILL_FAILURE_KEY),
     deliveredHas: (hash) => deliveredSet().has(hash),
@@ -382,7 +397,7 @@ function createMemoryDb({ dbPath, busyTimeoutMs = undefined } = {}) {
     migrateProjectTags,
     noteDelivered,
     rebuildSearchIndex,
-    recordCount: () => Number(statements.countRecords.get().total),
+    recordCount: () => Number(requiredAggregateRow(statements.countRecords.get()).total),
     saveTailOffset,
     scrubSearchIndex,
     searchIds,

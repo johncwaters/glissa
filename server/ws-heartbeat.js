@@ -26,6 +26,7 @@ function createHeartbeat({
   onTerminate = () => {},
   warn = console.warn,
 } = {}) {
+  /** @type {NodeJS.Timeout|null} */
   let timer = null;
 
   // Any traffic proves the socket is alive, not only a pong: a client sending control messages is
@@ -41,7 +42,7 @@ function createHeartbeat({
     for (const server of servers) {
       const clients = [...(server?.clients || [])];
       const { terminate, ping } = planHeartbeatSweep(
-        clients.map((ws) => ({ key: ws, lastSeenAt: ws.glissaLastSeenAt })),
+        clients.map((ws) => ({ key: ws, lastSeenAt: ws.glissaLastSeenAt ?? now() })),
         { now: now(), deadlineMs }
       );
       for (const ws of terminate) {

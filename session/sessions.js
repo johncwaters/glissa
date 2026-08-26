@@ -53,6 +53,55 @@ function signalablePid(pid) {
 /** @type {Set<import('../shared/states').SessionState>} */
 const DISMISSIBLE_STATES = new Set([STATES.WAITING, STATES.COMPLETE]);
 
+/**
+ * @typedef {object} SessionOptions
+ * @property {string} id
+ * @property {string} name
+ * @property {string} path
+ * @property {boolean} [dangerouslySkipPermissions]
+ * @property {number} [replayBufferKB]
+ * @property {Pick<InstanceType<typeof import('../detection/hook-source').HookRouter>, 'register' | 'unregister'> | null} [hookRouter]
+ * @property {(() => number | null) | null} [getHookPort]
+ * @property {string} [hooksBaseDir]
+ * @property {number} [titleStabilizationMs]
+ * @property {number} [statusConflictMs]
+ * @property {number} [statusDedupMs]
+ * @property {boolean} [detectBackgroundAgents]
+ * @property {number} [agentTtlMs]
+ * @property {number} [shellTaskTtlMs]
+ * @property {number} [teammateTaskTtlMs]
+ * @property {number} [gateReleaseSettleMs]
+ * @property {boolean} [detectScheduledWakeups]
+ * @property {string} [agent]
+ * @property {NonNullable<ReturnType<typeof resolveAdapter>> | null} [adapter]
+ * @property {boolean} [bypassHookTrust]
+ * @property {number} [titleQuietFallbackMs]
+ * @property {{ path: string | null, kind: string } | null} [spawnCommand]
+ * @property {string | null} [initialPrompt]
+ * @property {string[]} [extraClaudeArgs]
+ * @property {boolean} [ephemeral]
+ * @property {string | null} [resumeSessionId]
+ * @property {boolean} [antiSlopPrompt]
+ * @property {Record<string, unknown> | null} [settingsPermissions]
+ * @property {Record<string, string> | null} [spawnEnv]
+ * @property {boolean} [enableProjectMcp]
+ * @property {string | null} [rtkPath]
+ * @property {unknown} [packs]
+ * @property {string | null} [packsBuiltRoot]
+ * @property {string | null} [packVariantSlug]
+ * @property {boolean} [planLimits]
+ * @property {((file: string, args: string[], options: import('node-pty').IPtyForkOptions | import('node-pty').IWindowsPtyForkOptions) => import('node-pty').IPty) | null} [ptySpawn]
+ * @property {((args: string[], options: import('node:child_process').ExecFileOptions, callback: (error: Error | null) => void) => unknown) | null} [killProc]
+ * @property {((pid: number, signal: NodeJS.Signals | 0) => void) | null} [signalProc]
+ * @property {NodeJS.Platform} [platform]
+ * @property {Parameters<typeof createSessionWorktreeLifecycle>[0]['gitWorkspace']} [gitWorkspace]
+ * @property {string | null} [integrationBranch]
+ * @property {boolean} [autoRebase]
+ * @property {boolean} [liveWorktreeReview]
+ * @property {string | null} [worktreeRoot]
+ * @property {string[] | null} [worktreeShare]
+ */
+
 // ---------------------------------------------------------------------------
 // State machine. Status is driven by structural signals from StatusSource
 // (Claude Code hooks = authoritative; OSC-0 title = degraded fallback), mapped
@@ -63,6 +112,7 @@ const DISMISSIBLE_STATES = new Set([STATES.WAITING, STATES.COMPLETE]);
 // ---------------------------------------------------------------------------
 
 class Session extends EventEmitter {
+  /** @param {SessionOptions} options */
   constructor({
     id,
     name,
@@ -189,6 +239,7 @@ class Session extends EventEmitter {
     this.name = name;
     this.path = path;
     this.dangerouslySkipPermissions = dangerouslySkipPermissions;
+    /** @type {(import('node-pty').IPty & { _agent?: { inSocket?: { on: (event: string, listener: (error: Error) => void) => unknown } }, on?: (event: string, listener: (error: Error) => void) => unknown }) | null} */
     this.ptyProcess = null;
     /** @type {import('../shared/states').SessionState} */
     this.state = STATES.DORMANT;
@@ -231,7 +282,9 @@ class Session extends EventEmitter {
 
     // Resolved first, because the capability gates below read it: every CC-only feature this session
     // could run is asked of the adapter rather than assumed (M2 of docs/plan-agent-adapters.md).
-    this._adapter = adapter || resolveAdapter(agent, { label: `session:${name}` });
+    const resolvedAdapter = adapter || resolveAdapter(agent, { label: `session:${name}` });
+    if (!resolvedAdapter) throw new TypeError("default agent adapter is unavailable");
+    this._adapter = resolvedAdapter;
     this.agentId = this._adapter.id;
     this._observability = createSessionObservability({
       agentId: this.agentId,
@@ -307,6 +360,7 @@ class Session extends EventEmitter {
     this._wakeupSeq = 0;
     this._spawnCommand = spawnCommand;
     this._initialPrompt = initialPrompt;
+    /** @type {string[]} */
     this._extraClaudeArgs = Array.isArray(extraClaudeArgs) ? extraClaudeArgs : [];
     this._resumeSessionId = resumeSessionId || null;
     this._suppressResumeCapture = false;
@@ -1312,7 +1366,8 @@ class Session extends EventEmitter {
     // repo's linked worktrees so the thread picks up in THIS worktree's cwd. The adapter owns the
     // flag spellings and their order (session/adapters/claude-code.js buildArgs).
     this._suppressResumeCapture = false;
-    const agentArgs = this._adapter.buildArgs({
+    const buildAgentArgs = /** @type {(options: { dangerouslySkipPermissions: boolean, resumeSessionId: string | null, extraArgs: string[], antiSlopPrompt: boolean, initialPrompt: string | null }) => string[]} */ (this._adapter.buildArgs);
+    const agentArgs = buildAgentArgs({
       dangerouslySkipPermissions: this.dangerouslySkipPermissions,
       resumeSessionId: this._can("resume") ? this._resumeSessionId : null,
       extraArgs: this._extraClaudeArgs,
@@ -1322,7 +1377,8 @@ class Session extends EventEmitter {
     // Prefer spawning the resolved agent .exe directly (node-pty -> CreateProcess). Fall back to
     // `cmd.exe /c <agent>` only for .cmd/.bat/.ps1 shim installs or when resolution failed. The
     // resolution itself is lazy and cached per agent id (session/adapters/index.js commandFor).
-    const { file, args } = this._adapter.buildSpawnCommand({
+    const buildAgentSpawnCommand = /** @type {(options: { platform: NodeJS.Platform, resolved: { path: string | null, kind: string } | null, settingsArgs: string[], packArgs: string[], agentArgs: string[] }) => { file: string, args: string[] }} */ (this._adapter.buildSpawnCommand);
+    const { file, args } = buildAgentSpawnCommand({
       platform: this._platform,
       resolved: this._spawnCommand || commandFor(this._adapter),
       settingsArgs,
@@ -1611,6 +1667,7 @@ class Session extends EventEmitter {
   // that leaves every background bash task, MCP server and teammate under it orphaned. A grandchild that
   // setsid'd itself out of the group escapes, which is the same parity taskkill has with a re-parented
   // process. ESRCH is the ordinary outcome (the tree is already gone), never an error worth surfacing.
+  /** @param {number} pid @param {NodeJS.Signals} [signal] */
   _killProcessGroup(pid, signal = "SIGKILL") {
     const target = signalablePid(pid);
     if (target === null) return;

@@ -36,12 +36,18 @@ function nonEmptyString(value) {
 }
 
 // A rootless event is dropped for the ring's own reason: machine scope lands in every project's retrieval.
+/**
+ * @param {{ source?: string, kind?: string, detail?: { vendor?: string } | null, scope?: { root?: unknown, sessionId?: unknown } | null, summary?: unknown, ts?: unknown } | null} event
+ * @param {{ deliveredHashes?: string[] | { has: (hash: string) => boolean } | null, knownProjects?: Array<string | { path?: string | null }> }} [options]
+ */
 function memoryInputFromEvent(event, { deliveredHashes = null, knownProjects = [] } = {}) {
   if (!event || typeof event !== 'object' || Array.isArray(event)) return null;
   if (event.source !== AGENT_LOG_SOURCE) return null;
+  if (typeof event.kind !== 'string') return null;
   const kind = RECORD_KIND_BY_EVENT_KIND[event.kind];
   if (!kind) return null;
-  const vendor = SOURCE_VENDORS.includes(event.detail?.vendor) ? event.detail.vendor : null;
+  const eventVendor = event.detail?.vendor;
+  const vendor = typeof eventVendor === 'string' && SOURCE_VENDORS.includes(eventVendor) ? eventVendor : null;
   if (!vendor) return null;
   const project = canonicalProjectPath(nonEmptyString(event.scope?.root), knownProjects);
   if (!project) return null;

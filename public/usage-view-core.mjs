@@ -719,11 +719,19 @@ export function claudeOnlyHint(totals) {
 // beats no number and beats silently falling back to an estimate the operator did not ask for.
 export const PLAN_LIMIT_STALE_MS = 60 * 60 * 1000;
 
+/** @typedef {{ pct?: unknown, resetsAtMs?: unknown }} PlanWindow */
+/** @typedef {{ ts?: number, fiveHour?: PlanWindow, sevenDay?: PlanWindow }} PlanLimits */
+
+/** @type {readonly { key: 'fiveHour'|'sevenDay', label: string }[]} */
 export const PLAN_WINDOWS = Object.freeze([
   { key: 'fiveHour', label: '5 hour' },
   { key: 'sevenDay', label: '7 day' },
 ]);
 
+/**
+ * @param {PlanLimits|null|undefined} planLimits
+ * @param {'fiveHour'|'sevenDay'} key
+ */
 export function planWindowOf(planLimits, key) {
   const window = planLimits?.[key];
   if (!window || typeof window !== 'object') return null;
@@ -733,10 +741,12 @@ export function planWindowOf(planLimits, key) {
   return { pct, resetsAtMs };
 }
 
+/** @param {PlanLimits|null|undefined} planLimits */
 export function hasOfficialPlanLimits(planLimits) {
   return PLAN_WINDOWS.some((window) => planWindowOf(planLimits, window.key) !== null);
 }
 
+/** @param {PlanLimits|null|undefined} planLimits */
 export function officialFiveHourPct(planLimits) {
   return planWindowOf(planLimits, 'fiveHour')?.pct ?? null;
 }
@@ -754,6 +764,7 @@ export function provenanceLabel(source) {
  * without it does this fall back to the heuristic, which takes the worse of where the block IS and where
  * its burn rate lands it (a purely reactive alarm fires after the tokens are already spent).
  */
+/** @param {PlanLimits|null} [planLimits] */
 export function blockAttentionTone(report, planLimits = null) {
   const official = officialFiveHourPct(planLimits);
   if (official !== null) return tokenLimitTone(official);
@@ -767,6 +778,7 @@ export function blockAttentionTone(report, planLimits = null) {
 // and a budget is the operator's OWN ceiling, independent of the plan limit and the anomaly check. The
 // buckets are deliberately coarse so a percentage drifting 91 to 92 does not re-light a dot the operator
 // just cleared, while warn to crit (or near-budget to over-budget) does.
+/** @param {PlanLimits|null} [planLimits] */
 export function usageAttentionSignature(report, planLimits = null) {
   const parts = [];
   const tone = blockAttentionTone(report, planLimits);

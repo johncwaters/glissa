@@ -76,6 +76,7 @@ export function stateChip(state) {
 
 export function observeHeaderHeight(barEl) {
   if (!barEl) return;
+  /** @type {number|null} */
   let pendingRaf = null;
   const syncHeaderHeight = () => {
     pendingRaf = null;
@@ -146,6 +147,10 @@ export function adoptElement(element, parentEl) {
 // Put an adopted element back where it came from. `fallbackParent` catches the case where the original
 // parent was removed from the document while the element was away (a rebuilt session card), so the
 // element is never left orphaned inside a surface that is about to be hidden.
+/**
+ * @param {HTMLElement & { _adoptHome?: { parent: HTMLElement|null, next: Element|null } }} element
+ * @param {ParentNode|null} [fallbackParent]
+ */
 export function releaseElement(element, fallbackParent = null) {
   const home = element?._adoptHome;
   if (!home) return;

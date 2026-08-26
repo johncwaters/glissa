@@ -137,7 +137,7 @@ function isSpinnerChar(char) {
 function classifyTitle(title) {
   const normalizedTitle = String(title || "");
   if (normalizedTitle.includes("/") || normalizedTitle.includes("\\")) return "ignore";
-  const firstCharacter = normalizedTitle.length > 0 ? String.fromCodePoint(normalizedTitle.codePointAt(0)) : "";
+  const firstCharacter = normalizedTitle.length > 0 ? String.fromCodePoint(normalizedTitle.codePointAt(0) ?? 0) : "";
   if (isSpinnerChar(firstCharacter)) return "working";
   if (normalizedTitle.startsWith(ACTION_REQUIRED_MARKER)) return "awaiting-input";
   return "unknown";

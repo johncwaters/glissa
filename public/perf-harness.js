@@ -78,6 +78,7 @@ export function runStress(opts = {}) {
   // T8: longest main-thread task.
   let maxTask = 0;
   let taskCount = 0;
+  /** @type {PerformanceObserver|null} */
   let obs = null;
   try {
     obs = new PerformanceObserver((list) => {
@@ -153,6 +154,7 @@ export function runStress(opts = {}) {
 
   return new Promise((resolve) => {
     const start = performance.now();
+    /** @type {number|null} */
     let rafId = null;
 
     function finish(now) {

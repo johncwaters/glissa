@@ -162,6 +162,7 @@ function appendJsonLineIdle(filePath) {
  * @param {{ filePath: string, fsPromises?: typeof fs.promises, warn?: (error: unknown) => void }} options
  */
 function createJsonStateWriter({ filePath, fsPromises = fs.promises, warn = () => {} }) {
+  /** @type {string|null} */
   let signature = null;
   let writeChain = Promise.resolve();
 

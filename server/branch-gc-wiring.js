@@ -5,8 +5,8 @@ const { createLaneRunner } = require('./lane-runner');
 const { emptyLaneStatus } = require('./lane-status');
 
 function branchGcShouldStart(config) {
-  if (config.branchGc?.enabled === false) return { start: false, reason: null };
-  return { start: true, reason: null };
+  if (config.branchGc?.enabled === false) return { start: false };
+  return { start: true };
 }
 
 function branchGcCfgKey(config) {

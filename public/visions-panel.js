@@ -49,22 +49,30 @@ import {
 let _findingsByUri = new Map();
 let _commentsByUri = new Map();
 let _handsByUri = new Map();
+/** @type {ReturnType<typeof emptyIntentState>} */
 let _intent = emptyIntentState();
 // Project names for the intent rows, from the same snapshot that builds the cards. An id nothing named
 // renders as the id rather than as a blank.
 let _projectNames = new Map();
+/** @type {HTMLDivElement|null} */
 let _root = null;
+/** @type {HTMLDivElement|null} */
 let _feed = null;
+/** @type {{ list: HTMLDivElement }|null} */
 let _intentUI = null;
+/** @type {((unseen: boolean) => void)|null} */
 let _activityCallback = null;
+/** @type {boolean|null} */
 let _isEnabled = null;
 // The ingest lane's cross-source timeline, newest first and already capped by the view core.
 let _activityEvents = [];
 // What the last batched frame could not fit. A count, never the events themselves.
 let _activityOverflow = 0;
+/** @type {{ count: HTMLSpanElement, list: HTMLDivElement, overflow: HTMLParagraphElement }|null} */
 let _activityUI = null;
 // The tier 1 changelog, newest first and already capped by the view core.
 let _fixEntries = [];
+/** @type {{ count: HTMLSpanElement, list: HTMLDivElement }|null} */
 let _fixUI = null;
 // Findings that landed while the operator was looking at another tab. Cleared when this one is shown,
 // which is the whole point of the dot: it says "something arrived since you last looked".

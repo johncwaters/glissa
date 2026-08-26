@@ -8,8 +8,10 @@
 // drop can be backfilled. Byte counts are JS string .length units (UTF-16 code
 // units) throughout. State fields are public for white-box tests.
 function createOutputRing(maxBytes) {
+  /** @type {Array<string | null>} */
+  const chunks = [];
   return {
-    chunks: [],
+    chunks,
     head: 0, // index of oldest valid entry; advances instead of shift()
     size: 0,
     max: maxBytes,
@@ -20,7 +22,9 @@ function createOutputRing(maxBytes) {
       this.size += data.length;
       this.total += data.length;
       while (this.size > this.max && this.chunks.length - this.head > 1) {
-        this.size -= this.chunks[this.head].length;
+        const oldestChunk = this.chunks[this.head];
+        if (oldestChunk === null) throw new TypeError("output ring head cannot be empty");
+        this.size -= oldestChunk.length;
         this.chunks[this.head] = null;
         this.head++;
       }

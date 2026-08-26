@@ -5,10 +5,14 @@ export const VISIONS_INTENT_EMPTY_TEXT = 'No intent yet. The visions proposes on
 // The slot a uri no configured project owns lands in, and the fallback a project with none reads.
 export const VISIONS_INTENT_GLOBAL_LABEL = 'All projects';
 
+/** @typedef {{ text: string, source: 'model'|null, ts: number }} IntentSlot */
+/** @typedef {{ global: IntentSlot|null, byProject: Record<string, IntentSlot> }} IntentState */
+
 export function emptyIntent() {
   return { text: '', source: null, ts: 0 };
 }
 
+/** @returns {IntentState} */
 export function emptyIntentState() {
   return { global: null, byProject: {} };
 }
@@ -30,6 +34,7 @@ function statedSlot(raw) {
 }
 
 // Tolerant of the pre-per-project flat shape: a tab that outlives a server update reads it as global.
+/** @returns {IntentState} */
 export function intentStateOfMessage(msg) {
   const raw = msg?.intent;
   if (!raw || typeof raw !== 'object') return emptyIntentState();
@@ -56,11 +61,13 @@ export function applyIntentMessage(state, msg) {
   return { global: current.global, byProject: { ...current.byProject, [projectId]: slot } };
 }
 
+/** @param {Map<string, string>|null} namesById */
 export function intentProjectLabel(projectId, namesById = null) {
   const name = namesById && typeof namesById.get === 'function' ? namesById.get(projectId) : null;
   return typeof name === 'string' && name ? name : projectId;
 }
 
+/** @param {Map<string, string>|null} namesById */
 export function intentRows(state, namesById = null, now = Date.now()) {
   const current = state || emptyIntentState();
   const projects = Object.entries(current.byProject || {})

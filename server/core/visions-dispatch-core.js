@@ -138,7 +138,7 @@ function hasContextMoved(state, uri, contextSeq) {
  * Dispatches still inside the trailing hour, all of them or one trigger's. Read-only, so a gate check
  * never edits history.
  */
-function countRecentDispatches(state, now, trigger = null) {
+function countRecentDispatches(state, now, /** @type {'activity' | 'edit' | null} */ trigger = null) {
   const cutoff = now - HOUR_MS;
   return state.dispatchTimes.filter((entry) => entry.ts > cutoff && (!trigger || entry.trigger === trigger)).length;
 }
@@ -159,6 +159,8 @@ function classifyTrigger({ textStood, hashRecorded, armedBy }) {
 }
 
 /**
+ * @param {{ state: { lastHashByUri: Map<string, string>, lastAtByUri: Map<string, number>, lastSeqByUri: Map<string, number>, dispatchTimes: { ts: number, trigger: 'activity' | 'edit' }[] }, uri: string, text?: string | null, textHash: string, now: number, config: { enabled?: boolean, cooldownMs: number, activityMaxPerHour: number, maxPerHour: number }, inFlight?: boolean, contextSeq?: number | null, armedBy?: 'activity' | 'edit', inScope?: boolean }} options
+ * @returns {{ dispatch: boolean, gate: string | null, trigger: 'activity' | 'edit' | null }}
  * The one gate. It passes only when the lane is on, nothing is in flight, either the document or the
  * machine around it actually moved since its last dispatch, its cooldown has elapsed, and the budget its
  * trigger spends from has room. A refusal names the gate that held so the wiring can log exactly one
@@ -178,7 +180,7 @@ function decideDispatch({
   const trigger = classifyTrigger({ textStood, hashRecorded: recordedHash !== undefined, armedBy });
   if (textStood && !hasContextMoved(state, uri, contextSeq)) return { dispatch: false, gate: 'unchanged', trigger };
   const lastAt = state.lastAtByUri.get(uri);
-  if (Number.isFinite(lastAt) && now - lastAt < config.cooldownMs) return { dispatch: false, gate: 'cooldown', trigger };
+  if (typeof lastAt === 'number' && Number.isFinite(lastAt) && now - lastAt < config.cooldownMs) return { dispatch: false, gate: 'cooldown', trigger };
   /*
    * The machine's own quota, inside the total below and never instead of it: activity dispatches pass
    * both caps and edits pass only the total, which is what stops a busy hour from spending the budget a
@@ -191,6 +193,7 @@ function decideDispatch({
   return { dispatch: true, gate: null, trigger };
 }
 
+/** @param {string} prompt @param {'activity' | 'edit' | null} [trigger] */
 function decidePromptSize(prompt, trigger = null) {
   const promptBytes = Buffer.byteLength(typeof prompt === 'string' ? prompt : '', 'utf8');
   if (promptBytes > MAX_PROMPT_BYTES) {
@@ -201,13 +204,14 @@ function decidePromptSize(prompt, trigger = null) {
 
 // Recorded when the dispatch STARTS, so a slow session cannot let a second one through behind it. The
 // trigger is the gate's own classification, handed back so the two can never disagree about the budget.
+/** @param {{ lastAtByUri: Map<string, number>, lastHashByUri: Map<string, string>, lastSeqByUri: Map<string, number>, dispatchTimes: { ts: number, trigger: 'activity' | 'edit' }[] }} state @param {{ uri: string, textHash: string, now: number, contextSeq?: number | null, trigger?: 'activity' | 'edit' | null }} options */
 function recordDispatch(state, {
   uri, textHash, now, contextSeq = null, trigger = 'edit',
 }) {
   state.lastAtByUri.set(uri, now);
   state.lastHashByUri.set(uri, textHash);
   // A dispatch with no lane behind it clears the mark rather than leaving a stale one to be compared to.
-  if (Number.isFinite(contextSeq)) state.lastSeqByUri.set(uri, contextSeq);
+  if (typeof contextSeq === 'number' && Number.isFinite(contextSeq)) state.lastSeqByUri.set(uri, contextSeq);
   if (!Number.isFinite(contextSeq)) state.lastSeqByUri.delete(uri);
   state.dispatchTimes.push({ ts: now, trigger: trigger === 'activity' ? 'activity' : 'edit' });
   const cutoff = now - HOUR_MS;
@@ -414,6 +418,7 @@ function memorySection(memory) {
  * rewrite), the buffer fenced and named as DATA, and exactly one JSON result file as the only action
  * the session is asked to take. Pure string building; the wiring owns the file it names.
  */
+/** @param {{ uri: string, text: string, findings?: object[], intent?: string, digest?: string, memory?: { text: string, count: number, version: string | null } | null, resultPath?: string, maxComments?: number, maxMessageChars?: number, maxIntentChars?: number, maxHandChars?: number }} options */
 function buildVisionsPrompt({
   uri, text, findings = [], intent = '', digest = '', memory = null, resultPath = VISIONS_RESULT_FILE,
   maxComments = MAX_COMMENTS, maxMessageChars = MAX_MESSAGE_CHARS, maxIntentChars = MAX_INTENT_CHARS, maxHandChars = MAX_HAND_CHARS,

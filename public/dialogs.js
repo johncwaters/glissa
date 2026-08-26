@@ -141,6 +141,7 @@ export function createPosthogReportDialog({ issueId, issueTitle, format, content
     cancelLabel: 'Close',
   });
   const metaEl = el('div', 'dialog-report-meta', issueTitle || issueId || '');
+  /** @type {HTMLIFrameElement|HTMLPreElement|null} */
   let bodyEl = null;
   if (format === 'html' && !error && !message) {
     bodyEl = el('iframe', 'dialog-report-frame');

@@ -1,3 +1,4 @@
+/** @param {{ checked?: string[], stored?: string[], rendered?: string[] }} [selection] */
 export function unionProjectSelection({ checked = [], stored = [], rendered = [] } = {}) {
   const renderedIds = new Set(rendered);
   const selection = [...checked];

@@ -94,14 +94,20 @@ function createUsageScanner(deps = {}) {
   let claudeDirs = [];
   let dirs = [];
   let lastFileCount = 0;
+  /** @type {number | null} */
   let lastScanMs = null;
   let lastPartial = false;
+  /** @type {Promise<Awaited<ReturnType<typeof runPassInternal>>> | null} */
   let activePass = null;
   let pendingForce = false;
   let isReportDirty = true;
+  /** @type {string | null} */
   let resolutionError = null;
   const cachedRollupsByDays = new Map();
+  /** @type {Map<string, { tokens: number, costUSD: number, lastTs: number | null }> | null} */
   let cachedSessionTotals = null;
+  /** @typedef {{ type: 'insert', index: number, keys: ReturnType<typeof keysForEntry> } | { type: 'replace', index: number, oldEntry: typeof entries[number], oldKeys: ReturnType<typeof keysForEntry>, newKeys: ReturnType<typeof keysForEntry> }} FileJournalAction */
+  /** @type {FileJournalAction[] | null} */
   let currentFileJournal = null;
   let warehouseRecords = [];
   let warehouseLoaded = false;
@@ -295,7 +301,11 @@ function createUsageScanner(deps = {}) {
   }
 
   function ingestLine({ line, file, vendor, vendorState, dirs, lineOrdinal }) {
-    if (vendor === 'codex') return ingestVendorLine(parseCodexUsageLine(line, vendorState, { sessionId: codexSessionIdFromPath(file) }), file);
+    if (vendor === 'codex') {
+      const parsedCodexEntry = parseCodexUsageLine(line, vendorState);
+      if (!parsedCodexEntry) return 0;
+      return ingestVendorLine({ ...parsedCodexEntry, sessionId: codexSessionIdFromPath(file) }, file);
+    }
     if (vendor === 'grok') return ingestVendorLine(parseGrokUsageLine(line), file);
     const parsed = parseUsageLine(line);
     if (!parsed) return 0;
@@ -314,7 +324,7 @@ function createUsageScanner(deps = {}) {
       });
       const storedEntry = stripIngestFields(entry);
       if (syntheticPrimary) storedEntry[SYNTHETIC_PRIMARY] = syntheticPrimary;
-      if (storeEntry(storedEntry, syntheticPrimary)) accepted += 1;
+      if (storeEntry(storedEntry, syntheticPrimary || undefined)) accepted += 1;
     }
     return accepted;
   }
@@ -341,6 +351,7 @@ function createUsageScanner(deps = {}) {
     return { ...entry, costUSD: priced.costUSD };
   }
 
+  /** @param {string | null} [syntheticPrimary] */
   function storeEntry(entry, syntheticPrimary = null) {
     const keys = keysForEntry(entry, syntheticPrimary);
     const primaryHit = primaryIndex.get(keys.primary);
@@ -379,7 +390,9 @@ function createUsageScanner(deps = {}) {
 
   async function loadWarehouse() {
     if (warehouseLoaded || !warehousePath) return;
+    if (!warehouseWriter) return;
     warehouseLoaded = true;
+    /** @type {string | null} */
     let text = null;
     try {
       text = await fsPromises.readFile(warehousePath, 'utf8');
@@ -387,6 +400,7 @@ function createUsageScanner(deps = {}) {
       // No file yet is the ordinary first-run case, not a problem to report.
       return;
     }
+    if (text === null) return;
     try {
       const parsed = JSON.parse(text);
       const records = Array.isArray(parsed?.records) ? parsed.records : [];
@@ -481,7 +495,7 @@ function createUsageScanner(deps = {}) {
       completedBlocks: (blockSummary.blocks || []).filter((block) => !block.isGap && !block.isActive),
     });
     return {
-      daily: daily30 ? { ...daily30, baselineDays: baseline.days } : null,
+      daily: daily30 && baseline ? { ...daily30, baselineDays: baseline.days } : null,
       burn,
     };
   }
@@ -625,12 +639,14 @@ function createUsageScanner(deps = {}) {
   function cachedRollupsForDays(days, reportRetainDays) {
     const cached = cachedRollupsByDays.get(days);
     if (cached && !isReportDirty) return cached;
-    const report = buildUsageReport(entries, {
+    const report = {
+      ...buildUsageReport(entries, {
       now: nowFn(),
       blockHours,
       retainDays: reportRetainDays,
+      }),
       tz: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
-    });
+    };
     const rollups = {
       tz: report.tz,
       blockHours: report.blockHours,
@@ -669,6 +685,7 @@ function createUsageScanner(deps = {}) {
     markDirty();
   }
 
+  /** @param {FileJournalAction} action */
   function recordJournal(action) {
     if (!currentFileJournal) return;
     currentFileJournal.push(action);
@@ -790,7 +807,8 @@ function relativeToProjects(file, dirs) {
  * prompt id), and both cores put the vendor name in the first segment of the key they return, so a
  * Claude key can never collide with a Codex or Grok one. Pinned by a test.
  */
-function keysForEntry(entry, syntheticPrimary = null) {
+  /** @param {string | null} [syntheticPrimary] */
+  function keysForEntry(entry, syntheticPrimary = null) {
   if (entry?.vendor === 'codex') return { primary: codexDedupIdentity(entry), collision: null };
   if (entry?.vendor === 'grok') return { primary: grokDedupIdentity(entry), collision: null };
   const keys = dedupKeys(entry);

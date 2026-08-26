@@ -16,6 +16,7 @@ const { canonicalizePath } = require('../shared/paths');
 
 function createPackWatcher({ onChange, debounceMs = 500 }) {
   const debounce = createWatchDebounce({ onChange, debounceMs });
+  /** @type {import('node:fs').FSWatcher|null} */
   let watcher = null;
 
   function stop() {

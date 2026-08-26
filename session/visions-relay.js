@@ -174,8 +174,11 @@ function createRelay({
   const portPlan = resolvePortPlan(argv, env, readConfiguredPort(env));
   const docStore = createDocStore();
   let parserState = createParserState();
+  /** @type {import('ws') | null} */
   let ws = null;
+  /** @type {NodeJS.Timeout | null} */
   let retryTimer = null;
+  /** @type {NodeJS.Timeout | null} */
   let stableConnectionTimer = null;
   let retryMs = INITIAL_RETRY_MS;
   let nextPortIndex = 0;
@@ -351,6 +354,7 @@ function createRelay({
   }
 
   function handleDaemonText(text) {
+    /** @type {{ type?: unknown, id?: unknown, params?: unknown, method?: unknown, result?: unknown, error?: unknown } | null} */
     let msg = null;
     try {
       msg = JSON.parse(text);

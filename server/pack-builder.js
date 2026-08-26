@@ -58,6 +58,7 @@ function defaultGlissaHome() {
   return path.dirname(resolveConfigPath());
 }
 
+/** @param {string} pattern @param {string|null} glissaHome @param {string|null} [projectSlug] */
 function expandPlaceholders(pattern, glissaHome, projectSlug = null) {
   let expanded = pattern;
   if (expanded.includes(GLISSA_HOME_PLACEHOLDER)) {
@@ -69,6 +70,7 @@ function expandPlaceholders(pattern, glissaHome, projectSlug = null) {
   return expanded;
 }
 
+/** @param {string|null} [glissaHome] @param {string|null} [projectSlug] */
 function resolvePattern(rawPattern, baseDir, glissaHome = null, projectSlug = null) {
   const pattern = expandPlaceholders(rawPattern, glissaHome, projectSlug);
   if (path.isAbsolute(pattern)) return toPosix(path.resolve(pattern));
@@ -389,17 +391,20 @@ async function readPublishLock(lockPath) {
     if (err.code === 'ENOENT') return null;
     throw err;
   }
+  /** @type {{ pid?: unknown, timestamp?: unknown, token?: unknown }|null} */
   let record = null;
   try {
     record = JSON.parse(raw);
   } catch {
     record = null;
   }
+  const pid = record?.pid;
+  const timestamp = record?.timestamp;
   return {
     raw,
     mtimeMs: stats.mtimeMs,
-    pid: Number.isSafeInteger(record?.pid) ? record.pid : null,
-    timestampMs: Number.isFinite(record?.timestamp) ? record.timestamp : null,
+    pid: typeof pid === 'number' && Number.isSafeInteger(pid) ? pid : null,
+    timestampMs: typeof timestamp === 'number' && Number.isFinite(timestamp) ? timestamp : null,
     token: typeof record?.token === 'string' ? record.token : null,
   };
 }
@@ -484,6 +489,7 @@ async function writeCurrentPointer(packDir, version) {
   await fsp.mkdir(currentDir, { recursive: true });
   const pointerPath = path.join(currentDir, CURRENT_POINTER_FILE);
   const tempPath = path.join(currentDir, `${CURRENT_POINTER_FILE}.tmp-${process.pid}-${crypto.randomBytes(6).toString('hex')}`);
+  /** @type {import('node:fs/promises').FileHandle|null} */
   let handle = null;
   try {
     handle = await fsp.open(tempPath, 'wx', 0o600);
@@ -527,22 +533,31 @@ async function garbageCollectVersions(packDir, pointedVersion) {
 }
 
 // A plain pointer file works on Windows and Linux without symlink privileges.
+/**
+ * @param {string} builtRoot
+ * @param {string} name
+ * @param {Array<{ relPath: string, content: string }>} outputs
+ * @param {{ now?: () => number, sleep?: (delayMs: number) => Promise<void>, version?: string|null }} [options]
+ */
 async function publishBuild(builtRoot, name, outputs, { now = Date.now, sleep = wait, version = null } = {}) {
   const packDir = path.join(builtRoot, name);
   await fsp.mkdir(packDir, { recursive: true });
   const lock = await acquirePublishLock(packDir, { now, sleep });
+  /** @type {string|null} */
   let tmpDir = null;
   try {
     await clearStaleTmpDirs(packDir);
     const publishedVersion = versionForOutputs(outputs, version);
     const versionsDir = path.join(packDir, VERSIONS_DIRECTORY);
     const versionDir = packVersionDirectory(packDir, publishedVersion);
+    if (!versionDir) throw new Error(`invalid pack version "${publishedVersion}"`);
     await fsp.mkdir(versionsDir, { recursive: true });
-    tmpDir = path.join(packDir, `${TMP_PREFIX}${process.pid}-${crypto.randomBytes(6).toString('hex')}`);
-    await fsp.mkdir(tmpDir, { recursive: true });
-    await writeOutputs(tmpDir, outputs);
+    const stagedDir = path.join(packDir, `${TMP_PREFIX}${process.pid}-${crypto.randomBytes(6).toString('hex')}`);
+    tmpDir = stagedDir;
+    await fsp.mkdir(stagedDir, { recursive: true });
+    await writeOutputs(stagedDir, outputs);
     try {
-      await fsp.rename(tmpDir, versionDir);
+      await fsp.rename(stagedDir, versionDir);
       tmpDir = null;
     } catch (error) {
       if (error.code !== 'EEXIST' && error.code !== 'ENOTEMPTY') throw error;
@@ -622,6 +637,7 @@ function failure(name, specPath, errors) {
  *   variants: Array<Record<string, unknown>>, warnings: string[]}>}
  */
 async function buildPack({ specPath, baseDir = DEFAULT_PACKS_DIR, builtRoot = defaultBuiltRoot(), glissaHome = null, projects = [], now = Date.now } = {}) {
+  if (!specPath) return failure('', '', ['spec path required']);
   const fallbackName = path.basename(specPath).replace(/\.pack\.json$/, '');
 
   let spec;
@@ -670,6 +686,7 @@ async function buildOnePack(entry, { specPath, baseDir, builtRoot, glissaHome, n
     sourceRoots: manifestSourceRoots(spec, { baseDir, glissaHome }),
   });
   if (!built.ok) return failure(entry.name, specPath, built.errors);
+  if (!built.manifest) return failure(entry.name, specPath, ['pack build returned no manifest']);
 
   const report = buildReport(entry.name, specPath, {
     ok: true,
@@ -694,7 +711,11 @@ async function buildOnePack(entry, { specPath, baseDir, builtRoot, glissaHome, n
   return report;
 }
 
-/** Build every spec, or just the named one. Reports per pack; never throws. */
+/**
+ * Build every spec, or just the named one. Reports per pack; never throws.
+ * @param {{ name?: string|null, specsDir?: string, baseDir?: string, builtRoot?: string,
+ *   glissaHome?: string|null, projects?: Array<Record<string, unknown>>, now?: () => number }} [options]
+ */
 async function buildPacks({ name = null, specsDir = defaultSpecsDir(), baseDir = DEFAULT_PACKS_DIR, builtRoot = defaultBuiltRoot(), glissaHome = null, projects = [], now = Date.now } = {}) {
   const specs = await listPackSpecs({ specsDir });
   const wanted = name ? specs.filter((spec) => spec.name === name) : specs;
@@ -742,6 +763,7 @@ async function resolveCurrentDirectory(name, builtRoot) {
   const packDir = path.join(builtRoot, name);
   const currentDir = path.join(packDir, CURRENT_POINTER_DIRECTORY);
   const pointerPath = path.join(currentDir, CURRENT_POINTER_FILE);
+  /** @type {string|null} */
   let rawPointer = null;
   try {
     rawPointer = await fsp.readFile(pointerPath, 'utf8');

@@ -15,7 +15,9 @@ export function createMobileKeyStrip({ send, getSessionId }) {
 
   // Built on first use and kept in the strip so it stays in the document: a detached input's picker is
   // ignored by some mobile engines. The operator never sees it.
+  /** @type {HTMLInputElement|null} */
   let filePicker = null;
+  /** @type {HTMLButtonElement|null} */
   let pickingButton = null;
 
   for (const key of MOBILE_KEYS) {
@@ -58,9 +60,11 @@ export function createMobileKeyStrip({ send, getSessionId }) {
   }
 
   function onImagePicked() {
-    const file = filePicker.files ? filePicker.files[0] : null;
+    const picker = filePicker;
+    if (!picker) return;
+    const file = picker.files ? picker.files[0] : null;
     // Cleared immediately: re-picking the SAME photo fires no change event while its value is still set.
-    filePicker.value = '';
+    picker.value = '';
     if (!file) return;
     const sessionId = getSessionId?.();
     if (!sessionId) {
@@ -109,6 +113,7 @@ function pasteFromClipboard(send) {
   // insecure context. A denial can arrive either way - some engines throw NotAllowedError
   // synchronously instead of rejecting - so both shapes are caught and both surface as a notice
   // rather than a silently dead button.
+  /** @type {Promise<string>|null} */
   let read = null;
   try {
     read = navigator.clipboard?.readText?.();

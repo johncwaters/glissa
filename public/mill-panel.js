@@ -52,11 +52,18 @@ import {
   totalsChips,
 } from './mill-view-core.mjs';
 
+/** @typedef {{ packs?: unknown }} MillReport */
+
+/** @type {MillReport|null} */
 let _report = null;
+/** @type {HTMLDivElement|null} */
 let _root = null;
+/** @type {((isActive: boolean) => void)|null} */
 let _activityCallback = null;
+/** @type {((message: Record<string, unknown>) => void)|null} */
 let _sendRequest = null;
 let _requestSeq = 0;
+/** @type {string|null} */
 let _latestRequestId = null;
 
 const _attention = createAttentionAck({
@@ -235,6 +242,7 @@ function buildNoticeSection(text) {
 }
 
 function buildBody() {
+  if (!_root) return;
   // A missing or failed report has no totals, so the chips above would each print a confident zero for
   // a mill nobody has read yet.
   if (!_report) {

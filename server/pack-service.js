@@ -56,6 +56,7 @@ function createPackService(deps = {}) {
   // Latest known version per pack, including the ones a sweep found unchanged: this is what the
   // dashboard compares a session's DELIVERED version against.
   const versionsByName = new Map();
+  /** @type {NodeJS.Timeout|null} */
   let sweepTimer = null;
   let sweepRunning = false;
   let stopped = false;
@@ -67,6 +68,7 @@ function createPackService(deps = {}) {
   // Restarts run through their own chain, so a second consumer change landing mid-drain queues behind
   // the first rather than racing it over the same watchers and timer.
   let restartChain = Promise.resolve();
+  /** @type {string|null} */
   let lastConsumerKey = null;
 
   // null (no filter) is also the initial lastConsumerKey, so an unfiltered service never restarts.
@@ -108,6 +110,7 @@ function createPackService(deps = {}) {
     service.emit('pack-updated', { name: report.name, version: report.version });
   }
 
+  /** @param {string} name @param {string} specPath @param {Record<string, unknown>[] | null | undefined} projects */
   async function runBuild(name, specPath, projects) {
     if (stopped) return null;
     const report = await build({ specPath, name, projects: projects || variantProjects() });
@@ -121,6 +124,7 @@ function createPackService(deps = {}) {
     return report;
   }
 
+  /** @param {string} name @param {string} specPath @param {Record<string, unknown>[] | null} [projects] */
   function queueBuild(name, specPath, projects = null) {
     buildChain = buildChain.then(() => runBuild(name, specPath, projects)).catch((err) => {
       log.warn(`[packs] ${name} rebuild crashed: ${err.message}`);
@@ -242,6 +246,10 @@ function createPackService(deps = {}) {
    * persisted but not yet reloaded: consumer gating guarantees a newly assigned pack has never been
    * built, and a session resolves its packs at spawn, so a build that waits for the reload arrives after
    * the spawn that needed it. Runs on the build chain, so it cannot publish under a concurrent rebuild.
+   */
+  /**
+   * @param {string[]} names
+   * @param {{ projects?: Record<string, unknown>[] | null }} [options]
    */
   async function ensureBuilt(names, { projects = null } = {}) {
     if (torndown || stopped) return;

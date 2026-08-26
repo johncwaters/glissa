@@ -34,16 +34,23 @@ import {
   verdictLabel,
 } from './radar-core.mjs';
 
+/** @type {{ ts?: number, intervalMinutes?: number, projects?: unknown[], investigations?: unknown[] }|null} */
 let _latest = null;
+/** @type {unknown} */
 let _health = null;
 // The anomaly shape of the last health snapshot. A snapshot lands every ten seconds and is almost
 // always all-zero, and a full repaint on each one would drop hover state and reset the poll tickers
 // for nothing, so only a CHANGE in which anomalies are live repaints the board.
 let _healthKey = '';
+/** @type {unknown} */
 let _update = null;
+/** @type {unknown} */
 let _prs = null;
+/** @type {HTMLDivElement|null} */
 let _root = null;
+/** @type {((unseen: boolean) => void)|null} */
 let _activityCallback = null;
+/** @type {(() => void)|null} */
 let _navigateToPrs = null;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const _attention = createAttentionAck({
@@ -146,6 +153,7 @@ function createActionCluster() {
   // `onOk` is the seam for a request whose success the panel must remember beyond the reply (the
   // archive: see _archivedLocally). It runs before the outcome line is written, so the repaint the
   // hold releases already sees it.
+  /** @param {((message: unknown) => void)|null} onOk */
   const request = (token, type, payload, pendingText, describe, onOk = null) => {
     _hold.begin(token);
     setBusy(true);
@@ -351,7 +359,8 @@ function buildErrorsSection(projects) {
   const globalTickEl = el('div', 'radar-global-tick');
   _pollTicker.track(globalTickEl, _latest?.ts);
   section.append(globalTickEl);
-  const intervalMs = Number(_latest?.intervalMinutes) > 0 ? Number(_latest.intervalMinutes) * 60000 : 0;
+  const intervalMinutes = _latest?.intervalMinutes;
+  const intervalMs = Number(intervalMinutes) > 0 ? Number(intervalMinutes) * 60000 : 0;
   const { loud, quiet } = partitionRadarProjects(projects, Date.now(), { intervalMs });
   const showHost = hostsDiffer(projects);
   for (const entry of loud) section.append(buildProject(entry, showHost));

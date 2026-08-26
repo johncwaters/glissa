@@ -8,12 +8,13 @@ const { projectVariantSlug } = require('./core/pack-core');
 const { projectSkipsPermissions } = require('./core/session-registry-core');
 const { resolveUsageConfig } = require('./usage-wiring');
 
+
 /**
  * @typedef {object} SessionFactoryDependencies
  * @property {{ configPath: string }} configStore
- * @property {object} hookRouter
+ * @property {Pick<InstanceType<typeof import('../detection/hook-source').HookRouter>, 'register' | 'unregister'>|null} hookRouter
  * @property {() => number|null} getHookPort
- * @property {() => object} getGitWorkspace
+ * @property {() => import('../session/session-worktree-lifecycle').GitWorkspace|null} getGitWorkspace
  * @property {(config: object) => string|null} rtkPathForConfig
  */
 

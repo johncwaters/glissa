@@ -12,6 +12,7 @@ const RTK_TIMEOUT_MS = 3000;
 function runRtk(rtkPath, body) {
   return new Promise((resolve) => {
     let settled = false;
+    /** @type {NodeJS.Timeout|null} */
     let timer = null;
     const done = (text) => {
       if (settled) return;
@@ -19,6 +20,7 @@ function runRtk(rtkPath, body) {
       if (timer) clearTimeout(timer);
       resolve(text);
     };
+    /** @type {import('node:child_process').ChildProcess|null} */
     let child = null;
     try {
       child = spawn(rtkPath, ['hook', 'claude'], { stdio: ['pipe', 'pipe', 'ignore'] });
@@ -26,13 +28,22 @@ function runRtk(rtkPath, body) {
       done('');
       return;
     }
-    timer = setTimeout(() => {
+    const childStdout = child.stdout;
+    const childStdin = child.stdin;
+    if (!childStdout || !childStdin) {
       try { child.kill(); } catch {}
+      done('');
+      return;
+    }
+    timer = setTimeout(() => {
+      if (child) {
+        try { child.kill(); } catch {}
+      }
       done('');
     }, RTK_TIMEOUT_MS);
     const chunks = [];
     let stdoutBytes = 0;
-    child.stdout.on('data', (chunk) => {
+    childStdout.on('data', (chunk) => {
       const bytes = Buffer.from(chunk);
       stdoutBytes += bytes.length;
       if (stdoutBytes > MAX_RTK_STDOUT_BYTES) {
@@ -42,12 +53,12 @@ function runRtk(rtkPath, body) {
       }
       chunks.push(bytes);
     });
-    child.stdout.on('error', () => done(''));
+    childStdout.on('error', () => done(''));
     child.on('error', () => done(''));
     child.on('close', (code) => done(code === 0 ? Buffer.concat(chunks).toString('utf8') : ''));
-    child.stdin.on('error', () => {});
+    childStdin.on('error', () => {});
     try {
-      child.stdin.end(body);
+      childStdin.end(body);
     } catch {
       done('');
     }
@@ -60,7 +71,8 @@ async function main(
   stdout = process.stdout,
   runner = runRtk,
 ) {
-  const rtkPath = typeof env[RTK_PATH_ENV] === 'string' ? env[RTK_PATH_ENV].trim() : '';
+  const configuredRtkPath = env[RTK_PATH_ENV];
+  const rtkPath = typeof configuredRtkPath === 'string' ? configuredRtkPath.trim() : '';
   const body = await readStdin(stdin);
   if (!rtkPath || body.length === 0) return { code: 0, reason: rtkPath ? 'empty-payload' : 'no-rtk-path' };
   const response = normalizeRtkHookResponse(await runner(rtkPath, body));

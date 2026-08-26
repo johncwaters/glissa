@@ -17,6 +17,7 @@
 const { laneMapFromLedger, pruneLedger } = require('./core/usage-lane-core');
 const { createJsonStateWriter } = require('./json-file');
 
+/** @param {{ ledgerPath?: string | null, fsPromises?: typeof import('node:fs/promises'), nowFn?: () => number, retainDays?: number, logger?: Pick<Console, 'warn'> | null }} [options] */
 function createLaneLedger({
   ledgerPath = null,
   fsPromises = require('node:fs/promises'),
@@ -26,6 +27,7 @@ function createLaneLedger({
 } = {}) {
   let entries = [];
   let opsChain = Promise.resolve();
+  /** @type {Promise<void> | null} */
   let loadPromise = null;
 
   function warn(message) {
@@ -46,6 +48,7 @@ function createLaneLedger({
     if (!ledgerPath) return Promise.resolve();
     if (loadPromise) return loadPromise;
     loadPromise = (async () => {
+      /** @type {string | null} */
       let text = null;
       try {
         text = await fsPromises.readFile(ledgerPath, 'utf8');

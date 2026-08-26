@@ -35,8 +35,10 @@ function persistSessionField(configStore, liveConfig, sessionId, field, value) {
 /** @param {SessionEventDependencies} dependencies */
 function createSessionEventWiring(dependencies) {
   return function wireSessionEvents(session) {
+    /** @type {NodeJS.Timeout|null} */
     let postTurnDebounce = null;
     const notifyGate = createNotifyGate();
+    /** @type {boolean|null} */
     let lastPersistedWasActive = null;
     const persistProjectField = (field, value) => {
       persistSessionField(dependencies.configStore, dependencies.config, session.id, field, value);

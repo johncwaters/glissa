@@ -12,7 +12,7 @@
 
 import { STATES } from '/shared/states.mjs';
 import { borrowCard, getBorrowedCardId, releaseCard } from '../card-host.js';
-import { adoptElement, el, releaseElement, stateChip } from '../dom-helpers.js';
+import { adoptElement, el, queryTag, releaseElement, stateChip } from '../dom-helpers.js';
 import { isRenameInProgress } from '../session-card/card-dom.js';
 import { sessionUIs } from '../session-card/card-registry.js';
 import { onSessionTick, sessionElapsedText } from '../session-card/session-tick.js';
@@ -38,9 +38,9 @@ export function createTerminalScreen({ onBack }) {
   badgeEl.innerHTML = '<span class="phone-terminal-glyph" aria-hidden="true"></span>'
     + '<span class="phone-terminal-label"></span>'
     + '<span class="phone-terminal-elapsed" aria-hidden="true"></span>';
-  const glyphEl = badgeEl.querySelector('.phone-terminal-glyph');
-  const labelEl = badgeEl.querySelector('.phone-terminal-label');
-  const elapsedEl = badgeEl.querySelector('.phone-terminal-elapsed');
+  const glyphEl = queryTag(badgeEl, '.phone-terminal-glyph', 'span');
+  const labelEl = queryTag(badgeEl, '.phone-terminal-label', 'span');
+  const elapsedEl = queryTag(badgeEl, '.phone-terminal-elapsed', 'span');
   identity.append(nameEl, badgeEl);
 
   // Where the card's adopted action cluster lands. Empty (and collapsed) with no session shown.
@@ -58,11 +58,14 @@ export function createTerminalScreen({ onBack }) {
 
   screen.append(topBar, cardSlot, emptyEl, keyStrip);
 
+  /** @type {string|null} */
   let shownId = null;
   // The card action cluster currently adopted into the top bar, and the ui whose Rename we retargeted.
   // Tracked as their own references (not derived from shownId) so a card REBUILT under the same id
   // cannot leave either one dangling.
+  /** @type {HTMLDivElement|null} */
   let adoptedActions = null;
+  /** @type {{ renameTargetEl?: HTMLSpanElement }|null} */
   let renameTargetUi = null;
 
   // Bytes from the key strip go to whichever session this screen is showing, over the same data WS
@@ -146,7 +149,7 @@ export function createTerminalScreen({ onBack }) {
     releaseBorrowedChrome();
     shownId = sessionId;
     borrowCard(ui, sessionId, cardSlot, { className: 'phone-centered' });
-    adoptedActions = ui.card.querySelector('.session-actions');
+    adoptedActions = queryTag(ui.card, '.session-actions', 'div');
     adoptElement(adoptedActions, actionSlot);
     // The card header does not render on this screen, so the inline rename must edit the name the
     // operator can actually see. card-dom.js reads this seam and falls back to ui.nameEl.
