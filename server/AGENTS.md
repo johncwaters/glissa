@@ -10,6 +10,8 @@ Backend runtime: the Express + WebSocket server factory and its control plane, p
 | File | Description |
 |------|-------------|
 | `backend.js` | Express + WebSocket server factory, shared by root `server.js` and the Vite dev plugin |
+| `backend-*.js` | Focused HTTP, trust, WebSocket, lane, control, health, update, and lifecycle wiring extracted from the factory |
+| `session-{factory,registry,event-wiring}.js` | Session construction, config reconciliation, and one-time event wiring |
 | `control-handlers.js` | Control-WebSocket message handlers (kill, restart, rename, settings) |
 | `control-replay-core.js` | Pure control-broadcast replay log: monotonic seq stamping + retention of the replayable message types |
 | `server-lifecycle.js` | Boot/shutdown lifecycle helpers. A UI restart respawns `argv` detached and exits 0 when nothing supervises the process, but exits NON-ZERO without respawning under systemd (see `core/restart-strategy.js`); shutdown exits 0 in both worlds |

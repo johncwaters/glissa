@@ -54,7 +54,7 @@ async function bootWithConfig(memory) {
 test('memory off constructs no distill lane', async () => {
   const booted = await bootWithConfig(undefined);
   try {
-    assert.equal(booted.backend.getMemoryDistiller(), null);
+    assert.equal(booted.backend.getLane('memory-distill'), null);
   } finally {
     await booted.close();
   }
@@ -63,7 +63,7 @@ test('memory off constructs no distill lane', async () => {
 test('memory on constructs the lane and registers its shutdown stopper', async () => {
   const booted = await bootWithConfig({ enabled: true });
   try {
-    const distiller = booted.backend.getMemoryDistiller();
+    const distiller = booted.backend.getLane('memory-distill');
     assert.notEqual(distiller, null);
     assert.equal(distiller.isEnabled(), true);
     const names = booted.shutdownOnce().stoppers.map((entry) => entry.name);
@@ -77,8 +77,8 @@ test('memory on constructs the lane and registers its shutdown stopper', async (
 test('the distill kill switch leaves the store on and the lane inert', async () => {
   const booted = await bootWithConfig({ enabled: true, distill: { enabled: false } });
   try {
-    assert.notEqual(booted.backend.getMemoryStore(), null);
-    assert.equal(booted.backend.getMemoryDistiller().isEnabled(), false);
+    assert.notEqual(booted.backend.getLane('memory-store'), null);
+    assert.equal(booted.backend.getLane('memory-distill').isEnabled(), false);
   } finally {
     await booted.close();
   }

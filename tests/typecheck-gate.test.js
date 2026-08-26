@@ -7,6 +7,10 @@ const path = require('node:path');
 
 const CHECKED_INCLUDE_GLOBS = [
   'server/core/**/*.js',
+  'server/backend-websockets.js',
+  'server/backend-health.js',
+  'server/backend-shutdown.js',
+  'server/session-registry.js',
   'session/core/snapshot-projection.js',
   'session/core/worktree-state.js',
   'shared/contracts/**/*.js',

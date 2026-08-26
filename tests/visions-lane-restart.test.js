@@ -85,33 +85,33 @@ function saveSettings(ws, settings) {
 }
 
 test('turning Visions on builds its lane without a restart', withBackend({}, async ({ backend, dash, track }) => {
-  assert.equal(backend.getVisionsLane(), null);
-  assert.equal(backend.getIngestLane(), null);
+  assert.equal(backend.getLane('visions'), null);
+  assert.equal(backend.getLane('ingest'), null);
 
   const { received, ws } = await openControl(dash, track);
   saveSettings(ws, { visions: { enabled: true, dispatch: { enabled: false } }, ingest: { enabled: true, sources: { fs: { enabled: true } } } });
   await until(() => received.some((message) => message.type === 'settings-updated'), 'no settings-updated frame');
-  await until(() => backend.getVisionsLane() !== null, 'the visions lane was never built');
-  await until(() => backend.getIngestLane() !== null, 'the ingest lane was never built');
-  assert.equal(backend.getIngestLane().fsEnabled, true);
+  await until(() => backend.getLane('visions') !== null, 'the visions lane was never built');
+  await until(() => backend.getLane('ingest') !== null, 'the ingest lane was never built');
+  assert.equal(backend.getLane('ingest').fsEnabled, true);
 }));
 
 test('turning Visions off takes its lane back down', withBackend({
   visions: { enabled: true, dispatch: { enabled: false } },
 }, async ({ backend, dash, track }) => {
-  assert.notEqual(backend.getVisionsLane(), null);
+  assert.notEqual(backend.getLane('visions'), null);
 
   const { received, ws } = await openControl(dash, track);
   saveSettings(ws, { visions: { enabled: false } });
   await until(() => received.some((message) => message.type === 'settings-updated'), 'no settings-updated frame');
-  await until(() => backend.getVisionsLane() === null, 'the visions lane was never stopped');
+  await until(() => backend.getLane('visions') === null, 'the visions lane was never stopped');
 }));
 
 test('a boot with Visions on brings up the lanes it implies, on that same boot', withBackend({
   visions: { enabled: true },
 }, async ({ backend, cfgPath }) => {
-  await until(() => backend.getIngestLane() !== null, 'the implied ingest lane never came up');
-  const lane = backend.getIngestLane();
+  await until(() => backend.getLane('ingest') !== null, 'the implied ingest lane never came up');
+  const lane = backend.getLane('ingest');
   assert.equal(lane.fsEnabled, true);
   assert.equal(lane.editorEnabled, true);
 
@@ -124,9 +124,9 @@ test('a boot with Visions on brings up the lanes it implies, on that same boot',
 test('a save that leaves both configs alone rebuilds nothing', withBackend({
   visions: { enabled: true, dispatch: { enabled: false } },
 }, async ({ backend, dash, track }) => {
-  const laneBefore = backend.getVisionsLane();
+  const laneBefore = backend.getLane('visions');
   const { received, ws } = await openControl(dash, track);
   saveSettings(ws, { cursorBlink: true });
   await until(() => received.some((message) => message.type === 'settings-updated'), 'no settings-updated frame');
-  assert.equal(backend.getVisionsLane(), laneBefore);
+  assert.equal(backend.getLane('visions'), laneBefore);
 }));

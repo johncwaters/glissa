@@ -47,8 +47,8 @@ async function bootWithConfig(extra) {
 test('an accepted intent proposal reaches the memory store the lane was handed', async () => {
   const booted = await bootWithConfig({ memory: { enabled: true }, visions: { enabled: true } });
   try {
-    const lane = booted.backend.getVisionsLane();
-    const store = booted.backend.getMemoryStore();
+    const lane = booted.backend.getLane('visions');
+    const store = booted.backend.getLane('memory-store');
     assert.notEqual(lane, null);
     assert.notEqual(store, null);
 
@@ -68,8 +68,8 @@ test('an accepted intent proposal reaches the memory store the lane was handed',
 test('the same proposal with memory off is recorded nowhere and costs the lane nothing', async () => {
   const booted = await bootWithConfig({ visions: { enabled: true } });
   try {
-    const lane = booted.backend.getVisionsLane();
-    assert.equal(booted.backend.getMemoryStore(), null);
+    const lane = booted.backend.getLane('visions');
+    assert.equal(booted.backend.getLane('memory-store'), null);
 
     lane.applyModelIntent('nothing to write to');
     await lane.whenMemoryIdle();

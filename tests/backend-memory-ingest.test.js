@@ -73,8 +73,8 @@ function settle() {
 test('memory on with ingest off runs the source and nothing else of that lane', async () => {
   const booted = await boot({ memory: { enabled: true } });
   try {
-    assert.equal(booted.backend.getIngestLane(), null, 'no ring, no batch timer, no digest');
-    const ingest = booted.backend.getMemoryIngest();
+    assert.equal(booted.backend.getLane('ingest'), null, 'no ring, no batch timer, no digest');
+    const ingest = booted.backend.getLane('memory-ingest');
     assert.notEqual(ingest, null);
     assert.notEqual(ingest.source, null, 'the agent-log source was constructed for the memory lane');
     assert.equal(ingest.source.isDisabled, false);
@@ -102,10 +102,10 @@ test('the dispatch digest stays unwired, so memory alone never widens a prompt',
   // never builds one.
   const booted = await boot({ memory: { enabled: true }, visions: { enabled: true }, ingest: { enabled: false } });
   try {
-    assert.equal(booted.backend.getIngestLane(), null);
+    assert.equal(booted.backend.getLane('ingest'), null);
     // Null is what the Visions lane reports when it was handed no digest and no movement signal at all.
-    assert.equal(booted.backend.getVisionsLane().latestContextSeq(), null);
-    assert.notEqual(booted.backend.getMemoryIngest().source, null);
+    assert.equal(booted.backend.getLane('visions').latestContextSeq(), null);
+    assert.notEqual(booted.backend.getLane('memory-ingest').source, null);
   } finally {
     await booted.close();
   }
@@ -117,8 +117,8 @@ test('with the ingest lane running the memory consumer rides ITS source rather t
     ingest: { enabled: true, sources: { agentLogs: { enabled: true } } },
   });
   try {
-    assert.notEqual(booted.backend.getIngestLane(), null);
-    assert.equal(booted.backend.getMemoryIngest().source, null, 'one source, two targets');
+    assert.notEqual(booted.backend.getLane('ingest'), null);
+    assert.equal(booted.backend.getLane('memory-ingest').source, null, 'one source, two targets');
   } finally {
     await booted.close();
   }
@@ -130,8 +130,8 @@ test('an ingest lane whose agent-log source is off still leaves memory a source 
     ingest: { enabled: true, sources: { terminal: { enabled: true } } },
   });
   try {
-    assert.equal(booted.backend.getIngestLane().agentLogsEnabled, false);
-    assert.notEqual(booted.backend.getMemoryIngest().source, null);
+    assert.equal(booted.backend.getLane('ingest').agentLogsEnabled, false);
+    assert.notEqual(booted.backend.getLane('memory-ingest').source, null);
   } finally {
     await booted.close();
   }
@@ -140,7 +140,7 @@ test('an ingest lane whose agent-log source is off still leaves memory a source 
 test('memory off constructs no ingest consumer at all', async () => {
   const booted = await boot({});
   try {
-    assert.equal(booted.backend.getMemoryIngest(), null);
+    assert.equal(booted.backend.getLane('memory-ingest'), null);
     assert.deepEqual(fs.readdirSync(booted.dir).filter((name) => name.startsWith('memory')), []);
   } finally {
     await booted.close();

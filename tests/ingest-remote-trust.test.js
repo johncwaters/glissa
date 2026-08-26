@@ -126,7 +126,7 @@ test.after(async () => {
 });
 
 test('the connect-time ingest snapshot goes to a local dashboard and not to a paired device', async () => {
-  const lane = backend.getIngestLane();
+  const lane = backend.getLane('ingest');
   assert.ok(lane, 'the lane is on for this boot');
   lane.publish({ source: 'terminal', kind: 'output', summary: 'a local command ran', scope: { root: '/repo' } });
 
@@ -165,7 +165,7 @@ test('a batched activity delta reaches a local dashboard and not a paired device
     await waitFor(local.received, (msg) => msg.type === 'ingest-snapshot');
 
     const secret = 'output only this machine should see';
-    backend.getIngestLane().publish({
+    backend.getLane('ingest').publish({
       source: 'terminal', kind: 'output', summary: secret, scope: { root: '/repo' },
     });
 

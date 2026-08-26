@@ -139,7 +139,7 @@ test('a model intent proposal broadcasts and rides the snapshot repair', withVis
   const firstSnapshot = await waitFor(dashboard.received, (msg) => msg.type === 'visions-snapshot');
   assert.deepEqual(firstSnapshot.intent, { global: null, byProject: {} }, 'a fresh daemon believes nothing yet');
 
-  const lane = backend.getVisionsLane();
+  const lane = backend.getLane('visions');
   assert.equal(lane.applyModelIntent('  rewriting the merge gate  '), true);
   const proposed = await waitFor(dashboard.received, (msg) => msg.type === 'visions-intent');
   assert.equal(proposed.projectId, null, 'no project owns it, so it is the machine-wide slot');

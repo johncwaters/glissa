@@ -99,7 +99,7 @@ test('a bad token is refused 403 and stores nothing', async () => {
   const body = await res.json();
   assert.equal(body.ok, false);
   assert.equal(body.reason, 'bad-token');
-  assert.equal(backend.getPlanLimits(), null, 'a refused callback never reaches the lane');
+  assert.equal(backend.getLane('usage').getPlanLimitsMessage(), null, 'a refused callback never reaches the lane');
 });
 
 test('a missing token is refused and stores nothing', async () => {
@@ -109,7 +109,7 @@ test('a missing token is refused and stores nothing', async () => {
     headers: { 'content-type': 'application/json' },
   });
   assert.notEqual(res.status, 200);
-  assert.equal(backend.getPlanLimits(), null);
+  assert.equal(backend.getLane('usage').getPlanLimitsMessage(), null);
 });
 
 test('an unknown session is 404, exactly as for any other event', async () => {
@@ -134,7 +134,7 @@ test('an accepted callback stores the plan limits and answers the plain ok JSON'
   assert.equal(body.ok, true);
   assert.equal(body.reason, 'ignored-event', 'statusline is telemetry, so it maps to no detection signal');
 
-  const stored = backend.getPlanLimits();
+  const stored = backend.getLane('usage').getPlanLimitsMessage();
   assert.ok(stored, 'the lane stored the snapshot');
   assert.equal(stored.type, 'plan-limits');
   assert.equal(stored.source, 'statusline');
@@ -171,8 +171,8 @@ test('the request payload reaches the router, not an empty object', async () => 
 
 test('the stored snapshot keeps nothing but the numbers', async () => {
   await postStatusline(payload({ five: 22.5 }));
-  assert.ok(backend.getPlanLimits(), 'there is a snapshot to inspect');
-  const serialized = JSON.stringify(backend.getPlanLimits());
+  assert.ok(backend.getLane('usage').getPlanLimitsMessage(), 'there is a snapshot to inspect');
+  const serialized = JSON.stringify(backend.getLane('usage').getPlanLimitsMessage());
   assert.equal(serialized.includes('transcript'), false);
   assert.equal(serialized.includes('C:/fixture'), false);
   assert.equal(serialized.includes('Opus'), false);
@@ -180,9 +180,9 @@ test('the stored snapshot keeps nothing but the numbers', async () => {
 
 test('the freshest payload wins', async () => {
   await postStatusline(payload({ five: 30 }));
-  assert.equal(backend.getPlanLimits().fiveHour.pct, 30);
+  assert.equal(backend.getLane('usage').getPlanLimitsMessage().fiveHour.pct, 30);
   await postStatusline(payload({ five: 44.4 }));
-  assert.equal(backend.getPlanLimits().fiveHour.pct, 44.4);
+  assert.equal(backend.getLane('usage').getPlanLimitsMessage().fiveHour.pct, 44.4);
 });
 
 test('a malformed body is tolerated: the route answers and the snapshot survives', async () => {
@@ -193,12 +193,12 @@ test('a malformed body is tolerated: the route answers and the snapshot survives
     headers: { 'content-type': 'application/json' },
   });
   assert.equal(res.status, 200);
-  assert.equal(backend.getPlanLimits().fiveHour.pct, 55, 'garbage does not blank a good snapshot');
+  assert.equal(backend.getLane('usage').getPlanLimitsMessage().fiveHour.pct, 55, 'garbage does not blank a good snapshot');
 });
 
 test('a startup payload (no rate_limits) is accepted and changes no snapshot', async () => {
   await postStatusline(payload({ five: 66 }));
   const res = await postStatusline({ session_id: 'c1', cost: { total_cost_usd: 0.5 } });
   assert.equal(res.status, 200);
-  assert.equal(backend.getPlanLimits().fiveHour.pct, 66);
+  assert.equal(backend.getLane('usage').getPlanLimitsMessage().fiveHour.pct, 66);
 });

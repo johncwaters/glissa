@@ -128,7 +128,7 @@ function until(predicate, message) {
 // --- Config gating --------------------------------------------------------
 
 test('with no ingest config the lane is never constructed and no session is tapped', withBackend({}, async ({ backend }) => {
-  assert.equal(backend.getIngestLane(), null);
+  assert.equal(backend.getLane('ingest'), null);
   const sess = backend.getSession('p1');
   assert.ok(sess, 'the project session should exist');
   assert.equal(sess.listenerCount('data'), 0, 'a lane that was never built cannot have tapped anything');
@@ -136,12 +136,12 @@ test('with no ingest config the lane is never constructed and no session is tapp
 }));
 
 test('ingest enabled false is as inert as ingest absent', withBackend({ ingest: { enabled: false, sources: { terminal: { enabled: true } } } }, async ({ backend }) => {
-  assert.equal(backend.getIngestLane(), null);
+  assert.equal(backend.getLane('ingest'), null);
   assert.equal(backend.getSession('p1').listenerCount('data'), 0);
 }));
 
 test('the lane on with every source off builds no adapter and taps nothing', withBackend({ ingest: { enabled: true } }, async ({ backend }) => {
-  const lane = backend.getIngestLane();
+  const lane = backend.getLane('ingest');
   assert.ok(lane, 'the lane itself is constructed');
   assert.equal(lane.terminalEnabled, false);
   assert.deepEqual(lane.sources, []);
@@ -152,7 +152,7 @@ test('the lane on with every source off builds no adapter and taps nothing', wit
 // --- The tap and its exclusion --------------------------------------------
 
 test('a project session is tapped, because it goes through wireSessionEvents', withBackend({ ingest: INGEST_ON }, async ({ backend }) => {
-  const lane = backend.getIngestLane();
+  const lane = backend.getLane('ingest');
   assert.equal(lane.terminalEnabled, true);
   assert.equal(lane.tapCount, 1);
   const sess = backend.getSession('p1');
@@ -167,7 +167,7 @@ test('a project session is tapped, because it goes through wireSessionEvents', w
 }));
 
 test('an ephemeral lane session is NOT tapped, which is what keeps the visions out of its own prompt', withBackend({ ingest: INGEST_ON }, async ({ backend }) => {
-  const lane = backend.getIngestLane();
+  const lane = backend.getLane('ingest');
   assert.equal(lane.tapCount, 1, 'only the project session');
 
   // Exactly how every ephemeral lane registers its session: the one seam, and it never touches
@@ -215,7 +215,7 @@ const GIT_ON = { enabled: true, sources: { git: { enabled: true } } };
 test('the git watch set is populated at boot, and never by an ephemeral lane session', { skip: !hasGit() }, withBackend(
   { ingest: GIT_ON },
   async ({ backend, seeded }) => {
-    const lane = backend.getIngestLane();
+    const lane = backend.getLane('ingest');
     assert.equal(lane.gitEnabled, true);
     const projectGitDir = fs.realpathSync.native(path.join(seeded.projectDir, '.git'));
     await until(() => lane.git.repoCount === 1, 'the boot poke should have derived the watch set');
@@ -309,7 +309,7 @@ function transition(sess, to) {
 test('an fs root appears when a session starts and leaves when it exits', withBackend(
   { ingest: FS_ON },
   async ({ backend, seeded }) => {
-    const lane = backend.getIngestLane();
+    const lane = backend.getLane('ingest');
     assert.equal(lane.fsEnabled, true);
     const projectRoot = fs.realpathSync.native(seeded.projectDir);
     assert.deepEqual(lane.fs.roots, [], 'a dormant session has started nothing to watch');
@@ -335,12 +335,42 @@ test('an fs root appears when a session starts and leaves when it exits', withBa
   withStubWatcher,
 ));
 
+test('a rebuilt fs lane follows state changes from a pre-existing live session', withBackend(
+  { ingest: FS_ON },
+  async ({ backend, seeded, dash, track }) => {
+    const firstLane = backend.getLane('ingest');
+    const projectRoot = fs.realpathSync.native(seeded.projectDir);
+    const sess = backend.getSession('p1');
+    transition(sess, 'STARTING');
+    await firstLane.fs.settle();
+    assert.deepEqual(firstLane.fs.roots, [projectRoot]);
+
+    const { ws, received } = await openRecordingSocket(dash);
+    track(ws);
+    ws.send(JSON.stringify({
+      type: 'update-settings',
+      requestId: 'rebuild-ingest',
+      settings: { visions: { enabled: true, dispatch: { enabled: false } } },
+    }));
+    await waitFor(received, (message) => message.type === 'settings-updated');
+    await until(() => backend.getLane('ingest') !== firstLane, 'the ingest lane was never rebuilt');
+
+    const rebuiltLane = backend.getLane('ingest');
+    await rebuiltLane.fs.settle();
+    assert.deepEqual(rebuiltLane.fs.roots, [projectRoot]);
+    transition(sess, 'DONE');
+    await rebuiltLane.fs.settle();
+    assert.deepEqual(rebuiltLane.fs.roots, []);
+  },
+  withStubWatcher,
+));
+
 // The lane's own rule, and the reason the edge is a gated listener rather than an optional-chained one:
 // a source that is off owes a session zero listeners, not a no-op listener per transition.
 test('with the fs source off a session carries no extra state-change listener', withBackend(
   { ingest: INGEST_ON },
   async ({ backend }) => {
-    const lane = backend.getIngestLane();
+    const lane = backend.getLane('ingest');
     assert.equal(lane.fsEnabled, false);
     assert.equal(lane.fs, null);
     assert.equal(backend.getSession('p1').listenerCount('state-change'), 1, 'only the pre-existing handler');
@@ -356,7 +386,7 @@ test('with the fs source off a session carries no extra state-change listener', 
 test('an ephemeral lane session never contributes an fs root', withBackend(
   { ingest: FS_ON },
   async ({ backend, seeded }) => {
-    const lane = backend.getIngestLane();
+    const lane = backend.getLane('ingest');
     const ephemeral = new EventEmitter();
     ephemeral.id = 'visions:file:///tmp/plan.md';
     ephemeral.path = seeded.projectDir;
@@ -389,7 +419,7 @@ test('an ephemeral lane session never contributes an fs root', withBackend(
 // snapshot learned about it, every tapped session tripped listenerMismatch permanently, which lit
 // the Radar attention dot on an otherwise healthy install.
 test('the ingest tap does not trip the listener-mismatch anomaly, and a real leak still does', withBackend({ ingest: INGEST_ON }, async ({ backend, dash, track }) => {
-  assert.equal(backend.getIngestLane().tapCount, 1);
+  assert.equal(backend.getLane('ingest').tapCount, 1);
   const { ws, received } = await openRecordingSocket(dash);
   track(ws);
   const snapshot = await waitFor(received, (msg) => msg.type === 'health-snapshot');
@@ -447,7 +477,7 @@ function assistantLine(text, sessionId) {
 test('a completed agent turn reaches the rings and the digest, and a lane session never does', withBackend(
   { ingest: AGENT_LOGS_ON },
   async ({ backend, seeded }) => {
-    const lane = backend.getIngestLane();
+    const lane = backend.getLane('ingest');
     assert.equal(lane.agentLogsEnabled, true);
     await lane.agentLogs.start();
     // backend.js loads the ledger eagerly at boot but cannot await it from a synchronous factory, so
@@ -474,11 +504,11 @@ test('an editor buffer opened through the Visions lane reaches the rings as a ma
     visions: { enabled: true, dispatch: { enabled: false } },
   },
   async ({ backend, projectDir }) => {
-    const lane = backend.getIngestLane();
+    const lane = backend.getLane('ingest');
     assert.equal(lane.editorEnabled, true);
 
     const uri = `file://${projectDir.replace(/\\/g, '/')}/docs/plan.md`;
-    const connection = backend.getVisionsLane().openConnection({ send: () => {} });
+    const connection = backend.getLane('visions').openConnection({ send: () => {} });
     connection.handleFrame(JSON.stringify({
       type: 'lsp',
       method: 'textDocument/didOpen',
@@ -502,14 +532,14 @@ test('a file the lane never mirrors still reports its save as a marker', withBac
   },
   async ({ backend, projectDir }) => {
     const uri = `file://${projectDir.replace(/\\/g, '/')}/src/app.js`;
-    const connection = backend.getVisionsLane().openConnection({ send: () => {} });
+    const connection = backend.getLane('visions').openConnection({ send: () => {} });
     connection.handleFrame(JSON.stringify({
       type: 'lsp',
       method: ACTIVITY_METHOD,
       params: { uri, method: 'textDocument/didSave' },
     }));
 
-    const events = backend.getIngestLane().recentEvents();
+    const events = backend.getLane('ingest').recentEvents();
     assert.deepEqual(events.map((event) => event.summary), ['saved src/app.js']);
     assert.equal(events[0].scope.root, projectDir);
   },
@@ -521,9 +551,9 @@ test('with the editor source off a mirrored buffer publishes nothing', withBacke
     visions: { enabled: true, dispatch: { enabled: false } },
   },
   async ({ backend, projectDir }) => {
-    const lane = backend.getIngestLane();
+    const lane = backend.getLane('ingest');
     assert.equal(lane.editorEnabled, false);
-    const connection = backend.getVisionsLane().openConnection({ send: () => {} });
+    const connection = backend.getLane('visions').openConnection({ send: () => {} });
     connection.handleFrame(JSON.stringify({
       type: 'lsp',
       method: 'textDocument/didOpen',
@@ -534,7 +564,7 @@ test('with the editor source off a mirrored buffer publishes nothing', withBacke
 ));
 
 test('the agentLogs source off builds no adapter, even with the lane on', withBackend({ ingest: INGEST_ON }, async ({ backend }) => {
-  const lane = backend.getIngestLane();
+  const lane = backend.getLane('ingest');
   assert.equal(lane.agentLogsEnabled, false);
   assert.equal(lane.agentLogs, null);
 }));
@@ -566,7 +596,7 @@ const withSeededShell = {
 };
 
 test('shellHistory stays off with the lane on and another source running', withBackend({ ingest: INGEST_ON }, async ({ backend }) => {
-  const lane = backend.getIngestLane();
+  const lane = backend.getLane('ingest');
   assert.equal(lane.shellHistoryEnabled, false, 'it is the one source that never rides the lane flag');
   assert.equal(lane.shellHistory, null);
   assert.ok(!lane.sources.includes('shellHistory'));
@@ -575,7 +605,7 @@ test('shellHistory stays off with the lane on and another source running', withB
 test('a command accepted in an external shell reaches the feed and the digest as machine scope', withBackend(
   { ingest: SHELL_HISTORY_ON },
   async ({ backend, seeded }) => {
-    const lane = backend.getIngestLane();
+    const lane = backend.getLane('ingest');
     assert.equal(lane.shellHistoryEnabled, true);
     await lane.shellHistory.start();
     assert.equal(lane.shellHistory.trackedCount, 1, 'the seeded history file is tailed');
@@ -600,7 +630,7 @@ test('a command accepted in an external shell reaches the feed and the digest as
 test('a machine-scope command survives a project-scoped digest, since it belongs to no project', withBackend(
   { ingest: SHELL_HISTORY_ON },
   async ({ backend, seeded }) => {
-    const lane = backend.getIngestLane();
+    const lane = backend.getLane('ingest');
     await lane.shellHistory.start();
     fs.appendFileSync(seeded.historyFile, 'cargo build --release\n', 'utf8');
     await lane.shellHistory.poll();
@@ -614,7 +644,7 @@ test('a machine-scope command survives a project-scoped digest, since it belongs
 // --- Wire ------------------------------------------------------------------
 
 test('a connecting dashboard is repaired with one ingest snapshot', withBackend({ ingest: INGEST_ON }, async ({ backend, dash, track }) => {
-  const lane = backend.getIngestLane();
+  const lane = backend.getLane('ingest');
   lane.publish({ source: 'terminal', kind: 'output', summary: 'earlier output', scope: { root: '/repo' } });
 
   const { ws, received } = await openRecordingSocket(dash);
@@ -629,7 +659,7 @@ test('a batched activity delta reaches the dashboard, and is deliberately not re
   track(ws);
   await waitFor(received, (msg) => msg.type === 'ingest-snapshot');
 
-  const lane = backend.getIngestLane();
+  const lane = backend.getLane('ingest');
   lane.publish({ source: 'terminal', kind: 'output', summary: 'live output', scope: { root: '/repo' } });
   const frame = await waitFor(received, (msg) => msg.type === 'ingest-activity');
   assert.equal(frame.overflow, 0);
@@ -644,7 +674,7 @@ test('a batched activity delta reaches the dashboard, and is deliberately not re
 }));
 
 test('no dashboard connected costs the lane nothing: publishing still fills the rings', withBackend({ ingest: INGEST_ON }, async ({ backend }) => {
-  const lane = backend.getIngestLane();
+  const lane = backend.getLane('ingest');
   lane.publish({ source: 'terminal', kind: 'output', summary: 'nobody is watching', scope: { root: '/repo' } });
   assert.equal(lane.recentEvents().length, 1);
 }));
@@ -660,8 +690,8 @@ test('no dashboard connected costs the lane nothing: publishing still fills the 
 const BOTH_LANES = { ingest: INGEST_ON, visions: { enabled: true } };
 
 test('an ingest batch pokes the Visions lane, and its gate reads this lane seq', withBackend(BOTH_LANES, async ({ backend }) => {
-  const lane = backend.getIngestLane();
-  const visions = backend.getVisionsLane();
+  const lane = backend.getLane('ingest');
+  const visions = backend.getLane('visions');
   assert.ok(visions, 'both lanes are constructed');
   assert.equal(visions.latestContextSeq(), 0, 'wired, and nothing has happened on the machine yet');
 
@@ -679,16 +709,16 @@ test('an ingest batch pokes the Visions lane, and its gate reads this lane seq',
 // Visions IMPLIES the lane now, so ingest off here is the operator's explicit opt-out, which is the only
 // thing that still produces the pre-M7.5 shape.
 test('with ingest off the Visions lane is wired to no movement signal at all', withBackend({ visions: { enabled: true }, ingest: { enabled: false } }, async ({ backend }) => {
-  assert.equal(backend.getIngestLane(), null);
+  assert.equal(backend.getLane('ingest'), null);
   assert.equal(
-    backend.getVisionsLane().latestContextSeq(), null,
+    backend.getLane('visions').latestContextSeq(), null,
     'a null seq is what makes every gate decision the pre-M7.5 one',
   );
 }));
 
 test('with the Visions lane off the ingest lane batches with nothing to poke', withBackend({ ingest: INGEST_ON }, async ({ backend }) => {
-  const lane = backend.getIngestLane();
-  assert.equal(backend.getVisionsLane(), null);
+  const lane = backend.getLane('ingest');
+  assert.equal(backend.getLane('visions'), null);
   lane.publish({ source: 'terminal', kind: 'output', summary: 'nobody to tell', scope: { root: '/repo' } });
   await new Promise((resolve) => { setTimeout(resolve, 1400).unref(); });
   assert.equal(lane.pendingEventCount, 0, 'the batch flushed rather than falling over on a lane that is not there');

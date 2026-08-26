@@ -49,7 +49,7 @@ async function bootWithConfig(memory) {
 test('a config with no memory block constructs no store and touches no memory directory', async () => {
   const booted = await bootWithConfig(undefined);
   try {
-    assert.equal(booted.backend.getMemoryStore(), null);
+    assert.equal(booted.backend.getLane('memory-store'), null);
     assert.deepEqual(fs.readdirSync(booted.dir).filter((name) => name.startsWith('memory')), []);
   } finally {
     await booted.close();
@@ -59,7 +59,7 @@ test('a config with no memory block constructs no store and touches no memory di
 test('memory enabled false is as inert as an absent block', async () => {
   const booted = await bootWithConfig({ enabled: false, retainDays: 90 });
   try {
-    assert.equal(booted.backend.getMemoryStore(), null);
+    assert.equal(booted.backend.getLane('memory-store'), null);
     assert.equal(fs.existsSync(path.join(booted.dir, 'memory')), false);
   } finally {
     await booted.close();
@@ -69,7 +69,7 @@ test('memory enabled false is as inert as an absent block', async () => {
 test('memory enabled true constructs the store beside the resolved config file', async () => {
   const booted = await bootWithConfig({ enabled: true });
   try {
-    const store = booted.backend.getMemoryStore();
+    const store = booted.backend.getLane('memory-store');
     assert.notEqual(store, null);
     assert.equal(store.dir, path.join(booted.dir, 'memory'));
     assert.equal(fs.existsSync(path.join(booted.dir, 'memory', 'hmac-key')), true);
