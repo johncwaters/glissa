@@ -12,6 +12,7 @@ const { buildVsix, extensionIdOf } = require('./core/vsix-core');
 const {
   EDITOR_CANDIDATES, decideEditorTargets, isExtensionInstalled, visionsExtensionFiles,
 } = require('./core/editor-extension-core');
+const { buildSetupGuide, commandLine, recipeIds, relayInvocation } = require('./core/editor-setup-core');
 const { resolvePathCommandMatches } = require('../session/core/spawn-command');
 
 const PACKAGE_ROOT = path.join(__dirname, '..');
@@ -97,6 +98,7 @@ async function runInstall(args) {
 
   console.log(`\nrelay ${RELAY_PATH}`);
   console.log('reload the editor window, then open a markdown file inside a project the daemon knows.');
+  console.log('for any other editor: glissa visions setup');
   return failures === 0 ? 0 : 1;
 }
 
@@ -109,6 +111,7 @@ async function runStatus() {
   console.log('glissa visions\n');
   console.log(`  ${'relay'.padEnd(18)} ${fs.existsSync(RELAY_PATH) ? RELAY_PATH : `MISSING: ${RELAY_PATH}`}`);
   console.log(`  ${'extension'.padEnd(18)} ${extensionId} ${manifest.version}`);
+  console.log(`  ${'other editors'.padEnd(18)} ${commandLine(resolveRelayInvocation())} (config: glissa visions setup)`);
   if (targets.length === 0) console.log(`  ${'editors'.padEnd(18)} none found on PATH`);
   for (const target of targets) {
     const installed = isExtensionInstalled(await editorExtensions(target.commandPath), extensionId);
@@ -117,12 +120,58 @@ async function runStatus() {
   return 0;
 }
 
+// The relay owns stdout from here on: it is the LSP wire, so nothing else may write a byte to it.
+function runRelay() {
+  const { createRelay } = require('../session/visions-relay');
+  createRelay().start();
+  return new Promise(() => {});
+}
+
+function relayInvocationOptions({ platform = process.platform, exec = execSync } = {}) {
+  const onPath = resolvePathCommandMatches('glissa', { platform, exec }).length > 0;
+  const cliPath = path.join(PACKAGE_ROOT, 'bin', 'glissa.js');
+  return {
+    chosen: relayInvocation({ glissaOnPath: onPath, cliPath, nodePath: process.execPath }),
+    absolute: relayInvocation({ glissaOnPath: false, cliPath, nodePath: process.execPath }),
+    onPath,
+  };
+}
+
+function resolveRelayInvocation(options = {}) {
+  return relayInvocationOptions(options).chosen;
+}
+
+function runSetup(args) {
+  const editorIndex = args.indexOf('--editor');
+  const editorId = editorIndex >= 0 ? args[editorIndex + 1] || null : null;
+  const { chosen: invocation, absolute, onPath } = relayInvocationOptions();
+  const guide = buildSetupGuide({ editorId, invocation });
+  if (!guide.ok) {
+    console.error(`visions setup: ${guide.reason} (known: ${recipeIds().join(', ')})`);
+    return 1;
+  }
+
+  console.log(`The Visions relay is one stdio LSP server: ${commandLine(invocation)}`);
+  // A GUI-launched editor inherits the desktop session's PATH, which often lacks the npm global bin dir.
+  if (onPath) console.log(`An editor launched from a desktop menu may not see your PATH; there, use: ${commandLine(absolute)}`);
+  console.log('');
+  for (const section of guide.sections) {
+    console.log(`${section.label}  (${section.where})`);
+    console.log(`${section.snippet}\n`);
+  }
+  console.log('Findings reach the dashboard Visions tab whichever client mirrors the buffer.');
+  console.log('The relay tries port 5173 then 3000; GLISSA_PORT or --port names another one.');
+  return 0;
+}
+
 async function runVisionsCli(args = []) {
   const command = args[0];
+  if (command === 'relay') return runRelay();
   if (command === 'install') return runInstall(args.slice(1));
+  if (command === 'setup') return runSetup(args.slice(1));
   if (command === 'status') return runStatus();
-  console.error('Usage: glissa visions install [--editor <command>]\n       glissa visions status');
+  console.error('Usage: glissa visions relay\n       glissa visions install [--editor <command>]\n       glissa visions setup [--editor <id>]\n       glissa visions status');
   return 1;
 }
 
-module.exports = { packVsix, runVisionsCli };
+module.exports = { packVsix, resolveRelayInvocation, runVisionsCli };

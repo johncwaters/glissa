@@ -13,7 +13,9 @@ Commands:
   pair              Mint a single-use pairing link for a remote device
   pair --list       List paired devices
   pair --revoke <id>  Revoke a paired device
-  visions install   Install the Visions editor extension into every VS Code family editor on PATH
+  visions relay     Run the Visions LSP relay on stdio (what an editor's LSP client spawns)
+  visions install   Install the Visions extension into every VS Code family editor on PATH
+  visions setup     Print LSP client config for Neovim, Helix, Emacs, Kate, Sublime, JetBrains
   visions status    Report the relay path and which editors carry the extension
   pack build [name] Build one context pack, or every spec
   pack list         List context pack specs and their built versions
