@@ -28,10 +28,15 @@ function splitMarked(text, begin, end) {
   return { hasBlock: true, before: text.slice(0, startAt), after: text.slice(endAt + end.length) };
 }
 
+function appendBlock(text, block) {
+  const body = text.trimEnd();
+  return `${body}${body === '' ? '' : '\n\n'}${block}\n`;
+}
+
 function replaceMarkedBlock(text, begin, end, block) {
   const split = splitMarked(text, begin, end);
   if (split.unterminated) return { text, changed: false, reason: 'unterminated-block' };
-  if (!split.hasBlock) return { text: `${text}${trailingNewline(text)}${text === '' ? '' : '\n'}${block}\n`, changed: true, reason: 'appended' };
+  if (!split.hasBlock) return { text: appendBlock(text, block), changed: true, reason: 'appended' };
   const merged = `${split.before}${block}${split.after}`;
   if (merged === text) return { text, changed: false, reason: UNCHANGED };
   return { text: merged, changed: true, reason: 'updated' };
@@ -125,8 +130,7 @@ function helixMerge(existingText, invocation) {
     if (merged === text) return { text, changed: false, reason: UNCHANGED };
     return { text: merged, changed: true, reason: 'updated' };
   }
-  const body = `${before}${after}`;
-  const merged = `${body.trimEnd()}${body.trim() === '' ? '' : '\n\n'}${block}\n`;
+  const merged = appendBlock(`${before}${after}`, block);
   if (merged === text) return { text, changed: false, reason: UNCHANGED };
   return { text: merged, changed: true, reason: 'appended' };
 }
@@ -136,7 +140,8 @@ function removeFromHelixMarkdown(text) {
   let changed = false;
   for (let index = 0; index < lines.length; index += 1) {
     if (!/^\s*language-servers\s*=\s*\[/.test(lines[index]) || !lines[index].includes(`"${SERVER_ID}"`)) continue;
-    lines[index] = lines[index].replace(new RegExp(`\\s*,\\s*"${SERVER_ID}"|"${SERVER_ID}"\\s*,\\s*`), '');
+    // Sole entry included: dropping it leaves an empty list, which is what the operator had.
+    lines[index] = lines[index].replace(new RegExp(`\\s*,\\s*"${SERVER_ID}"|"${SERVER_ID}"\\s*,\\s*|"${SERVER_ID}"`), '');
     changed = true;
   }
   return { text: lines.join('\n'), changed };
@@ -234,17 +239,13 @@ function kateSettings(invocation) {
 }
 
 module.exports = {
-  EMACS_BEGIN,
-  emacsRemove,
-  helixRemove,
-  jsonSettingsRemove,
-  EMACS_END,
-  HELIX_BEGIN,
-  HELIX_END,
   SERVER_ID,
   emacsMerge,
+  emacsRemove,
   helixMerge,
+  helixRemove,
   jsonSettingsMerge,
+  jsonSettingsRemove,
   kateSettings,
   neovimDropIn,
   sublimeSettings,

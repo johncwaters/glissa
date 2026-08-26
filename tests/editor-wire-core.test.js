@@ -39,6 +39,14 @@ test('an existing markdown entry keeps its own servers and settings', () => {
   assert.equal(helixRemove(merged.text).text, existing);
 });
 
+test('an empty language-servers list takes our entry without a stray comma', () => {
+  const existing = '[[language]]\nname = "markdown"\nlanguage-servers = []\n';
+  const merged = helixMerge(existing, INVOCATION);
+  assert.match(merged.text, /language-servers = \["glissa-visions"\]/);
+  assert.equal(helixMerge(merged.text, INVOCATION).changed, false);
+  assert.equal(helixRemove(merged.text).text.includes('glissa-visions'), false);
+});
+
 test('helix leaves other languages alone', () => {
   const existing = '[[language]]\nname = "rust"\nauto-format = true\n';
   const merged = helixMerge(existing, INVOCATION);

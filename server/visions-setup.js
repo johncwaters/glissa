@@ -125,7 +125,9 @@ async function uninstallExtensions({ resolvedByCommand = null } = {}) {
 
 async function wireEverything({ requested = null, dryRun = false } = {}) {
   const missing = missingInstallFiles();
-  if (missing.length > 0) return { ok: false, reason: `missing from this install: ${missing.join(', ')}`, extensions: [], files: [] };
+  if (missing.length > 0) {
+    return { ok: false, reason: `missing from this install: ${missing.join(', ')}`, extensions: { targets: [], reason: 'not-run', results: [] }, files: [] };
+  }
   const invocation = resolveRelayInvocation();
   const extensions = await installExtensions({ requested });
   const files = wireEditors({ invocation, dryRun });
