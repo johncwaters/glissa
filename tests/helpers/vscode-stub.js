@@ -46,7 +46,9 @@ class WorkspaceEdit {
 }
 
 function parseUri(value) {
-  return { toString: () => String(value), fsPath: String(value) };
+  const text = String(value);
+  const scheme = text.includes(':') ? text.slice(0, text.indexOf(':')) : 'file';
+  return { toString: () => text, fsPath: text, scheme };
 }
 
 const emitter = new EventEmitter();

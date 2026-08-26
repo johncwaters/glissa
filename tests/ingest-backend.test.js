@@ -494,6 +494,26 @@ test('an editor buffer opened through the Visions lane reaches the rings as a ma
   },
 ));
 
+test('a file the lane never mirrors still reports its save as a marker', withBackend(
+  {
+    ingest: { enabled: true, sources: { editor: { enabled: true } } },
+    visions: { enabled: true, dispatch: { enabled: false } },
+  },
+  async ({ backend, projectDir }) => {
+    const uri = `file://${projectDir.replace(/\\/g, '/')}/src/app.js`;
+    const connection = backend.getVisionsLane().openConnection({ send: () => {} });
+    connection.handleFrame(JSON.stringify({
+      type: 'lsp',
+      method: 'visions/editorActivity',
+      params: { uri, method: 'textDocument/didSave' },
+    }));
+
+    const events = backend.getIngestLane().recentEvents();
+    assert.deepEqual(events.map((event) => event.summary), ['saved src/app.js']);
+    assert.equal(events[0].scope.root, projectDir);
+  },
+));
+
 test('with the editor source off a mirrored buffer publishes nothing', withBackend(
   {
     ingest: { enabled: true, sources: { terminal: { enabled: true }, editor: { enabled: false } } },

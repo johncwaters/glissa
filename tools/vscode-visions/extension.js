@@ -14,6 +14,8 @@ const {
 } = require('./lsp-convert');
 
 const LANGUAGE_ID = 'markdown';
+// Every other file reports markers only: the lane sweeps markdown alone but the machine still moved.
+const ACTIVITY_METHOD = 'visions/editorActivity';
 const CODE_ACTION_TIMEOUT_MS = 2000;
 const INITIAL_RESTART_MS = 1000;
 const MAX_RESTART_MS = 15000;
@@ -121,8 +123,13 @@ function createRelayClient({ relayPath, port, output, diagnostics }) {
     return document.languageId === LANGUAGE_ID;
   }
 
+  function reportActivity(document, method) {
+    if (document.uri.scheme !== 'file') return;
+    notify(ACTIVITY_METHOD, { uri: document.uri.toString(), method });
+  }
+
   function didOpen(document) {
-    if (!isMirrored(document)) return;
+    if (!isMirrored(document)) return reportActivity(document, 'textDocument/didOpen');
     openVersionByUri.set(document.uri.toString(), document.version);
     notify('textDocument/didOpen', {
       textDocument: {
@@ -146,12 +153,12 @@ function createRelayClient({ relayPath, port, output, diagnostics }) {
   }
 
   function didSave(document) {
-    if (!isMirrored(document)) return;
+    if (!isMirrored(document)) return reportActivity(document, 'textDocument/didSave');
     notify('textDocument/didSave', { textDocument: { uri: document.uri.toString() } });
   }
 
   function didClose(document) {
-    if (!isMirrored(document)) return;
+    if (!isMirrored(document)) return reportActivity(document, 'textDocument/didClose');
     openVersionByUri.delete(document.uri.toString());
     diagnostics.delete(document.uri);
     notify('textDocument/didClose', { textDocument: { uri: document.uri.toString() } });
