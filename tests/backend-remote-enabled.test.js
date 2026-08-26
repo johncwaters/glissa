@@ -118,7 +118,7 @@ test.before(async () => {
   process.env.GLISSA_CONFIG = cfgPath;
 
   localServer = http.createServer();
-  backend = createBackend(localServer, { staticDir: null });
+  backend = createBackend(localServer, { staticDir: path.join(__dirname, '..', 'public') });
   localServer.on('request', backend.app);
   await new Promise((resolve) => localServer.listen(0, '127.0.0.1', resolve));
   localPort = localServer.address().port;
@@ -216,6 +216,9 @@ test('a paired device may reconnect with a replay cursor on the remote listener'
 // while express served the dashboard bundle under it. Impact was limited to static assets, but every
 // later app.use handler would have inherited the hole.
 test('a traversal dressed as a pair path does not escape the pairing gate', async () => {
+  const local = await fetch(`http://127.0.0.1:${localPort}/index.html`);
+  assert.equal(local.status, 200, 'the dashboard asset is mounted on the shared app');
+
   const plain = await fetch(`http://127.0.0.1:${remotePort}/index.html`);
   assert.equal(plain.status, 401, 'the baseline: an unpaired device gets nothing');
 

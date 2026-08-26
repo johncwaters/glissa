@@ -12,6 +12,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const http = require('node:http');
+const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const WebSocket = require('ws');
@@ -33,7 +34,7 @@ test.before(async () => {
   process.env.GLISSA_CONFIG = cfgPath;
 
   server = http.createServer();
-  backend = createBackend(server, { staticDir: null });
+  backend = createBackend(server, { staticDir: path.join(__dirname, '..', 'public') });
   server.on('request', backend.app);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   port = server.address().port;
@@ -63,6 +64,12 @@ test('the token endpoint answers a same-origin fetch and forbids caching', async
   const body = await res.json();
   assert.equal(typeof body.token, 'string');
   assert.equal(body.token.length, 64, 'a 32-byte random hex token');
+});
+
+test('static JavaScript uses the current IANA media type', async () => {
+  const res = await fetch(`http://127.0.0.1:${port}/app.js`);
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'text/javascript; charset=utf-8');
 });
 
 // A same-origin GET carries no Origin header at all, so the presence of a disallowed one is the tell.
@@ -125,9 +132,28 @@ function statusWithHost(hostHeader) {
   });
 }
 
+function statusWithoutHost() {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect(port, '127.0.0.1', () => {
+      socket.end('GET /control-token HTTP/1.0\r\nConnection: close\r\n\r\n');
+    });
+    let response = '';
+    socket.on('data', (chunk) => { response += chunk; });
+    socket.on('end', () => {
+      const match = response.match(/^HTTP\/1\.[01] (\d{3})/);
+      resolve(match ? Number(match[1]) : null);
+    });
+    socket.on('error', reject);
+  });
+}
+
 test('a rebinding Host is refused while every loopback spelling is allowed', async () => {
   assert.equal(await statusWithHost('evil.example'), 403);
   assert.equal(await statusWithHost(`evil.example:${port}`), 403);
   assert.equal(await statusWithHost(`localhost:${port}`), 200);
   assert.equal(await statusWithHost(`127.0.0.1:${port}`), 200);
+});
+
+test('an absent Host passes through the real middleware', async () => {
+  assert.equal(await statusWithoutHost(), 200);
 });
