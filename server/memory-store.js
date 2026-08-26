@@ -40,6 +40,26 @@ const MAX_DELIVERED_HASHES = 2000;
 const SEARCH_CANDIDATE_FACTOR = 10;
 const SEARCH_CANDIDATE_FLOOR = 100;
 
+function buildCanonicalProjectLookupPlan({
+  project,
+  knownProjects,
+  hasCachedProject,
+  cachedProject,
+  hasResolver,
+}) {
+  const normalized = core.normalizeProjectTag(project);
+  const configured = core.canonicalProjectPath(normalized, knownProjects);
+  const knownProjectTags = new Set(knownProjects
+    .map((knownProject) => core.normalizeProjectTag(typeof knownProject === 'string' ? knownProject : knownProject?.path))
+    .filter(Boolean));
+  if (!normalized || normalized !== configured || knownProjectTags.has(normalized)) return { canonical: configured };
+  if (hasCachedProject) return { canonical: cachedProject };
+  if (!hasResolver) return { canonical: configured };
+  return {
+    canonical: null, configured, normalized, knownProjects,
+  };
+}
+
 function createMemoryStore(deps = {}) {
   const {
     dir,
@@ -80,9 +100,6 @@ function createMemoryStore(deps = {}) {
   let projectionTimer = null;
   let projectionDirty = false;
   const canonicalProjectCache = new Map();
-  const knownProjectTags = new Set((Array.isArray(knownProjects) ? knownProjects : [])
-    .map((project) => core.normalizeProjectTag(typeof project === 'string' ? project : project?.path))
-    .filter(Boolean));
 
   let db = null;
   try {
@@ -131,45 +148,50 @@ function createMemoryStore(deps = {}) {
     return core.verifyOrDemote(shape.record, signingKey);
   }
 
-  function configuredProjectPath(project) {
-    return core.canonicalProjectPath(project, knownProjects);
+  function readKnownProjects() {
+    const configuredProjects = typeof knownProjects === 'function' ? knownProjects() : knownProjects;
+    if (!Array.isArray(configuredProjects)) return [];
+    return configuredProjects;
   }
 
-  function needsGitProjectLookup(project, configured) {
-    if (!project || project !== configured) return false;
-    return !knownProjectTags.has(project);
+  function canonicalProjectLookupPlan(project, resolver) {
+    const projects = readKnownProjects();
+    const normalized = core.normalizeProjectTag(project);
+    return buildCanonicalProjectLookupPlan({
+      project,
+      knownProjects: projects,
+      hasCachedProject: canonicalProjectCache.has(normalized),
+      cachedProject: canonicalProjectCache.get(normalized),
+      hasResolver: typeof resolver === 'function',
+    });
   }
 
   function canonicalProjectPathSync(project) {
-    const normalized = core.normalizeProjectTag(project);
-    const configured = configuredProjectPath(normalized);
-    if (!needsGitProjectLookup(normalized, configured)) return configured;
-    if (canonicalProjectCache.has(normalized)) return canonicalProjectCache.get(normalized);
-    if (typeof resolveProjectPathSync !== 'function') return configured;
+    const lookup = canonicalProjectLookupPlan(project, resolveProjectPathSync);
+    if (lookup.canonical !== null) return lookup.canonical;
     try {
-      const resolved = resolveProjectPathSync({ cwd: project, knownProjects });
-      const canonical = core.canonicalProjectPath(resolved, knownProjects) || configured;
-      canonicalProjectCache.set(normalized, canonical);
+      const resolved = resolveProjectPathSync({ cwd: lookup.normalized, knownProjects: lookup.knownProjects });
+      const canonical = core.canonicalProjectPath(resolved, lookup.knownProjects) || lookup.configured;
+      canonicalProjectCache.set(lookup.normalized, canonical);
       return canonical;
-    } catch {
-      canonicalProjectCache.set(normalized, configured);
-      return configured;
+    } catch (error) {
+      log.warn(`project path resolution failed for ${lookup.normalized}: ${error.message}`);
+      return lookup.configured;
     }
   }
 
   async function canonicalProjectPathForAppend(project) {
-    const normalized = core.normalizeProjectTag(project);
-    const configured = configuredProjectPath(normalized);
-    if (!needsGitProjectLookup(normalized, configured)) return configured;
-    if (canonicalProjectCache.has(normalized)) return canonicalProjectCache.get(normalized);
-    if (typeof resolveProjectPath !== 'function') return configured;
-    let canonical = configured;
+    const lookup = canonicalProjectLookupPlan(project, resolveProjectPath);
+    if (lookup.canonical !== null) return lookup.canonical;
     try {
-      const resolved = await resolveProjectPath({ cwd: project, knownProjects });
-      canonical = core.canonicalProjectPath(resolved, knownProjects) || configured;
-    } catch {}
-    canonicalProjectCache.set(normalized, canonical);
-    return canonical;
+      const resolved = await resolveProjectPath({ cwd: lookup.normalized, knownProjects: lookup.knownProjects });
+      const canonical = core.canonicalProjectPath(resolved, lookup.knownProjects) || lookup.configured;
+      canonicalProjectCache.set(lookup.normalized, canonical);
+      return canonical;
+    } catch (error) {
+      log.warn(`project path resolution failed for ${lookup.normalized}: ${error.message}`);
+      return lookup.configured;
+    }
   }
 
   async function canonicalizeInputProject(input) {

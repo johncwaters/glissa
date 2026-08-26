@@ -1179,9 +1179,9 @@ function createBackend(httpServer, options = {}) {
       dbPath: dbPathForConfig(configStore.configPath),
       config: memoryConfig,
       logger: console,
-      knownProjects: config.projects,
-      resolveProjectPath: (args) => gitWorkspace.resolveProjectPath(args),
-      resolveProjectPathSync: (args) => gitWorkspaceSync.resolveProjectPath(args),
+      knownProjects: () => configStore.getSettings().projects,
+      resolveProjectPath: gitWorkspace.resolveProjectPath,
+      resolveProjectPathSync: gitWorkspaceSync.resolveProjectPath,
       // Same reason as the ingest and visions lanes: the setting moves, the store is built once.
       debug: () => configStore.getSettings().debugMode === true,
     })
@@ -1196,7 +1196,7 @@ function createBackend(httpServer, options = {}) {
       laneMap: () => laneLedger.laneMap(),
       // How far back that exclusion can actually speak, so the backfill skips transcripts predating it.
       laneFloorMs: () => earliestLaneEntryMs(laneLedger),
-      knownProjects: config.projects,
+      knownProjects: () => configStore.getSettings().projects,
       debug: () => configStore.getSettings().debugMode === true,
     })
     : null;

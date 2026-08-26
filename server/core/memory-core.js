@@ -216,8 +216,9 @@ function normalizeProjectTag(raw) {
 }
 
 function configuredProjectTags(knownProjects) {
+  const configuredProjects = typeof knownProjects === 'function' ? knownProjects() : knownProjects;
   const tags = [];
-  for (const project of Array.isArray(knownProjects) ? knownProjects : []) {
+  for (const project of Array.isArray(configuredProjects) ? configuredProjects : []) {
     const candidate = typeof project === 'string' ? project : project?.path;
     const tag = normalizeProjectTag(candidate);
     if (!tag || tags.includes(tag)) continue;

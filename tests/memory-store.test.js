@@ -243,6 +243,31 @@ test('store open remaps worktree project tags once and publishes the configured 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('a failed project resolver is logged and retried on the next append', async () => {
+  const dir = tempDir();
+  try {
+    let calls = 0;
+    const warnings = [];
+    const store = openStore(dir, {
+      logger: { log() {}, warn: (line) => warnings.push(line) },
+      extra: {
+        resolveProjectPath: async () => {
+          calls += 1;
+          throw new Error('git unavailable');
+        },
+      },
+    });
+    await store.append(knowledge('first unresolved worktree', '/tmp/worktree'));
+    await store.append(knowledge('second unresolved worktree', '/tmp/worktree'));
+
+    assert.equal(calls, 2);
+    assert.equal(warnings.filter((line) => line.includes('git unavailable')).length, 2);
+    await store.stop();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a row hand-written by another local process is demoted on the next load', async () => {
   const dir = tempDir();
   try {

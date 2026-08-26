@@ -101,6 +101,12 @@ function createMemoryIngest({
   let ownSource = null;
   let stopped = false;
 
+  function readKnownProjects() {
+    const configuredProjects = typeof knownProjects === 'function' ? knownProjects() : knownProjects;
+    if (!Array.isArray(configuredProjects)) return [];
+    return configuredProjects;
+  }
+
   // Starting empty costs the gap, never a duplicate: every unknown file restarts at end of file.
   function loadTailState() {
     if (loadPromise) return loadPromise;
@@ -139,7 +145,7 @@ function createMemoryIngest({
     counts.seen += 1;
     const input = core.memoryInputFromEvent(event, {
       deliveredHashes: store.deliveredHashes?.() || null,
-      knownProjects,
+      knownProjects: readKnownProjects(),
     });
     if (!input) return false;
     const outcome = core.enqueueIngestInput(queued, { ...input, tailPath }, { maxQueued });

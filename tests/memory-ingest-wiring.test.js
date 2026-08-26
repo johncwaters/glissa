@@ -283,6 +283,30 @@ test('the ingest write path tags a worktree transcript with its configured proje
   assert.equal(store.records()[0].project, projectPath);
 }));
 
+test('a project added after ingest wiring tags the next worktree event', withHomes(async ({ memoryDir, env, cleanups }) => {
+  const configuredProjects = [];
+  const projectPath = '/home/carbon/projects/glissa';
+  const worktreePath = '/home/carbon/projects/.glissa-worktrees/glissa-abc123';
+  const knownProjects = () => configuredProjects;
+  const store = realStore(memoryDir, { knownProjects });
+  cleanups.push(() => store.stop());
+  const ingest = createMemoryIngest({ store, env, knownProjects });
+  cleanups.push(() => ingest.stop());
+
+  configuredProjects.push({ path: projectPath });
+  ingest.consumer.publish({
+    source: 'agentLogs',
+    kind: 'agent-turn',
+    ts: Date.UTC(2026, 7, 20, 10, 0, 0),
+    scope: { root: worktreePath, sessionId: 'sess-1' },
+    summary: 'claude: a new project configuration is live',
+    detail: { vendor: 'claude' },
+  });
+  await ingest.whenIdle();
+
+  assert.equal(store.records()[0].project, projectPath);
+}));
+
 test('a backfill cut short by its byte budget resumes without writing anything twice', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
   const lines = [];
   for (let index = 0; index < 6; index += 1) {

@@ -35,8 +35,8 @@ function defaultMakeStore() {
     // enabled flag gates the automatic lane, not a deliberate expunge.
     config: { ...resolved, enabled: true },
     knownProjects,
-    resolveProjectPath: (args) => gitWorkspace.resolveProjectPath(args),
-    resolveProjectPathSync: (args) => gitWorkspaceSync.resolveProjectPath(args),
+    resolveProjectPath: gitWorkspace.resolveProjectPath,
+    resolveProjectPathSync: gitWorkspaceSync.resolveProjectPath,
   });
 }
 

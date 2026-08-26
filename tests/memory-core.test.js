@@ -437,6 +437,15 @@ test('canonicalProjectPath gives exact configured paths priority and leaves unkn
   assert.equal(canonicalProjectPath('C:\\Other\\Repo', projects), 'C:\\Other\\Repo');
 });
 
+test('canonicalProjectPath reads configured projects from a getter for every call', () => {
+  const projects = [];
+  const worktreePath = '/repos/.glissa-worktrees/glissa-abc123';
+  const knownProjects = () => projects;
+  assert.equal(canonicalProjectPath(worktreePath, knownProjects), worktreePath);
+  projects.push('/repos/glissa');
+  assert.equal(canonicalProjectPath(worktreePath, knownProjects), '/repos/glissa');
+});
+
 // --- Forget ---------------------------------------------------------------
 
 test('forget by id removes the record; forget by pattern redacts what survives', () => {
