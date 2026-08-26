@@ -761,14 +761,25 @@ test('a remembered line reaching the index or a rules file fails the build, publ
 
 test('a short data line reaching the instruction tier fails the build', () => {
   const plan = planPackBuild(
-    dataSpec({ rules: ['secret'] }),
-    [dataFile('MEMORY.md', 'secret\n')],
+    dataSpec({ rules: ['[m-abcdef]'] }),
+    [dataFile('MEMORY.md', '[m-abcdef]\n')],
     { builtAt: BUILT_AT }
   );
 
   assert.equal(plan.ok, false);
   assert.deepEqual(plan.outputs, []);
   assert.equal(plan.errors.some((error) => error.includes('instruction-tier')), true);
+});
+
+test('a coincidental short data bullet does not fail the build', () => {
+  const plan = planPackBuild(
+    dataSpec({ rules: ['- Node'] }),
+    [dataFile('MEMORY.md', '- Node\n')],
+    { builtAt: BUILT_AT }
+  );
+
+  assert.equal(plan.ok, true);
+  assert.equal(plan.errors.length, 0);
 });
 
 test('an unfilled template stub in any delivered source fails with a named error', () => {
