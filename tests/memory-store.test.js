@@ -66,6 +66,34 @@ test('a canonical project lookup reuses its plan for fresh equal-content project
   assert.strictEqual(second, first);
 });
 
+test('a canonical project lookup invalidates a plan when a known project array is mutated', () => {
+  const planLookup = createCanonicalProjectLookupPlanner();
+  const knownProjects = ['/repos/glissa'];
+  const first = planLookup({
+    project: '/repos/.glissa-worktrees/glissa-abc123', knownProjects, hasCachedProject: false,
+    cachedProject: null, hasResolver: false,
+  });
+  knownProjects[0] = '/repos/other';
+  const second = planLookup({
+    project: '/repos/.glissa-worktrees/glissa-abc123', knownProjects, hasCachedProject: false,
+    cachedProject: null, hasResolver: false,
+  });
+  assert.notStrictEqual(second, first);
+  assert.equal(second.canonical, '/repos/.glissa-worktrees/glissa-abc123');
+});
+
+test('a canonical project lookup distinguishes colliding legacy plan signature values', () => {
+  const planLookup = createCanonicalProjectLookupPlanner();
+  const base = { knownProjects: [], hasCachedProject: true, cachedProject: '/cached', hasResolver: false };
+  const nullProject = planLookup({ ...base, project: null });
+  const emptyProject = planLookup({ ...base, project: '' });
+  assert.notStrictEqual(emptyProject, nullProject);
+
+  const separatorProject = planLookup({ ...base, project: '/repos/a\u0000b' });
+  const splitProject = planLookup({ ...base, project: '/repos/a', knownProjects: ['b\u0000'] });
+  assert.notStrictEqual(splitProject, separatorProject);
+});
+
 // json-file.js writes `<target>.tmp.<pid>.<n>` beside its target, so a read racing a rename sees one.
 function readdirStable(dirPath) {
   return fs.readdirSync(dirPath).filter((name) => !/\.tmp\.\d+\.\d+$/.test(name));

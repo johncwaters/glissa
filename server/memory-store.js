@@ -41,7 +41,17 @@ const SEARCH_CANDIDATE_FACTOR = 10;
 const SEARCH_CANDIDATE_FLOOR = 100;
 
 function configuredProjectPathsSignature(knownProjects) {
-  return core.configuredProjectTags(knownProjects).join('\u0000');
+  return JSON.stringify(core.configuredProjectTags(knownProjects));
+}
+
+function planValueSignature(value) {
+  const type = value === null ? 'null' : typeof value;
+  const text = String(value);
+  return `${type}:${text.length}:${text}`;
+}
+
+function canonicalProjectPlanSignature(values) {
+  return values.map(planValueSignature).join('');
 }
 
 function createCanonicalProjectLookupPlanner() {
@@ -53,23 +63,24 @@ function createCanonicalProjectLookupPlanner() {
     const projectPathsSignature = configuredProjectPathsSignature(knownProjects);
     if (projectPathsSignature !== memoizedProjectPathsSignature) {
       memoizedProjectPathsSignature = projectPathsSignature;
-      memoizedProjectTags = new Set(projectPathsSignature ? projectPathsSignature.split('\u0000') : []);
+      memoizedProjectTags = new Set(JSON.parse(projectPathsSignature));
     }
-    const planSignature = [project, projectPathsSignature, hasCachedProject, cachedProject, hasResolver].join('\u0000');
+    const planSignature = canonicalProjectPlanSignature([
+      project, projectPathsSignature, hasCachedProject, cachedProject, hasResolver,
+    ]);
     if (planSignature === memoizedPlanSignature) return memoizedPlan;
-    const commit = (plan) => {
-      memoizedPlan = plan;
-      memoizedPlanSignature = planSignature;
-      return plan;
-    };
     const normalized = core.normalizeProjectTag(project);
     const configured = core.canonicalProjectPath(normalized, knownProjects);
+    let plan;
     if (!normalized || normalized !== configured || memoizedProjectTags.has(normalized)) {
-      return commit({ canonical: configured });
+      plan = { canonical: configured };
     }
-    if (hasCachedProject) return commit({ canonical: cachedProject });
-    if (!hasResolver) return commit({ canonical: configured });
-    return commit({ canonical: null, configured, normalized, knownProjects });
+    if (!plan && hasCachedProject) plan = { canonical: cachedProject };
+    if (!plan && !hasResolver) plan = { canonical: configured };
+    if (!plan) plan = { canonical: null, configured, normalized, knownProjects };
+    memoizedPlan = plan;
+    memoizedPlanSignature = planSignature;
+    return memoizedPlan;
   };
 }
 
