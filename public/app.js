@@ -283,10 +283,9 @@ const messageHandlers = {
   'mill-report':        (msg) => {
     applyMillReport(msg);
     applySettingsProjectReport(msg);
-    if (_activeView === 'settings') activateSettingsHash();
-    if (!shouldResolveSettingsHashOnMillReport) return;
+    const shouldResolve = _activeView === 'settings' || shouldResolveSettingsHashOnMillReport;
     shouldResolveSettingsHashOnMillReport = false;
-    activateSettingsHash();
+    if (shouldResolve) activateSettingsHash();
   },
   // A project's pack list changed from some dashboard. The Mill tab is a pull surface, so the broadcast
   // says the report moved and every client fetches its own; the debounce coalesces a run of toggles.
