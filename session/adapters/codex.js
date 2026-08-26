@@ -24,9 +24,7 @@ const RTK_RELAY_PATH = path.resolve(__dirname, "..", "rtk-relay.js");
 const RTK_HOOK_EVENT = "PreToolUse";
 const RTK_TOOL_MATCHER = "Bash";
 
-// The five events Glissa subscribes for DETECTION. PostToolUse is deliberately absent: a per-tool-call
-// callback is the pack-read-telemetry cost without pack-read telemetry's justification, and nothing
-// in the codex signal map needs one.
+// The five events Glissa subscribes for detection.
 const HOOK_EVENTS = ["SessionStart", "SessionEnd", "UserPromptSubmit", "Stop", "PermissionRequest"];
 
 // -- Environment ------------------------------------------------------------
@@ -315,7 +313,6 @@ module.exports = {
   renderPackArgs,
   packCarrier: "developer_instructions index pointers",
   packNoticeCaveat: "staleness notices require trusted UserPromptSubmit hooks or the hook-trust bypass",
-  packReadTelemetry: false,
   buildHookArgs,
   buildHookCommand,
   mayContributeHooks,

@@ -493,8 +493,6 @@ function createBackend(httpServer, options = {}) {
       // Which per-project variant this project's spawns resolve first (see Session._resolvePacks).
       // The SAME slug the memory projection names its per-project file by.
       packVariantSlug: projectVariantSlug(project.path),
-      // Pack read telemetry (config kill switch; undefined -> Session default true).
-      packReadTelemetry: cfg.packReadTelemetry,
       // Official plan-limit ingestion via a managed statusLine. Off whenever the usage lane itself is
       // off, so one switch turns the whole lane inert.
       planLimits: planLimitsEnabled(cfg),

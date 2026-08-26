@@ -32,7 +32,6 @@ function pack(overrides = {}) {
     },
     builtReason: null,
     deliveredTo: [],
-    totalReads: 0,
     staleDeliveries: 0,
     consumers: { projects: [], lanes: [] },
     distill: [],
@@ -230,20 +229,20 @@ test('the checkbox list is one row per project the server ships, so sibling card
   assert.deepEqual(deliveryTargets(report, pack()).map((target) => [target.id, target.name]), [['p1', 'glissa']]);
 });
 
-test('a delivery row reads as one project, counting the cards behind it', async () => {
+test('a delivery row names one project and its cards', async () => {
   const { deliveryDetail, deliveryLabel, deliveryStaleText, deliveryTone } = await importCore();
-  const single = { project: 'glissa', sessionCount: 1, state: 'RUNNING', version: VERSION, reads: 3, readsSinceNotice: null, stale: false, staleSessions: 0 };
+  const single = { project: 'glissa', sessionCount: 1, state: 'RUNNING', version: VERSION, stale: false, staleSessions: 0 };
   assert.equal(deliveryLabel(single), 'glissa (running)');
   assert.equal(deliveryStaleText(single), '');
   assert.equal(deliveryTone(single), 'ok');
 
-  const grouped = { project: 'glissa', sessionCount: 2, state: 'RUNNING', version: VERSION, reads: 5, readsSinceNotice: 2, stale: true, staleSessions: 1 };
+  const grouped = { project: 'glissa', sessionCount: 2, state: 'RUNNING', version: VERSION, stale: true, staleSessions: 1 };
   assert.equal(deliveryLabel(grouped), 'glissa (2 sessions, running)');
-  assert.equal(deliveryDetail(grouped), '5 reads, 2 since stale notice, version abcdef012345');
+  assert.equal(deliveryDetail(grouped), 'version abcdef012345');
   assert.equal(deliveryStaleText(grouped), '1 of 2 stale');
   assert.equal(deliveryTone(grouped), 'warn');
 
-  const mixed = { project: 'glissa', sessionCount: 2, state: null, version: null, reads: 0, readsSinceNotice: null, stale: true, staleSessions: 2 };
+  const mixed = { project: 'glissa', sessionCount: 2, state: null, version: null, stale: true, staleSessions: 2 };
   assert.equal(deliveryLabel(mixed), 'glissa (2 sessions)', 'no state is claimed while the sessions disagree');
   assert.equal(deliveryStaleText(mixed), 'stale', 'every session behind is plainly stale');
 });

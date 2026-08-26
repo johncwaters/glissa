@@ -27,15 +27,3 @@ export function stalePackNames(deliveredPacks, latestVersionsByName) {
 export function hasStalePack(deliveredPacks, latestVersionsByName) {
   return stalePackNames(deliveredPacks, latestVersionsByName).length > 0;
 }
-
-/** "N read"/"N reads" for a pack snapshot entry; the one owner of that coercion and pluralization. */
-export function readCountText(pack) {
-  const reads = Number(pack?.reads) || 0;
-  return `${reads} ${reads === 1 ? 'read' : 'reads'}`;
-}
-
-/** Reads since the last staleness notice, or null when no notice was ever taken. */
-export function sinceNoticeCount(pack) {
-  if (!pack || pack.readsSinceNotice == null) return null;
-  return Number(pack.readsSinceNotice) || 0;
-}

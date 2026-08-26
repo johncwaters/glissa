@@ -54,10 +54,6 @@ const DEFAULT_CONFIG = {
   // switch only, read once at boot: with it false no watcher and no timer is installed and packs are
   // whatever `glissa pack build` last wrote. See server/pack-service.js and AGENTS.md "Context Packs".
   packsAutoRebuild: true,
-  // Count Read tool calls that land inside a delivered pack dir, so the operator can see whether a
-  // pack is actually consumed. Costs one matcher-scoped PostToolUse hook, and only for a session that
-  // delivers packs; with it false that hook is never injected. See AGENTS.md "Context Packs".
-  packReadTelemetry: true,
   // The distiller lane: an LLM pass that regenerates a pack's DERIVED source files when the sources
   // they distill have drifted (server/pack-distiller.js). Off by default, and deliberately not
   // settable from the control WebSocket, like `remote`: enabling it lets a scheduled headless session
@@ -149,10 +145,8 @@ const BOOLEAN_KEYS = [
   'checkForUpdates',
   'autoResume',
   'telegramNotifications',
-  // Both surfaced on the Mill tab. The service reads packsAutoRebuild once at boot and a session
-  // reads packReadTelemetry once at spawn, so each applies from the next restart / next session.
+  // The service reads this at boot, so changes apply from the next restart.
   'packsAutoRebuild',
-  'packReadTelemetry',
   // Both worktree conflict-avoidance switches, absent from getSettings for the same reason
   // (precedent: usage.rtkSavings). Validated and reloadable; each takes effect on the next session
   // construction / server restart respectively.
@@ -487,7 +481,6 @@ function createConfigStore({ settingsDefaults } = {}) {
       autoResume: config.autoResume ?? effectiveDefaults.autoResume,
       telegramNotifications: config.telegramNotifications ?? effectiveDefaults.telegramNotifications,
       packsAutoRebuild: config.packsAutoRebuild ?? effectiveDefaults.packsAutoRebuild,
-      packReadTelemetry: config.packReadTelemetry ?? effectiveDefaults.packReadTelemetry,
       integrationBranch: config.integrationBranch ?? effectiveDefaults.integrationBranch,
       worktreeRoot: config.worktreeRoot ?? effectiveDefaults.worktreeRoot,
       worktreeShare: config.worktreeShare ?? effectiveDefaults.worktreeShare,

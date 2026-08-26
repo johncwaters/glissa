@@ -252,8 +252,8 @@ test('two cards on one checkout are offered once, and deliver as one project', a
     },
     // The snapshot shape the Session class hands over, path included: it is what groups the rows.
     listSessions: () => [
-      { id: 's1', name: 'glissa', path: projectPath, state: 'RUNNING', packs: [{ name: 'good', version: VERSION, reads: 2 }] },
-      { id: 's2', name: 'glissa (2)', path: projectPath, state: 'RUNNING', packs: [{ name: 'good', version: VERSION, reads: 1 }] },
+      { id: 's1', name: 'glissa', path: projectPath, state: 'RUNNING', packs: [{ name: 'good', version: VERSION }] },
+      { id: 's2', name: 'glissa (2)', path: projectPath, state: 'RUNNING', packs: [{ name: 'good', version: VERSION }] },
     ],
   });
   const { replies, done } = pull(wiring, 'r1');
@@ -264,7 +264,6 @@ test('two cards on one checkout are offered once, and deliver as one project', a
   assert.equal(good.deliveredTo.length, 1);
   assert.equal(good.deliveredTo[0].project, 'glissa');
   assert.equal(good.deliveredTo[0].sessionCount, 2);
-  assert.equal(good.deliveredTo[0].reads, 3);
   assert.ok(!JSON.stringify(replies[0]).includes(fixture.tmpDir), 'no server path reaches the wire');
 });
 

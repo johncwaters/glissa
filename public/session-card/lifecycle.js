@@ -17,7 +17,7 @@ import { computeAggregate } from './aggregate-core.mjs';
 import { buildCardDOM, closeDebugOverlay, isRenameInProgress, openDebugOverlay, setDebugMode, startInlineRename } from './card-dom.js';
 import { aggregateEl, container, sessionUIs } from './card-registry.js';
 import { openConfirmDialog } from './modal.js';
-import { readCountText, sinceNoticeCount, stalePackNames } from './pack-stale-core.mjs';
+import { stalePackNames } from './pack-stale-core.mjs';
 import { openResumeDialog } from './resume-dialog.js';
 // Load-bearing import: evaluating session-tick.js installs the shared 1s tick (elapsed clock +
 // working-heartbeat poll) at module load.
@@ -384,25 +384,12 @@ export function notePackVersion(name, version) {
   refreshPackStaleness();
 }
 
-// One line of read telemetry per delivered pack: "name: N reads" (plus the count since the staleness
-// notice, once one has been injected). Server-side counters, so a pack never read reads as 0.
-function packReadsText(packs) {
-  const rows = (Array.isArray(packs) ? packs : []).map((pack) => {
-    const since = sinceNoticeCount(pack);
-    const suffix = since == null ? '' : `, ${since} since notice`;
-    return `${pack.name}: ${readCountText(pack)}${suffix}`;
-  });
-  return `Reads by this session: ${rows.join('; ')}`;
-}
-
 function applyPackStaleness(ui) {
   const stale = stalePackNames(ui.packs, latestPackVersions);
   paintCardBadge(ui, '.pack-badge', 'packStale', {
     on: stale.length > 0,
-    // Reads ride the same tooltip rather than a chip of their own: "rebuilt, and this session read it
-    // N times" is one thought, and the chip only renders while a pack is stale anyway.
     title: stale.length > 0
-      ? `Rebuilt since this session started: ${stale.join(', ')}. Restart it to pick up the new context.\n${packReadsText(ui.packs)}`
+      ? `Rebuilt since this session started: ${stale.join(', ')}. Restart it to pick up the new context.`
       : '',
   });
 }

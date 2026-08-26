@@ -155,16 +155,8 @@ export function deliveryLabel(delivery) {
   return `${name} (${parts.join(', ')})`;
 }
 
-// Reads are the whole point of the telemetry: a delivered pack nothing ever opened cost context for
-// nothing, so the count is said even when it is zero.
 export function deliveryDetail(delivery) {
-  const parts = [`${formatCount(delivery?.reads ?? 0)} reads`];
-  const sinceNotice = delivery?.readsSinceNotice;
-  if (typeof sinceNotice === 'number' && Number.isFinite(sinceNotice)) {
-    parts.push(`${formatCount(sinceNotice)} since stale notice`);
-  }
-  parts.push(`version ${shortVersion(delivery?.version)}`);
-  return parts.join(', ');
+  return `version ${shortVersion(delivery?.version)}`;
 }
 
 export function deliveryTone(delivery) {
@@ -294,7 +286,6 @@ export function totalsChips(report) {
     { label: 'invalid specs', value: formatCount(totals.invalidSpecs ?? 0), tone: Number(totals.invalidSpecs) > 0 ? 'crit' : null },
     { label: 'stale deliveries', value: formatCount(totals.staleDeliveries ?? 0), tone: Number(totals.staleDeliveries) > 0 ? 'warn' : null },
     { label: 'stale distills', value: formatCount(totals.staleDistills ?? 0), tone: Number(totals.staleDistills) > 0 ? 'warn' : null },
-    { label: 'pack reads', value: formatCount(totals.totalReads ?? 0) },
   ];
 }
 

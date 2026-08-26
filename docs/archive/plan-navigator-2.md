@@ -168,7 +168,7 @@ is current behavior and stays the default.
 - **The mapping is the work**: buffers arrive as uris, projects are configured as paths. A new pure
   `server/core/navigator-scope-core.js` owns `pathOfFileUri(uri)` (file scheme only, percent
   decoding, Windows drive-letter form, both slash kinds folded, following the shape-based
-  normalization precedent in `session/core/pack-read-tracker.js`) and
+  normalization) and
   `isUriInProjects(uri, projectPaths)` (prefix match on normalized paths). A non-file uri
   (untitled buffers) matches nothing when a scope list is set.
 - **Enforcement sits at the two entry points**: the sweep path (out-of-scope docs get no sweep, no

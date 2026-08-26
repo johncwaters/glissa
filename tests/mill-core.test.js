@@ -130,21 +130,17 @@ test('a spec that parses but does not validate carries the validator errors', ()
 test('a delivery is stale only when the delivered version differs from a KNOWN built one', () => {
   const report = buildMillReport(baseInput({
     sessionRows: [
-      { sessionId: 's1', sessionName: 'current', state: 'running', packs: [{ name: 'company-context', version: VERSION, reads: 4 }] },
-      { sessionId: 's2', sessionName: 'behind', state: 'idle', packs: [{ name: 'company-context', version: OLD_VERSION, reads: 1, readsSinceNotice: 1 }] },
-      { sessionId: 's3', sessionName: 'other pack', state: 'idle', packs: [{ name: 'elsewhere', version: VERSION, reads: 9 }] },
+      { sessionId: 's1', sessionName: 'current', state: 'running', packs: [{ name: 'company-context', version: VERSION }] },
+      { sessionId: 's2', sessionName: 'behind', state: 'idle', packs: [{ name: 'company-context', version: OLD_VERSION }] },
+      { sessionId: 's3', sessionName: 'other pack', state: 'idle', packs: [{ name: 'elsewhere', version: VERSION }] },
     ],
   }));
   const pack = report.packs[0];
   assert.deepEqual(pack.deliveredTo.map((d) => d.project), ['current', 'behind']);
   assert.equal(pack.deliveredTo[0].stale, false);
   assert.equal(pack.deliveredTo[1].stale, true);
-  assert.equal(pack.deliveredTo[1].readsSinceNotice, 1);
-  assert.equal(pack.deliveredTo[0].readsSinceNotice, null, 'absent telemetry stays absent rather than reading as zero');
-  assert.equal(pack.totalReads, 5);
   assert.equal(pack.staleDeliveries, 1);
   assert.equal(report.totals.staleDeliveries, 1);
-  assert.equal(report.totals.totalReads, 5);
 });
 
 // ---- Delivery rows are addressed per PROJECT, never per card ----
@@ -159,31 +155,28 @@ test('two cards on one checkout are ONE delivery row, counted and summed', () =>
   const report = buildMillReport(baseInput({
     consumers: { projects: SIBLING_PROJECTS },
     sessionRows: [
-      { sessionId: 's1', sessionName: 'glissa', path: 'C:/repo', state: 'running', packs: [{ name: 'company-context', version: VERSION, reads: 2 }] },
-      { sessionId: 's2', sessionName: 'glissa (2)', path: 'C:/repo', state: 'idle', packs: [{ name: 'company-context', version: OLD_VERSION, reads: 3, readsSinceNotice: 1 }] },
-      { sessionId: 's3', sessionName: 'other', path: 'C:/other', state: 'running', packs: [{ name: 'company-context', version: VERSION, reads: 1 }] },
+      { sessionId: 's1', sessionName: 'glissa', path: 'C:/repo', state: 'running', packs: [{ name: 'company-context', version: VERSION }] },
+      { sessionId: 's2', sessionName: 'glissa (2)', path: 'C:/repo', state: 'idle', packs: [{ name: 'company-context', version: OLD_VERSION }] },
+      { sessionId: 's3', sessionName: 'other', path: 'C:/other', state: 'running', packs: [{ name: 'company-context', version: VERSION }] },
     ],
   }));
   const pack = report.packs[0];
   assert.deepEqual(pack.deliveredTo.map((delivery) => delivery.project), ['glissa', 'other']);
   const grouped = pack.deliveredTo[0];
   assert.equal(grouped.sessionCount, 2);
-  assert.equal(grouped.reads, 5);
-  assert.equal(grouped.readsSinceNotice, 1);
   assert.equal(grouped.state, null, 'two sessions in different states, so neither speaks for the project');
   assert.equal(grouped.version, null);
   assert.equal(grouped.stale, true, 'one session behind puts the project behind');
   assert.equal(grouped.staleSessions, 1);
   assert.equal(pack.staleDeliveries, 1, 'the total stays SESSIONS, which is what an operator restarts');
-  assert.equal(pack.totalReads, 6);
 });
 
 test('a grouped row keeps a state and a version its sessions agree on', () => {
   const report = buildMillReport(baseInput({
     consumers: { projects: SIBLING_PROJECTS },
     sessionRows: [
-      { sessionId: 's1', sessionName: 'glissa', path: 'C:/repo', state: 'running', packs: [{ name: 'company-context', version: VERSION, reads: 1 }] },
-      { sessionId: 's2', sessionName: 'glissa (2)', path: 'C:/repo', state: 'running', packs: [{ name: 'company-context', version: VERSION, reads: 1 }] },
+      { sessionId: 's1', sessionName: 'glissa', path: 'C:/repo', state: 'running', packs: [{ name: 'company-context', version: VERSION }] },
+      { sessionId: 's2', sessionName: 'glissa (2)', path: 'C:/repo', state: 'running', packs: [{ name: 'company-context', version: VERSION }] },
     ],
   }));
   const grouped = report.packs[0].deliveredTo[0];
@@ -197,7 +190,7 @@ test('the delivery row is named by the project record, not by whichever card hap
   const report = buildMillReport(baseInput({
     consumers: { projects: SIBLING_PROJECTS },
     sessionRows: [
-      { sessionId: 's2', sessionName: 'glissa (2)', path: 'C:/repo', state: 'running', packs: [{ name: 'company-context', version: VERSION, reads: 0 }] },
+      { sessionId: 's2', sessionName: 'glissa (2)', path: 'C:/repo', state: 'running', packs: [{ name: 'company-context', version: VERSION }] },
     ],
   }));
   assert.equal(report.packs[0].deliveredTo[0].project, 'glissa');
@@ -207,7 +200,7 @@ test('a session whose path no project record names is still reported, under its 
   const report = buildMillReport(baseInput({
     consumers: { projects: SIBLING_PROJECTS },
     sessionRows: [
-      { sessionId: 's9', sessionName: 'ephemeral', path: 'C:/nowhere', state: 'running', packs: [{ name: 'company-context', version: VERSION, reads: 0 }] },
+      { sessionId: 's9', sessionName: 'ephemeral', path: 'C:/nowhere', state: 'running', packs: [{ name: 'company-context', version: VERSION }] },
     ],
   }));
   assert.equal(report.packs[0].deliveredTo[0].project, 'ephemeral');
@@ -217,7 +210,7 @@ test('a session path never reaches the report: the tab renders on a paired phone
   const report = buildMillReport(baseInput({
     consumers: { projects: SIBLING_PROJECTS },
     sessionRows: [
-      { sessionId: 's1', sessionName: 'glissa', path: '/home/x/repo', state: 'running', packs: [{ name: 'company-context', version: VERSION, reads: 0 }] },
+      { sessionId: 's1', sessionName: 'glissa', path: '/home/x/repo', state: 'running', packs: [{ name: 'company-context', version: VERSION }] },
     ],
   }));
   assert.ok(!JSON.stringify(report).includes('/home/x/'), 'no server path survives into the wire shape');
@@ -243,7 +236,7 @@ test('sibling cards are one assignable project, with the packs either of them na
 test('an unbuilt pack judges no delivery stale: an unknown version is not a mismatch', () => {
   const report = buildMillReport(baseInput({
     specs: [{ name: 'company-context', spec: validSpec(), manifest: null, builtReason: 'not built', distill: [] }],
-    sessionRows: [{ sessionId: 's1', sessionName: 'a', state: 'running', packs: [{ name: 'company-context', version: OLD_VERSION, reads: 0 }] }],
+    sessionRows: [{ sessionId: 's1', sessionName: 'a', state: 'running', packs: [{ name: 'company-context', version: OLD_VERSION }] }],
   }));
   assert.equal(report.packs[0].deliveredTo[0].stale, null);
   assert.equal(report.totals.staleDeliveries, 0);
@@ -348,7 +341,7 @@ test('an empty mill reports zeros rather than throwing', () => {
   assert.deepEqual(report.packs, []);
   assert.deepEqual(report.configWarnings, []);
   assert.deepEqual(report.totals, {
-    packCount: 0, variantCount: 0, builtCount: 0, unconsumed: 0, invalidSpecs: 0, staleDeliveries: 0, staleDistills: 0, totalReads: 0,
+    packCount: 0, variantCount: 0, builtCount: 0, unconsumed: 0, invalidSpecs: 0, staleDeliveries: 0, staleDistills: 0,
   });
   assert.equal(report.autoRebuild, false);
   assert.equal(report.watcherCount, null);
@@ -461,12 +454,11 @@ test('a delivery of a variant is joined onto the variant row, not its group', ()
       sessionId: 's1',
       sessionName: 'glissa',
       state: 'RUNNING',
-      packs: [{ name: 'memory-glissa-12345678', version: VERSION, reads: 2 }],
+      packs: [{ name: 'memory-glissa-12345678', version: VERSION }],
     }],
   }));
   const [group, variant] = report.packs;
   assert.deepEqual(group.deliveredTo, []);
   assert.equal(variant.deliveredTo.length, 1);
   assert.equal(variant.deliveredTo[0].stale, true, 'the delivered version is compared against the VARIANT build');
-  assert.equal(variant.totalReads, 2);
 });

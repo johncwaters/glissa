@@ -62,12 +62,6 @@ function worstStale(current, next) {
   return false;
 }
 
-function addedOrNull(current, next) {
-  if (current === null) return next;
-  if (next === null) return current;
-  return current + next;
-}
-
 // Stale needs BOTH versions known: an unreadable manifest is unknown, and unknown must not warn.
 function deliveriesFor(name, sessionRows, builtVersion, labelByPath = new Map()) {
   const deliveries = [];
@@ -80,15 +74,11 @@ function deliveriesFor(name, sessionRows, builtVersion, labelByPath = new Map())
       const version = stringOrNull(delivered.version);
       const state = stringOrNull(row.state);
       const stale = version !== null && builtVersion !== null ? version !== builtVersion : null;
-      const reads = safeNumber(delivered.reads);
-      const readsSinceNotice = numberOrNull(delivered.readsSinceNotice);
       const existing = deliveryByKey.get(key);
       if (existing) {
         existing.sessionCount += 1;
         existing.state = existing.state === state ? state : null;
         existing.version = existing.version === version ? version : null;
-        existing.reads += reads;
-        existing.readsSinceNotice = addedOrNull(existing.readsSinceNotice, readsSinceNotice);
         existing.stale = worstStale(existing.stale, stale);
         existing.staleSessions += stale === true ? 1 : 0;
         continue;
@@ -99,8 +89,6 @@ function deliveriesFor(name, sessionRows, builtVersion, labelByPath = new Map())
         sessionCount: 1,
         state,
         version,
-        reads,
-        readsSinceNotice,
         stale,
         staleSessions: stale === true ? 1 : 0,
       };
@@ -244,7 +232,6 @@ function buildPackRow(entry, { consumers, sessionRows }) {
     built,
     builtReason: built ? null : shortBuiltReason(entry?.builtReason),
     deliveredTo,
-    totalReads: deliveredTo.reduce((total, delivery) => total + delivery.reads, 0),
     staleDeliveries: deliveredTo.reduce((total, delivery) => total + delivery.staleSessions, 0),
     consumers: namedBy,
     // Nothing names it, so the mill deliberately neither builds nor watches it: an informational state,
@@ -263,7 +250,6 @@ function totalsFrom(packs) {
     invalidSpecs: packs.filter((pack) => !pack.specValid).length,
     staleDeliveries: packs.reduce((total, pack) => total + pack.staleDeliveries, 0),
     staleDistills: packs.reduce((total, pack) => total + pack.distill.filter((row) => row.stale === true).length, 0),
-    totalReads: packs.reduce((total, pack) => total + pack.totalReads, 0),
   };
 }
 

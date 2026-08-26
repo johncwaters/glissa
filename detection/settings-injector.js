@@ -61,11 +61,6 @@ const HOOK_EVENTS = ['SessionStart', 'SessionEnd', 'UserPromptSubmit', 'Stop', '
 // re-filters by tool_name server-side as defense in depth.
 const WAKEUP_TOOL_MATCHER = 'ScheduleWakeup|CronCreate|CronDelete';
 
-// Second PostToolUse matcher: pack read telemetry (did the spawned agent ever open the context pack
-// it was given). Injected ONLY for a session that delivers packs, so a pack-less session's settings
-// file stays byte-identical to the pre-telemetry one.
-const PACK_READ_TOOL_MATCHER = 'Read';
-
 // The managed statusLine relay, and the marker meaning "the operator had no statusLine of their own".
 const RELAY_PATH = path.resolve(__dirname, '..', 'session', 'statusline-relay.js');
 const NO_CHAIN = '-';
@@ -121,7 +116,7 @@ function buildStatuslineCommand({ relayPath = RELAY_PATH, postUrl, userCommand =
 // guard), plus the `acceptEdits` mode that is the actual write boundary for the two prompt-embedding
 // lanes (server/core/lane-permissions-core.js). A lane passing neither leaves the file as it was, so
 // ordinary user sessions stay byte-identical to before.
-function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, packReadTelemetry = false, enableProjectMcp = false, rtkPath = null, planLimits = false, userSettingsPath = null, relayPath = RELAY_PATH }) {
+function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, enableProjectMcp = false, rtkPath = null, planLimits = false, userSettingsPath = null, relayPath = RELAY_PATH }) {
   if (!port || !glissaId || !token) {
     throw new Error('buildHookSettings requires port, glissaId, token');
   }
@@ -133,7 +128,6 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
   }
   const postToolUse = [];
   if (detectScheduledWakeups) postToolUse.push(WAKEUP_TOOL_MATCHER);
-  if (packReadTelemetry) postToolUse.push(PACK_READ_TOOL_MATCHER);
   if (postToolUse.length > 0) {
     const url = `${base}/posttooluse?t=${encodeURIComponent(token)}`;
     hooks.PostToolUse = postToolUse.map((matcher) => ({ matcher, hooks: [{ type: 'http', url, timeout: timeoutSec }] }));
@@ -252,7 +246,6 @@ module.exports = {
   readUserStatuslineCommand,
   HOOK_EVENTS,
   WAKEUP_TOOL_MATCHER,
-  PACK_READ_TOOL_MATCHER,
   DEFAULT_BASE_DIR,
   DEFAULT_TIMEOUT_SEC,
   DIR_MODE,

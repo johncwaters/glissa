@@ -326,11 +326,6 @@ export const SETTINGS_MAP = Object.freeze([
         control: 'toggle', keywords: ['context', 'watcher'], defaultValue: true,
       },
       {
-        id: 'pack-read-telemetry', path: 'packReadTelemetry', title: 'Count pack reads',
-        description: 'Record whether sessions read delivered context packs.',
-        control: 'toggle', keywords: ['telemetry', 'hooks'], defaultValue: true,
-      },
-      {
         id: 'pack-distiller-enabled', path: 'packDistiller.enabled', title: 'Enable the pack distiller',
         description: 'Run bounded sessions that refresh derived pack sources.',
         control: 'toggle', keywords: ['derived', 'context'], defaultValue: false,

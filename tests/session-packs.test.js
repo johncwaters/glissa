@@ -75,9 +75,7 @@ test('a built pack spawns as --add-dir, sets the CLAUDE.md env flag, and rides t
     const packDir = fixtureVersionDir(builtRoot, 'company-context', 'v-abc');
     assert.deepEqual(calls[0].args, ['--add-dir', packDir]);
     assert.equal(calls[0].opts.env[CLAUDE_MD_ENV], '1');
-    // `reads` rides every delivered entry from the start: 0 means "delivered and never opened",
-    // which is exactly the measurable (see tests/session-pack-reads.test.js).
-    assert.deepEqual(s.toSnapshot().packs, [{ name: 'company-context', version: fixtureVersion('v-abc'), reads: 0 }]);
+    assert.deepEqual(s.toSnapshot().packs, [{ name: 'company-context', version: fixtureVersion('v-abc') }]);
     const delivered = s.getDebugState().decisions.filter((d) => d.kind === 'pack');
     assert.equal(delivered.length, 1);
     assert.equal(delivered[0].decision, 'delivered');
@@ -287,7 +285,7 @@ test('a project delivers ITS variant of a group pack, and the snapshot records t
   const { s, calls, decisions } = await startWithPacks(builtRoot, { packVariantSlug: SLUG });
   try {
     assert.deepEqual(calls[0].args, ['--add-dir', fixtureVersionDir(builtRoot, `memory-${SLUG}`, 'v-mine')]);
-    assert.deepEqual(s.toSnapshot().packs, [{ name: `memory-${SLUG}`, version: fixtureVersion('v-mine'), reads: 0 }]);
+    assert.deepEqual(s.toSnapshot().packs, [{ name: `memory-${SLUG}`, version: fixtureVersion('v-mine') }]);
     assert.deepEqual(decisions.map((d) => d.decision), ['delivered']);
     assert.equal(decisions[0].name, `memory-${SLUG}`);
   } finally {
@@ -301,7 +299,7 @@ test('a project with no variant built yet falls back to the base pack, and says 
   const { s, calls, decisions } = await startWithPacks(builtRoot, { packVariantSlug: SLUG });
   try {
     assert.deepEqual(calls[0].args, ['--add-dir', fixtureVersionDir(builtRoot, 'memory', 'v-base')]);
-    assert.deepEqual(s.toSnapshot().packs, [{ name: 'memory', version: fixtureVersion('v-base'), reads: 0 }]);
+    assert.deepEqual(s.toSnapshot().packs, [{ name: 'memory', version: fixtureVersion('v-base') }]);
     assert.deepEqual(decisions.map((d) => d.decision), ['variant-fallback', 'delivered']);
     assert.equal(decisions[0].name, 'memory');
     assert.match(decisions[0].reason, /not built/);
@@ -332,7 +330,7 @@ test('a plain pack is never probed for a variant, whatever slug the project carr
   try {
     assert.deepEqual(calls[0].args, ['--add-dir', fixtureVersionDir(builtRoot, 'memory', 'v-plain')]);
     assert.deepEqual(decisions.map((d) => d.decision), ['delivered']);
-    assert.deepEqual(s.toSnapshot().packs, [{ name: 'memory', version: fixtureVersion('v-plain'), reads: 0 }]);
+    assert.deepEqual(s.toSnapshot().packs, [{ name: 'memory', version: fixtureVersion('v-plain') }]);
   } finally {
     s.destroy();
     await fsp.rm(builtRoot, { recursive: true, force: true });
@@ -352,7 +350,7 @@ test('a codex session carries the resolved variant by index pointer without Clau
     assert.equal(calls[0].args.includes('--add-dir'), false);
     assert.equal(CLAUDE_MD_ENV in calls[0].opts.env, false);
     assert.deepEqual(s.toSnapshot().packs, [{ name: `memory-${SLUG}`, version: fixtureVersion('v-mine') }]);
-    assert.equal(s.toSnapshot().packs[0].reads, undefined);
+    assert.deepEqual(s.toSnapshot().packs[0], { name: `memory-${SLUG}`, version: fixtureVersion('v-mine') });
     assert.deepEqual(decisions.map((decision) => decision.decision), ['delivered']);
   } finally {
     s.destroy();

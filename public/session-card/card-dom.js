@@ -11,7 +11,6 @@ import { STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
 import { el, escapeHtml } from '../dom-helpers.js';
 import { sessionUIs } from './card-registry.js';
-import { readCountText, sinceNoticeCount } from './pack-stale-core.mjs';
 import { showErrorToast } from './toast.js';
 
 // Debug overlay visibility - toggled by applyTerminalSettings (lifecycle) via
@@ -325,15 +324,12 @@ function renderDebugOverlay(ui, payload) {
   html += `<div class="debug-field"><span class="debug-label">Gate:</span> <span class="debug-value">${escapeHtml(gateText)}</span></div>`;
   html += `</div>`;
 
-  // Context packs: whether the delivered context was ever actually opened, and whether a staleness
-  // notice made the agent re-open it. Absent entirely for a session that delivers no packs.
+  // Context packs are absent entirely for a session that delivers no packs.
   const packs = Array.isArray(p.packs) ? p.packs : [];
   if (packs.length > 0) {
     html += `<div class="debug-section"><div class="debug-section-title">Packs</div>`;
     for (const pack of packs) {
-      const sinceCount = sinceNoticeCount(pack);
-      const since = sinceCount == null ? '' : ` <span class="debug-dim">(${sinceCount} since notice)</span>`;
-      html += `<div class="debug-field"><span class="debug-label">${escapeHtml(pack.name)}:</span> <span class="debug-value">${readCountText(pack)}</span>${since}</div>`;
+      html += `<div class="debug-field"><span class="debug-label">${escapeHtml(pack.name)}:</span> <span class="debug-value">${escapeHtml(pack.version || 'unknown version')}</span></div>`;
     }
     html += `</div>`;
   }

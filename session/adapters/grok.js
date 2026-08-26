@@ -244,7 +244,6 @@ module.exports = {
   renderPackArgs,
   packCarrier: "--rules index pointers",
   packNoticeHookEvent: "Stop",
-  packReadTelemetry: false,
   sessionIdOf,
   mapHookPayload,
   mapHookToSignal,

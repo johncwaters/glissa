@@ -73,6 +73,12 @@ test('validateConfig accepts lenient partial configs and unknown keys', () => {
   }), { ok: true });
 });
 
+test('a legacy packReadTelemetry config key is ignored', () => {
+  withStore({ projects: [], packReadTelemetry: false }, (store) => {
+    assert.equal('packReadTelemetry' in store.getSettings(), false);
+  });
+});
+
 test('validateConfig rejects malformed known fields', () => {
   const validation = validateConfig({
     projects: [{ id: 7 }],

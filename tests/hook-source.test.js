@@ -88,23 +88,6 @@ test('HookRouter passes the low-confidence override for idle_prompt, none for St
   assert.equal('confidence' in got[1], false, 'Stop keeps the hook default');
 });
 
-test('PostToolUse Read routes as tracking-only pack-read telemetry', () => {
-  // Subscribed with its own Read matcher for pack-carrying sessions; like the wakeup tools it is
-  // tracking-only, so it must carry neither a confidence override nor a promptKind.
-  assert.equal(mapHookToSignal('PostToolUse', { tool_name: 'Read' }), 'pack-read');
-  const r = new HookRouter();
-  const got = [];
-  r.register('s1', { token: 'tok', onSignal: (s) => got.push(s) });
-  const payload = { tool_name: 'Read', tool_input: { file_path: 'C:/packs/glissa/current/CLAUDE.md' } };
-  const res = r.handle({ glissaId: 's1', event: 'PostToolUse', token: 'tok', payload });
-  assert.equal(res.status, 200);
-  assert.equal(res.signal, 'pack-read');
-  assert.equal(got.length, 1);
-  assert.equal(got[0].payload.tool_input.file_path, 'C:/packs/glissa/current/CLAUDE.md');
-  assert.equal('confidence' in got[0], false);
-  assert.equal('promptKind' in got[0], false);
-});
-
 test('HookRouter rejects unknown session (404)', () => {
   const r = new HookRouter();
   const res = r.handle({ glissaId: 'nope', event: 'Stop', token: 'x', payload: {} });
