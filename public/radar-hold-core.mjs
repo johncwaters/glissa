@@ -21,12 +21,20 @@
 // enough to read one short line, short enough that the board is never meaningfully stale.
 export const OUTCOME_READ_MS = 4000;
 
+/**
+ * @param {{
+ *   render: () => void,
+ *   holdMs?: number,
+ *   setTimer?: (handler: () => void, timeout: number) => any,
+ *   clearTimer?: (handle: any) => void,
+ * }} options
+ */
 export function createRenderHold({
   render,
   holdMs = OUTCOME_READ_MS,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
-} = {}) {
+}) {
   const pending = new Set();
   let held = false;
   let timer = null;

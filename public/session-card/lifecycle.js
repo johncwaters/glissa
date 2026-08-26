@@ -327,7 +327,11 @@ export function setSessionResume(sessionId, resumeSessionId) {
 // One paint for every card chip: the card's data-* attribute drives the CSS, the badge element carries
 // the text. `on: false` clears both. A badge whose tooltip is fixed at build time (card-dom.js
 // TAG_BADGES) passes no `title` and keeps it; one that owns its tooltip passes it in both directions.
-function paintCardBadge(ui, selector, datasetKey, { on, value = '', text, title }) {
+/**
+ * @param {{ on: boolean, value?: string, text?: string, title?: string }} badgeState
+ */
+function paintCardBadge(ui, selector, datasetKey, badgeState) {
+  const { on, value = '', text, title } = badgeState;
   const badge = ui.card.querySelector(selector);
   if (!on) {
     delete ui.card.dataset[datasetKey];

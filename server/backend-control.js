@@ -8,7 +8,7 @@ const { packVariantProjects } = require('./core/pack-core');
 /** @typedef {{ stamp: (message: Record<string, unknown>) => Record<string, unknown>, entriesSince: (since: number) => { entries: Record<string, unknown>[], evicted: boolean }, currentSeq: () => number }} ControlReplayLog */
 /** @typedef {{ snapshotMessage: () => Record<string, unknown> }} SnapshotLane */
 /** @typedef {{ current: (name: string) => SnapshotLane|null }} LaneReader */
-/** @typedef {{ getStatus: () => Record<string, unknown>|null, setIssueStatus: (args: Record<string, unknown>) => Promise<Record<string, unknown>>, archiveInvestigation: (args: { id: string }) => Promise<Record<string, unknown>> }} PosthogControl */
+/** @typedef {{ getStatus: () => Record<string, unknown>|null, setIssueStatus: (args: { projectId: string, issueId: string, action: string }) => Promise<Record<string, unknown>>, archiveInvestigation: (args: { id: string }) => Promise<Record<string, unknown>> }} PosthogControl */
 /** @typedef {{ getStatus: () => Record<string, unknown>|null }} PrReviewControl */
 /** @typedef {{ getVersions: () => Record<string, string>, ensureBuilt: (names: string[], options: { projects: Record<string, unknown>[] }) => Promise<unknown> }} PackControl */
 /** @typedef {{ getSessionsMessage: () => Record<string, unknown>, getCachedReport: () => Record<string, unknown>|null, requestReport: (args: Record<string, unknown>) => Promise<Record<string, unknown>>, getPlanLimitsMessage: () => Record<string, unknown>|null }} UsageControl */

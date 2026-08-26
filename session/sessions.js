@@ -1,4 +1,3 @@
-// @ts-nocheck
 const fs = require("node:fs");
 const path = require("node:path");
 const pty = require("node-pty");
@@ -51,6 +50,7 @@ function signalablePid(pid) {
 }
 
 // The two states an operator can dismiss a card out of: an unanswered prompt and an unopened result.
+/** @type {Set<import('../shared/states').SessionState>} */
 const DISMISSIBLE_STATES = new Set([STATES.WAITING, STATES.COMPLETE]);
 
 // ---------------------------------------------------------------------------
@@ -190,6 +190,7 @@ class Session extends EventEmitter {
     this.path = path;
     this.dangerouslySkipPermissions = dangerouslySkipPermissions;
     this.ptyProcess = null;
+    /** @type {import('../shared/states').SessionState} */
     this.state = STATES.DORMANT;
     this.stateSince = Date.now();
     this._receivedFirstOutput = false;
@@ -787,6 +788,7 @@ class Session extends EventEmitter {
   // Drop both signal sources back to a clean stream, and optionally latch the title source quiet or
   // clear the background-work bookkeeping with them. Called from a PTY (re)start, a PTY exit, /clear
   // and sleep. `quiet` omitted leaves the latch alone (sleep freezes state, it does not re-open a turn).
+  /** @param {{ quiet?: boolean, clearTracking?: boolean }} [options] */
   _resetDetectionSources({ quiet, clearTracking = false } = {}) {
     this._titleSource.reset();
     this._statusSource.reset();
@@ -1458,6 +1460,7 @@ class Session extends EventEmitter {
     return this._packDelivery.resolve();
   }
 
+  /** @param {{ extraEnv?: any, additionalDirsClaudeMd?: boolean, prependPathDir?: string | null }} [options] */
   _buildSpawnEnv({ extraEnv = this._spawnEnv, ...options } = {}) {
     return this._adapter.buildEnv(process.env, extraEnv, options);
   }
@@ -1590,12 +1593,12 @@ class Session extends EventEmitter {
   // (start()'s prior-PTY kill) or fire-and-forget with a .catch (the reap / kill / force-kill paths).
   // Array args (no shell string interpolation): safer and faster than the old execSync template.
   _taskkill(pid, opts = {}) {
-    return new Promise((resolve, reject) => {
-      this._killProc(["/PID", String(Number(pid)), "/T", "/F"], { ...opts }, (err) => {
+    return /** @type {Promise<void>} */ (new Promise((resolve, reject) => {
+      this._killProc(["/PID", String(Number(pid)), "/T", "/F"], { ...opts }, (/** @type {unknown} */ err) => {
         if (err) return reject(err);
         resolve();
       });
-    });
+    }));
   }
 
   // An 'error' emit with no listener is an uncaught throw, and every kill path is best-effort.
@@ -1648,7 +1651,7 @@ class Session extends EventEmitter {
     // One timer field serves one wait: settle any earlier one first, or arming over it would strand that
     // promise unresolved for whoever is awaiting it.
     if (this._resolveKillReap) this._resolveKillReap();
-    return new Promise((resolve) => {
+    return /** @type {Promise<void>} */ (new Promise((resolve) => {
       const settle = () => {
         this._clearTimer("_killReapTimer");
         this._resolveKillReap = null;
@@ -1669,7 +1672,7 @@ class Session extends EventEmitter {
       // the first look charged every restart 200ms of dead time for a tree that was usually already
       // gone (restart only fires from DONE/FAILED), where the win32 taskkill returns as fast as it can.
       poll();
-    });
+    }));
   }
 
   kill() {

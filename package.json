@@ -60,8 +60,7 @@
     "start": "node server.js",
     "lint": "biome check .",
     "test": "node --test \"tests/**/*.test.js\"",
-    "typecheck": "tsc --project tsconfig.json",
-    "typecheck:all": "tsc --project tsconfig.all.json",
+    "typecheck": "tsc --project tsconfig.json && tsc --project tsconfig.public.json",
     "test:container": "docker build -f test/container/Dockerfile -t glissa-remote-test . && docker run --rm glissa-remote-test",
     "dev": "vite",
     "dev:server-only": "node server.js",
@@ -69,7 +68,8 @@
     "preview": "vite preview",
     "postinstall": "node scripts/postinstall-path-check.js",
     "prepare": "node scripts/prepare-build.js",
-    "release": "node scripts/release.js"
+    "release": "node scripts/release.js",
+    "typecheck:public": "tsc --project tsconfig.public.json"
   },
   "dependencies": {
     "@parcel/watcher": "^2.6.0",

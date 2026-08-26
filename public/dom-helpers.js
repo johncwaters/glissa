@@ -3,6 +3,13 @@
 
 import { BADGE_LABELS, STATE_GLYPHS } from '/shared/states.mjs';
 
+/**
+ * @template {keyof HTMLElementTagNameMap} Tag
+ * @param {Tag} tag
+ * @param {string | null} [className]
+ * @param {string | null} [text]
+ * @returns {HTMLElementTagNameMap[Tag]}
+ */
 export function el(tag, className, text) {
   const e = document.createElement(tag);
   if (className) e.className = className;
@@ -10,15 +17,47 @@ export function el(tag, className, text) {
   return e;
 }
 
+// querySelector answers Element, which carries none of the properties these lookups exist to reach.
+// The instanceof gate both narrows the type and turns a selector that no longer matches the markup into
+// a throw at wiring time, where it names itself, instead of an undefined read somewhere downstream.
+
+/**
+ * @template {keyof HTMLElementTagNameMap} Tag
+ * @param {ParentNode} root
+ * @param {string} selector
+ * @param {Tag} tag
+ * @returns {HTMLElementTagNameMap[Tag]}
+ */
+export function queryTag(root, selector, tag) {
+  const found = root.querySelector(selector);
+  if (!found || found.tagName.toLowerCase() !== tag) throw new Error(`${selector} does not match a <${tag}>`);
+  return /** @type {HTMLElementTagNameMap[Tag]} */ (found);
+}
+
+/**
+ * @param {ParentNode} root
+ * @param {string} selector
+ * @returns {HTMLElement}
+ */
+export function query(root, selector) {
+  const found = root.querySelector(selector);
+  if (!(found instanceof HTMLElement)) throw new Error(`${selector} matches no element`);
+  return found;
+}
+
 // A link when there is somewhere to go, otherwise the same text as a plain span.
 export function externalLink(className, text, url, title = text) {
-  const node = url ? el('a', className, text) : el('span', className, text);
-  node.title = title;
-  if (!url) return node;
-  node.href = url;
-  node.target = '_blank';
-  node.rel = 'noopener';
-  return node;
+  if (!url) {
+    const plain = el('span', className, text);
+    plain.title = title;
+    return plain;
+  }
+  const link = el('a', className, text);
+  link.title = title;
+  link.href = url;
+  link.target = '_blank';
+  link.rel = 'noopener';
+  return link;
 }
 
 // ── State display ────────────────────────────────────────────

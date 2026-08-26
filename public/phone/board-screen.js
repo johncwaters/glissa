@@ -11,7 +11,7 @@
 // Down), so the client-trust gating and every existing listener come along untouched.
 
 import { STATES } from '/shared/states.mjs';
-import { el, MERGE_TAGS, observeHeaderHeight, stateChip } from '../dom-helpers.js';
+import { el, MERGE_TAGS, observeHeaderHeight, queryTag, stateChip } from '../dom-helpers.js';
 import { attentionSummaryText, countSessionsNeedingAttention, orderRoster } from '../focus-view/attention-core.mjs';
 import { NO_PATH_KEY } from '../focus-view/roster-groups.mjs';
 import { emptyProjectKeys, forgetProject } from '../project-registry.js';
@@ -21,6 +21,9 @@ import { onSessionTick, sessionElapsedText } from '../session-card/session-tick.
 import { groupSessionsForBoard } from './board-groups-core.mjs';
 
 const projectPathOf = (row) => row.ui.path;
+
+/** @typedef {{ glyph: HTMLSpanElement, name: HTMLSpanElement, badge: HTMLSpanElement, merge: HTMLSpanElement, elapsed: HTMLSpanElement }} RowRefs */
+/** @typedef {{ header: HTMLDivElement, label: HTMLSpanElement, count: HTMLSpanElement, addButton: HTMLButtonElement, forgetButton: HTMLButtonElement, rows: HTMLDivElement }} GroupRefs */
 
 // createBoardScreen({ onSelectSession }) -> { el, topBarEl, refresh, getAttentionCount }
 // The shell adopts the desktop header controls into topBarEl on activation and gives them back on
@@ -49,6 +52,12 @@ export function createBoardScreen({ onSelectSession }) {
 
   const rowById = new Map();
   const groupSectionByKey = new Map();
+  /** @type {WeakMap<HTMLButtonElement, { refs: RowRefs, item: HTMLDivElement }>} */
+  const rowState = new WeakMap();
+  /** @type {WeakMap<HTMLElement, GroupRefs>} */
+  const groupRefs = new WeakMap();
+  /** @type {WeakMap<HTMLElement, string>} */
+  const orderKeys = new WeakMap();
   let attentionCount = 0;
 
   observeHeaderHeight(topBar);
@@ -64,12 +73,12 @@ export function createBoardScreen({ onSelectSession }) {
       + '<span class="phone-row-badge"></span><span class="phone-row-merge"></span>'
       + '</span></span>'
       + '<span class="phone-row-elapsed" aria-hidden="true"></span>';
-    row._refs = {
-      glyph: row.querySelector('.phone-row-glyph'),
-      name: row.querySelector('.phone-row-name'),
-      badge: row.querySelector('.phone-row-badge'),
-      merge: row.querySelector('.phone-row-merge'),
-      elapsed: row.querySelector('.phone-row-elapsed'),
+    const refs = {
+      glyph: queryTag(row, '.phone-row-glyph', 'span'),
+      name: queryTag(row, '.phone-row-name', 'span'),
+      badge: queryTag(row, '.phone-row-badge', 'span'),
+      merge: queryTag(row, '.phone-row-merge', 'span'),
+      elapsed: queryTag(row, '.phone-row-elapsed', 'span'),
     };
     row.addEventListener('click', () => onSelectSession?.(id));
     const item = el('div', 'phone-row-item');
@@ -83,7 +92,7 @@ export function createBoardScreen({ onSelectSession }) {
       requestSessionRemoval(id);
     });
     item.append(row, removeButton);
-    row._item = item;
+    rowState.set(row, { refs, item });
     return row;
   }
 
@@ -106,7 +115,7 @@ export function createBoardScreen({ onSelectSession }) {
     rows.setAttribute('role', 'list');
     header.append(label, count, forgetButton, addButton);
     section.append(header, rows);
-    section._refs = { header, label, count, addButton, forgetButton, rows };
+    groupRefs.set(section, { header, label, count, addButton, forgetButton, rows });
     return section;
   }
 
@@ -115,25 +124,29 @@ export function createBoardScreen({ onSelectSession }) {
   }
 
   function paintRow(row, entry) {
+    const rowDetails = rowState.get(row);
+    if (!rowDetails) return;
     const { ui, state, unseen } = entry;
     const { glyph, label } = stateChip(state);
     const name = entry.name;
     row.dataset.state = state;
     row.toggleAttribute('data-unseen', unseen);
-    row._refs.glyph.textContent = glyph;
-    row._refs.name.textContent = name;
-    row._refs.badge.textContent = label;
+    rowDetails.refs.glyph.textContent = glyph;
+    rowDetails.refs.name.textContent = name;
+    rowDetails.refs.badge.textContent = label;
     // Merge status is read off the card's data-merge, which lifecycle.js already maintains for the
     // remove-warning. Reusing it keeps the board off any pipeline of its own.
     const merge = ui.card?.dataset.merge || '';
     row.dataset.merge = merge;
-    row._refs.merge.textContent = MERGE_TAGS[merge] || '';
-    row._refs.elapsed.textContent = sessionElapsedText(ui);
+    rowDetails.refs.merge.textContent = MERGE_TAGS[merge] || '';
+    rowDetails.refs.elapsed.textContent = sessionElapsedText(ui);
     row.setAttribute('aria-label', `${name}, ${label}`);
   }
 
   function paintGroup(section, group) {
-    const { header, label, count, addButton, forgetButton, rows } = section._refs;
+    const refs = groupRefs.get(section);
+    if (!refs) return;
+    const { header, label, count, addButton, forgetButton, rows } = refs;
     const isPathless = group.key === NO_PATH_KEY;
     const isEmpty = group.rows.length === 0;
     section.dataset.path = group.key;
@@ -195,6 +208,7 @@ export function createBoardScreen({ onSelectSession }) {
       name: sessionName(ui),
       isDormant: (ui.currentState || STATES.DORMANT) === STATES.DORMANT,
       state: ui.currentState || STATES.DORMANT,
+      unseen: false,
     }));
     noteStateTransitions(entries);
     for (const entry of entries) entry.unseen = unseenCompleteIds.has(entry.id);
@@ -214,7 +228,7 @@ export function createBoardScreen({ onSelectSession }) {
 
     const presentGroupKeys = new Set(boardGroups.order);
     const groupOrderKey = boardGroups.order.join(',');
-    const groupOrderUnchanged = groupsEl._lastOrderKey === groupOrderKey
+    const groupOrderUnchanged = orderKeys.get(groupsEl) === groupOrderKey
       && groupsEl.childElementCount === boardGroups.groups.length;
     for (const group of boardGroups.groups) {
       let section = groupSectionByKey.get(group.key);
@@ -225,8 +239,10 @@ export function createBoardScreen({ onSelectSession }) {
       paintGroup(section, group);
       if (!groupOrderUnchanged) groupsEl.appendChild(section);
       const rowOrderKey = group.rows.map((entry) => entry.id).join(',');
-      const rowOrderUnchanged = section._refs.rows._lastOrderKey === rowOrderKey
-        && section._refs.rows.childElementCount === group.rows.length;
+      const refs = groupRefs.get(section);
+      if (!refs) continue;
+      const rowOrderUnchanged = orderKeys.get(refs.rows) === rowOrderKey
+        && refs.rows.childElementCount === group.rows.length;
       for (const entry of group.rows) {
         let row = rowById.get(entry.id);
         if (!row) {
@@ -234,11 +250,13 @@ export function createBoardScreen({ onSelectSession }) {
           rowById.set(entry.id, row);
         }
         paintRow(row, entry);
-        if (!rowOrderUnchanged) section._refs.rows.appendChild(row._item);
+        const state = rowState.get(row);
+        if (!state) continue;
+        if (!rowOrderUnchanged) refs.rows.appendChild(state.item);
       }
-      section._refs.rows._lastOrderKey = rowOrderKey;
+      orderKeys.set(refs.rows, rowOrderKey);
     }
-    groupsEl._lastOrderKey = groupOrderKey;
+    orderKeys.set(groupsEl, groupOrderKey);
     for (const [key, section] of [...groupSectionByKey]) {
       if (presentGroupKeys.has(key)) continue;
       section.remove();
@@ -247,7 +265,8 @@ export function createBoardScreen({ onSelectSession }) {
     const seen = new Set(boardGroups.visibleIds);
     for (const [id, row] of [...rowById]) {
       if (seen.has(id)) continue;
-      row._item.remove();
+      const state = rowState.get(row);
+      if (state) state.item.remove();
       rowById.delete(id);
     }
 
@@ -264,7 +283,8 @@ export function createBoardScreen({ onSelectSession }) {
   onSessionTick(() => {
     for (const [id, row] of rowById) {
       const ui = sessionUIs.get(id);
-      if (ui) row._refs.elapsed.textContent = sessionElapsedText(ui);
+      const state = rowState.get(row);
+      if (ui && state) state.refs.elapsed.textContent = sessionElapsedText(ui);
     }
   });
 

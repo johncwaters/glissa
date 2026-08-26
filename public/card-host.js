@@ -15,6 +15,12 @@ export function getBorrowedCardId() {
 // Move `ui.card` into `slotEl` and make its terminal live and correctly sized there. `className` is the
 // surface's own marker class (the Focus center and the phone Terminal screen style the borrowed card
 // differently); it is removed again on release, and swapping surfaces swaps the class.
+/**
+ * @param {{ card?: HTMLElement & { _cardHostClass?: string }, _unviewTerminal?: () => void }} ui
+ * @param {string} sessionId
+ * @param {HTMLElement} slotEl
+ * @param {{ className?: string }} [options]
+ */
 export function borrowCard(ui, sessionId, slotEl, { className } = {}) {
   if (!ui?.card || !slotEl) return;
   const borrowedId = getBorrowedCardId();

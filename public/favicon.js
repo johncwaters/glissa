@@ -2,7 +2,7 @@ import { decideFaviconVariant, renderFaviconSvg } from './favicon-core.mjs';
 
 function getFaviconElement() {
   const existingFavicon = document.querySelector('link[rel="icon"]');
-  if (existingFavicon) return existingFavicon;
+  if (existingFavicon instanceof HTMLLinkElement) return existingFavicon;
 
   const faviconElement = document.createElement('link');
   faviconElement.rel = 'icon';

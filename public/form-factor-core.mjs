@@ -10,6 +10,7 @@ export const COARSE_POINTER_QUERY = '(pointer: coarse)';
 // AND, not OR: a narrowed desktop window can be widened back and keeps the docked IA, and a coarse
 // tablet above the threshold has room for all three panels. Non-boolean input reads as false, so an
 // engine without matchMedia lands on 'desktop' rather than guessing.
+/** @param {{ coarse?: unknown, narrowWidth?: unknown }} [probe] */
 export function decideLayout({ coarse, narrowWidth } = {}) {
   if (coarse === true && narrowWidth === true) return 'phone';
   return 'desktop';

@@ -36,6 +36,9 @@ export function pickAdjacent(orderedIds, currentId, dir) {
 // rail's pill attribute, the Board's Set), never a DOM read here. RUNNING is excluded because counting
 // it would make the readout mean "how many sessions exist"; FAILED because its own loud state treatment
 // carries it instead.
+/**
+ * @param {{ state?: string, unseen?: boolean }} [attention]
+ */
 export function needsAttention({ state, unseen } = {}) {
   if (state === 'WAITING') return true;
   return state === 'COMPLETE' && unseen === true;

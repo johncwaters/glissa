@@ -1,4 +1,3 @@
-// @ts-nocheck
 /*
  * Glissa Backend - Express + WebSocket server factory
  *
@@ -49,12 +48,14 @@ const { createBackendSessionRuntime } = require('./backend-session-runtime');
  * Create and wire the Glissa backend onto an existing HTTP server.
  *
  * @param {import('http').Server} httpServer - HTTP server to attach to
- * @param {object} options
- * @param {string|null} options.staticDir
- *   'auto'  - detect dist/ vs public/ (production behavior)
- *   null    - skip static serving entirely (Vite mode)
- *   string  - absolute path to serve from
- * @returns {{ shutdown: () => void, port: number, app: import('express').Express }}
+ * @param {import('./backend-lanes').BackendLaneOptions & {
+ *   staticDir?: string | null,
+ *   settingsDefaults?: Record<string, unknown>,
+ *   checkForUpdate?: (() => Promise<unknown>) | null,
+ *   onRestart?: (() => void) | null,
+ * }} [options]
+ *   staticDir: 'auto' detects dist/ vs public/ (production), null skips static serving entirely
+ *   (Vite mode), and a string is an absolute path to serve from.
  */
 function createBackend(httpServer, options = {}) {
   const { staticDir = 'auto', settingsDefaults } = options;

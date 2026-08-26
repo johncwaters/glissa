@@ -955,10 +955,18 @@ export function sortUsageRows(rows, key, dir, labelOf = sessionRowLabel) {
   });
 }
 
+/** @typedef {{ key: string, dir: 'asc' | 'desc' }} SortState */
+
+/** @returns {'asc' | 'desc'} */
 export function defaultSortDir(key) {
   return ASC_BY_DEFAULT_KEYS.has(key) ? 'asc' : 'desc';
 }
 
+/**
+ * @param {SortState | null | undefined} current
+ * @param {string} key
+ * @returns {SortState}
+ */
 export function nextSortState(current, key) {
   if (current?.key === key) return { key, dir: current.dir === 'asc' ? 'desc' : 'asc' };
   return { key, dir: defaultSortDir(key) };
@@ -969,8 +977,11 @@ export function ariaSortValue(current, key) {
   return current.dir === 'asc' ? 'ascending' : 'descending';
 }
 
+/** @type {Readonly<SortState>} */
 export const DEFAULT_SESSION_SORT = Object.freeze({ key: 'lastTs', dir: 'desc' });
+/** @type {Readonly<SortState>} */
 export const DEFAULT_MODEL_SORT = Object.freeze({ key: 'tokens', dir: 'desc' });
+/** @type {Readonly<SortState>} */
 export const DEFAULT_DAY_SORT = Object.freeze({ key: 'day', dir: 'desc' });
 
 export function sortSessionRows(rows, sort = DEFAULT_SESSION_SORT) {

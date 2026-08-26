@@ -25,9 +25,9 @@ const WORKTREE_CHECK_DEBOUNCE_MS = 400;
 
 /**
  * @typedef {{ cwd: string, isGit: boolean, branch?: string | null, base?: string | null, baseSha?: string | null }} Workspace
- * @typedef {{ state: string, isDestroyed: boolean, isTeardownPending: boolean, hasLivePty: boolean }} SessionState
+ * @typedef {{ state: import('../shared/states').SessionState, isDestroyed: boolean, isTeardownPending: boolean, hasLivePty: boolean }} SessionSnapshot
  * @typedef {{ create: (...args: unknown[]) => unknown, populate: (...args: unknown[]) => unknown, hasUnmergedWork: (...args: unknown[]) => unknown, discard: (...args: unknown[]) => unknown, mergeBack: (...args: unknown[]) => unknown, mergeKeep: (...args: unknown[]) => unknown, rebaseOnly: (...args: unknown[]) => Promise<{ ok?: boolean, rebased?: boolean, baseSha?: string, headSha?: string, rerereReplayed?: boolean, reason?: string, conflicts?: string[] }> }} GitWorkspace
- * @typedef {{ state: () => SessionState, projectPath?: () => string, emit: (event: string, detail: Record<string, unknown>) => void, recordDecision: (entry: Record<string, unknown>) => void, pasteText: (text: string) => Record<string, unknown> }} SessionPort
+ * @typedef {{ state: () => SessionSnapshot, projectPath?: () => string, emit: (event: string, detail: Record<string, unknown>) => void, recordDecision: (entry: Record<string, unknown>) => void, pasteText: (text: string) => Record<string, unknown> }} SessionPort
  * @typedef {{ id: string, projectPath: string, integrationBranch?: string | null, gitWorkspace?: GitWorkspace | null, autoRebase?: boolean, liveWorktreeReview?: boolean, worktreeRoot?: string | null, worktreeShare?: string[] | null, port: SessionPort }} WorktreeLifecycleOptions
  */
 

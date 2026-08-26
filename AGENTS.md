@@ -44,7 +44,7 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 - Inter-module communication via Node `EventEmitter`, not globals or direct coupling.
 - Sessions are keyed by stable UUID `id`; `name` is display-only.
 - Wire and persisted shapes are Zod schemas in `shared/contracts/`; boundaries parse and fail closed (`tests/contracts-*.test.js`).
-- `npm run typecheck` gates all of `server/`, `session/`, `detection/`, `notifications/` and `shared/` at zero errors; the checked set only grows (`tests/typecheck-gate.test.js`).
+- `npm run typecheck` gates `server/`, `session/`, `detection/`, `notifications/`, `shared/` and `public/` at zero errors. The checked set only grows, and no file may opt out with `@ts-nocheck`/`@ts-ignore` (`tests/typecheck-gate.test.js`).
 
 ### Testing Requirements
 

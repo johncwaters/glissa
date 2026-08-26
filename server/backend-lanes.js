@@ -35,7 +35,7 @@ const { normalizeShapePath } = require('./core/visions-scope-core');
 /** @typedef {Record<string, unknown> & { projects: BackendLaneProject[], worktreeRerere?: boolean, usage?: Record<string, unknown>, ingest?: Record<string, unknown>, visions?: Record<string, unknown>, memory?: Record<string, unknown>, replayBufferKB?: number, packDistiller?: { enabled?: boolean, intervalHours?: number, timeoutSeconds?: number }, packsAutoRebuild?: boolean }} BackendLaneConfig */
 /** @typedef {{ path?: string, worktreeDir?: string, toSnapshot: () => Record<string, unknown>, notePackUpdate: (name: string, version: string) => void }} BackendLaneSession */
 /** @typedef {{ branchGcWiringOptions?: Record<string, unknown>, ingestLaneOptions?: Record<string, unknown>, packServiceOptions?: Record<string, unknown>, millWiringOptions?: Record<string, unknown>, usageWiringOptions?: Record<string, unknown> }} BackendLaneOptions */
-/** @typedef {{ register: (id: string, options: Record<string, unknown>) => void, unregister: (id: string) => void, handle: (envelope: Record<string, unknown>) => Record<string, unknown> }} BackendHookRouter */
+/** @typedef {InstanceType<typeof import('../detection/hook-source')['HookRouter']>} BackendHookRouter */
 
 /**
  * @typedef {object} BackendLaneDependencies

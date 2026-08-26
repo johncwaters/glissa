@@ -18,6 +18,14 @@
 const DEFAULT_BUDGET = 6; // terminals serviced per frame
 const DEFAULT_MAX_CHUNK = 256 * 1024; // bytes per single write (anti-monopoly cap)
 
+/**
+ * @param {{
+ *   budget?: number,
+ *   maxChunkBytes?: number,
+ *   requestFrame?: (callback: FrameRequestCallback) => number,
+ *   cancelFrame?: (handle: number) => void,
+ * }} [options]
+ */
 export function createScheduler({
   budget = DEFAULT_BUDGET,
   maxChunkBytes = DEFAULT_MAX_CHUNK,

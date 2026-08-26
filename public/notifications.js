@@ -58,7 +58,7 @@ export function initNotifications() {
  * Raise a native notification for a delivered server `notify` message.
  * Same tag per session+category dedupes across multiple open tabs and lets an
  * escalation re-fire replace the previous toast instead of stacking.
- * @param {{ session?: string, category?: string, message?: string }} msg
+ * @param {{ session?: string, category?: string, message?: string, ignoreFocus?: boolean }} [msg]
  */
 export function showDesktopNotification({ session, category, message, ignoreFocus = false } = {}) {
   const notificationApi = getNotificationApi();
@@ -78,11 +78,14 @@ export function showDesktopNotification({ session, category, message, ignoreFocu
   // claim raises the toast (see notify-dedupe-core.mjs). Fail-open on storage errors.
   if (!claimNotification(window.localStorage, claimKey(session, category), Date.now())) return;
   try {
-    const n = new notificationApi('Glissa', {
+    // renotify is what makes a re-fire on the same tag re-alert rather than silently replace; it is
+    // shipped in every browser Glissa targets but is absent from TypeScript's NotificationOptions.
+    const options = /** @type {NotificationOptions} */ ({
       body: message || 'Session needs attention',
       tag: `glissa-${session || ''}-${category || ''}`,
       renotify: true,
     });
+    const n = new notificationApi('Glissa', options);
     n.onclick = () => {
       window.focus();
       n.close();

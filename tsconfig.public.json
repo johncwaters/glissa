@@ -1,0 +1,46 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "target": "ES2023",
+    "types": [],
+    "paths": {
+      "/shared/control-messages.mjs": [
+        "./shared/contracts/control-messages.js"
+      ],
+      "/shared/session.mjs": [
+        "./shared/contracts/session.js"
+      ],
+      "/shared/states.mjs": [
+        "./shared/states.js"
+      ],
+      "/shared/settings-ranges.mjs": [
+        "./shared/settings-ranges.js"
+      ],
+      "/shared/client-trust.mjs": [
+        "./shared/client-trust.esm.mjs"
+      ]
+    }
+  },
+  "include": [
+    "public/**/*.js",
+    "public/**/*.mjs",
+    "public/**/*.d.ts"
+  ],
+  "exclude": [
+    "node_modules/**",
+    "dist/**"
+  ]
+}

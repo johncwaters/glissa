@@ -421,6 +421,7 @@ export function mountPhoneShell(options) {
 // `sessionId` is the session the desktop Focus center was holding, if any. It is pre-loaded into the
 // Terminal screen but does NOT change which screen opens: a phone's job is triage, so it always lands
 // on the Board and the operator taps through.
+/** @param {{ sessionId?: string }} [options] */
 export function activatePhoneShell({ sessionId } = {}) {
   if (active) return;
   build();

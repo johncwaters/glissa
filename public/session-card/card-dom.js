@@ -27,6 +27,9 @@ export function setDebugMode(on) {
 // The persistent tag strip, in render order. Every badge is always built and stays hidden until the
 // card carries its matching data-* attribute (set live by the setSessionX handlers in lifecycle.js),
 // so a delta never has to rebuild the header.
+/** @typedef {{ cls: string, text?: string, title?: string, ariaLabel?: string, ariaHidden?: boolean }} TagBadgeSpec */
+
+/** @type {TagBadgeSpec[]} */
 const TAG_BADGES = [
   // Which agent CLI the card supervises. Shown only for a non-default agent, so a Claude Code
   // dashboard looks exactly as it did (session/adapters, and setSessionAgent in lifecycle.js).
@@ -43,6 +46,7 @@ const TAG_BADGES = [
   { cls: 'prompt-badge', title: 'Waiting on a permission or input prompt' },
 ];
 
+/** @param {TagBadgeSpec} spec */
 function buildTagBadge({ cls, text = '', title, ariaLabel, ariaHidden }) {
   const badge = el('span', cls, text);
   if (title) badge.title = title;
@@ -359,6 +363,7 @@ export function openDebugOverlay(ui, sessionId) {
 
   overlay.addEventListener('click', (e) => {
     e.stopPropagation();
+    if (!(e.target instanceof Element)) return;
     if (e.target.closest('.debug-close')) closeDebugOverlay(ui);
   });
 

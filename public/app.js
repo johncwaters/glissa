@@ -8,7 +8,7 @@ import { shouldShowServerAction } from '/shared/client-trust.mjs';
 import { STATES } from '/shared/states.mjs';
 import { checkControlLiveness, connectControl, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
 import { createAddSessionDialog } from './dialogs.js';
-import { observeHeaderHeight, writeClipboardText } from './dom-helpers.js';
+import { observeHeaderHeight, queryTag, writeClipboardText } from './dom-helpers.js';
 import { refreshFavicon } from './favicon.js';
 import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, getFocusedSessionId, isFocusActive, mountFocusView, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
 import { initFormFactor, isPhoneLayout, onLayoutChange } from './form-factor.js';
@@ -180,7 +180,8 @@ function handleStateChange(msg) {
   // terminal) in the off-screen grid home, reusing the well-tested create path instead of mutating a
   // live card. skipPerms is read off the existing card so the YOLO badge survives the rebuild.
   if (msg.to === STATES.DORMANT && msg.from !== STATES.DORMANT) {
-    const card = document.querySelector(`.session-card[data-id="${CSS.escape(msg.id)}"]`);
+    const matchedCard = document.querySelector(`.session-card[data-id="${CSS.escape(msg.id)}"]`);
+    const card = matchedCard instanceof HTMLElement ? matchedCard : null;
     const skipPerms = card ? card.dataset.skipPerms !== undefined : false;
     // Read path off the old card BEFORE removeSessionCard detaches it. Nothing re-populates path
     // after the rebuild (unlike worktree, which rides a later session-git delta), so a DORMANT
@@ -358,13 +359,13 @@ const messageHandlers = {
   'shutting-down':      () => {
     connectionEl.dataset.state = 'shutdown';
     connectionLabel.textContent = 'Shutting down...';
-    document.getElementById('btn-menu').disabled = true;
+    queryTag(document, '#btn-menu', 'button').disabled = true;
     showShutdownOverlay('Shutting down sessions...');
   },
   'restarting':         () => {
     connectionEl.dataset.state = 'shutdown';
     connectionLabel.textContent = 'Restarting...';
-    document.getElementById('btn-menu').disabled = true;
+    queryTag(document, '#btn-menu', 'button').disabled = true;
     showShutdownOverlay('Restarting server...');
   },
 };
@@ -396,7 +397,7 @@ function showUpdateBanner(msg) {
   const command = msg.command;
   document.getElementById('update-banner-text').textContent = updateBannerText(msg);
   document.getElementById('update-banner-cmd').textContent = command;
-  const link = document.getElementById('update-banner-link');
+  const link = queryTag(document, '#update-banner-link', 'a');
   link.hidden = !msg.releaseUrl;
   link.href = msg.releaseUrl || '';
   banner.hidden = false;
@@ -444,6 +445,7 @@ btnMenu.addEventListener('click', (e) => {
 
 // Close menu on outside click
 document.addEventListener('click', (e) => {
+  if (!(e.target instanceof Node)) return;
   if (!headerMenu.contains(e.target)) {
     headerMenu.classList.remove('open');
     syncMenuAria();
@@ -593,6 +595,14 @@ function acknowledgeViewAttention(view) {
   if (view === 'visions') refreshVisionsView();
 }
 
+/**
+ * @typedef {{ section?: string, setting?: string, persist?: boolean }} ActivateViewOptions
+ */
+
+/**
+ * @param {string} view
+ * @param {ActivateViewOptions} [options]
+ */
 function activateView(view, { section, setting, persist = true } = {}) {
   const prev = getActiveView();
   uiState.dispatch('setActiveView', view);
@@ -792,7 +802,7 @@ btnMute.addEventListener('click', (e) => {
 // shortcuts fire from the terminal, while a genuine INPUT/TEXTAREA/contentEditable still swallows them.
 function isRealInputFocused() {
   const a = document.activeElement;
-  if (!a) return false;
+  if (!(a instanceof HTMLElement)) return false;
   if (a.isContentEditable) return true;
   return (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA')
     && !a.classList.contains('xterm-helper-textarea');
@@ -857,7 +867,7 @@ document.addEventListener('keydown', (e) => {
 // shortcut list it shows is sourced from public/shortcuts.mjs.
 function isTextEntryContext() {
   const a = document.activeElement;
-  if (!a) return false;
+  if (!(a instanceof HTMLElement)) return false;
   if (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable) return true;
   return !!a.closest?.('.terminal-wrap');
 }

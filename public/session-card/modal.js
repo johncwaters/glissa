@@ -26,7 +26,7 @@ export function createModalOverlay({ dialogClass = 'dialog', closeOnBackdrop = t
   function close() {
     overlay.remove();
     document.removeEventListener('keydown', onKeydown);
-    opener?.focus?.();
+    if (opener instanceof HTMLElement) opener.focus();
   }
 
   if (closeOnBackdrop) {
@@ -49,7 +49,8 @@ export function applyDialogAria(dialog, titleId) {
 
 // Overlay plus the chrome every hand-built dialog repeats: a labelled title, an actions row, and the
 // cancel button that closes it. The caller appends its own body between the two.
-export function buildDialogShell({ title, dialogClass = 'dialog', cancelLabel = 'Cancel' } = {}) {
+/** @param {{ title: string, dialogClass?: string, cancelLabel?: string }} options */
+export function buildDialogShell({ title, dialogClass = 'dialog', cancelLabel = 'Cancel' }) {
   const { overlay, dialog, close } = createModalOverlay({ dialogClass });
   const titleId = `dialog-title-${Math.random().toString(36).slice(2)}`;
 

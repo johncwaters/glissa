@@ -694,6 +694,17 @@ function renderFile(f, kind) {
 
 // One shape for every action in this row: an optional id, an optional key hint rendered as a <kbd>
 // chip, and a label that never varies with state (the sibling reason line carries progress).
+/**
+ * @param {{
+ *   label: string,
+ *   onClick: (event: MouseEvent) => void,
+ *   id?: string,
+ *   shortcut?: string,
+ *   title?: string,
+ *   disabled?: boolean,
+ *   danger?: boolean,
+ * }} spec
+ */
 function actionButton({ id, label, shortcut, title, disabled = false, danger = false, onClick }) {
   const btn = el('button', danger ? 'review-btn review-btn-danger' : 'review-btn review-btn-primary');
   btn.type = 'button';

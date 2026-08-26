@@ -14,7 +14,7 @@
 import { STATES } from '/shared/states.mjs';
 import { borrowCard, getBorrowedCardId, releaseCard } from '../card-host.js';
 import { sendControlMsg } from '../control-ws.js';
-import { el, MERGE_TAGS, stateChip } from '../dom-helpers.js';
+import { el, MERGE_TAGS, query, stateChip } from '../dom-helpers.js';
 import { emptyProjectKeys, forgetProject } from '../project-registry.js';
 import { quickAddSession, requestSessionRemoval } from '../session-actions.js';
 import { setActivityRenderer } from '../session-card/activity.js';
@@ -316,24 +316,28 @@ function sessionName(ui) {
 // ── Rail pills ──
 
 function buildPill(id) {
-  const pill = el('button', 'focus-pill');
-  pill.type = 'button';
-  pill.dataset.id = id;
-  pill.setAttribute('role', 'option');
+  const button = el('button', 'focus-pill');
+  button.type = 'button';
+  button.dataset.id = id;
+  button.setAttribute('role', 'option');
   // Name first so its left edge never shifts as the state label (DORMANT -> RUNNING -> ...) changes
   // width; the badge + merge tag ride on the right where their flex is absorbed by the name's 1fr.
-  pill.innerHTML = '<span class="focus-pill-name"></span>'
+  button.innerHTML = '<span class="focus-pill-name"></span>'
     + '<span class="focus-pill-badge">'
     + '<span class="focus-pill-glyph"></span><span class="focus-pill-label"></span></span>'
     + '<span class="focus-pill-merge"></span>';
   // Cache child-span refs once at build time. buildPill is the sole innerHTML writer, so these
   // refs are permanently valid for the life of the pill (never stale).
-  pill._refs = {
-    glyph: pill.querySelector('.focus-pill-glyph'),
-    label: pill.querySelector('.focus-pill-label'),
-    name: pill.querySelector('.focus-pill-name'),
-    merge: pill.querySelector('.focus-pill-merge'),
-  };
+  const pill = Object.assign(button, {
+    _refs: {
+      glyph: query(button, '.focus-pill-glyph'),
+      label: query(button, '.focus-pill-label'),
+      name: query(button, '.focus-pill-name'),
+      merge: query(button, '.focus-pill-merge'),
+    },
+    /** @type {HTMLElement | null} */
+    _row: null,
+  });
   pill.addEventListener('click', () => onPillActivate(id));
 
   // Wrap the option in a positioned row so a hover-only "×" can overlay its right edge. The remove

@@ -264,6 +264,7 @@ function buildIssueRow(issue, projectId) {
       row.title = 'View investigation report';
       row.addEventListener('click', (event) => {
         // The action buttons live inside the row, so a click on one must not also open the report.
+        if (!(event.target instanceof Element)) return;
         if (event.target.closest('a, button')) return;
         openIssueReport(issue);
       });

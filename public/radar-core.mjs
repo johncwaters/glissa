@@ -260,6 +260,7 @@ export function updateBannerText(update) {
 
 // One list so the panel renders ops in a fixed order regardless of which feed landed first: the
 // advisory update line, then every live anomaly.
+/** @param {{ update?: any, health?: any }} [feeds] */
 export function opsRows({ update, health } = {}) {
   const rows = [];
   const updateEntry = updateAvailableRow(update);
@@ -301,6 +302,7 @@ export function needsActionPrRows(snapshot) {
 // PR facts are deliberately ABSENT. Radar still renders its PR section, but a single failing PR used to
 // light Radar, PRs and the phone More dot at once, so one fact read as three places needing attention.
 // The PRs surfaces own that fact; Radar owns PostHog issues and live health anomalies.
+/** @param {{ posthog?: any, health?: any }} [feeds] */
 function radarAttentionParts({ posthog, health } = {}) {
   const parts = [];
   const projects = Array.isArray(posthog?.projects) ? posthog.projects : [];

@@ -232,7 +232,7 @@ export function setupTerminal(termWrap, ui) {
   }
   const resizeObserver = new ResizeObserver(() => {
     if (fitRafId !== null) return;
-    fitRafId = requestAnimationFrame(applyFit);
+    fitRafId = requestAnimationFrame(() => applyFit());
   });
   resizeObserver.observe(termWrap);
   ui.resizeObserver = resizeObserver;

@@ -2,7 +2,7 @@
 // bottom dock. Leaf module: depends only on the DOM-element helper, so any
 // session-card module can import it without creating an import cycle.
 
-import { el } from '../dom-helpers.js';
+import { el, queryTag } from '../dom-helpers.js';
 
 // Transient notices clear themselves; persistent ones (real failures) wait for
 // the operator to dismiss them.
@@ -10,6 +10,11 @@ const AUTO_DISMISS_MS = 6000;
 // Safety net if `transitionend` never fires (e.g. element detached mid-exit).
 const EXIT_FALLBACK_MS = 400;
 const CLOSE_GLYPH = String.fromCharCode(0x00d7); // multiplication sign as an x
+
+/** @typedef {{ message: string, count: number, timer: ReturnType<typeof setTimeout> | null, dismissed: boolean }} ToastState */
+
+/** @type {WeakMap<Element, ToastState>} */
+const toastState = new WeakMap();
 
 function ensureRegion() {
   let region = document.getElementById('notice-region');
@@ -24,9 +29,10 @@ function ensureRegion() {
 }
 
 function dismiss(notice) {
-  if (notice._dismissed) return;
-  notice._dismissed = true;
-  if (notice._timer) clearTimeout(notice._timer);
+  const state = toastState.get(notice);
+  if (!state || state.dismissed) return;
+  state.dismissed = true;
+  if (state.timer) clearTimeout(state.timer);
   notice.classList.add('is-leaving');
   notice.addEventListener('transitionend', () => notice.remove(), { once: true });
   setTimeout(() => notice.remove(), EXIT_FALLBACK_MS);
@@ -40,20 +46,23 @@ export function showErrorToast(message, opts = {}) {
   const region = ensureRegion();
 
   const newest = region.firstElementChild;
-  if (newest && newest._message === message && !newest._dismissed) {
-    newest._count = (newest._count || 1) + 1;
-    const counter = newest.querySelector('.notice-count');
-    counter.textContent = `x${newest._count}`;
+  const newestState = newest ? toastState.get(newest) : null;
+  if (newestState && newestState.message === message && !newestState.dismissed) {
+    newestState.count++;
+    const counter = queryTag(newest, '.notice-count', 'span');
+    counter.textContent = `x${newestState.count}`;
     counter.hidden = false;
-    if (!persist && newest._timer) {
-      clearTimeout(newest._timer);
-      newest._timer = setTimeout(() => dismiss(newest), AUTO_DISMISS_MS);
+    if (!persist && newestState.timer) {
+      clearTimeout(newestState.timer);
+      newestState.timer = setTimeout(() => dismiss(newest), AUTO_DISMISS_MS);
     }
     return newest;
   }
 
   const notice = el('div', persist ? 'notice is-persistent' : 'notice');
-  notice._message = message;
+  /** @type {ToastState} */
+  const state = { message, count: 1, timer: null, dismissed: false };
+  toastState.set(notice, state);
   notice.setAttribute('role', 'alert');
 
   const glyph = el('span', 'notice-glyph', '!');
@@ -76,7 +85,7 @@ export function showErrorToast(message, opts = {}) {
   requestAnimationFrame(() => notice.classList.add('is-visible'));
 
   if (!persist) {
-    notice._timer = setTimeout(() => dismiss(notice), AUTO_DISMISS_MS);
+    state.timer = setTimeout(() => dismiss(notice), AUTO_DISMISS_MS);
   }
 
   return notice;

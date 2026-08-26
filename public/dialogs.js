@@ -2,11 +2,15 @@
 
 import addSessionHTML from './components/add-session-dialog.html?raw';
 import { sendControlMsg, sendControlRequest } from './control-ws.js';
-import { el } from './dom-helpers.js';
+import { el, query, queryTag } from './dom-helpers.js';
 import { applyDialogAria, buildDialogShell, createModalOverlay } from './session-card/modal.js';
 import { DEFAULT_AGENT_ID, decideAgentPicker } from './session-card/agent-core.mjs';
 import { countSessionsByName, suggestSessionName } from './session-card/naming.js';
 
+/**
+ * @param {string} text
+ * @param {{ value?: string, disabled?: boolean, selected?: boolean }} [settings]
+ */
 function option(text, { value, disabled = false, selected = false } = {}) {
   const optionEl = el('option', null, text);
   if (value != null) optionEl.value = value;
@@ -20,17 +24,17 @@ export function createAddSessionDialog() {
   dialog.innerHTML = addSessionHTML;
   applyDialogAria(dialog, 'add-session-title');
 
-  const pickerEl = dialog.querySelector('#add-session-picker');
-  const agentLabelEl = dialog.querySelector('#add-session-agent-label');
-  const agentSelectEl = dialog.querySelector('#add-session-agent');
-  const advancedToggle = dialog.querySelector('#add-session-advanced-toggle');
-  const advancedPanel = dialog.querySelector('#add-session-advanced');
-  const nameInput = dialog.querySelector('#add-session-name');
-  const pathInput = dialog.querySelector('#add-session-path');
-  const requirePermsCheckbox = dialog.querySelector('#add-session-require-perms');
-  const errorEl = dialog.querySelector('#add-session-error');
-  const btnCancel = dialog.querySelector('#add-session-cancel');
-  const btnConfirm = dialog.querySelector('#add-session-confirm');
+  const pickerEl = queryTag(dialog, '#add-session-picker', 'select');
+  const agentLabelEl = query(dialog, '#add-session-agent-label');
+  const agentSelectEl = queryTag(dialog, '#add-session-agent', 'select');
+  const advancedToggle = queryTag(dialog, '#add-session-advanced-toggle', 'button');
+  const advancedPanel = query(dialog, '#add-session-advanced');
+  const nameInput = queryTag(dialog, '#add-session-name', 'input');
+  const pathInput = queryTag(dialog, '#add-session-path', 'input');
+  const requirePermsCheckbox = queryTag(dialog, '#add-session-require-perms', 'input');
+  const errorEl = query(dialog, '#add-session-error');
+  const btnCancel = queryTag(dialog, '#add-session-cancel', 'button');
+  const btnConfirm = queryTag(dialog, '#add-session-confirm', 'button');
 
   advancedToggle.setAttribute('aria-expanded', 'false');
   advancedToggle.addEventListener('click', () => {
@@ -120,6 +124,16 @@ export function createAddSessionDialog() {
   requestAnimationFrame(() => pickerEl.focus());
 }
 
+/**
+ * @param {{
+ *   issueId: string,
+ *   issueTitle?: string,
+ *   format?: string,
+ *   content?: string,
+ *   message?: string,
+ *   error?: string,
+ * }} report
+ */
 export function createPosthogReportDialog({ issueId, issueTitle, format, content, message, error }) {
   const { dialog, close, actions, btnCancel: btnClose } = buildDialogShell({
     title: 'Investigation report',
