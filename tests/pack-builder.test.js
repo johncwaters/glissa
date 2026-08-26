@@ -400,6 +400,33 @@ test('a write failure leaves the pointed build byte-identical', async () => {
   });
 });
 
+test('publishing nested outputs syncs every created ancestor directory', async (t) => {
+  if (process.platform === 'win32') t.skip('directory sync is unsupported on Windows');
+  const builtRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-sync-'));
+  const originalOpen = fsp.open;
+  const syncedDirectories = [];
+  t.mock.method(fsp, 'open', async (target, ...args) => {
+    if (args[0] === 'r') syncedDirectories.push(path.resolve(target));
+    return originalOpen(target, ...args);
+  });
+  try {
+    await publishBuild(builtRoot, 'demo', [{ relPath: 'a/b/c/file.md', content: 'nested' }]);
+    const temporaryDirectory = syncedDirectories.find((directory) => path.basename(directory).startsWith('tmp-'));
+    assert.ok(temporaryDirectory);
+    assert.deepEqual(
+      [
+        temporaryDirectory,
+        path.join(temporaryDirectory, 'a'),
+        path.join(temporaryDirectory, 'a', 'b'),
+        path.join(temporaryDirectory, 'a', 'b', 'c'),
+      ].sort(),
+      syncedDirectories.filter((directory) => directory === temporaryDirectory || directory.startsWith(`${temporaryDirectory}${path.sep}`)).sort()
+    );
+  } finally {
+    fs.rmSync(builtRoot, { recursive: true, force: true });
+  }
+});
+
 test('a source that matches nothing fails the build with the offending pattern', async () => {
   await withFixture(
     async ({ build }) => {

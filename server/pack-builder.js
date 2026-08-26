@@ -288,7 +288,14 @@ async function writeOutputs(targetDir, outputs) {
     const destination = path.join(targetDir, file.relPath);
     const destinationDir = path.dirname(destination);
     await fsp.mkdir(destinationDir, { recursive: true });
-    directories.add(destinationDir);
+    let directory = destinationDir;
+    while (true) {
+      directories.add(directory);
+      if (directory === targetDir) break;
+      const parent = path.dirname(directory);
+      if (parent === directory) throw new Error(`destination ${destination} escaped ${targetDir}`);
+      directory = parent;
+    }
     const handle = await fsp.open(destination, 'wx', 0o666);
     try {
       await handle.writeFile(file.content, 'utf8');
@@ -469,7 +476,7 @@ async function writeCurrentPointer(packDir, version) {
   }
 }
 
-async function garbageCollectVersions(packDir, pointedVersion, retain = RETAINED_PACK_VERSIONS) {
+async function garbageCollectVersions(packDir, pointedVersion) {
   const versionsDir = path.join(packDir, VERSIONS_DIRECTORY);
   let entries;
   try {
@@ -488,7 +495,7 @@ async function garbageCollectVersions(packDir, pointedVersion, retain = RETAINED
   versions.sort((left, right) => right.mtimeMs - left.mtimeMs || left.name.localeCompare(right.name));
   const kept = new Set([pointedVersion]);
   for (const version of versions) {
-    if (kept.size >= Math.max(1, retain)) break;
+    if (kept.size >= RETAINED_PACK_VERSIONS) break;
     kept.add(version.name);
   }
   for (const version of versions) {
@@ -711,23 +718,24 @@ async function resolveCurrentDirectory(name, builtRoot) {
     rawPointer = await fsp.readFile(pointerPath, 'utf8');
   } catch (error) {
     if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') {
-      return { dir: null, version: null, reason: `current pointer unreadable at ${pointerPath}` };
+      return { dir: null, version: null, manifest: null, reason: `current pointer unreadable at ${pointerPath}` };
     }
   }
   if (rawPointer !== null) {
     const version = parsePackPointer(rawPointer);
-    if (!version) return { dir: null, version: null, reason: `current pointer invalid at ${pointerPath}` };
+    if (!version) return { dir: null, version: null, manifest: null, reason: `current pointer invalid at ${pointerPath}` };
     const versionDir = packVersionDirectory(packDir, version);
     const stats = await statOrNull(versionDir);
-    if (!stats?.isDirectory()) return { dir: null, version: null, reason: `pointed version missing at ${versionDir}` };
-    return { dir: versionDir, version, reason: null };
+    if (!stats?.isDirectory()) return { dir: null, version: null, manifest: null, reason: `pointed version missing at ${versionDir}` };
+    const manifest = await readManifestFromDirectory(versionDir);
+    return { dir: versionDir, version, manifest, reason: null };
   }
 
   const legacyManifest = await readManifestFromDirectory(currentDir);
   if (legacyManifest && typeof legacyManifest.version === 'string') {
-    return { dir: currentDir, version: legacyManifest.version, reason: null };
+    return { dir: currentDir, version: legacyManifest.version, manifest: legacyManifest, reason: null };
   }
-  return { dir: null, version: null, reason: `not built (no pointer at ${pointerPath})` };
+  return { dir: null, version: null, manifest: null, reason: `not built (no pointer at ${pointerPath})` };
 }
 
 /** The manifest of a pack's current build, or null when it has never been built. */
@@ -735,7 +743,7 @@ async function readBuiltManifest(name, { builtRoot = defaultBuiltRoot() } = {}) 
   if (typeof name !== 'string' || !PACK_NAME_RE.test(name)) return null;
   const current = await resolveCurrentDirectory(name, builtRoot);
   if (!current.dir) return null;
-  const manifest = await readManifestFromDirectory(current.dir);
+  const { manifest } = current;
   if (!manifest || manifest.version !== current.version) return null;
   return manifest;
 }
@@ -754,7 +762,7 @@ async function resolveBuiltPack(name, { builtRoot = defaultBuiltRoot() } = {}) {
 
   const current = await resolveCurrentDirectory(name, builtRoot);
   if (!current.dir) return skip(current.reason);
-  const manifest = await readManifestFromDirectory(current.dir);
+  const { manifest } = current;
   if (!manifest || manifest.version !== current.version) {
     return skip(`manifest.json missing, unreadable, or mismatched in ${current.dir}`);
   }
