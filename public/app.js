@@ -9,6 +9,7 @@ import { STATES } from '/shared/states.mjs';
 import { checkControlLiveness, connectControl, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
 import { applySettingsBroadcast, createAddSessionDialog, createSettingsDialog } from './dialogs.js';
 import { observeHeaderHeight, writeClipboardText } from './dom-helpers.js';
+import { refreshFavicon } from './favicon.js';
 import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, getFocusedSessionId, isFocusActive, mountFocusView, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.js';
 import { initFormFactor, isPhoneLayout, onLayoutChange } from './form-factor.js';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
@@ -147,6 +148,7 @@ function handleSnapshot(sessions, packVersions) {
     restoreUsageChip(s.id);
   }
   updateAggregateStatus();
+  refreshFavicon(sessionUIs);
 
   // Focus can be the active view when the initial snapshot lands; rebuild its rail from the new cards,
   // then restore the session the operator had open (the boot/reload race: the saved session does not
@@ -160,6 +162,7 @@ function handleSnapshot(sessions, packVersions) {
 function handleStateChange(msg) {
   if (!hasSession(msg.id)) {
     createSessionCard(msg.id, msg.session, msg.to, { skipPerms: !!msg.skipPerms, stateSince: msg.timestamp });
+    refreshFavicon(sessionUIs);
     return;
   }
 
@@ -179,10 +182,12 @@ function handleStateChange(msg) {
     if (isFocusActive()) refreshFocusRoster();
     refreshPhoneBoard();
     refreshReviewSidebar(msg.id);
+    refreshFavicon(sessionUIs);
     return;
   }
 
   applyState(msg.id, msg.to, msg.timestamp);
+  refreshFavicon(sessionUIs);
   // Re-evaluate the review sidebar's merge gate: it is state-dependent (isMergeableLive), so a turn
   // ending RUNNING -> COMPLETE must surface the Merge button without the operator clicking a file, and
   // COMPLETE -> RUNNING must withdraw it. No-op unless this session is selected.
@@ -275,10 +280,10 @@ const messageHandlers = {
   // The versions a spawn actually delivered, pushed as the session starts.
   'session-packs':      (msg) => setSessionPacks(msg.id, msg.packs),
   'state-change':       (msg) => handleStateChange(msg),
-  'session-added':      (msg) => { if (!msg.ephemeral) noteKnownProjectPath(msg.path); if (!hasSession(msg.id)) { createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId, stateSince: msg.stateSince }); restoreUsageChip(msg.id); } if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
-  'session-removed':    (msg) => { removeSessionCard(msg.id); forgetReviewSession(msg.id); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
+  'session-added':      (msg) => { if (!msg.ephemeral) noteKnownProjectPath(msg.path); if (!hasSession(msg.id)) { createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId, stateSince: msg.stateSince }); restoreUsageChip(msg.id); } refreshFavicon(sessionUIs); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
+  'session-removed':    (msg) => { removeSessionCard(msg.id); forgetReviewSession(msg.id); refreshFavicon(sessionUIs); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
   'session-renamed':    (msg) => { renameSessionCard(msg.id, msg.newName); refreshPhoneBoard(); },
-  'session-modified':   (msg) => { if (!msg.ephemeral) noteKnownProjectPath(msg.path); removeSessionCard(msg.id); forgetReviewSession(msg.id); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId, stateSince: msg.stateSince }); restoreUsageChip(msg.id); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
+  'session-modified':   (msg) => { if (!msg.ephemeral) noteKnownProjectPath(msg.path); removeSessionCard(msg.id); forgetReviewSession(msg.id); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId, stateSince: msg.stateSince }); restoreUsageChip(msg.id); refreshFavicon(sessionUIs); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
   'session-git':        (msg) => setSessionWorktree(msg.id, !!msg.worktree),
   'session-resume':     (msg) => setSessionResume(msg.id, msg.resumeSessionId),
   // The agent count and a delivered notification both move the decision trace without any
