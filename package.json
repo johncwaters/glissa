@@ -30,7 +30,8 @@
     "shared/notification-states.js",
     "shared/settings-ranges.js",
     "shared/contracts/",
-    "shared/paths.js"
+    "shared/paths.js",
+    "shared/usage-config.js"
   ],
   "engines": {
     "node": ">=22.16.0"
