@@ -22,6 +22,7 @@ const {
   uriOfParams,
 } = require('../server/core/visions-buffer-core');
 const { decideConfigPath, glissaHomeDir } = require('../server/core/config-path-core');
+const { ACTIVITY_METHOD } = require('../server/core/ingest-editor-core');
 const {
   MAX_DAEMON_FRAME_BYTES,
   daemonMessage,
@@ -32,12 +33,14 @@ const {
 } = require('./core/visions-relay-core');
 
 const DEFAULT_PORTS = [5173, 3000];
+// A reconnect replays mirrored documents from the doc store; a marker has no store, so it is held here.
+const MAX_PENDING_FORWARDS = 50;
 const INITIAL_RETRY_MS = 500;
 const MAX_RETRY_MS = 5000;
 const STABLE_CONNECTION_MS = 5000;
 const METHOD_NOT_FOUND = -32601;
 const MIRROR_METHODS = new Set(['textDocument/didOpen', 'textDocument/didChange', 'textDocument/didClose']);
-const FORWARDED_METHODS = new Set([...MIRROR_METHODS, 'textDocument/didSave']);
+const FORWARDED_METHODS = new Set([...MIRROR_METHODS, 'textDocument/didSave', ACTIVITY_METHOD]);
 // The one editor request the daemon answers. Everything else is still method-not-found.
 const CODE_ACTION_METHOD = 'textDocument/codeAction';
 // The one request the daemon initiates, which is what makes tier 1 silent (docs/archive/plan-navigator-2.md, M6).
@@ -181,6 +184,7 @@ function createRelay({
   // Editor-facing id -> the daemon id it answers for, for the applyEdit direction.
   const applyEditDaemonIdByEditorId = new Map();
   const unsyncedUris = new Set();
+  const pendingForwards = [];
   let nextEditorRequestId = 1;
 
   // stdout carries the LSP protocol, so every line the relay says about itself goes to stderr.
@@ -221,6 +225,26 @@ function createRelay({
     retryMs = nextDelayMs(retryMs);
   }
 
+  // Editor activity reported while the daemon is down still happened, so it waits for the socket.
+  function forwardNotification(method, params) {
+    const message = daemonMessage(method, params);
+    if (sendWsJson(ws, message)) return true;
+    pendingForwards.push(message);
+    while (pendingForwards.length > MAX_PENDING_FORWARDS) pendingForwards.shift();
+    return false;
+  }
+
+  function flushPendingForwards() {
+    let sent = 0;
+    while (pendingForwards.length > 0) {
+      // Held again rather than dropped: a socket that refuses the first one refuses the rest too.
+      if (!sendWsJson(ws, pendingForwards[0])) return sent;
+      pendingForwards.shift();
+      sent += 1;
+    }
+    return sent;
+  }
+
   function replayMirror() {
     const replay = planMirrorReplay(listDocs(docStore));
     for (const frame of replay.frames) {
@@ -253,7 +277,8 @@ function createRelay({
       }, STABLE_CONNECTION_MS);
       stableConnectionTimer.unref?.();
       const replay = replayMirror();
-      note(`connected to the daemon on port ${port} (replayed ${replay.frames.length} mirrored documents, skipped ${replay.skipped.length})`);
+      const forwarded = flushPendingForwards();
+      note(`connected to the daemon on port ${port} (replayed ${replay.frames.length} mirrored documents, skipped ${replay.skipped.length}, ${forwarded} held markers)`);
     });
 
     socket.on('message', (data, isBinary) => {
@@ -402,7 +427,7 @@ function createRelay({
       if (!mirrorUpdate.applied) note(`mirror update failed method=${method} uri=${uriOfParams(params) || '<unknown>'} reason=${mirrorUpdate.reason}${mirrorFailureDetail(mirrorUpdate)}`);
       return sendMirrorNotification(method, params, mirrorUpdate);
     }
-    if (FORWARDED_METHODS.has(method)) return sendWsJson(ws, daemonMessage(method, params));
+    if (FORWARDED_METHODS.has(method)) return forwardNotification(method, params);
     if (method === 'exit') return stop(0);
     return false;
   }
@@ -460,6 +485,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  ACTIVITY_METHOD,
   APPLY_EDIT_METHOD,
   readConfiguredPort,
   CODE_ACTION_METHOD,

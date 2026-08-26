@@ -169,6 +169,38 @@ test('the extension mirrors buffers to the daemon and renders what it sends back
   assert.equal(vscode.__test.state.diagnosticsByUri.has(URI), false);
 });
 
+test('a non-markdown buffer reports a marker instead of its text', async (t) => {
+  const daemon = createDaemon();
+  await once(daemon.server, 'listening');
+
+  vscode.__test.reset();
+  vscode.__test.state.settings = { relayPath: RELAY_PATH, port: daemon.port() };
+  const context = { subscriptions: [] };
+  extension.activate(context);
+  t.after(async () => {
+    for (const subscription of context.subscriptions) subscription.dispose?.();
+    await daemon.close();
+  });
+
+  const code = vscode.__test.document({ uri: 'file:///tmp/app.js', text: 'const a = 1;', languageId: 'javascript' });
+  vscode.__test.fire('open', code);
+  vscode.__test.fire('save', code);
+
+  const marker = (method) => daemon.waitFor(
+    (message) => message.type === 'lsp' && message.method === 'visions/editorActivity' && message.params.method === method,
+    `no ${method} marker reached the daemon`,
+  );
+
+  const opened = await marker('textDocument/didOpen');
+  assert.equal(opened.params.uri, 'file:///tmp/app.js');
+  // The whole point of the marker: the buffer this lane never sweeps does not ride the wire.
+  assert.equal(JSON.stringify(opened).includes('const a = 1'), false);
+
+  await marker('textDocument/didSave');
+  vscode.__test.fire('close', code);
+  await marker('textDocument/didClose');
+});
+
 test('a non-markdown buffer is never mirrored', async (t) => {
   const daemon = createDaemon();
   await once(daemon.server, 'listening');

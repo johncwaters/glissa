@@ -64,6 +64,7 @@ const {
   readSweepResult,
 } = require('./core/visions-fix-core');
 const { createJsonStateWriter } = require('./json-file');
+const { ACTIVITY_METHOD } = require('./core/ingest-editor-core');
 const { createLaneLog } = require('./lane-log');
 
 // Quiet window before a document is swept.
@@ -971,6 +972,14 @@ function createVisionsWiring({
         // A save is the boundary itself: it evaluates the same gate now rather than waiting it out.
         cancelDispatch(uri);
         dispatchSettled = runDispatch(uri, 'edit').catch((error) => warn(`dispatch loop failed: ${error.message}`));
+        return null;
+      },
+      // A buffer this lane never sweeps still moves the machine, and the marker carries no text.
+      [ACTIVITY_METHOD]: (params) => {
+        const uri = typeof params?.uri === 'string' ? params.uri : null;
+        const method = typeof params?.method === 'string' ? params.method : null;
+        if (!uri || !method) return 'invalid-params';
+        reportEditorEvent(method, uri);
         return null;
       },
       // The one editor-driven refusal signal there is; absent it, a served finding is simply unlabeled.

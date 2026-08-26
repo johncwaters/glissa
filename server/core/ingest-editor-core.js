@@ -6,6 +6,8 @@
 const { deepestRootFor, normalizeShapePath, pathOfFileUri } = require('./visions-scope-core');
 
 const SOURCE = 'editor';
+// The one notification for a buffer the lane does not mirror; both ends key on this constant.
+const ACTIVITY_METHOD = 'visions/editorActivity';
 const KIND_BY_METHOD = Object.freeze({
   'textDocument/didOpen': 'doc-open',
   'textDocument/didSave': 'doc-save',
@@ -49,4 +51,4 @@ function applyEditorNotification(state, { method, uri, roots = [], now = 0 } = {
   };
 }
 
-module.exports = { SOURCE, applyEditorNotification, createEditorState };
+module.exports = { ACTIVITY_METHOD, SOURCE, applyEditorNotification, createEditorState };
