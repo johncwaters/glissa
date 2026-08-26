@@ -79,6 +79,15 @@ test('the emacs block appends, refreshes in place and removes cleanly', () => {
   assert.equal(emacsRemove(merged.text).text, existing);
 });
 
+test('an appended block keeps one blank line from the file it joined', () => {
+  const messy = '(setq inhibit-startup-message t)\n\n\n';
+  const merged = emacsMerge(messy, INVOCATION);
+  assert.match(merged.text, /startup-message t\)\n\n;; >>> glissa-visions/);
+  assert.equal(merged.text.endsWith(';; <<< glissa-visions\n'), true);
+  assert.equal(emacsMerge(merged.text, INVOCATION).changed, false);
+  assert.equal(emacsRemove(merged.text).text, '(setq inhibit-startup-message t)\n');
+});
+
 test('json settings gain one key and lose exactly that key again', () => {
   const existing = '{\n  "log_debug": true\n}\n';
   const merged = jsonSettingsMerge(existing, sublimeSettings(INVOCATION));

@@ -15,11 +15,6 @@ function parts(invocation) {
   return [invocation.command, ...invocation.args];
 }
 
-function trailingNewline(text) {
-  if (text === '') return '';
-  return text.endsWith('\n') ? '' : '\n';
-}
-
 function splitMarked(text, begin, end) {
   const startAt = text.indexOf(begin);
   if (startAt === -1) return { hasBlock: false, before: text, after: '' };
