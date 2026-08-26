@@ -2,7 +2,7 @@
   "name": "glissa-visions",
   "displayName": "Glissa Visions",
   "publisher": "johnwaters",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "engines": {
     "vscode": "^1.85.0"
@@ -18,7 +18,7 @@
         "glissaVisions.relayPath": {
           "type": "string",
           "default": "",
-          "description": "Absolute path to session/visions-relay.js."
+          "description": "Absolute path to session/visions-relay.js. Empty uses the path stamped at install time."
         },
         "glissaVisions.port": {
           "type": "number",
@@ -28,7 +28,5 @@
       }
     }
   },
-  "dependencies": {
-    "vscode-languageclient": "^9.0.1"
-  }
+  "description": "Mirrors markdown buffers to the Glissa daemon and shows its findings and silent fixes."
 }

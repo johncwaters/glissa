@@ -13,6 +13,8 @@ Commands:
   pair              Mint a single-use pairing link for a remote device
   pair --list       List paired devices
   pair --revoke <id>  Revoke a paired device
+  visions install   Install the Visions editor extension into every VS Code family editor on PATH
+  visions status    Report the relay path and which editors carry the extension
   pack build [name] Build one context pack, or every spec
   pack list         List context pack specs and their built versions
   memory forget <id|pattern>  Expunge a remembered record
@@ -81,6 +83,12 @@ function runAsyncCommand(run) {
   );
 }
 
+const isVisionsCommand = args[0] === 'visions';
+if (isVisionsCommand) {
+  const { runVisionsCli } = require('../server/visions-cli');
+  runAsyncCommand(runVisionsCli(args.slice(1)));
+}
+
 const isPackCommand = args[0] === 'pack';
 if (isPackCommand) {
   const { runPackCli } = require('../server/pack-cli');
@@ -93,7 +101,7 @@ if (isMemoryCommand) {
   runAsyncCommand(runMemoryCli(args.slice(1)));
 }
 
-if (!isPackCommand && !isMemoryCommand && !isAgentCommand) {
+if (!isPackCommand && !isMemoryCommand && !isAgentCommand && !isVisionsCommand) {
   require('../server');
 }
 

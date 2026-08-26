@@ -21,6 +21,7 @@
     "packs/",
     "!packs/AGENTS.md",
     "session/",
+    "tools/vscode-visions/",
     "notifications/",
     "detection/",
     "shared/states.js",

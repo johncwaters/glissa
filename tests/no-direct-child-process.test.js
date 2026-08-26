@@ -35,8 +35,11 @@ const SKIP_DIRS = new Set([
   ".glissa-worktrees",
 ]);
 
-// The single module permitted to import child_process directly.
-const ALLOWED = new Set([path.join(ROOT, "server", "child-process-safe.js")]);
+// The single module permitted to import child_process directly, plus the editor extension: it is
+// installed OUTSIDE this package (server/visions-cli.js packs it into a .vsix) and can no longer
+// resolve anything inside it, so it carries windowsHide itself under the assertion below.
+const EXTENSION = path.join(ROOT, "tools", "vscode-visions", "extension.js");
+const ALLOWED = new Set([path.join(ROOT, "server", "child-process-safe.js"), EXTENSION]);
 
 const CHILD_PROCESS_REQUIRE = /require\(\s*['"](?:node:)?child_process['"]\s*\)/;
 
@@ -83,4 +86,9 @@ test("child-process-safe.js exists and exports the spawn surface", () => {
   for (const fn of ["execFile", "execFileSync", "execSync", "spawn", "hide"]) {
     assert.equal(typeof safe[fn], "function", `child-process-safe must export ${fn}`);
   }
+});
+
+test("the editor extension hides its own console window, since it cannot use the wrapper", () => {
+  const source = fs.readFileSync(EXTENSION, "utf8");
+  assert.match(source, /windowsHide: true/);
 });
