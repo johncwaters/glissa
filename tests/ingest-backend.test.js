@@ -495,7 +495,10 @@ test('an editor buffer opened through the Visions lane reaches the rings as a ma
 ));
 
 test('with the editor source off a mirrored buffer publishes nothing', withBackend(
-  { ingest: INGEST_ON, visions: { enabled: true, dispatch: { enabled: false } } },
+  {
+    ingest: { enabled: true, sources: { terminal: { enabled: true }, editor: { enabled: false } } },
+    visions: { enabled: true, dispatch: { enabled: false } },
+  },
   async ({ backend, projectDir }) => {
     const lane = backend.getIngestLane();
     assert.equal(lane.editorEnabled, false);
@@ -652,7 +655,9 @@ test('an ingest batch pokes the Visions lane, and its gate reads this lane seq',
   assert.equal(pokes, 1, 'one poke for the batch, however many events it carried');
 }));
 
-test('with ingest off the Visions lane is wired to no movement signal at all', withBackend({ visions: { enabled: true } }, async ({ backend }) => {
+// Visions IMPLIES the lane now, so ingest off here is the operator's explicit opt-out, which is the only
+// thing that still produces the pre-M7.5 shape.
+test('with ingest off the Visions lane is wired to no movement signal at all', withBackend({ visions: { enabled: true }, ingest: { enabled: false } }, async ({ backend }) => {
   assert.equal(backend.getIngestLane(), null);
   assert.equal(
     backend.getVisionsLane().latestContextSeq(), null,

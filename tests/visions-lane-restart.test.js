@@ -107,6 +107,20 @@ test('turning Visions off takes its lane back down', withBackend({
   await until(() => backend.getVisionsLane() === null, 'the visions lane was never stopped');
 }));
 
+test('a boot with Visions on brings up the lanes it implies, on that same boot', withBackend({
+  visions: { enabled: true },
+}, async ({ backend, cfgPath }) => {
+  await until(() => backend.getIngestLane() !== null, 'the implied ingest lane never came up');
+  const lane = backend.getIngestLane();
+  assert.equal(lane.fsEnabled, true);
+  assert.equal(lane.editorEnabled, true);
+
+  // Written to disk as well, or the dashboard would show sources off while they ran.
+  const onDisk = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+  assert.equal(onDisk.ingest.enabled, true);
+  assert.equal(onDisk.visions.dispatch.enabled, true);
+}));
+
 test('a save that leaves both configs alone rebuilds nothing', withBackend({
   visions: { enabled: true, dispatch: { enabled: false } },
 }, async ({ backend, dash, track }) => {

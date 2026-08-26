@@ -1270,6 +1270,8 @@ function createBackend(httpServer, options = {}) {
     configStore,
     logger: console,
     debug: () => configStore.getSettings().debugMode === true,
+    // The lanes it implies come up on the same boot that wrote them in, not the next one.
+    onConfigChanged: () => restartLanesIfConfigChanged(),
   });
 
   const visionsSessions = new Map();

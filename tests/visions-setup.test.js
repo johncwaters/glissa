@@ -6,6 +6,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+const os = require('node:os');
+const path = require('node:path');
+
 const { createVisionsSetup } = require('../server/visions-setup');
 const { IMPLIED_INGEST, decideImpliedDefaults } = require('../server/core/visions-defaults-core');
 
@@ -61,6 +64,49 @@ test('enabling writes the implied ingest and dispatch blocks', async () => {
   await setup.maybeApply();
   assert.deepEqual(config.ingest, IMPLIED_INGEST);
   assert.deepEqual(config.visions.dispatch, { enabled: true });
+});
+
+test('a config under the operator home is refused while the test runner is what is running', async () => {
+  const config = { visions: { enabled: true } };
+  let saves = 0;
+  const setup = createVisionsSetup({
+    getConfig: () => config,
+    configStore: { configPath: path.join(os.homedir(), '.glissa', 'config.json'), save() { saves += 1; return config; } },
+    logger: { log() {}, warn() {} },
+    env: { NODE_TEST_CONTEXT: 'child' },
+    wire: async () => ({ ok: true, files: [], extensions: { results: [] } }),
+    unwire: async () => ({ files: [], extensions: { results: [] } }),
+  });
+
+  await setup.maybeApply();
+  assert.equal(saves, 0);
+  assert.equal(config.ingest, undefined);
+});
+
+test('the LIVE config object is the one mutated, and the lanes are told once', async () => {
+  const config = { visions: { enabled: true } };
+  const disk = { visions: { enabled: true } };
+  const pokes = [];
+  const setup = createVisionsSetup({
+    // A getter, exactly as backend.js hands it over: the same object the lanes read.
+    getConfig: () => config,
+    configStore: {
+      save(mutator) {
+        mutator(disk);
+        return disk;
+      },
+    },
+    logger: { log() {}, warn() {} },
+    onConfigChanged: () => pokes.push(JSON.parse(JSON.stringify(config.ingest))),
+    wire: async () => ({ ok: true, files: [], extensions: { results: [] } }),
+    unwire: async () => ({ files: [], extensions: { results: [] } }),
+  });
+
+  await setup.maybeApply();
+  assert.deepEqual(config.ingest, IMPLIED_INGEST);
+  assert.deepEqual(disk.ingest, IMPLIED_INGEST);
+  // The poke lands AFTER the live mutation, or the rebuild would compare against a config still saying off.
+  assert.deepEqual(pokes, [IMPLIED_INGEST]);
 });
 
 test('what the operator already chose is never rewritten', () => {

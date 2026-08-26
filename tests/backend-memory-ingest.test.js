@@ -98,7 +98,9 @@ test('with ingest off no ingest frame reaches the control WS', async () => {
 });
 
 test('the dispatch digest stays unwired, so memory alone never widens a prompt', async () => {
-  const booted = await boot({ memory: { enabled: true }, visions: { enabled: true } });
+  // Visions implies the ingest lane, so the opt-out is explicit: what this pins is that MEMORY alone
+  // never builds one.
+  const booted = await boot({ memory: { enabled: true }, visions: { enabled: true }, ingest: { enabled: false } });
   try {
     assert.equal(booted.backend.getIngestLane(), null);
     // Null is what the Visions lane reports when it was handed no digest and no movement signal at all.

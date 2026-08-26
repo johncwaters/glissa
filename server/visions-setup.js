@@ -14,7 +14,7 @@ const {
 } = require('./core/editor-extension-core');
 const { relayInvocation } = require('./core/editor-setup-core');
 const { applyChanges, decideImpliedDefaults } = require('./core/visions-defaults-core');
-const { underTestRunner } = require('./core/db-path-guard');
+const { isUnder, underTestRunner } = require('./core/db-path-guard');
 const { createLaneLog } = require('./lane-log');
 const { unwireEditors, wireEditors } = require('./editor-wire');
 const { resolvePathCommandMatches } = require('../session/core/spawn-command');
@@ -145,7 +145,7 @@ async function unwireEverything() {
 // wired must never be able to stop the lane it was for.
 function createVisionsSetup({
   getConfig, configStore = null, logger = console, debug = false, env = process.env,
-  wire = wireEverything, unwire = unwireEverything,
+  onConfigChanged = null, wire = wireEverything, unwire = unwireEverything,
 } = {}) {
   const { note, warn } = createLaneLog({ prefix: '[visions-setup]', logger, debugFlag: debug });
   // False rather than null, so a boot with Visions OFF is not a transition and unwires nothing the
@@ -170,12 +170,14 @@ function createVisionsSetup({
 
   async function apply(enabled) {
     if (!enabled) {
+      if (isEditorWiringRefused()) return null;
       const report = await unwire();
       reportFiles(report.files);
       for (const result of report.extensions.results) note(`${result.label}: extension ${result.detail}`);
       return report;
     }
     writeImpliedDefaults();
+    if (isEditorWiringRefused()) return null;
     const report = await wire({});
     if (!report.ok) {
       warn(report.reason);
@@ -189,25 +191,49 @@ function createVisionsSetup({
     return report;
   }
 
-  // The lanes read config at boot, so a write here reaches them on the next start; the editor wiring
-  // below is what takes effect now.
+  // The live config is mutated beside the file, since configStore.save only writes disk: without it the
+  // lanes would compare against a config that still says off and rebuild nothing until the next boot.
   function writeImpliedDefaults() {
-    if (!configStore) return null;
-    const { changes } = decideImpliedDefaults(getConfig());
-    if (changes.length === 0) return null;
-    const saved = configStore.save((freshConfig) => applyChanges(freshConfig, decideImpliedDefaults(freshConfig).changes));
-    for (const change of changes) note(`config: ${change.path.join('.')} on (${change.why})`);
+    if (!configStore || isConfigWriteRefused()) return null;
+    if (decideImpliedDefaults(getConfig()).changes.length === 0) return null;
+    // The DISK decision is the authority, and the live object then gets exactly what was written: the
+    // file may have moved under this process, and two lists would let the lanes rebuild against neither.
+    const written = [];
+    const saved = configStore.save((freshConfig) => {
+      const changes = decideImpliedDefaults(freshConfig).changes;
+      written.push(...changes);
+      applyChanges(freshConfig, changes);
+    });
+    if (!saved || written.length === 0) return null;
+    applyChanges(getConfig(), written);
+    for (const change of written) note(`config: ${change.path.join('.')} on (${change.why})`);
+    reportConfigChanged();
     return saved;
   }
 
-  // A test that boots a backend with Visions on must not install extensions or rewrite the operator's
-  // own editor config, the same hazard db-path-guard refuses a home database for.
-  function isRefusedUnderTest() {
+  function reportConfigChanged() {
+    if (typeof onConfigChanged !== 'function') return;
+    try {
+      void Promise.resolve(onConfigChanged()).catch((error) => warn(`lane rebuild failed: ${error.message}`));
+    } catch (error) {
+      warn(`lane rebuild failed: ${error.message}`);
+    }
+  }
+
+  // A test booting with Visions on must not install extensions into the operator's real editors.
+  function isEditorWiringRefused() {
     return underTestRunner(env) && wire === wireEverything && unwire === unwireEverything;
   }
 
+  // Nor may it write the operator's own config, the hazard db-path-guard refuses a home database for.
+  function isConfigWriteRefused() {
+    if (!underTestRunner(env)) return false;
+    const configPath = configStore?.configPath;
+    if (typeof configPath !== 'string' || !configPath) return false;
+    return isUnder(configPath, os.homedir()) && !isUnder(configPath, os.tmpdir());
+  }
+
   async function maybeApply() {
-    if (isRefusedUnderTest()) return null;
     const enabled = isEnabled();
     if (appliedState === enabled) return null;
     if (inFlight) return inFlight;
