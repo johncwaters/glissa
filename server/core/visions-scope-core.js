@@ -79,10 +79,11 @@ function projectForUri(uri, scopeProjects) {
   if (!Array.isArray(scopeProjects) || scopeProjects.length === 0) return null;
   const uriPath = pathOfFileUri(uri);
   if (!uriPath) return null;
-  const owned = scopeProjects.filter((entry) => entry && typeof entry.id === 'string' && entry.id);
+  const owned = scopeProjects
+    .filter((entry) => entry && typeof entry.id === 'string' && entry.id)
+    .map((entry) => ({ id: entry.id, path: normalizeShapePath(entry.path) }));
   const root = deepestRootFor(uriPath, owned.map((entry) => entry.path));
-  if (!root) return null;
-  const owner = owned.find((entry) => normalizeShapePath(entry.path) === root);
+  const owner = owned.find((entry) => entry.path === root);
   return owner ? owner.id : null;
 }
 
