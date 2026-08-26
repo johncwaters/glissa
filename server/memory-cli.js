@@ -148,7 +148,8 @@ async function runDistill(makeStore, makeDistiller, { dryRun }) {
       return 1;
     }
     if (dryRun) {
-      console.log(`${result.records} record(s) would be distilled. Nothing was spawned.`);
+      console.log(`${result.records} record(s) would be distilled in ${result.mode} mode, ${result.remaining} left behind for the next run.`);
+      console.log(`Cursor: ${result.cursor}; ${result.claims} claim(s) already stand. Nothing was spawned.`);
       return 0;
     }
     if (result.pending) {

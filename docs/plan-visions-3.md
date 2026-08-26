@@ -603,6 +603,36 @@ embedding probe) was DROPPED, operator decision 2026-08-23. What is left:
 - **Non-CC pack delivery adapter**: Codex shipped 2026-08-24; Grok waits on the packs probe.
 - ~~**Per-project pack variants**~~: CLOSED 2026-08-23, see the as-built note under M16.
 
+### M18: incremental distillation [SHIPPED]
+
+Shipped 2026-08-25. M15 read the WHOLE valid canon and its result REPLACED the projection, which made
+`maxPromptRecords` a correctness guard rather than a budget: slicing the input dropped every unshown
+record from `dist/`. At 952 projectable records the guard refused every run, so the lane had stopped.
+
+Why it is built this way:
+
+- The model's output **merges** into the standing claims instead of replacing them, which is what makes
+  reading a slice safe: an unread record keeps the claim it already has.
+- The cursor is a **monotonic `seq` column**, not `ts` (a clamped, transcript-supplied timestamp can sort
+  behind a cursor) and not `rowid` (reused after a forget). Its high water mark lives in `memory_meta`,
+  so deleting the newest row cannot hand its ordinal to the next append.
+- The cursor moves **only after the build is published and re-verified**, so a failure re-reads the same
+  delta; three consecutive non-advancing runs halve the window, which isolates a record the model chokes
+  on rather than wedging the lane on it.
+- Standing claims are read back **only from a distilled build**. The fallback renderer emits one bullet
+  per record, so parsing those as claims would put the whole canon back in the prompt; a forget, which
+  republishes the fallback, therefore also resets the cursor and the canon is re-read from the start.
+- Locked claims are **synthesized mechanically** from the records, so the locked sweep judges the merged
+  set. A delta run never sees most locked records, and without this every run diverted to `dist-pending/`.
+- Pruning is mechanical too: a claim whose cited records left the canon is dropped with no model in the
+  loop, which is what an empty delta after a supersession or a forget runs.
+- A merge only ever grows a project's claim set, so **compaction** (`memory.distill.maxProjectClaims`,
+  default 200) turns the next run into a full re-distill of that one project, gated on it actually
+  shrinking. `MAX_CLAIMS` stays the last wall.
+
+Pointers: `server/core/memory-distill-core.js` (selection, ops, merge), `server/memory-distill.js` (the
+IO half), `server/memory-db.js` (the `seq` column and its migration), `tests/memory-distill*.test.js`.
+
 ## Non-goals (v1)
 
 - No memory bytes in instruction-tier pack files, ever: the pack carrier ships DATA files

@@ -124,7 +124,8 @@ test('a backfill that hit its byte budget says it can be run again', async () =>
 function distillReport(overrides) {
   return {
     status: 'published', reason: null, verdict: 'DISTILLED', published: true, version: 'abc123',
-    newClaims: 2, records: 7, pending: false, ...overrides,
+    newClaims: 2, records: 7, pending: false, mode: 'incremental', cursor: 41, delta: 7, remaining: 3,
+    claims: 12, ...overrides,
   };
 }
 
@@ -133,8 +134,10 @@ test('a dry run reports what would be distilled and spawns nothing', async () =>
   const { code, logged } = await captureCli(['distill', '--dry-run'], fakeStore(null), null, distiller);
   assert.equal(code, 0);
   assert.deepEqual(distiller.calls, [{ dryRun: true, force: true }]);
-  assert.match(logged[0], /7 record\(s\) would be distilled/);
-  assert.match(logged[0], /Nothing was spawned/);
+  assert.match(logged[0], /7 record\(s\) would be distilled in incremental mode/);
+  assert.match(logged[0], /3 left behind/);
+  assert.match(logged[1], /Cursor: 41; 12 claim\(s\) already stand/);
+  assert.match(logged[1], /Nothing was spawned/);
   assert.equal(distiller.stopped, 1);
 });
 

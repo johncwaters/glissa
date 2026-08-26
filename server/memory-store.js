@@ -40,6 +40,20 @@ const MAX_DELIVERED_HASHES = 2000;
 const SEARCH_CANDIDATE_FACTOR = 10;
 const SEARCH_CANDIDATE_FLOOR = 100;
 
+/*
+ * Rebuilt on every append otherwise, and the list is the same array nearly every time: one slot keyed on
+ * identity is enough, and a stale entry is impossible because a new list is a new array.
+ */
+let memoizedProjectList = null;
+let memoizedProjectTags = null;
+
+function knownProjectTagSet(knownProjects) {
+  if (knownProjects === memoizedProjectList) return memoizedProjectTags;
+  memoizedProjectList = knownProjects;
+  memoizedProjectTags = new Set(core.configuredProjectTags(knownProjects));
+  return memoizedProjectTags;
+}
+
 function buildCanonicalProjectLookupPlan({
   project,
   knownProjects,
@@ -49,10 +63,9 @@ function buildCanonicalProjectLookupPlan({
 }) {
   const normalized = core.normalizeProjectTag(project);
   const configured = core.canonicalProjectPath(normalized, knownProjects);
-  const knownProjectTags = new Set(knownProjects
-    .map((knownProject) => core.normalizeProjectTag(typeof knownProject === 'string' ? knownProject : knownProject?.path))
-    .filter(Boolean));
-  if (!normalized || normalized !== configured || knownProjectTags.has(normalized)) return { canonical: configured };
+  if (!normalized || normalized !== configured || knownProjectTagSet(knownProjects).has(normalized)) {
+    return { canonical: configured };
+  }
   if (hasCachedProject) return { canonical: cachedProject };
   if (!hasResolver) return { canonical: configured };
   return {
@@ -148,14 +161,8 @@ function createMemoryStore(deps = {}) {
     return core.verifyOrDemote(shape.record, signingKey);
   }
 
-  function readKnownProjects() {
-    const configuredProjects = typeof knownProjects === 'function' ? knownProjects() : knownProjects;
-    if (!Array.isArray(configuredProjects)) return [];
-    return configuredProjects;
-  }
-
   function canonicalProjectLookupPlan(project, resolver) {
-    const projects = readKnownProjects();
+    const projects = core.readKnownProjects(knownProjects);
     const normalized = core.normalizeProjectTag(project);
     return buildCanonicalProjectLookupPlan({
       project,
@@ -478,10 +485,15 @@ function createMemoryStore(deps = {}) {
           const out = [];
           for (const input of canonicalInputs) {
             const signed = buildForAppend(input);
-            const accepted = signed !== null && db.insertRecord(signed);
-            if (!accepted) log.debugNote(() => (signed === null ? 'record rejected' : 'record already remembered'));
-            out.push(accepted ? signed : null);
-            if (accepted) written.push(signed);
+            const seq = signed === null ? false : db.insertRecord(signed);
+            if (!seq) {
+              log.debugNote(() => (signed === null ? 'record rejected' : 'record already remembered'));
+              out.push(null);
+              continue;
+            }
+            const stamped = { ...signed, seq };
+            out.push(stamped);
+            written.push(stamped);
           }
           if (written.length > 0) db.setLastAppendAt(now());
           // Sampled under the write lock, so no other connection can commit between here and our COMMIT.
@@ -722,6 +734,8 @@ function createMemoryStore(deps = {}) {
     dbPath,
     deliveredHashes: () => deliveredView,
     dir,
+    distillCursorSeq: () => (stopped ? 0 : db.distillCursorSeq()),
+    distillFailures: () => (stopped ? 0 : db.distillFailures()),
     distDir,
     flushProjection,
     forget,
@@ -743,6 +757,9 @@ function createMemoryStore(deps = {}) {
     records: () => currentRecords().slice(),
     retrieve,
     saveTailOffset,
+    // Queued with the writes: a cursor advance may not interleave with the publish it is a receipt for.
+    setDistillCursorSeq: (seq) => queue(async () => db.setDistillCursorSeq(seq)),
+    setDistillFailures: (count) => queue(async () => db.setDistillFailures(count)),
     search: (query, { limit = SEARCH_CANDIDATE_FLOOR } = {}) => searchMatches(core.tokenizeQuery(query), limit),
     stats,
     stop,

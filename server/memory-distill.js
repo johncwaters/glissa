@@ -22,6 +22,8 @@ const LANE_NAME = 'memory-distill';
 const RESULT_FILE = 'memory-distill-result.json';
 // A stable prefix, not decoration: it is what ingest-agent-core recognizes as this lane's throwaway cwd.
 const WORK_DIR_PREFIX = 'glissa-memory-distill-';
+// The delta never renders to nothing, however much of the budget the standing claims already took.
+const MIN_DELTA_CHARS = 4000;
 
 /*
  * The prompt embeds remembered text, so this session gets the least capability that still lets it write
@@ -123,7 +125,7 @@ function createMemoryDistiller(deps = {}) {
   function report(overrides) {
     return {
       status: 'skipped', reason: null, verdict: null, published: false, version: null, newClaims: 0,
-      records: 0, pending: false, ...overrides,
+      records: 0, pending: false, mode: null, cursor: 0, delta: 0, remaining: 0, claims: 0, ...overrides,
     };
   }
 
@@ -160,6 +162,36 @@ function createMemoryDistiller(deps = {}) {
     return { files, recordCount: valid.length, claimCount: claims.length };
   }
 
+  /*
+   * Only a DISTILLED build carries claims. The fallback renderer emits one bullet per record, so reading
+   * those back as standing claims would put the whole canon in the prompt the delta exists to avoid, and
+   * would freeze raw records into a claim set nobody distilled.
+   */
+  async function readPublished() {
+    const manifest = await store.readPublishedManifest();
+    const documents = await store.readPublishedDocuments(manifest);
+    const distilled = manifest?.source === 'distill';
+    return {
+      manifest,
+      distilled,
+      claims: distilled ? distillCore.readPublishedClaims(documents) : [],
+      previousTexts: distillCore.publishedClaimTexts(documents),
+    };
+  }
+
+  /*
+   * The cursor is a receipt for a published build, so it moves only once the bytes are on disk and
+   * re-read; anything else leaves the delta to be read again, narrower each time it keeps failing.
+   */
+  async function noteOutcome({ advanced, cursor, failures }) {
+    if (!advanced) {
+      await store.setDistillFailures(failures + 1);
+      return;
+    }
+    await store.setDistillCursorSeq(cursor);
+    if (failures > 0) await store.setDistillFailures(0);
+  }
+
   // A verdict is a claim; the published bytes are the evidence, so the stamp is re-read off what landed.
   async function verifyPublished(watermark) {
     const manifest = await store.readPublishedManifest();
@@ -172,76 +204,210 @@ function createMemoryDistiller(deps = {}) {
     return { ok: true, reason: null };
   }
 
-  async function distill({ valid, watermark }) {
-    const selection = distillCore.selectCanonForPrompt(valid, {
-      maxRecords: config.maxPromptRecords, maxChars: config.maxPromptChars,
-    });
-    if (!selection.ok) return report({ status: 'error', reason: selection.reason });
-
-    const manifest = await store.readPublishedManifest();
-    const previousTexts = distillCore.publishedClaimTexts(await store.readPublishedDocuments(manifest));
-
+  async function spawnForResult({ prompt }) {
     let workDir = null;
     try {
       workDir = await makeWorkDir();
     } catch (error) {
-      return report({ status: 'error', reason: `no work dir: ${firstLine(error.message)}` });
+      return { error: `no work dir: ${firstLine(error.message)}`, parsed: null };
     }
     const resultPath = path.join(workDir, RESULT_FILE);
     let pendingSpawn = null;
     let outcome = null;
     try {
       outcome = await spawnWithTimeout({
-        prompt: distillCore.buildMemoryDistillPrompt({
-          records: selection.records, resultPath, maxNewClaims: config.maxNewClaims,
-        }),
-        cwd: workDir,
-        resultPath,
-        onPending: (promise) => { pendingSpawn = promise; },
+        prompt: prompt(resultPath), cwd: workDir, resultPath, onPending: (promise) => { pendingSpawn = promise; },
       });
     } finally {
       await drainPending(pendingSpawn);
       await removeWorkDir(workDir);
     }
-    if (outcome.timedOut) return report({ status: 'error', reason: 'the distill run timed out' });
-    if (outcome.error) return report({ status: 'error', reason: outcome.error });
+    if (outcome.timedOut) return { error: 'the distill run timed out', parsed: null };
+    if (outcome.error) return { error: outcome.error, parsed: null };
+    return { error: null, parsed: outcome.parsed };
+  }
 
-    const checked = distillCore.validateDistillResult(outcome.parsed, {
-      records: valid, previousTexts, maxNewClaims: config.maxNewClaims,
-    });
-    if (!checked.ok) return report({ status: 'error', reason: `${checked.reason}: ${checked.detail}` });
-    if (checked.verdict !== 'DISTILLED') {
-      return report({ status: 'current', verdict: checked.verdict });
-    }
-
-    const built = filesFor(checked.claims, valid);
-    if (checked.lockedTouched.length > 0) {
-      const pending = await store.publishPending({ ...built, watermark });
-      log.warn(`a distilled projection changed ${checked.lockedTouched.length} locked record(s): it was queued for review, not published`);
+  async function publishMerged({
+    merged, valid, watermark, verdict, mode, cursor, failures, advances, proposed = null,
+  }) {
+    const built = filesFor(merged.claims, valid);
+    if (merged.lockedTouched.length > 0) {
+      // The held build renders what the run PROPOSED, which is the only place an operator can see it.
+      const pending = await store.publishPending({ ...filesFor(proposed || merged.claims, valid), watermark });
+      await noteOutcome({ advanced: false, cursor, failures });
+      log.warn(`a distilled projection changed ${merged.lockedTouched.length} locked record(s): it was queued for review, not published`);
       return report({
-        status: 'pending', verdict: checked.verdict, pending: true, newClaims: checked.newClaims,
+        status: 'pending', verdict, pending: true, newClaims: merged.newClaims, mode, cursor,
+        claims: built.claimCount,
         version: pending ? pending.version : null, reason: 'a locked record would be re-rendered',
       });
     }
-
     const published = await store.publishProjection({
-      ...built,
-      source: 'distill',
-      verdict: checked.verdict,
-      distilledAt: now(),
-      watermark,
+      ...built, source: 'distill', verdict, distilledAt: now(), watermark,
     });
-    if (!published) return report({ status: 'error', reason: 'the store is stopping' });
+    if (!published) return report({ status: 'error', reason: 'the store is stopping', mode });
     const verified = await verifyPublished(watermark);
-    if (!verified.ok) return report({ status: 'error', reason: `published but ${verified.reason}`, version: published.version });
-    log.note(`distilled ${built.claimCount} claim(s) from ${built.recordCount} record(s): ${published.published ? 'published' : 'unchanged'} ${published.version.slice(0, 12)}`);
+    if (!verified.ok) {
+      await noteOutcome({ advanced: false, cursor, failures });
+      return report({
+        status: 'error', reason: `published but ${verified.reason}`, version: published.version, mode,
+      });
+    }
+    await noteOutcome({ advanced: advances, cursor, failures });
+    log.note(`distilled ${built.claimCount} claim(s) from ${built.recordCount} record(s) in ${mode} mode: ${published.published ? 'published' : 'unchanged'} ${published.version.slice(0, 12)}`);
     return report({
       status: 'published',
-      verdict: checked.verdict,
+      verdict,
       published: published.published,
       version: published.version,
-      newClaims: checked.newClaims,
+      newClaims: merged.newClaims,
+      claims: built.claimCount,
+      mode,
+      cursor: advances ? cursor : store.distillCursorSeq(),
     });
+  }
+
+  /*
+   * Compaction. A merge only ever grows a project's claim set, so the one thing that can shrink it is a
+   * full re-distill of that project's own records, replacing that project's claims and nothing else.
+   */
+  async function compact({
+    valid, watermark, published, project, failures,
+  }) {
+    const own = valid.filter((record) => (record.project || null) === project);
+    const selection = distillCore.selectCanonForPrompt(own, {
+      maxRecords: config.maxPromptRecords, maxChars: config.maxPromptChars,
+    });
+    if (!selection.ok) return report({ status: 'error', reason: selection.reason, mode: 'full' });
+    const spawned = await spawnForResult({
+      prompt: (resultPath) => distillCore.buildMemoryDistillPrompt({
+        records: selection.records, resultPath, maxNewClaims: config.maxNewClaims,
+      }),
+    });
+    if (spawned.error) {
+      await noteOutcome({ advanced: false, cursor: 0, failures });
+      return report({ status: 'error', reason: spawned.error, mode: 'full' });
+    }
+    const checked = distillCore.validateDistillResult(spawned.parsed, {
+      records: valid, previousTexts: published.previousTexts, maxNewClaims: distillCore.MAX_CLAIMS,
+    });
+    if (!checked.ok) {
+      await noteOutcome({ advanced: false, cursor: 0, failures });
+      return report({ status: 'error', reason: `${checked.reason}: ${checked.detail}`, mode: 'full' });
+    }
+    if (checked.verdict !== 'DISTILLED') return report({ status: 'current', verdict: checked.verdict, mode: 'full' });
+    const stray = checked.claims.filter((claim) => (claim.project || null) !== project);
+    if (stray.length > 0) {
+      await noteOutcome({ advanced: false, cursor: 0, failures });
+      return report({ status: 'error', reason: `${stray.length} compaction claim(s) fell outside ${project || 'global'}`, mode: 'full' });
+    }
+    const before = distillCore.claimsByProject(published.claims).get(project) || 0;
+    if (checked.claims.length >= before) {
+      await noteOutcome({ advanced: false, cursor: 0, failures });
+      return report({ status: 'error', reason: `compaction returned ${checked.claims.length} claim(s), no fewer than the ${before} it replaced`, mode: 'full' });
+    }
+    /*
+     * The net-new TEXT cap is not applied here: a full re-distill rewrites ground the projection already
+     * covers, so every line reads as new. The shrink gate above is what bounds this run instead.
+     */
+    const replaced = distillCore.replaceProjectClaims(published.claims, checked.claims, project);
+    const merged = distillCore.finalizeMergedClaims(replaced, {
+      records: valid,
+      previousTexts: published.previousTexts,
+      maxNewClaims: distillCore.MAX_CLAIMS,
+      lockedTouched: checked.lockedTouched,
+    });
+    if (!merged.ok) {
+      await noteOutcome({ advanced: false, cursor: 0, failures });
+      return report({ status: 'error', reason: `${merged.reason}: ${merged.detail}`, mode: 'full' });
+    }
+    // A compaction read every record of one project, not the delta, so the cursor is not its to move.
+    return publishMerged({
+      merged,
+      valid,
+      watermark,
+      verdict: checked.verdict,
+      mode: 'full',
+      cursor: 0,
+      failures,
+      advances: false,
+      proposed: replaced,
+    });
+  }
+
+  /*
+   * The mechanical merge, run with no model in it at all: a supersession or a forget removes the records
+   * a standing claim cited, and pruning that claim needs no judgement.
+   */
+  async function reconcile({
+    valid, watermark, published, cursor, failures,
+  }) {
+    if (published.claims.length === 0) return report({ status: 'current', verdict: 'NO_CHANGE', mode: 'incremental', cursor });
+    const merged = distillCore.finalizeMergedClaims(published.claims, {
+      records: valid, previousTexts: published.previousTexts, maxNewClaims: config.maxNewClaims,
+    });
+    if (!merged.ok) {
+      await noteOutcome({ advanced: false, cursor, failures });
+      return report({ status: 'error', reason: `${merged.reason}: ${merged.detail}`, mode: 'incremental' });
+    }
+    return publishMerged({
+      merged, valid, watermark, verdict: 'NO_CHANGE', mode: 'incremental', cursor, failures, advances: true,
+    });
+  }
+
+  async function distillDelta({
+    valid, watermark, published, delta, failures,
+  }) {
+    const cursor = delta.nextCursor;
+    const spawned = await spawnForResult({
+      prompt: (resultPath) => distillCore.buildIncrementalDistillPrompt({
+        published: published.claims,
+        records: delta.records,
+        resultPath,
+        maxNewClaims: config.maxNewClaims,
+      }),
+    });
+    if (spawned.error) {
+      await noteOutcome({ advanced: false, cursor, failures });
+      return report({ status: 'error', reason: spawned.error, mode: 'incremental', delta: delta.records.length });
+    }
+    const checked = distillCore.validateDistillOps(spawned.parsed, {
+      records: valid, published: published.claims,
+    });
+    if (!checked.ok) {
+      await noteOutcome({ advanced: false, cursor, failures });
+      return report({ status: 'error', reason: `${checked.reason}: ${checked.detail}`, mode: 'incremental', delta: delta.records.length });
+    }
+    if (checked.verdict !== 'DISTILLED') {
+      // The delta was read and said nothing new, so re-reading it could only say nothing new twice.
+      await noteOutcome({ advanced: true, cursor, failures });
+      return report({
+        status: 'current', verdict: checked.verdict, mode: 'incremental', cursor, delta: delta.records.length,
+      });
+    }
+    const proposed = distillCore.applyDistillOps(published.claims, checked.ops);
+    const merged = distillCore.finalizeMergedClaims(proposed, {
+      records: valid,
+      previousTexts: published.previousTexts,
+      maxNewClaims: config.maxNewClaims,
+      lockedTouched: checked.lockedTouched,
+    });
+    if (!merged.ok) {
+      await noteOutcome({ advanced: false, cursor, failures });
+      return report({ status: 'error', reason: `${merged.reason}: ${merged.detail}`, mode: 'incremental', delta: delta.records.length });
+    }
+    const outcome = await publishMerged({
+      merged,
+      valid,
+      watermark,
+      verdict: checked.verdict,
+      mode: 'incremental',
+      cursor,
+      failures,
+      advances: true,
+      proposed,
+    });
+    return { ...outcome, delta: delta.records.length, remaining: delta.remaining };
   }
 
   /** One pass. Never throws: the lane reports a reason and leaves the published build untouched. */
@@ -252,27 +418,57 @@ function createMemoryDistiller(deps = {}) {
     try {
       const valid = store.validRecords();
       const watermark = store.watermark();
-      const manifest = await store.readPublishedManifest();
+      const failures = store.distillFailures();
+      const published = await readPublished();
+      /*
+       * A forget republishes the fallback build over the distilled one, which drops every standing claim;
+       * the cursor has to fall back with it, or the lane would resume mid-canon over an empty claim set.
+       */
+      const cursor = published.distilled ? store.distillCursorSeq() : 0;
+      const standing = distillCore.renderPublishedForPrompt(published.claims).length;
+      const delta = distillCore.selectDeltaForPrompt(valid, {
+        sinceSeq: cursor,
+        limit: distillCore.deltaWindowFor(config.maxPromptRecords, failures),
+        maxChars: Math.max(MIN_DELTA_CHARS, config.maxPromptChars - standing),
+      });
+      const mode = distillCore.decideDistillMode(published.claims, {
+        maxProjectClaims: config.maxProjectClaims,
+        maxChars: config.maxPromptChars,
+      });
       const verdict = distillCore.decideDistillRun({
         now: now(),
         watermark,
-        manifest,
+        manifest: published.manifest,
         lastAppendAt: store.lastAppendAt(),
         intervalMs,
         quietMs: config.quietMs,
+        workPending: delta.pending > 0 || mode.mode === 'full',
       });
-      if (!verdict.run && !force) return report({ status: verdict.reason });
+      if (!verdict.run && !force) return report({ status: verdict.reason, cursor, delta: delta.records.length });
       if (dryRun) {
-        const selection = distillCore.selectCanonForPrompt(valid, {
-          maxRecords: config.maxPromptRecords, maxChars: config.maxPromptChars,
-        });
         return report({
-          status: selection.ok ? 'stale' : 'error',
-          reason: selection.reason,
-          records: selection.records.length,
+          status: 'stale',
+          mode: mode.mode,
+          cursor,
+          delta: delta.records.length,
+          remaining: delta.remaining,
+          records: delta.records.length,
+          claims: published.claims.length,
         });
       }
-      return await distill({ valid, watermark });
+      if (mode.mode === 'full') {
+        return await compact({
+          valid, watermark, published, project: mode.project, failures,
+        });
+      }
+      if (delta.records.length === 0) {
+        return await reconcile({
+          valid, watermark, published, cursor, failures,
+        });
+      }
+      return await distillDelta({
+        valid, watermark, published, delta, failures,
+      });
     } catch (error) {
       // Reported as `locked` because that is what the operator is being told: another writer holds it.
       if (isBusyError(error)) return report({ status: 'locked', reason: 'the memory database is busy' });

@@ -8,13 +8,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  canonWatermark, parseProjectionBullets, planProjectionBuild, projectionStampSources,
+  canonWatermark, claimHandle, parseProjectionBullets, planProjectionBuild, projectionStampSources,
 } = require('../server/core/memory-core');
 const { needsDistill } = require('../server/core/distill-core');
 const {
-  DEFAULT_INTERVAL_MINUTES, MAX_CLAIM_IDS, buildMemoryDistillPrompt, claimProjectTags, decideDistillRun,
-  publishedClaimTexts, renderDistilledProjection, resolveDistillConfig, selectCanonForPrompt,
-  validateDistillResult,
+  DEFAULT_INTERVAL_MINUTES, MAX_CLAIM_IDS, MIN_DELTA_WINDOW, applyDistillOps,
+  buildIncrementalDistillPrompt, buildMemoryDistillPrompt, claimProjectTags, decideDistillMode,
+  decideDistillRun, deltaWindowFor, finalizeMergedClaims, publishedClaimTexts, readPublishedClaims,
+  renderDistilledProjection, resolveDistillConfig, selectCanonForPrompt, selectDeltaForPrompt,
+  validateDistillOps, validateDistillResult,
 } = require('../server/core/memory-distill-core');
 
 const NOW = Date.UTC(2026, 7, 23, 12, 0, 0);
@@ -46,6 +48,10 @@ function claim(overrides = {}) {
     text: 'the merge gate lives in session/core/merge-gate.js',
     ...overrides,
   };
+}
+
+function withHandlesFor(claims) {
+  return claims.map((entry) => ({ locked: false, ...entry, handle: claimHandle(entry) }));
 }
 
 function distilled(claims) {
@@ -323,4 +329,176 @@ test('a run needs a moved canon, an elapsed interval and a settled canon', () =>
     { run: true, reason: null }
   );
   assert.deepEqual(decideDistillRun({ now: NOW, watermark: moved, manifest: null }), { run: true, reason: null });
+});
+
+test('a delta reads only the records above the cursor, oldest ordinal first', () => {
+  const records = [
+    record({ id: 'm-0000000000000003', seq: 3, text: 'third' }),
+    record({ id: 'm-0000000000000001', seq: 1, text: 'first' }),
+    record({ id: 'm-0000000000000002', seq: 2, text: 'second' }),
+    record({ id: 'm-0000000000000004', seq: 4, kind: 'prompt', text: 'a prompt is never projectable' }),
+  ];
+  const delta = selectDeltaForPrompt(records, { sinceSeq: 1, limit: 10 });
+  assert.deepEqual(delta.records.map((entry) => entry.seq), [2, 3]);
+  assert.equal(delta.nextCursor, 3);
+  assert.equal(delta.pending, 2);
+  assert.equal(delta.remaining, 0);
+});
+
+test('a delta past the window leaves the rest behind and stops the cursor at what it read', () => {
+  const records = [1, 2, 3, 4, 5].map((seq) => record({ id: `m-000000000000000${seq}`, seq, text: `fact ${seq}` }));
+  const delta = selectDeltaForPrompt(records, { sinceSeq: 0, limit: 2 });
+  assert.deepEqual(delta.records.map((entry) => entry.seq), [1, 2]);
+  assert.equal(delta.nextCursor, 2);
+  assert.equal(delta.remaining, 3);
+  const next = selectDeltaForPrompt(records, { sinceSeq: delta.nextCursor, limit: 2 });
+  assert.deepEqual(next.records.map((entry) => entry.seq), [3, 4]);
+});
+
+test('an empty delta leaves the cursor exactly where it was', () => {
+  const delta = selectDeltaForPrompt([record({ seq: 4 })], { sinceSeq: 9, limit: 10 });
+  assert.deepEqual(delta.records, []);
+  assert.equal(delta.nextCursor, 9);
+});
+
+test('a run of failures halves the window down to one record, never to zero', () => {
+  assert.equal(deltaWindowFor(400, 0), 400);
+  assert.equal(deltaWindowFor(400, 2), 400);
+  assert.equal(deltaWindowFor(400, 3), 200);
+  assert.equal(deltaWindowFor(400, 6), 100);
+  assert.equal(deltaWindowFor(400, 300), MIN_DELTA_WINDOW);
+});
+
+test('the two prompt corpora carry their own markers, so neither fence closes the other', () => {
+  const published = [{ ...claim(), handle: 'c-0123456789', locked: false }];
+  const prompt = buildIncrementalDistillPrompt({
+    published, records: [record({ seq: 2, text: 'a newly observed fact' })], resultPath: '/tmp/out.json',
+  });
+  const markers = [...new Set([...prompt.matchAll(/GLISSA-[A-Z]+-[0-9A-F]+/g)].map((match) => match[0]))];
+  assert.equal(markers.length, 2);
+  assert.equal(markers[0] === markers[1], false);
+  assert.equal(prompt.includes('c-0123456789'), true);
+  assert.equal(prompt.includes('a newly observed fact'), true);
+});
+
+test('an op naming a claim that does not stand fails the whole run', () => {
+  const outcome = validateDistillOps({ verdict: 'DISTILLED', ops: [{ op: 'retire', target: 'c-deadbeef00' }] }, {
+    records: [record()], published: [],
+  });
+  assert.equal(outcome.ok, false);
+  assert.match(outcome.detail, /does not stand/);
+});
+
+test('ops apply in order onto the standing set, so a merge is deterministic', () => {
+  const standing = withHandlesFor([
+    claim({ ids: ['m-0000000000000001'], text: 'the first claim' }),
+    claim({ ids: ['m-0000000000000002'], text: 'the second claim' }),
+  ]);
+  const ops = [
+    { op: 'retire', target: standing[1].handle, claim: null },
+    { op: 'update', target: standing[0].handle, claim: claim({ ids: ['m-0000000000000001'], text: 'the corrected claim' }) },
+    { op: 'add', target: null, claim: claim({ ids: ['m-0000000000000003'], text: 'a brand new claim' }) },
+  ];
+  const first = applyDistillOps(standing, ops);
+  const second = applyDistillOps(standing, ops);
+  assert.deepEqual(first.map((entry) => entry.text), ['the corrected claim', 'a brand new claim']);
+  assert.deepEqual(first, second);
+});
+
+test('a claim whose records left the canon is pruned with no model in the loop', () => {
+  const standing = withHandlesFor([
+    claim({ ids: ['m-0000000000000001'], text: 'the surviving claim' }),
+    claim({ ids: ['m-0000000000000002'], text: 'the forgotten claim' }),
+    claim({ ids: ['m-0000000000000001', 'm-0000000000000002'], text: 'a claim citing both' }),
+  ]);
+  const merged = finalizeMergedClaims(standing, {
+    records: [record({ id: 'm-0000000000000001' })], maxNewClaims: 50,
+  });
+  assert.equal(merged.ok, true);
+  assert.deepEqual(merged.claims.map((entry) => entry.text), ['the surviving claim']);
+});
+
+test('every locked record is re-synthesized verbatim, so a delta run never diverts on an unread lock', () => {
+  const locked = record({
+    id: 'm-00000000000000aa',
+    locked: true,
+    source: { kind: 'operator', vendor: 'glissa', sessionId: null },
+    lineage: 'operator',
+    kind: 'preference',
+    project: null,
+    text: 'never write else statements',
+  });
+  const merged = finalizeMergedClaims(withHandlesFor([claim({ text: 'an unrelated standing claim' })]), {
+    records: [record(), locked], maxNewClaims: 50,
+  });
+  assert.equal(merged.ok, true);
+  assert.deepEqual(merged.lockedTouched, []);
+  const synthesized = merged.claims.find((entry) => entry.locked === true);
+  assert.equal(synthesized.text, 'never write else statements');
+  assert.deepEqual(synthesized.ids, ['m-00000000000000aa']);
+  assert.equal(synthesized.rank, 'operator');
+});
+
+test('the net-new cap is counted over the MERGED set, not over what one run proposed', () => {
+  const standing = withHandlesFor([claim({ text: 'a claim that already stands' })]);
+  const previousTexts = new Set(['a claim that already stands']);
+  const added = [2, 3, 4].map((n) => ({
+    op: 'add', target: null, claim: claim({ ids: [`m-000000000000000${n}`], text: `net new claim ${n}` }),
+  }));
+  const records = [record(), ...[2, 3, 4].map((n) => record({ id: `m-000000000000000${n}` }))];
+  const merged = finalizeMergedClaims(applyDistillOps(standing, added), {
+    records, previousTexts, maxNewClaims: 2,
+  });
+  assert.equal(merged.ok, false);
+  assert.equal(merged.reason, 'too-many-new-claims');
+  const under = finalizeMergedClaims(applyDistillOps(standing, added.slice(0, 2)), {
+    records, previousTexts, maxNewClaims: 2,
+  });
+  assert.equal(under.ok, true);
+  assert.equal(under.newClaims, 2);
+  assert.equal(under.claims.length, 3);
+});
+
+test('a merged set past the total cap is refused rather than sliced', () => {
+  const standing = withHandlesFor([1, 2, 3].map((n) => claim({ ids: [`m-000000000000000${n}`], text: `claim ${n}` })));
+  const records = [1, 2, 3].map((n) => record({ id: `m-000000000000000${n}` }));
+  const merged = finalizeMergedClaims(standing, { records, maxClaims: 2, maxNewClaims: 50 });
+  assert.equal(merged.ok, false);
+  assert.equal(merged.reason, 'too-many-claims');
+});
+
+test('a project past its claim threshold turns the next run into a full re-distill of that project', () => {
+  const standing = withHandlesFor([
+    ...Array.from({ length: 4 }, (_unused, n) => claim({ project: '/repo/big', ids: [`m-00000000000000a${n}`], text: `big ${n}` })),
+    claim({ project: '/repo/small', text: 'small' }),
+  ]);
+  assert.deepEqual(decideDistillMode(standing, { maxProjectClaims: 10 }), { mode: 'incremental', project: null, claims: 0 });
+  assert.deepEqual(decideDistillMode(standing, { maxProjectClaims: 3 }), { mode: 'full', project: '/repo/big', claims: 4 });
+  // Standing claims are a prompt corpus too, so one that no longer fits compacts whatever grew most.
+  assert.equal(decideDistillMode(standing, { maxProjectClaims: 500, maxChars: 10 }).mode, 'full');
+});
+
+test('a published projection round-trips back to claims that keep their kind and their project', () => {
+  const claims = [
+    claim({ kind: 'knowledge', project: '/repo/glissa', text: 'a knowledge claim' }),
+    claim({ kind: 'preference', project: '/repo/glissa', ids: ['m-0000000000000002'], text: 'a preference claim' }),
+  ];
+  const parsed = readPublishedClaims([renderDistilledProjection(claims, { project: '/repo/glissa' })]);
+  assert.deepEqual(parsed.map((entry) => [entry.kind, entry.project, entry.text]), [
+    ['knowledge', '/repo/glissa', 'a knowledge claim'],
+    ['preference', '/repo/glissa', 'a preference claim'],
+  ]);
+  assert.equal(parsed[0].handle.startsWith('c-'), true);
+  assert.equal(readPublishedClaims([renderDistilledProjection(claims, { project: '/repo/glissa' })])[0].handle, parsed[0].handle);
+});
+
+test('records still above the cursor keep a run due even when the canon watermark has not moved', () => {
+  const watermark = canonWatermark([record()]);
+  const manifest = { distilledAt: NOW - 1000, watermark };
+  const args = {
+    now: NOW, watermark, manifest, lastAppendAt: 0, intervalMs: 60000, quietMs: 0,
+  };
+  assert.equal(decideDistillRun(args).reason, 'unchanged');
+  assert.equal(decideDistillRun({ ...args, workPending: true }).reason, 'cooling');
+  assert.equal(decideDistillRun({ ...args, workPending: true, intervalMs: 1 }).run, true);
 });

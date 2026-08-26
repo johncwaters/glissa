@@ -167,13 +167,13 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 ### Long-Term Memory (plan: `docs/plan-visions-3.md`)
 
 - Trust is stamped by the WRITE PATH, never read off the event; ranks fall but never rise along a lineage (`server/core/memory-core.js`).
-- A user prompt becomes a `prompt` record, never projected and refused as knowledge, and its kind is absent from the ingest ring's table, so operator text reaches neither `dist/` nor the control WS.
+- A user prompt becomes a `prompt` record, never projected and refused as knowledge, its kind absent from the ingest ring's table, so operator text reaches neither `dist/` nor the control WS.
 - Memory alone never widens what leaves the machine: with the ingest lane off it builds its own source, and no ring, frame or digest sees those events.
 - Expunging is THREE writes, all needed: `secure_delete` (a DELETE leaves plaintext greppable), an FTS5 rebuild (a delete only tombstones terms), and a WAL truncate checkpoint. Canary in `tests/memory-store.test.js`.
 - A transcript-supplied timestamp is untrusted and clamped: a future-dated record lands in a segment retention can never prune and heads every recency ranking forever.
 - A verdict is never trusted alone: the session answers with structured CLAIMS and Glissa renders the bytes, so no remembered byte reaches a file except through the renderer; a bad result is refused as ONE.
 - Implied-rank rule: a rank may never exceed the highest among its cited records, and anything above `model` must cite one record and copy it verbatim, which makes verbatim locked facts mechanical.
-- Net-new claims are capped and over the cap is an ERROR, a run inventing thirty facts at once being the failure this gate exists for. A canon past the prompt budget is refused rather than sliced, and a diff touching a LOCKED record is diverted to `dist-pending/`.
+- Net-new claims are capped, a run inventing thirty facts at once being what that gate exists for. A run reads only the delta above a durable `seq` cursor and MERGES into the standing claims: replacing them made the canon one prompt, refusing every run. A LOCKED diff still diverts to `dist-pending/`.
 - Echo suppression closes the loop: delivered line hashes are registered and matching transcript lines dropped, so a session quoting its memory back is not re-ingested as fresh fact.
 - One `contentMarker` PER untrusted corpus, so one fence cannot close another, and it is a sha256 digest rather than a cheap hash an attacker's text could fix-point.
 - Only memory TOGGLES cross the control WS: settings are an allow-list of booleans and clamped ints, so no `memory-*` type, path, record or lane log line rides one, a knob being tunable where a filename would be a leak (`tests/memory-delivery-negative.test.js`).

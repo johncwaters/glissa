@@ -215,10 +215,16 @@ function normalizeProjectTag(raw) {
   return folded.slice(0, MAX_PROJECT_TAG_CHARS) || null;
 }
 
-function configuredProjectTags(knownProjects) {
+// Accepted as an array or as a zero-arg getter, since only the server reads the live config list.
+function readKnownProjects(knownProjects) {
   const configuredProjects = typeof knownProjects === 'function' ? knownProjects() : knownProjects;
+  if (!Array.isArray(configuredProjects)) return [];
+  return configuredProjects;
+}
+
+function configuredProjectTags(knownProjects) {
   const tags = [];
-  for (const project of Array.isArray(configuredProjects) ? configuredProjects : []) {
+  for (const project of readKnownProjects(knownProjects)) {
     const candidate = typeof project === 'string' ? project : project?.path;
     const tag = normalizeProjectTag(candidate);
     if (!tag || tags.includes(tag)) continue;
@@ -391,6 +397,8 @@ function validateMemoryRecord(raw, { maxChars = MAX_RECORD_CHARS } = {}) {
       lineage: raw.lineage,
       locked: raw.locked === true,
       sig: typeof raw.sig === 'string' ? raw.sig : null,
+      // Storage ordinal, deliberately outside SIGNED_FIELDS: it decides read order, never trust.
+      seq: Number.isInteger(raw.seq) ? raw.seq : null,
     },
   };
 }
@@ -722,6 +730,48 @@ function parseProjectionBullets(text) {
   return bullets;
 }
 
+const KIND_BY_HEADING = new Map(Object.entries(KIND_HEADINGS).map(([kind, heading]) => [heading, kind]));
+const PROJECTION_HEADING_RE = /^## (.+)$/;
+const PROJECTION_PROJECT_RE = /^Project: (.+)$/;
+
+/*
+ * The published projection read back as claims. An incremental run is shown what already stands, so the
+ * heading and the Project line have to survive the parse: without them a bullet carries no kind and no
+ * project, and a merge would have to guess which file it came from.
+ */
+function parsePublishedClaims(text) {
+  const claims = [];
+  let kind = null;
+  let project = null;
+  for (const line of String(text || '').split('\n')) {
+    const heading = PROJECTION_HEADING_RE.exec(line);
+    if (heading) {
+      kind = KIND_BY_HEADING.get(heading[1].trim()) || null;
+      continue;
+    }
+    const tag = PROJECTION_PROJECT_RE.exec(line);
+    if (tag) {
+      project = normalizeProjectTag(tag[1]);
+      continue;
+    }
+    const bullet = parseProjectionBullet(line);
+    if (!bullet || !kind) continue;
+    claims.push({
+      kind, project, rank: bullet.rank, ids: bullet.ids, locked: bullet.locked, text: bullet.text,
+    });
+  }
+  return claims;
+}
+
+// Server-minted so a model can only ever name a claim that already stands, never invent one.
+function claimHandle(claim) {
+  const parts = [
+    claim?.kind ?? '', claim?.project ?? '', (Array.isArray(claim?.ids) ? claim.ids : []).join(' '),
+    normalizeMemoryLine(claim?.text),
+  ];
+  return `c-${sha256Hex(parts.join('\u0000')).slice(0, 10)}`;
+}
+
 // No clock and no build stamp, so the same bullets always render byte-identical markdown.
 function renderProjectionDocument(bulletsByKind, { project = null } = {}) {
   const lines = [PROJECTION_HEADER, '', PROJECTION_NOTICE, ''];
@@ -897,6 +947,8 @@ module.exports = {
   canonicalSignaturePayload,
   canonicalProjectPath,
   canonWatermark,
+  claimHandle,
+  configuredProjectTags,
   capTextLineAligned,
   clampObservedTs,
   compareRecords,
@@ -923,12 +975,14 @@ module.exports = {
   normalizeProjectTag,
   parseProjectionBullet,
   parseProjectionBullets,
+  parsePublishedClaims,
   parseSegmentFileName,
   planProjectionBuild,
   projectFileSlug,
   projectTagsOf,
   projectionBulletFrom,
   projectionStampSources,
+  readKnownProjects,
   renderProjection,
   renderProjectionDocument,
   sanitizeProjectionText,

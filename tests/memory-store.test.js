@@ -220,7 +220,7 @@ test('store open remaps worktree project tags once and publishes the configured 
   assert.equal(migrated.id, tagged.id);
   assert.equal(migrated.source.kind, tagged.source.kind);
   assert.equal(verifyRecordSignature(migrated, signingKey), true);
-  assert.deepEqual(first.records().find((record) => record.id === tombstone.id), tombstone);
+  assert.deepEqual(first.records().find((record) => record.id === tombstone.id), { ...tombstone, seq: 2 });
   assert.equal(firstLogs.some((line) => line.includes('remapped 1 of 1 tagged record(s)')), true);
 
   await first.flushProjection();
@@ -1017,4 +1017,17 @@ test('the store resolves a supersession ancestry rather than letting a writer sk
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('the distill cursor and its failure counter survive a store reopen', async () => {
+  const dir = tempDir();
+  const first = openStore(dir);
+  await first.setDistillCursorSeq(17);
+  await first.setDistillFailures(2);
+  assert.equal(first.distillCursorSeq(), 17);
+  assert.equal(first.distillFailures(), 2);
+  await first.stop();
+  const second = openStore(dir);
+  assert.equal(second.distillCursorSeq(), 17);
+  assert.equal(second.distillFailures(), 2);
 });

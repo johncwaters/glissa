@@ -75,8 +75,8 @@ test('the schema is created idempotently and stamps its shape', () => {
 test('a record round-trips through its row unchanged', () => {
   const db = openDb(tempDbPath());
   const original = record();
-  assert.equal(db.insertRecord(original), true);
-  assert.deepEqual(db.listRecords(), [original]);
+  assert.equal(db.insertRecord(original), 1, 'the ordinal it assigned');
+  assert.deepEqual(db.listRecords(), [{ ...original, seq: 1 }]);
   assert.equal(db.insertRecord(original), false, 'the same id is ignored, never doubled');
   assert.equal(db.recordCount(), 1);
 });
@@ -238,4 +238,48 @@ test('the feature detect and the busy classifier answer the two questions a call
   assert.equal(isBusyError(new Error('database is locked')), true);
   assert.equal(isBusyError(new Error('no such table')), false);
   assert.equal(recordToRow(record()).locked, 0, 'a boolean is stored as the integer sqlite has');
+});
+
+test('an append ordinal never goes backwards, not even after the newest record is forgotten', () => {
+  const dbPath = tempDbPath();
+  const db = openDb(dbPath);
+  assert.equal(db.insertRecord(record()), 1);
+  assert.equal(db.insertRecord(record({ id: 'm-0000000000000002', text: 'the second fact' })), 2);
+  db.transaction(() => db.deleteRecord('m-0000000000000002'));
+  assert.equal(db.insertRecord(record({ id: 'm-0000000000000003', text: 'the third fact' })), 3);
+  db.close();
+  // A reopen re-reads the high water mark rather than re-deriving it from the rows that survived.
+  const reopened = openDb(dbPath);
+  assert.equal(reopened.insertRecord(record({ id: 'm-0000000000000004', text: 'the fourth fact' })), 4);
+});
+
+test('a pre-M18 database is widened in place and its records backfilled in insertion order', () => {
+  const dbPath = tempDbPath();
+  const seeded = openDb(dbPath);
+  seeded.insertRecord(record());
+  seeded.insertRecord(record({ id: 'm-0000000000000002', text: 'the second fact' }));
+  seeded.close();
+  const raw = new DatabaseSync(dbPath);
+  try {
+    raw.exec('DROP INDEX IF EXISTS memory_records_seq');
+    raw.exec('ALTER TABLE memory_records DROP COLUMN seq');
+    raw.exec("DELETE FROM memory_meta WHERE key = 'memory.seq.high'");
+  } finally {
+    raw.close();
+  }
+  const migrated = openDb(dbPath);
+  assert.deepEqual(migrated.listRecords().map((entry) => entry.seq), [1, 2]);
+  assert.equal(migrated.insertRecord(record({ id: 'm-0000000000000003', text: 'the third fact' })), 3);
+});
+
+test('the distill cursor and its failure counter round-trip through the meta table', () => {
+  const db = openDb(tempDbPath());
+  assert.equal(db.distillCursorSeq(), 0);
+  assert.equal(db.distillFailures(), 0);
+  db.setDistillCursorSeq(41);
+  db.setDistillFailures(3);
+  assert.equal(db.distillCursorSeq(), 41);
+  assert.equal(db.distillFailures(), 3);
+  db.setDistillCursorSeq(-9);
+  assert.equal(db.distillCursorSeq(), 0);
 });

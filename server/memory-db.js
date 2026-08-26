@@ -30,10 +30,12 @@ const SCHEMA = Object.freeze([
     supersedes TEXT,
     lineage TEXT NOT NULL,
     locked INTEGER NOT NULL,
-    sig TEXT
+    sig TEXT,
+    seq INTEGER
   )`,
   'CREATE INDEX IF NOT EXISTS memory_records_segment ON memory_records (segment_key)',
   'CREATE INDEX IF NOT EXISTS memory_records_ts ON memory_records (ts)',
+  'CREATE INDEX IF NOT EXISTS memory_records_seq ON memory_records (seq)',
   `CREATE TABLE IF NOT EXISTS memory_tail_state (
     path TEXT PRIMARY KEY,
     size INTEGER NOT NULL,
@@ -56,6 +58,14 @@ const SCHEMA = Object.freeze([
 const LAST_APPEND_KEY = 'memory.lastAppendAt';
 const PROJECT_TAG_SCHEMA_KEY = 'memory.schema.projectTags';
 const PROJECT_TAG_SCHEMA_VERSION = 1;
+const DISTILL_CURSOR_KEY = 'memory.distill.cursorSeq';
+const DISTILL_FAILURE_KEY = 'memory.distill.failures';
+/*
+ * The append ordinal a distill cursor is read against. It is a HIGH WATER MARK rather than max(seq),
+ * which rowid and max() both fail to be: a forget deletes the newest row, and reusing its ordinal would
+ * put a fresh record behind a cursor that has already passed it.
+ */
+const SEQ_HIGH_KEY = 'memory.seq.high';
 
 function recordToRow(record) {
   return {
@@ -95,6 +105,7 @@ function rowToRecord(row) {
     lineage: row.lineage,
     locked: row.locked === 1,
     sig: row.sig,
+    seq: Number.isInteger(row.seq) ? row.seq : null,
   };
 }
 
@@ -105,8 +116,22 @@ function ftsMatchExpression(terms) {
   return terms.map((term) => `"${String(term).replace(/"/g, '""')}"`).join(' OR ');
 }
 
+/*
+ * CREATE TABLE IF NOT EXISTS cannot widen a table that already exists, so an existing one is altered
+ * and backfilled in rowid order BEFORE the schema runs: its index over the new column comes next.
+ * An absent table is left to the schema, which creates it carrying the column already.
+ */
+function ensureSeqColumn(db) {
+  const columns = db.prepare('PRAGMA table_info(memory_records)').all();
+  if (columns.length === 0 || columns.some((column) => column.name === 'seq')) return false;
+  db.exec('ALTER TABLE memory_records ADD COLUMN seq INTEGER');
+  db.exec('UPDATE memory_records SET seq = rowid');
+  return true;
+}
+
 function createMemoryDb({ dbPath, busyTimeoutMs = undefined } = {}) {
   const db = openDatabase(dbPath, { busyTimeoutMs });
+  ensureSeqColumn(db);
   applySchema(db, SCHEMA);
 
   const statements = {
@@ -115,15 +140,16 @@ function createMemoryDb({ dbPath, busyTimeoutMs = undefined } = {}) {
     hasRecord: db.prepare('SELECT 1 AS present FROM memory_records WHERE id = ?'),
     insertRecord: db.prepare(`INSERT OR IGNORE INTO memory_records (
       id, ts, segment_key, kind, layer, project, source_kind, source_vendor, source_session_id,
-      body, valid_from, valid_to, supersedes, lineage, locked, sig
+      body, valid_from, valid_to, supersedes, lineage, locked, sig, seq
     ) VALUES (
       $id, $ts, $segment_key, $kind, $layer, $project, $source_kind, $source_vendor, $source_session_id,
-      $body, $valid_from, $valid_to, $supersedes, $lineage, $locked, $sig
+      $body, $valid_from, $valid_to, $supersedes, $lineage, $locked, $sig, $seq
     )`),
     updateRecord: db.prepare('UPDATE memory_records SET body = ?, source_kind = ?, lineage = ?, locked = ?, sig = ? WHERE id = ?'),
     updateRecordProject: db.prepare('UPDATE memory_records SET project = ?, sig = ? WHERE id = ?'),
     deleteRecord: db.prepare('DELETE FROM memory_records WHERE id = ?'),
     countRecords: db.prepare('SELECT count(*) AS total FROM memory_records'),
+    maxSeq: db.prepare('SELECT coalesce(max(seq), 0) AS high FROM memory_records'),
     segmentKeys: db.prepare('SELECT DISTINCT segment_key FROM memory_records'),
     deleteSegment: db.prepare('DELETE FROM memory_records WHERE segment_key = ?'),
     insertFts: db.prepare('INSERT INTO memory_records_fts (id, body) VALUES (?, ?)'),
@@ -156,12 +182,28 @@ function createMemoryDb({ dbPath, busyTimeoutMs = undefined } = {}) {
       ON CONFLICT(key) DO UPDATE SET value = excluded.value`),
   };
 
+  function readMetaInteger(key) {
+    const value = Number(statements.readMeta.get(key)?.value);
+    return Number.isFinite(value) ? Math.floor(value) : 0;
+  }
+
+  /*
+   * Two statements, and atomic because every production caller already holds the BEGIN IMMEDIATE write
+   * lock; the row max is folded in so a hand-edited or pre-migration database cannot hand out a dead seq.
+   */
+  function allocateSeq() {
+    const next = Math.max(readMetaInteger(SEQ_HIGH_KEY), Number(statements.maxSeq.get().high) || 0) + 1;
+    statements.writeMeta.run(SEQ_HIGH_KEY, String(next));
+    return next;
+  }
+
+  // Returns the ordinal it assigned rather than a bare true, so an in-memory copy can carry it too.
   function insertRecord(record) {
-    const row = recordToRow(record);
+    const row = { ...recordToRow(record), seq: allocateSeq() };
     const outcome = statements.insertRecord.run(row);
     if (Number(outcome.changes) === 0) return false;
     statements.insertFts.run(row.id, row.body);
-    return true;
+    return row.seq;
   }
 
   function updateRecordText(record) {
@@ -175,6 +217,13 @@ function createMemoryDb({ dbPath, busyTimeoutMs = undefined } = {}) {
   function deleteRecord(id) {
     statements.deleteRecord.run(id);
     statements.deleteFts.run(id);
+  }
+
+  // A pre-M18 database carries backfilled ordinals with no high water mark, and a fresh one carries none.
+  function ensureSeqHighWater() {
+    const rowMax = Number(statements.maxSeq.get().high) || 0;
+    if (rowMax <= readMetaInteger(SEQ_HIGH_KEY)) return;
+    statements.writeMeta.run(SEQ_HIGH_KEY, String(rowMax));
   }
 
   function migrateProjectTags(migrateRecord) {
@@ -305,6 +354,8 @@ function createMemoryDb({ dbPath, busyTimeoutMs = undefined } = {}) {
     return rebuildSearchIndex();
   }
 
+  ensureSeqHighWater();
+
   return {
     checkpoint,
     close: () => db.close(),
@@ -325,6 +376,8 @@ function createMemoryDb({ dbPath, busyTimeoutMs = undefined } = {}) {
       return removed;
     },
     deliveredCount: () => Number(statements.countDelivered.get().total),
+    distillCursorSeq: () => readMetaInteger(DISTILL_CURSOR_KEY),
+    distillFailures: () => readMetaInteger(DISTILL_FAILURE_KEY),
     deliveredHas: (hash) => deliveredSet().has(hash),
     ensureSearchIndex,
     forgetTails,
@@ -344,6 +397,8 @@ function createMemoryDb({ dbPath, busyTimeoutMs = undefined } = {}) {
     scrubSearchIndex,
     searchIds,
     segmentKeys: () => statements.segmentKeys.all().map((row) => row.segment_key),
+    setDistillCursorSeq: (seq) => { statements.writeMeta.run(DISTILL_CURSOR_KEY, String(Math.max(0, Math.floor(seq)))); },
+    setDistillFailures: (count) => { statements.writeMeta.run(DISTILL_FAILURE_KEY, String(Math.max(0, Math.floor(count)))); },
     setLastAppendAt: (at) => { statements.writeMeta.run(LAST_APPEND_KEY, String(Math.floor(at))); },
     tailState,
     transaction,
@@ -352,10 +407,13 @@ function createMemoryDb({ dbPath, busyTimeoutMs = undefined } = {}) {
 }
 
 module.exports = {
+  DISTILL_CURSOR_KEY,
+  DISTILL_FAILURE_KEY,
   LAST_APPEND_KEY,
   PROJECT_TAG_SCHEMA_KEY,
   PROJECT_TAG_SCHEMA_VERSION,
   SCHEMA,
+  SEQ_HIGH_KEY,
   createMemoryDb,
   ftsMatchExpression,
   recordToRow,

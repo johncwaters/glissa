@@ -4,6 +4,7 @@ const { isPlainObject } = require('./usage-number-core');
 const {
   INTERVAL_MINUTES_RANGE,
   MAX_NEW_CLAIMS_RANGE,
+  MAX_PROJECT_CLAIMS_RANGE,
   MAX_RECORD_CHARS_RANGE,
   MAX_RECORDS_PER_KIND_RANGE,
   MEMORY_RETAIN_DAY_RANGE,
@@ -24,6 +25,7 @@ const MEMORY_DISTILL_SPEC = Object.freeze({
     intervalMinutes: INTERVAL_MINUTES_RANGE,
     timeoutSeconds: TIMEOUT_SECONDS_RANGE,
     maxNewClaims: MAX_NEW_CLAIMS_RANGE,
+    maxProjectClaims: MAX_PROJECT_CLAIMS_RANGE,
     quietMs: QUIET_MS_RANGE,
   }),
   blocks: NO_BLOCKS,

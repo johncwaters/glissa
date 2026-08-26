@@ -97,8 +97,14 @@ function manifestOf(dir, slot = 'current') {
   return JSON.parse(fs.readFileSync(path.join(dir, 'dist', slot, 'manifest.json'), 'utf8'));
 }
 
+// The lane speaks the incremental op contract now, so a full claim set reaches it as a list of adds.
 function distilledResult(claims, verdict = 'DISTILLED') {
-  return { verdict, summary: 'distilled the canon', claims };
+  return { verdict, summary: 'distilled the canon', ops: claims.map((claim) => ({ op: 'add', claim })) };
+}
+
+// A compaction run answers with a whole claim set for one project, which is the pre-M18 contract.
+function fullResult(claims, verdict = 'DISTILLED') {
+  return { verdict, summary: 'compacted one project', claims };
 }
 
 async function seed(store, clock, texts) {
@@ -436,6 +442,270 @@ test('a poisoned manifest cannot walk the read out of the published build', asyn
     assert.equal(documents.length, manifest.files.length - 3, 'only the contained files were read');
     for (const document of documents) assert.equal(document.includes('root:'), false);
     assert.equal(warnings.filter((line) => line.includes('outside the build')).length, 3);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a run reads only the records above the cursor and moves it once the build is verified', async () => {
+  const dir = tempDir();
+  const clock = { at: START };
+  try {
+    const store = openStore(dir, clock);
+    const [first] = await seed(store, clock, ['the poller ticks every 15 minutes']);
+    assert.equal(store.distillCursorSeq(), 0);
+
+    clock.at += 2 * HOUR;
+    const firstRun = makeLane(store, clock, {
+      result: distilledResult([{
+        kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [first.id], text: 'the poller ticks every 15 minutes',
+      }]),
+    });
+    assert.equal((await firstRun.distiller.runOnce()).status, 'published');
+    assert.equal(store.distillCursorSeq(), first.seq);
+    assert.equal(firstRun.spawns[0].prompt.includes(first.id), true);
+
+    const second = await store.append(knowledge('the poller is opt in'));
+    clock.at += 25 * HOUR;
+    const secondRun = makeLane(store, clock, {
+      result: distilledResult([{
+        kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [second.id], text: 'the poller is opt in',
+      }]),
+    });
+    const report = await secondRun.distiller.runOnce();
+    assert.equal(report.status, 'published');
+    assert.equal(report.delta, 1, 'only the new record was read');
+    assert.equal(secondRun.spawns[0].prompt.includes(first.id), false);
+    assert.equal(secondRun.spawns[0].prompt.includes(second.id), true);
+    assert.equal(store.distillCursorSeq(), second.seq);
+
+    const published = readProjectFiles(dir);
+    assert.equal(published.includes('the poller ticks every 15 minutes'), true, 'the unread claim survived the merge');
+    assert.equal(published.includes('the poller is opt in'), true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a failed run leaves the cursor where it was and counts against the delta window', async () => {
+  const dir = tempDir();
+  const clock = { at: START };
+  try {
+    const store = openStore(dir, clock);
+    const [first] = await seed(store, clock, ['the poller ticks every 15 minutes']);
+    clock.at += 2 * HOUR;
+    assert.equal((await makeLane(store, clock, {
+      result: distilledResult([{
+        kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [first.id], text: 'the poller ticks every 15 minutes',
+      }]),
+    }).distiller.runOnce()).status, 'published');
+    const cursor = store.distillCursorSeq();
+
+    await store.append(knowledge('a record the run chokes on'));
+    clock.at += 25 * HOUR;
+    const broken = makeLane(store, clock, { result: null });
+    assert.equal((await broken.distiller.runOnce()).status, 'error');
+    assert.equal(store.distillCursorSeq(), cursor, 'the delta is left to be read again');
+    assert.equal(store.distillFailures(), 1);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a held locked diff blocks the cursor, so the same delta is re-read once the operator has ruled', async () => {
+  const dir = tempDir();
+  const clock = { at: START };
+  try {
+    const store = openStore(dir, clock);
+    const locked = await store.append({
+      kind: 'preference',
+      layer: 'semantic',
+      project: null,
+      source: { kind: 'operator', vendor: 'glissa', sessionId: null },
+      text: 'never write else statements',
+      locked: true,
+    });
+    clock.at += 1;
+    await store.flushProjection();
+    clock.at += 2 * HOUR;
+    const { distiller } = makeLane(store, clock, {
+      result: distilledResult([{
+        kind: 'preference', project: null, rank: 'model', ids: [locked.id], text: 'else statements are banned',
+      }]),
+    });
+    assert.equal((await distiller.runOnce()).status, 'pending');
+    assert.equal(store.distillCursorSeq(), 0);
+    assert.equal(store.distillFailures(), 1);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a NO_CHANGE verdict publishes nothing and still moves the cursor past what it read', async () => {
+  const dir = tempDir();
+  const clock = { at: START };
+  try {
+    const store = openStore(dir, clock);
+    const [first] = await seed(store, clock, ['the poller ticks every 15 minutes']);
+    clock.at += 2 * HOUR;
+    assert.equal((await makeLane(store, clock, {
+      result: distilledResult([{
+        kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [first.id], text: 'the poller ticks every 15 minutes',
+      }]),
+    }).distiller.runOnce()).status, 'published');
+    const version = manifestOf(dir).version;
+
+    const second = await store.append(knowledge('the poller is opt in'));
+    clock.at += 25 * HOUR;
+    const report = await makeLane(store, clock, { result: distilledResult([], 'NO_CHANGE') }).distiller.runOnce();
+    assert.equal(report.status, 'current');
+    assert.equal(report.verdict, 'NO_CHANGE');
+    assert.equal(manifestOf(dir).version, version, 'nothing was republished');
+    assert.equal(store.distillCursorSeq(), second.seq);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a superseded record loses its claim mechanically, with nothing spawned at all', async () => {
+  const dir = tempDir();
+  const clock = { at: START };
+  try {
+    const store = openStore(dir, clock);
+    const [stale, kept] = await seed(store, clock, ['the poller ticks every 5 minutes', 'the poller is opt in']);
+    clock.at += 2 * HOUR;
+    assert.equal((await makeLane(store, clock, {
+      result: distilledResult([
+        {
+          kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [stale.id], text: 'the poller ticks every 5 minutes',
+        },
+        {
+          kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [kept.id], text: 'the poller is opt in',
+        },
+      ]),
+    }).distiller.runOnce()).status, 'published');
+    assert.equal(readProjectFiles(dir).includes('the poller ticks every 5 minutes'), true);
+
+    await store.append({ ...knowledge('the poller ticks every 15 minutes'), supersedes: stale.id });
+    clock.at += 25 * HOUR;
+    // The superseder is a record of its own, so a run reads it before the prune it caused can be seen.
+    assert.equal((await makeLane(store, clock, { result: distilledResult([], 'NO_CHANGE') }).distiller.runOnce()).status, 'current');
+
+    clock.at += 25 * HOUR;
+    const reconciled = makeLane(store, clock, { result: null });
+    const report = await reconciled.distiller.runOnce();
+    assert.equal(reconciled.spawns.length, 0, 'a prune needs no model');
+    assert.equal(report.status, 'published');
+    const published = readProjectFiles(dir);
+    assert.equal(published.includes('the poller ticks every 5 minutes'), false);
+    assert.equal(published.includes('the poller is opt in'), true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a project past its claim threshold is re-distilled in full, and only that project is rewritten', async () => {
+  const dir = tempDir();
+  const clock = { at: START };
+  try {
+    const store = openStore(dir, clock);
+    const big = await seed(store, clock, ['big one', 'big two', 'big three']);
+    const other = await store.append(knowledge('a fact from another checkout', '/repos/other'));
+    clock.at += 2 * HOUR;
+    const seeded = makeLane(store, clock, {
+      maxProjectClaims: 20,
+      result: distilledResult([
+        ...big.map((entry) => ({
+          kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [entry.id], text: `standing ${entry.text}`,
+        })),
+        {
+          kind: 'knowledge', project: '/repos/other', rank: 'model', ids: [other.id], text: 'a standing claim elsewhere',
+        },
+      ]),
+    });
+    assert.equal((await seeded.distiller.runOnce()).status, 'published');
+    const cursor = store.distillCursorSeq();
+
+    clock.at += 25 * HOUR;
+    const compacting = makeLane(store, clock, {
+      maxProjectClaims: 2,
+      result: fullResult([{
+        kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: big.map((entry) => entry.id), text: 'one compacted claim',
+      }]),
+    });
+    const report = await compacting.distiller.runOnce();
+    assert.equal(report.mode, 'full');
+    assert.equal(report.status, 'published');
+    assert.equal(compacting.spawns[0].prompt.includes(other.id), false, 'a compaction reads one project only');
+    const published = readProjectFiles(dir);
+    assert.equal(published.includes('one compacted claim'), true);
+    assert.equal(published.includes('standing big one'), false);
+    assert.equal(published.includes('a standing claim elsewhere'), true, 'every other project is untouched');
+    assert.equal(store.distillCursorSeq(), cursor, 'a compaction never moves the delta cursor');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a compaction that does not shrink its project is refused rather than published', async () => {
+  const dir = tempDir();
+  const clock = { at: START };
+  try {
+    const store = openStore(dir, clock);
+    const seeds = await seed(store, clock, ['one', 'two', 'three']);
+    clock.at += 2 * HOUR;
+    const claims = seeds.map((entry) => ({
+      kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [entry.id], text: `standing ${entry.text}`,
+    }));
+    assert.equal((await makeLane(store, clock, {
+      maxProjectClaims: 20, result: distilledResult(claims),
+    }).distiller.runOnce()).status, 'published');
+    const version = manifestOf(dir).version;
+
+    clock.at += 25 * HOUR;
+    const report = await makeLane(store, clock, {
+      maxProjectClaims: 2, result: fullResult(claims),
+    }).distiller.runOnce();
+    assert.equal(report.status, 'error');
+    assert.match(report.reason, /no fewer than/);
+    assert.equal(manifestOf(dir).version, version);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a forget drops the distilled claims, so the cursor falls back and the canon is read again', async () => {
+  const dir = tempDir();
+  const clock = { at: START };
+  try {
+    const store = openStore(dir, clock);
+    const [doomed, kept] = await seed(store, clock, ['the staging passphrase is hunter2', 'the poller is opt in']);
+    clock.at += 2 * HOUR;
+    assert.equal((await makeLane(store, clock, {
+      result: distilledResult([
+        {
+          kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [doomed.id], text: 'the staging passphrase is hunter2',
+        },
+        {
+          kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [kept.id], text: 'the poller is opt in',
+        },
+      ]),
+    }).distiller.runOnce()).status, 'published');
+    assert.equal(store.distillCursorSeq() > 0, true);
+
+    await store.forget('hunter2');
+    assert.equal(readProjectFiles(dir).includes('hunter2'), false);
+    assert.equal(manifestOf(dir).source, 'trivial');
+
+    clock.at += 25 * HOUR;
+    const after = makeLane(store, clock, {
+      result: distilledResult([{
+        kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [kept.id], text: 'the poller is opt in',
+      }]),
+    });
+    assert.equal((await after.distiller.runOnce()).status, 'published');
+    assert.equal(after.spawns[0].prompt.includes(kept.id), true, 'the canon is re-read from the start');
+    assert.equal(readProjectFiles(dir).includes('hunter2'), false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
