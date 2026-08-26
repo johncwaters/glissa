@@ -600,7 +600,8 @@ made in the build:
 The retrieval index shipped early, with M12b. The `rankCandidates` seam (an Ollama-if-present
 embedding probe) was DROPPED, operator decision 2026-08-23. What is left:
 
-- **Non-CC pack delivery adapter**: Codex shipped 2026-08-24; Grok waits on the packs probe.
+- ~~**Non-CC pack delivery adapter**~~: SHIPPED. Codex 2026-08-24 (`developer_instructions`); Grok rides one
+  `--rules` index-pointer token (`session/adapters/grok.js` renderPackArgs, `tests/agent-grok.test.js`).
 - ~~**Per-project pack variants**~~: CLOSED 2026-08-23, see the as-built note under M16.
 
 ### M18: incremental distillation [SHIPPED]

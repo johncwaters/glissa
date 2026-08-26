@@ -213,11 +213,7 @@ function createVisionsSetup({
 
   function reportConfigChanged() {
     if (typeof onConfigChanged !== 'function') return;
-    try {
-      void Promise.resolve(onConfigChanged()).catch((error) => warn(`lane rebuild failed: ${error.message}`));
-    } catch (error) {
-      warn(`lane rebuild failed: ${error.message}`);
-    }
+    void Promise.resolve().then(onConfigChanged).catch((error) => warn(`lane rebuild failed: ${error.message}`));
   }
 
   // A test booting with Visions on must not install extensions into the operator's real editors.
