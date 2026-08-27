@@ -4,11 +4,16 @@ const { STATES } = require('../../shared/states');
 const { normalizePackNames } = require('./pack-core');
 
 /**
+ * Agent id a project may name, derived from config schema so the two cannot drift.
+ * @typedef {import('zod').infer<typeof import('../../shared/contracts/config').ProjectConfig>['agent']} AgentId
+ */
+
+/**
  * @typedef {object} RegistryProject
  * @property {string} id
  * @property {string} name
  * @property {string} path
- * @property {unknown} [agent]
+ * @property {AgentId} [agent]
  * @property {unknown} [packs]
  * @property {boolean} [codexBypassHookTrust]
  * @property {boolean} [dangerouslySkipPermissions]
@@ -32,7 +37,7 @@ function shouldStartAfterModify(previousState) {
 /**
  * @param {Map<string, any>} currentSessions
  * @param {RegistryProject[]} newProjects
- * @param {{ ensureProjectIds: (projects: RegistryProject[]) => unknown, resolveAgentId: (agent: unknown) => string }} dependencies
+ * @param {{ ensureProjectIds: (projects: RegistryProject[]) => unknown, resolveAgentId: (agent: AgentId) => string }} dependencies
  */
 function diffProjects(currentSessions, newProjects, dependencies) {
   dependencies.ensureProjectIds(newProjects);

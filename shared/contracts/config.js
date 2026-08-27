@@ -248,5 +248,6 @@ module.exports = {
   BrowserConfig,
   Config,
   ConfigUpdate,
+  ProjectConfig,
   configIssueMessage,
 };

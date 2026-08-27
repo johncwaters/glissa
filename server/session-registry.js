@@ -30,7 +30,7 @@ const { diffProjects, shouldStartAfterModify } = require('./core/session-registr
  * @property {(input: { projects: RegistryProject[], sessions: Map<string, RegistrySession>, gitWorkspaceSync: RegistryGitWorkspace, integrationBranch: string }) => void} reconcileSessionWorktrees
  * @property {(oldSession: RegistrySession, newSession: RegistrySession) => unknown} carryWorktreeAcrossRecreate
  * @property {(projects: RegistryProject[]) => boolean} ensureProjectIds
- * @property {(agent: unknown) => string} resolveAgentId
+ * @property {(agent: import('./core/session-registry-core').AgentId) => string} resolveAgentId
  * @property {Pick<Console, 'log'|'warn'>} logger
  */
 
