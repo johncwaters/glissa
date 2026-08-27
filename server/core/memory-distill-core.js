@@ -26,6 +26,10 @@ const DEFAULT_MAX_PROJECT_CLAIMS = 200;
 // How often the loop looks, as opposed to how often it distills: a tick skipped for a busy canon must
 // retry in minutes, not tomorrow.
 const CHECK_INTERVAL_MS = 15 * 60 * 1000;
+// The prompt's stand-in for a record that carries no project. It must never look like a project tag:
+// rendering it as `global` had the model copy that word back as the claim's project, and every
+// global claim then failed `mixes projects`, which deadlocked the lane (2026-08-26).
+const NO_PROJECT_LABEL = '<none>';
 const MAX_PROMPT_RECORDS = 400;
 const MAX_PROMPT_CHARS = 200000;
 const MAX_CLAIMS = 500;
@@ -61,7 +65,7 @@ function resolveDistillConfig(raw, { memoryEnabled = false } = {}) {
 }
 
 function canonLine(record) {
-  const project = record.project ? record.project : 'global';
+  const project = record.project ? record.project : NO_PROJECT_LABEL;
   const lock = record.locked === true ? ' locked' : '';
   return `[${record.id}] (${effectiveRank(record)}${lock}) ${record.kind} project=${project} :: ${sanitizeProjectionText(record.text)}`;
 }
@@ -127,7 +131,7 @@ function buildMemoryDistillPrompt({
     '{"verdict":"DISTILLED","summary":"one line","claims":[{"kind":"knowledge","project":"/path/to/repo","rank":"model","ids":["m-0123456789abcdef"],"text":"the standing claim"}]}',
     'Fields:',
     `- "kind" is one of ${kinds}.`,
-    '- "project" is the project value of the records it cites, copied exactly, or null when they carry none. Never mix projects in one claim.',
+    `- "project" is the project value of the records it cites, copied exactly. Records shown as project=${NO_PROJECT_LABEL} carry none, so their claim sets "project" to null. Never mix projects in one claim.`,
     `- "rank" is one of ${SOURCE_KINDS.join(', ')}, and never higher than the ranks of the records cited.`,
     '- "ids" are the record ids the claim came from, copied exactly from the markers above.',
     'Verdicts:',
@@ -171,7 +175,7 @@ function normalizeClaim(raw, index, recordsById) {
   if (!text) return { ok: false, error: `${at} carries no text` };
   if (text.length > MAX_PROJECTION_LINE_CHARS) return { ok: false, error: `${at} is longer than ${MAX_PROJECTION_LINE_CHARS} characters` };
   if (findHighEntropyToken(text)) return { ok: false, error: `${at} carries a high-entropy token` };
-  const project = normalizeProjectTag(raw.project);
+  const project = raw.project === NO_PROJECT_LABEL ? null : normalizeProjectTag(raw.project);
   if (cited.some((record) => (record.project || null) !== project)) return { ok: false, error: `${at} mixes projects` };
   if (cited.some((record) => record.kind !== raw.kind)) return { ok: false, error: `${at} mixes record kinds` };
   /*
@@ -325,7 +329,7 @@ function decideDistillMode(published, {
 }
 
 function publishedLine(claim) {
-  const project = claim.project ? claim.project : 'global';
+  const project = claim.project ? claim.project : NO_PROJECT_LABEL;
   const lock = claim.locked === true ? ' locked' : '';
   return `[${claim.handle}] (${claim.rank}${lock}) ${claim.kind} project=${project} :: ${sanitizeProjectionText(claim.text)}`;
 }
@@ -377,7 +381,7 @@ function buildIncrementalDistillPrompt({
     `- "op" is one of ${OPS.join(', ')}. "add" needs a claim, "update" needs a target and a claim, "retire" needs a target only.`,
     '- "target" is a handle copied exactly from the standing claims above. Never invent one.',
     `- "kind" is one of ${kinds}.`,
-    '- "project" is the project value of the records it cites, copied exactly, or null when they carry none. Never mix projects in one claim.',
+    `- "project" is the project value of the records it cites, copied exactly. Records shown as project=${NO_PROJECT_LABEL} carry none, so their claim sets "project" to null. Never mix projects in one claim.`,
     `- "rank" is one of ${SOURCE_KINDS.join(', ')}, and never higher than the ranks of the records cited.`,
     '- "ids" are the record ids the claim came from, copied exactly from the observations above.',
     'Verdicts:',
@@ -605,6 +609,7 @@ module.exports = {
   MAX_PROMPT_CHARS,
   MAX_PROMPT_RECORDS,
   MIN_DELTA_WINDOW,
+  NO_PROJECT_LABEL,
   OPS,
   PENDING_DIR_NAME,
   QUIET_MS_RANGE,

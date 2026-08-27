@@ -14,7 +14,7 @@ const { needsDistill } = require('../server/core/distill-core');
 const {
   DEFAULT_INTERVAL_MINUTES, MAX_CLAIM_IDS, MIN_DELTA_WINDOW, applyDistillOps,
   buildIncrementalDistillPrompt, buildMemoryDistillPrompt, claimProjectTags, decideDistillMode,
-  decideDistillRun, deltaWindowFor, finalizeMergedClaims, publishedClaimTexts, readPublishedClaims,
+  decideDistillRun, deltaWindowFor, finalizeMergedClaims, NO_PROJECT_LABEL, publishedClaimTexts, readPublishedClaims,
   renderDistilledProjection, resolveDistillConfig, selectCanonForPrompt, selectDeltaForPrompt,
   validateDistillOps, validateDistillResult,
 } = require('../server/core/memory-distill-core');
@@ -161,6 +161,42 @@ test('a claim may not merge two projects or two record kinds', () => {
   const kinds = validateDistillResult(distilled([claim({ ids: [here.id, preference.id] })]), { records: [here, preference] });
   assert.equal(kinds.ok, false);
   assert.match(kinds.detail, /mixes record kinds/);
+});
+
+test('a record carrying no project round-trips through the prompt label as a global claim', () => {
+  const global = record({ id: 'm-000000000000001a', project: null, kind: 'preference', text: 'never write else statements' });
+  const prompt = buildMemoryDistillPrompt({ records: [global], resultPath: '/tmp/result.json' });
+  assert.equal(prompt.includes(`project=${NO_PROJECT_LABEL}`), true);
+  assert.equal(prompt.includes('project=global'), false);
+
+  const copied = validateDistillResult(
+    distilled([claim({ kind: 'preference', project: NO_PROJECT_LABEL, ids: [global.id], text: global.text })]),
+    { records: [global] }
+  );
+  assert.equal(copied.ok, true, copied.detail);
+  assert.equal(copied.claims[0].project, null);
+
+  const asNull = validateDistillResult(
+    distilled([claim({ kind: 'preference', project: null, ids: [global.id], text: global.text })]),
+    { records: [global] }
+  );
+  assert.equal(asNull.ok, true, asNull.detail);
+  assert.equal(asNull.claims[0].project, null);
+});
+
+test('the incremental path renders and accepts the same no-project label', () => {
+  const global = record({ id: 'm-000000000000001b', seq: 2, project: null, kind: 'preference', text: 'never write else statements' });
+  const published = withHandlesFor([claim({ kind: 'preference', project: null, ids: ['m-000000000000001c'], text: 'prefer guard clauses' })]);
+  const prompt = buildIncrementalDistillPrompt({ published, records: [global], resultPath: '/tmp/out.json' });
+  assert.equal(prompt.includes(`project=${NO_PROJECT_LABEL}`), true);
+  assert.equal(prompt.includes('project=global'), false);
+
+  const outcome = validateDistillOps({
+    verdict: 'DISTILLED',
+    ops: [{ op: 'add', claim: claim({ kind: 'preference', project: NO_PROJECT_LABEL, ids: [global.id], text: global.text }) }],
+  }, { records: [global], published });
+  assert.equal(outcome.ok, true, outcome.detail);
+  assert.equal(outcome.ops[0].claim.project, null);
 });
 
 test('more net-new claims than the cap is an error, never a partial accept', () => {
