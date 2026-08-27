@@ -207,10 +207,16 @@ function readResultFile(resultPath, allowed, decorate = null, { maxBytes = null,
 // removeAllListeners can pre-empt the 'exit' cleanup (every orchestrator/poller finish path
 // calls destroy()). logPrefix names the lane in error logs (e.g. 'pr-review', 'posthog').
 /**
+ * The lane ledger's attribution callback. Every ephemeral lane forwards its own copy here, so the
+ * signature lives once rather than being re-guessed per lane.
+ * @typedef {(sessionId: string, lane: string, vendor?: string) => void} RecordLane
+ */
+
+/**
  * @param {{ map: Map<string, unknown>, id: string,
  *   sess: InstanceType<typeof import('../session/sessions')['Session']>, closeSessionDataClients: (id: string) => void,
  *   logPrefix: string, name: string,
- *   recordLane?: ((sessionId: string, lane: string, vendor?: string) => unknown) | null }} options
+ *   recordLane?: RecordLane | null }} options
  */
 function registerEphemeralSession({ map, id, sess, closeSessionDataClients, logPrefix, name, recordLane = null }) {
   map.set(id, sess);

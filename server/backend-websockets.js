@@ -14,6 +14,12 @@ const { createWsSender } = require('./ws-sender');
 const decideWebSocketUpgradeAccess = /** @type {(options: { remoteEnabled: boolean, trust: string, origin?: string, allowedOrigins: string[], authenticated: boolean, listenerPorts?: number[], dashboardRoute?: boolean, tokenOk?: boolean }) => { allow: boolean, reason: string|null }} */ (decideUpgradeAccess);
 
 /**
+ * A control-plane broadcast. Messages are JSON frames keyed by `type`, so the parameter is the
+ * string-keyed record the sender stamps and serializes, not a bare `object`.
+ * @typedef {(message: Record<string, unknown>) => void} ControlBroadcast
+ */
+
+/**
  * @typedef {object} BackendWebSocketDependencies
  * @property {{ enabled: boolean, allowedOrigins: string[] }} remote
  * @property {{ isUpgradeAuthorized: (request: import('http').IncomingMessage) => boolean }|null} remoteAuth
@@ -60,6 +66,7 @@ function createBackendWebSockets(dependencies) {
   const sessionDataClients = new Map();
   let nextViewerResizeSeq = 0;
 
+  /** @type {ControlBroadcast} */
   function broadcastControl(message) {
     const stamped = controlReplayLog.stamp({ ...message });
     const payload = JSON.stringify(stamped);
@@ -68,6 +75,7 @@ function createBackendWebSockets(dependencies) {
     }
   }
 
+  /** @type {ControlBroadcast} */
   function broadcastLocalControl(message) {
     const stamped = controlReplayLog.stamp({ ...message });
     const payload = JSON.stringify(stamped);

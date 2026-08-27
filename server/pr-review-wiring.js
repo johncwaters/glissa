@@ -137,7 +137,7 @@ function prReviewPackNames(cfg) {
  *   gitWorkspace: object, getProjectPathById: (projectId: string) => string | null,
  *   getProjectNameById?: (projectId: string) => string | null,
  *   broadcast?: (message: Record<string, unknown>) => void,
- *   recordLane?: ((sessionId: string, lane: string, vendor?: string) => unknown) | null }} options
+ *   recordLane?: import('./ephemeral-session').RecordLane | null }} options
  */
 function createPrReviewWiring({
   config, reviewSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate, gitWorkspace,

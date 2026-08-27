@@ -102,9 +102,14 @@ function writeStandaloneLaneSettings(permissions) {
 }
 
 /**
+ * @typedef {(options: { id: string, name: string, cwd: string, signal?: AbortSignal|null }) => Promise<void>} DistillSpawn
+ */
+
+/**
  * @param {{ sessions?: Map<string, unknown>, closeSessionDataClients?: (id: string) => void,
  *   hookRouter?: Pick<InstanceType<typeof import('../detection/hook-source').HookRouter>, 'register' | 'unregister'>|null, getHookPort?: (() => number | null) | null, spawnGate?: unknown,
- *   replayBufferKB?: number, recordLane?: ((...args: unknown[]) => unknown) | null }} [options]
+ *   replayBufferKB?: number, recordLane?: import('./ephemeral-session').RecordLane | null }} [options]
+ * @returns {DistillSpawn}
  */
 function createDistillSpawn({
   sessions = new Map(), closeSessionDataClients = () => {}, hookRouter = null, getHookPort = null,
@@ -112,7 +117,7 @@ function createDistillSpawn({
   // Lane attribution: names this lane on the ledger when its headless session reports a Claude session id.
   recordLane = null,
 } = {}) {
-  return async function spawnDistill({ id, name, cwd, signal }) {
+  return async function spawnDistill({ id, name, cwd, signal = null }) {
     // Lazy loading keeps dry runs from resolving Claude on PATH.
     const { Session } = require('../session/sessions');
     const posture = packDistillerPermissions();
@@ -146,7 +151,7 @@ function createDistillSpawn({
  *   readOutput?: (path: string) => Promise<string | null>,
  *   writeOutput?: (path: string, content: string) => Promise<void>,
  *   writePrompt?: (path: string, content: string) => Promise<void>,
- *   spawnDistill?: (options: { id: string, name: string, cwd: string, signal?: AbortSignal | null }) => Promise<void>,
+ *   spawnDistill?: DistillSpawn,
  *   createResultFile?: (packName: string, index: number) => { path: string, cleanup: () => Promise<void> | void },
  *   readResult?: (path: string) => Record<string, unknown>, intervalHours?: number,
  *   timeoutSeconds?: number, setIntervalFn?: typeof setInterval,

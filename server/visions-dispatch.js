@@ -107,15 +107,20 @@ async function readCommentsResult(resultPath, { lineCount = 0, onBytesRead = nul
  * rejects on an abort; the caller has already resolved that race.
  */
 /**
+ * @typedef {(options: { id: string, name: string, cwd: string, model?: string|null, signal?: AbortSignal|null, initialPrompt?: string }) => Promise<void>} VisionsSpawn
+ */
+
+/**
  * @param {{ sessions?: Map<string, unknown>, closeSessionDataClients?: (id: string) => void,
  *   hookRouter?: Pick<InstanceType<typeof import('../detection/hook-source').HookRouter>, 'register' | 'unregister'>|null, getHookPort?: (() => number | null) | null, spawnGate?: unknown,
- *   replayBufferKB?: number, recordLane?: ((...args: unknown[]) => unknown) | null }} [options]
+ *   replayBufferKB?: number, recordLane?: import('./ephemeral-session').RecordLane | null }} [options]
+ * @returns {VisionsSpawn}
  */
 function createVisionsSpawn({
   sessions = new Map(), closeSessionDataClients = () => {}, hookRouter = null, getHookPort = null,
   spawnGate = null, replayBufferKB = undefined, recordLane = null,
 } = {}) {
-  return async function spawnVisionsSession({ id, name, cwd, model = null, signal = null }) {
+  return async function spawnVisionsSession({ id, name, cwd, model = null, signal = null, initialPrompt = VISIONS_BOOTSTRAP_PROMPT }) {
     // Required here, not at module load: an inert lane must not pay for resolving `claude` on PATH.
     const { Session } = require('../session/sessions');
     const posture = visionsPermissions();
@@ -127,7 +132,7 @@ function createVisionsSpawn({
       path: cwd,
       dangerouslySkipPermissions: false,
       extraClaudeArgs,
-      initialPrompt: VISIONS_BOOTSTRAP_PROMPT,
+      initialPrompt,
       ephemeral: true,
       settingsPermissions: posture.permissions,
       replayBufferKB,
@@ -146,7 +151,7 @@ function createVisionsSpawn({
  * single shape to handle.
  */
 /**
- * @param {{ spawnSession?: (options: { id: string, name: string, cwd: string, model?: string | null, signal?: AbortSignal | null, initialPrompt?: string }) => Promise<void>, timeoutSeconds?: number,
+ * @param {{ spawnSession?: VisionsSpawn, timeoutSeconds?: number,
  *   model?: string | null, logger?: Console, nowFn?: () => number,
  *   setTimeoutFn?: typeof setTimeout, clearTimeoutFn?: typeof clearTimeout,
  *   makeWorkDir?: () => Promise<string>, removeWorkDir?: (dir: string) => Promise<void>,

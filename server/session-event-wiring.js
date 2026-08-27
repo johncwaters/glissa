@@ -12,7 +12,7 @@ const { runPostTurnChecks, resolveCheckConfig } = require('./post-turn-checker')
  * @property {{ projects: Array<{ id?: string, postTurnChecks?: Record<string, unknown> }>, postTurnChecks?: Record<string, unknown> }} config
  * @property {(sessionId: string, lane: string, vendor: string) => void} recordLane
  * @property {{ refreshSessions: () => void, nudgeSession: () => void }} usage
- * @property {(message: object) => void} broadcastControl
+ * @property {import('./backend-websockets').ControlBroadcast} broadcastControl
  * @property {{ noteStateChange: (id: string) => void, recheck: (id: string) => void }} telegramChannel
  * @property {{ acknowledge: (id: string) => void, trigger: (id: string, category: string, message: string) => void }} notificationManager
  * @property {() => any|null} getIngestLane

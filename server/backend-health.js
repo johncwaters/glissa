@@ -12,7 +12,7 @@ const HEALTH_SNAPSHOT_INTERVAL_MS = 10000;
  * @property {() => any|null} getIngestLane
  * @property {{ clients: Set<any> }} controlWss
  * @property {{ clients: Set<any> }} dataWss
- * @property {(message: object) => void} broadcastControl
+ * @property {import('./backend-websockets').ControlBroadcast} broadcastControl
  */
 
 /** @param {BackendHealthDependencies} dependencies */

@@ -507,6 +507,7 @@ function manifestSourceRoots(manifest) {
   return roots.filter((root) => typeof root === 'string' && root.length > 0);
 }
 
+/** @param {string[]} sourceRoots @param {string|null} projectPath @param {{ packsDir?: string|null }} [options] */
 function isSelfReferentialPack(sourceRoots, projectPath, { packsDir = null } = {}) {
   const project = comparablePath(projectPath);
   if (project === null) return false;
@@ -533,6 +534,8 @@ function deliversOnlyBoilerplate(manifest) {
 /**
  * Whether one built pack may be delivered to one project, `packsDir` being where its relative source
  * roots resolve from. `detail` carries no path: a decision trace reaches a paired phone.
+ * @param {{ manifest?: Record<string, unknown>|null, projectPath?: string|null, packsDir?: string|null }} [options]
+ * @returns {{ deliver: boolean, reason: string|null, detail: string|null }}
  */
 function decidePackDelivery({ manifest = null, projectPath = null, packsDir = null } = {}) {
   if (isSelfReferentialPack(manifestSourceRoots(manifest), projectPath, { packsDir })) {

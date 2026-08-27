@@ -170,7 +170,7 @@ function changeFailureReason(uri, version, result) {
 /**
  * @param {{ debounceMs?: number, setTimeoutFn?: typeof setTimeout, clearTimeoutFn?: typeof clearTimeout, nowFn?: () => number,
  *   sweep?: (text: string) => { diagnostics: object[], fixes: object[] }, maxPayload?: number, autoFix?: boolean, fixLogMax?: number,
- *   applyEditTimeoutMs?: number, logger?: Console, broadcast?: ((message: unknown) => void) | null, dispatchConfig?: object | null,
+ *   applyEditTimeoutMs?: number, logger?: Console, broadcast?: import('./backend-websockets').ControlBroadcast | null, dispatchConfig?: object | null,
  *   dispatch?: ((options: { uri: string, text: string, findings: object[], intent: string, digest: string, memory: { text: string, count: number, version: string | null } | null, prompt: string }) => Promise<{ verdict: string, reason?: string | null, diagnostics?: unknown, comments?: unknown, hand?: unknown, intent?: unknown }>) | null,
  *   contextDigest?: ((options: { scopes: null, budgetChars: number, now: number }) => string | null) | null, contextSeq?: (() => number | null) | null,
  *   scopeProjects?: { id: string, path: string }[] | null, knownProjectIds?: string[] | null,

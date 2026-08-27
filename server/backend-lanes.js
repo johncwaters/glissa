@@ -53,7 +53,7 @@ const { normalizeShapePath } = require('./core/visions-scope-core');
  * @property {BackendHookRouter} hookRouter
  * @property {() => number|null} getHookPort
  * @property {(message: Record<string, unknown>) => void} broadcastControl
- * @property {(message: Record<string, unknown>) => void} broadcastLocalControl
+ * @property {import('./backend-websockets').ControlBroadcast} broadcastLocalControl
  * @property {{ clients: Set<import('ws').WebSocket>, on: (event: string, listener: (socket: import('ws').WebSocket) => void) => unknown }} controlWss
  * @property {BackendLaneOptions} options
  * @property {Console} logger

@@ -20,9 +20,16 @@ const PASTE_READY_STATES = new Set([
  * @property {(text: string) => void} write
  * @property {() => void} start
  * @property {() => void} restart
- * @property {(event: string, listener: (...args: unknown[]) => void) => void} on
- * @property {(event: string, listener: (...args: unknown[]) => void) => void} once
- * @property {(event: string, listener: (...args: unknown[]) => void) => void} off
+ * @property {SessionEventBinder} on
+ * @property {SessionEventBinder} once
+ * @property {SessionEventBinder} off
+ */
+
+/**
+ * The two Session events this module binds. Spelled as an overload rather than `unknown[]`, so a
+ * state-change listener keeps its payload type instead of re-asserting it.
+ * @typedef {((event: 'state-change', listener: (change: { to: typeof STATES[keyof typeof STATES] }) => void) => void)
+ *   & ((event: 'exit', listener: () => void) => void)} SessionEventBinder
  */
 
 /** @param {SessionOutputOptions} options */

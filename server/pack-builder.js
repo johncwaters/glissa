@@ -804,7 +804,7 @@ async function readBuiltManifest(name, { builtRoot = defaultBuiltRoot() } = {}) 
  * skip reason. Never throws and never guesses: an unbuilt or unreadable pack resolves to dir null.
  *
  * @returns {Promise<{name: string, dir: string|null, version: string|null, reason: string|null,
- *   manifest: object|null, perProjectVariants: boolean, group: string|null}>}
+ *   manifest: Record<string, unknown>|null, perProjectVariants: boolean, group: string|null}>}
  */
 async function resolveBuiltPack(name, { builtRoot = defaultBuiltRoot() } = {}) {
   const skip = (reason) => ({ name, dir: null, version: null, reason, manifest: null, perProjectVariants: false, group: null });

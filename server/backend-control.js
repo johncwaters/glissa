@@ -20,7 +20,7 @@ const { packVariantProjects } = require('./core/pack-core');
  * @property {Map<string, BackendControlSession>} sessions
  * @property {BackendControlConfig} config
  * @property {{ configPath: string, config: BackendControlConfig, getSettings: () => Record<string, unknown>, save: (mutator: (config: BackendControlConfig) => void) => BackendControlConfig|null, isUnchosenLaunchDefault: (config: BackendControlConfig, key: string, value: boolean) => boolean }} configStore
- * @property {(message: Record<string, unknown>) => void} broadcastControl
+ * @property {import('./backend-websockets').ControlBroadcast} broadcastControl
  * @property {ControlReplayLog} controlReplayLog
  * @property {() => Record<string, unknown>|null} getRtkInstallStatus
  * @property {() => string} generateProjectId

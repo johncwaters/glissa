@@ -424,7 +424,7 @@ function posthogPackNames(cfg) {
  *   getHookPort: (() => number | null) | null, spawnGate: { run: (callback: () => unknown) => Promise<unknown> },
  *   gitWorkspace?: PosthogGitWorkspace | null, runCommand?: typeof runCli,
  *   broadcast?: (message: Record<string, unknown>) => void,
- *   recordLane?: ((sessionId: string, lane: string, vendor?: string) => unknown) | null }} options
+ *   recordLane?: import('./ephemeral-session').RecordLane | null }} options
  */
 function createPosthogWiring({
   config, investigationSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate,

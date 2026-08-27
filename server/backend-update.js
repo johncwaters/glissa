@@ -12,7 +12,7 @@ const UPDATE_RECHECK_MS = 24 * 60 * 60 * 1000;
  * @property {string} currentVersion
  * @property {((options: { currentVersion: string, abortController: AbortController }) => Promise<any>)|undefined} checkForUpdate
  * @property {() => number} getControlClientCount
- * @property {(message: object) => void} broadcastControl
+ * @property {import('./backend-websockets').ControlBroadcast} broadcastControl
  * @property {Pick<Console, 'log'>} logger
  */
 

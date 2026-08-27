@@ -75,6 +75,7 @@ function createLaneLedger({
    * any usage number. `vendor` defaults to claude, so a pre-M5 caller (the ephemeral lanes, all Claude)
    * records exactly as before.
    */
+  /** @type {import('./ephemeral-session').RecordLane} */
   function record(sessionId, lane, vendor = 'claude') {
     if (!ledgerPath || !sessionId || !lane) return;
     // Serialized so records apply in arrival order and whenIdle() has one chain to settle on.

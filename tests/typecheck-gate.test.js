@@ -31,6 +31,7 @@ const REQUIRED_OPTIONS = {
   noEmit: true,
   strictNullChecks: true,
   strictBindCallApply: true,
+  strictFunctionTypes: true,
   noImplicitThis: true,
   alwaysStrict: true,
   strictPropertyInitialization: true,

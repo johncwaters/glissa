@@ -6,7 +6,7 @@ const { isSameDirectoryPath } = require('../shared/paths');
 const { pickAutoResume } = require('../session/core/auto-resume');
 const { diffProjects, shouldStartAfterModify } = require('./core/session-registry-core');
 
-/** @typedef {Record<string, unknown> & { id: string, name: string, path: string, agent?: string }} RegistryProject */
+/** @typedef {import('./core/session-registry-core').RegistryProject & Record<string, unknown>} RegistryProject */
 /** @typedef {Record<string, unknown> & { projects: RegistryProject[], integrationBranch?: string }} RegistryConfig */
 /** @typedef {{ id: string, cwd: string, branch: string, integrationBranch?: string, hasWork: boolean }} RegistryWorktree */
 /** @typedef {{ id: string, name: string, path: string, state: string, stateSince: number, pendingRestart?: boolean, dangerouslySkipPermissions?: boolean, isWorktree?: boolean, resumeSessionId?: string|null, _killReap?: Promise<unknown>|null, start: () => unknown, destroy: () => void, toSnapshot: () => Record<string, unknown>, getWorktreeCarry?: () => Record<string, unknown>|null, adoptWorktree: (worktree: Record<string, unknown>) => void, discardWorktree?: () => unknown, discardWorktreeIfClean: () => unknown }} RegistrySession */
@@ -30,7 +30,7 @@ const { diffProjects, shouldStartAfterModify } = require('./core/session-registr
  * @property {(input: { projects: RegistryProject[], sessions: Map<string, RegistrySession>, gitWorkspaceSync: RegistryGitWorkspace, integrationBranch: string }) => void} reconcileSessionWorktrees
  * @property {(oldSession: RegistrySession, newSession: RegistrySession) => unknown} carryWorktreeAcrossRecreate
  * @property {(projects: RegistryProject[]) => boolean} ensureProjectIds
- * @property {(agent?: string) => string} resolveAgentId
+ * @property {(agent: unknown) => string} resolveAgentId
  * @property {Pick<Console, 'log'|'warn'>} logger
  */
 

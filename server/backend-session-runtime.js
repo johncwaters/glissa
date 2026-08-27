@@ -16,7 +16,7 @@ const buildRuntimeSettingsPayload = /** @type {(options: { configStore: object, 
  * @property {object} config
  * @property {any} configStore
  * @property {() => any} getGitWorkspace
- * @property {() => ((message: object) => void)|null} getBroadcastControl
+ * @property {() => import('./backend-websockets').ControlBroadcast|null} getBroadcastControl
  * @property {Pick<Console, 'warn'>} logger
  */
 
