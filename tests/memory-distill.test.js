@@ -11,7 +11,9 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { createMemoryStore } = require('../server/memory-store');
-const { MEMORY_DISTILL_DENY_TOOLS, WORK_DIR_PREFIX, createMemoryDistiller } = require('../server/memory-distill');
+const {
+  BOOTSTRAP_PROMPT, MEMORY_DISTILL_DENY_TOOLS, PROMPT_FILE, WORK_DIR_PREFIX, createMemoryDistiller,
+} = require('../server/memory-distill');
 const { resolveDistillConfig } = require('../server/core/memory-distill-core');
 const { resolveMemoryConfig } = require('../server/core/memory-core');
 const { isDispatchWorkdir } = require('../server/core/ingest-agent-core');
@@ -69,8 +71,10 @@ function makeLane(store, clock, { result = null, onSpawn = null, ...config } = {
     makeWorkDir: async () => fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-distill-work-')),
     removeWorkDir: async (dir) => fs.rmSync(dir, { recursive: true, force: true }),
     spawnDistill: async ({ prompt, cwd }) => {
-      spawns.push({ prompt, cwd });
-      if (onSpawn) await onSpawn({ prompt, cwd });
+      const promptFile = path.join(cwd, PROMPT_FILE);
+      const delivered = fs.existsSync(promptFile) ? fs.readFileSync(promptFile, 'utf8') : '';
+      spawns.push({ prompt: delivered, argvPrompt: prompt, cwd });
+      if (onSpawn) await onSpawn({ prompt: delivered, cwd });
     },
     readResult: async () => result,
   });
@@ -140,6 +144,8 @@ test('a DISTILLED run publishes the claims and rotates the fallback build to pre
     assert.equal(report.published, true);
     assert.equal(spawns.length, 1);
     assert.equal(spawns[0].prompt.includes(first.id), true);
+    assert.equal(spawns[0].argvPrompt, BOOTSTRAP_PROMPT);
+    assert.equal(Buffer.byteLength(spawns[0].argvPrompt, 'utf8') < 131072, true, 'one argv string is capped at MAX_ARG_STRLEN');
 
     const published = readProjectFiles(dir);
     assert.equal(published.includes('the opt-in poller ticks every 15 minutes'), true);

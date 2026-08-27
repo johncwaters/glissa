@@ -20,6 +20,10 @@ const distillCore = require('./core/memory-distill-core');
 
 const LANE_NAME = 'memory-distill';
 const RESULT_FILE = 'memory-distill-result.json';
+const PROMPT_FILE = 'memory-distill-prompt.txt';
+// Linux caps one argv string at MAX_ARG_STRLEN (128 KiB), and a full delta prompt runs past it, so the
+// prompt travels as a file the way the visions and pack lanes already send theirs (2026-08-27).
+const BOOTSTRAP_PROMPT = 'Read memory-distill-prompt.txt and follow all instructions in that file';
 // A stable prefix, not decoration: it is what ingest-agent-core recognizes as this lane's throwaway cwd.
 const WORK_DIR_PREFIX = 'glissa-memory-distill-';
 // The delta never renders to nothing, however much of the budget the standing claims already took.
@@ -111,6 +115,7 @@ async function readDistillResultFile(resultPath) {
  *   spawnDistill?: (options: { id: string, name: string, prompt: string, cwd: string, model?: string | null, signal?: AbortSignal | null }) => Promise<void>,
  *   readResult?: (path: string) => Promise<Record<string, unknown> | null>,
  *   makeWorkDir?: () => Promise<string>, removeWorkDir?: (dir: string) => Promise<void>,
+ *   writePrompt?: (promptPath: string, content: string) => Promise<void>,
  *   now?: () => number, logger?: Console, debug?: boolean | (() => boolean),
  *   setTimeoutFn?: typeof setTimeout, clearTimeoutFn?: typeof clearTimeout,
  *   setIntervalFn?: typeof setInterval, clearIntervalFn?: typeof clearInterval,
@@ -124,6 +129,7 @@ function createMemoryDistiller(deps = {}) {
     spawnDistill = createMemoryDistillSpawn(),
     readResult = readDistillResultFile,
     makeWorkDir = () => fsPromises.mkdtemp(path.join(os.tmpdir(), `${WORK_DIR_PREFIX}work-`)),
+    writePrompt = (promptPath, content) => fsPromises.writeFile(promptPath, content, 'utf8'),
     removeWorkDir = async (dir) => { try { await fsPromises.rm(dir, { recursive: true, force: true }); } catch { /* best-effort */ } },
     now = () => Date.now(),
     logger = console,
@@ -224,13 +230,19 @@ function createMemoryDistiller(deps = {}) {
       return { error: `no work dir: ${firstLine(error.message)}`, parsed: null };
     }
     const resultPath = path.join(workDir, RESULT_FILE);
+    try {
+      await writePrompt(path.join(workDir, PROMPT_FILE), prompt(resultPath));
+    } catch (error) {
+      await removeWorkDir(workDir);
+      return { error: `no prompt file: ${firstLine(error.message)}`, parsed: null };
+    }
     /** @type {Promise<unknown>|null} */
     let pendingSpawn = null;
     /** @type {{ timedOut: boolean, parsed: Record<string, unknown>|null, error?: string }} */
     let outcome;
     try {
       outcome = await spawnWithTimeout({
-        prompt: prompt(resultPath), cwd: workDir, resultPath, onPending: (promise) => { pendingSpawn = promise; },
+        prompt: BOOTSTRAP_PROMPT, cwd: workDir, resultPath, onPending: (promise) => { pendingSpawn = promise; },
       });
     } finally {
       await drainPending(pendingSpawn);
@@ -510,8 +522,10 @@ function createMemoryDistiller(deps = {}) {
 }
 
 module.exports = {
+  BOOTSTRAP_PROMPT,
   LANE_NAME,
   MEMORY_DISTILL_DENY_TOOLS,
+  PROMPT_FILE,
   RESULT_FILE,
   WORK_DIR_PREFIX,
   createMemoryDistillSpawn,
