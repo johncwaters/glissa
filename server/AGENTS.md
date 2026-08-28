@@ -98,6 +98,8 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - A tool call is activity, not a fact: `agent-tool` left the ingest kind table at 53% of the canon, `Bash` lines a run paid to read.
 - One `contentMarker` PER untrusted corpus, so one fence cannot close another, and it is a sha256 digest rather than a cheap hash an attacker's text could fix-point.
 - Only memory TOGGLES cross the control WS: settings are an allow-list of booleans and clamped ints, so no `memory-*` type, path, record or lane log line rides one, a knob being tunable where a filename would be a leak (`tests/memory-delivery-negative.test.js`).
+- The ceiling on a delivered projection is BYTES per project, not claims: a count bounds nothing an operator feels, so a project over `maxProjectChars` is compacted by a model first and evicted down to fit if that declines, never dropping a locked claim and never emptying a project (`server/core/memory-distill-core.js`).
+- `deadend` is a projected kind of its own because retiring a failed attempt forgets it and the next session proposes it again; it stands until a record shows the approach working.
 - The direct-read pointer line in a repo's own `AGENTS.md` stays operator-authored: it is the one instruction-tier link in the chain, which keeps the store agent-agnostic.
 
 ### Ephemeral Lane Write Boundaries

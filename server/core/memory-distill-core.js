@@ -5,6 +5,7 @@
 const {
   INTERVAL_MINUTES_RANGE,
   MAX_NEW_CLAIMS_RANGE,
+  MAX_PROJECT_CHARS_RANGE,
   MAX_PROJECT_CLAIMS_RANGE,
   QUIET_MS_RANGE,
   STALE_HORIZON_DAYS_RANGE,
@@ -27,6 +28,9 @@ const DEFAULT_QUIET_MS = 60000;
 // and the cursor steps over it, the way the PostHog lane prunes vanished issues instead of replaying them.
 const DEFAULT_STALE_HORIZON_DAYS = 7;
 const DEFAULT_MAX_PROJECT_CLAIMS = 200;
+// The delivered ceiling, in characters of rendered projection, roughly 4k tokens. A claim COUNT bounds
+// nothing an operator feels: 200 claims at the line cap is a 120k character prefix on every session.
+const DEFAULT_MAX_PROJECT_CHARS = 16000;
 // How often the loop looks, as opposed to how often it distills: a tick skipped for a busy canon must
 // retry in minutes, not tomorrow.
 const CHECK_INTERVAL_MS = 15 * 60 * 1000;
@@ -62,6 +66,7 @@ function resolveDistillConfig(raw, { memoryEnabled = false } = {}) {
     timeoutSeconds: integerWithin(source.timeoutSeconds, TIMEOUT_SECONDS_RANGE, DEFAULT_TIMEOUT_SECONDS),
     maxNewClaims: integerWithin(source.maxNewClaims, MAX_NEW_CLAIMS_RANGE, DEFAULT_MAX_NEW_CLAIMS),
     maxProjectClaims: integerWithin(source.maxProjectClaims, MAX_PROJECT_CLAIMS_RANGE, DEFAULT_MAX_PROJECT_CLAIMS),
+    maxProjectChars: integerWithin(source.maxProjectChars, MAX_PROJECT_CHARS_RANGE, DEFAULT_MAX_PROJECT_CHARS),
     quietMs: integerWithin(source.quietMs, QUIET_MS_RANGE, DEFAULT_QUIET_MS),
     staleHorizonDays: integerWithin(source.staleHorizonDays, STALE_HORIZON_DAYS_RANGE, DEFAULT_STALE_HORIZON_DAYS),
     maxPromptRecords: MAX_PROMPT_RECORDS,
@@ -103,11 +108,11 @@ function renderCanonForPrompt(records) {
 /**
  * @param {{ records?: Array<{ id: string, project?: string|null, locked?: boolean,
  *   kind: string, text: string }>, resultPath: string, maxNewClaims?: number,
- *   maxClaims?: number, maxClaimChars?: number }} options
+ *   maxClaims?: number, maxClaimChars?: number, maxProjectChars?: number }} options
  */
 function buildMemoryDistillPrompt({
   records = [], resultPath, maxNewClaims = DEFAULT_MAX_NEW_CLAIMS, maxClaims = MAX_CLAIMS,
-  maxClaimChars = MAX_PROJECTION_LINE_CHARS,
+  maxClaimChars = MAX_PROJECTION_LINE_CHARS, maxProjectChars = DEFAULT_MAX_PROJECT_CHARS,
 }) {
   const canon = renderCanonForPrompt(records);
   const marker = contentMarker('MEMORY', canon);
@@ -127,6 +132,8 @@ function buildMemoryDistillPrompt({
     `- At most ${maxNewClaims} claims may say something no previous projection said. Past that, answer ERROR rather than a partial set.`,
     `- At most ${maxClaims} claims in total, each at most ${maxClaimChars} characters.`,
     `- The ${maxClaimChars} character limit is HARD and counted per claim: ONE claim over it refuses this whole run, so split a long fact into two claims rather than writing one long one.`,
+    `- Your claims for one project must render under ${maxProjectChars} characters in total. Past that Glissa DROPS your least corroborated claims to fit, so choose what to keep yourself.`,
+    '- A claim about an approach that was TRIED and abandoned is kind "deadend": say what was tried and why it failed, so nobody proposes it again. Never write one as a plan, a suggestion, or a thing still to do.',
     '- No em dash, en dash, ellipsis character, or emoji anywhere in your output.',
     '',
     `<<<${marker}`,
@@ -343,19 +350,44 @@ function claimsByProject(claims) {
   return counts;
 }
 
+function projectionChars(claims, project) {
+  return renderDistilledProjection(claims, { project }).length;
+}
+
 // A full project re-distill is the only operation that can shrink a claim set a merge grows.
 function decideDistillMode(published, {
   maxProjectClaims = DEFAULT_MAX_PROJECT_CLAIMS, maxChars = MAX_PROMPT_CHARS,
+  maxProjectChars = DEFAULT_MAX_PROJECT_CHARS,
 } = {}) {
   const counts = [...claimsByProject(published).entries()]
     .sort((left, right) => right[1] - left[1] || (String(left[0]) < String(right[0]) ? -1 : 1));
   if (counts.length === 0) return { mode: 'incremental', project: null, claims: 0 };
+  // Bytes before counts: a project past the delivered ceiling is compacted by a model first, so the
+  // eviction wall below only ever fires on a compaction that declined to shrink.
+  const oversize = counts
+    .map(([project, claims]) => ({ project, claims, chars: projectionChars(published, project) }))
+    .filter((entry) => entry.chars > Math.floor(maxProjectChars))
+    .sort((left, right) => right.chars - left.chars || (String(left.project) < String(right.project) ? -1 : 1));
+  if (oversize.length > 0) return { mode: 'full', project: oversize[0].project, claims: oversize[0].claims };
   // The standing claims are a prompt corpus too, so a set that no longer fits compacts whatever grew most.
   const overBudget = renderPublishedForPrompt(published).length > maxChars;
   if (!overBudget && counts[0][1] <= Math.floor(maxProjectClaims)) {
     return { mode: 'incremental', project: null, claims: 0 };
   }
   return { mode: 'full', project: counts[0][0], claims: counts[0][1] };
+}
+
+/**
+ * Whether a compaction earned its run. Fewer claims is the count-triggered win; fewer rendered
+ * characters is the byte-triggered one, and demanding both would deadlock a lane that a model
+ * legitimately shrank by rewriting long claims short.
+ */
+function compactionShrank(published, claims, project) {
+  const before = claimsByProject(published).get(project) || 0;
+  if (claims.length < before) return { ok: true, before, beforeChars: 0 };
+  const beforeChars = projectionChars(published, project);
+  if (projectionChars(claims, project) < beforeChars) return { ok: true, before, beforeChars };
+  return { ok: false, before, beforeChars };
 }
 
 function publishedLine(claim) {
@@ -394,6 +426,8 @@ function buildIncrementalDistillPrompt({
     `- At most ${maxNewClaims} claims may say something no previous projection said. Past that, answer ERROR rather than a partial set.`,
     `- At most ${maxClaims} claims may stand in total, each at most ${maxClaimChars} characters.`,
     `- The ${maxClaimChars} character limit is HARD and counted per claim: ONE claim over it refuses this whole run, so split a long fact into two claims rather than writing one long one.`,
+    '- A claim about an approach that was TRIED and abandoned is kind "deadend": say what was tried and why it failed, so nobody proposes it again. Never write one as a plan, a suggestion, or a thing still to do.',
+    '- Never retire a "deadend" claim merely because nothing mentions it any more. It stands until a record shows the approach working.',
     '- No em dash, en dash, ellipsis character, or emoji anywhere in your output.',
     '',
     'The claims that already stand, each named by the handle in brackets:',
@@ -591,6 +625,56 @@ function renderDistilledProjection(claims, {
   return renderProjectionDocument(bulletsByKind, { project: tag });
 }
 
+/** Least valuable last: a lock survives every eviction, then trust rank, then how many records agree. */
+function compareClaimValue(left, right) {
+  if ((left.locked === true) !== (right.locked === true)) return left.locked === true ? -1 : 1;
+  const rankGap = trustRankValue(right.rank) - trustRankValue(left.rank);
+  if (rankGap !== 0) return rankGap;
+  if (left.ids.length !== right.ids.length) return right.ids.length - left.ids.length;
+  return compareClaims(left, right);
+}
+
+/** Rendered length is monotone in the kept prefix, so the largest set that fits is one binary search. */
+function longestFittingPrefix(ordered, project, budget, floor) {
+  let low = floor;
+  let high = ordered.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (projectionChars(ordered.slice(0, mid), project) <= budget) {
+      low = mid;
+      continue;
+    }
+    high = mid - 1;
+  }
+  return low;
+}
+
+/**
+ * The wall a claim count is not. Compaction ASKS a model to shrink and it may decline, so the delivered
+ * bytes are bounded here, after every model has had its say, or one project's canon silently grows the
+ * prefix of every session that opens it. Locked claims are exempt: dropping one quietly is exactly what
+ * the pending-review path exists to prevent, and a project is never emptied, since empty reads as erased.
+ */
+function enforceProjectionBudget(claims, { maxProjectChars = DEFAULT_MAX_PROJECT_CHARS } = {}) {
+  const budget = Math.max(1, Math.floor(maxProjectChars));
+  const list = withHandles(claims);
+  const kept = [];
+  const evicted = [];
+  for (const project of [...new Set(list.map((claim) => claim.project || null))]) {
+    const own = list.filter((claim) => (claim.project || null) === project);
+    if (projectionChars(own, project) <= budget) {
+      kept.push(...own);
+      continue;
+    }
+    const ordered = [...own].sort(compareClaimValue);
+    const locked = ordered.filter((claim) => claim.locked === true).length;
+    const keep = longestFittingPrefix(ordered, project, budget, Math.max(1, locked));
+    kept.push(...ordered.slice(0, keep));
+    evicted.push(...ordered.slice(keep));
+  }
+  return { claims: kept, evicted };
+}
+
 function claimProjectTags(claims) {
   const tags = [];
   for (const claim of Array.isArray(claims) ? claims : []) {
@@ -628,6 +712,7 @@ module.exports = {
   CHECK_INTERVAL_MS,
   DEFAULT_INTERVAL_MINUTES,
   DEFAULT_MAX_NEW_CLAIMS,
+  DEFAULT_MAX_PROJECT_CHARS,
   DEFAULT_MAX_PROJECT_CLAIMS,
   DEFAULT_QUIET_MS,
   DEFAULT_STALE_HORIZON_DAYS,
@@ -637,6 +722,7 @@ module.exports = {
   MAX_CLAIM_IDS,
   FAILURES_PER_HALVING,
   MAX_NEW_CLAIMS_RANGE,
+  MAX_PROJECT_CHARS_RANGE,
   MAX_PROJECT_CLAIMS_RANGE,
   MAX_PROMPT_CHARS,
   MAX_PROMPT_RECORDS,
@@ -652,9 +738,11 @@ module.exports = {
   buildMemoryDistillPrompt,
   claimProjectTags,
   claimsByProject,
+  compactionShrank,
   decideDistillMode,
   decideDistillRun,
   deltaWindowFor,
+  enforceProjectionBudget,
   finalizeMergedClaims,
   publishedClaimTexts,
   readPublishedClaims,

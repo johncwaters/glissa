@@ -54,11 +54,13 @@ const TIMEOUT_SECONDS_RANGE = Object.freeze({ min: 60, max: 7200 });
 const MAX_NEW_CLAIMS_RANGE = Object.freeze({ min: 1, max: 500 });
 const QUIET_MS_RANGE = Object.freeze({ min: 0, max: 3600000 });
 const MAX_PROJECT_CLAIMS_RANGE = Object.freeze({ min: 20, max: 500 });
+const MAX_PROJECT_CHARS_RANGE = Object.freeze({ min: 2000, max: 200000 });
 const STALE_HORIZON_DAYS_RANGE = Object.freeze({ min: 1, max: 3650 });
 
 const SETTINGS_RANGES = Object.freeze({
   INTERVAL_MINUTES_RANGE,
   MAX_NEW_CLAIMS_RANGE,
+  MAX_PROJECT_CHARS_RANGE,
   MAX_PROJECT_CLAIMS_RANGE,
   STALE_HORIZON_DAYS_RANGE,
   MAX_RECORD_CHARS_RANGE,
@@ -97,6 +99,7 @@ module.exports = {
   BRANCH_GC_STALE_DAYS_RANGE,
   INTERVAL_MINUTES_RANGE,
   MAX_NEW_CLAIMS_RANGE,
+  MAX_PROJECT_CHARS_RANGE,
   MAX_PROJECT_CLAIMS_RANGE,
   STALE_HORIZON_DAYS_RANGE,
   MAX_RECORD_CHARS_RANGE,

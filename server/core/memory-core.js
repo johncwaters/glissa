@@ -12,11 +12,12 @@ const {
 const { buildStampLine } = require('./distill-core');
 const { scrubText } = require('./ingest-core');
 
-const MEMORY_KINDS = Object.freeze(['intent', 'feedback', 'knowledge', 'preference', 'prompt', 'tombstone']);
-const PROJECTED_KINDS = Object.freeze(['intent', 'knowledge', 'preference', 'feedback']);
+const MEMORY_KINDS = Object.freeze(['intent', 'feedback', 'knowledge', 'preference', 'deadend', 'prompt', 'tombstone']);
+// `deadend` is negative knowledge: retiring a failed attempt forgets it, and the next session proposes it again.
+const PROJECTED_KINDS = Object.freeze(['intent', 'knowledge', 'preference', 'feedback', 'deadend']);
 const MEMORY_LAYERS = Object.freeze(['episodic', 'semantic']);
 // Pasted-secret density is highest here, so a prompt may be remembered only as raw episodic material.
-const USER_PROMPT_DENIED_KINDS = Object.freeze(['knowledge', 'preference']);
+const USER_PROMPT_DENIED_KINDS = Object.freeze(['knowledge', 'preference', 'deadend']);
 const SOURCE_KINDS = Object.freeze(['operator', 'action', 'reported', 'model']);
 const SOURCE_VENDORS = Object.freeze(['claude', 'codex', 'grok', 'glissa']);
 
@@ -692,6 +693,7 @@ const KIND_HEADINGS = Object.freeze({
   knowledge: 'Codebase knowledge',
   preference: 'Operator preferences',
   feedback: 'Suggestion feedback',
+  deadend: 'Dead ends',
 });
 
 // Brackets are reserved for the Glissa-authored prefix, so remembered text cannot forge an id or a rank.

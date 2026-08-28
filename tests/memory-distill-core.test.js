@@ -12,8 +12,9 @@ const {
 } = require('../server/core/memory-core');
 const { needsDistill } = require('../server/core/distill-core');
 const {
-  DEFAULT_INTERVAL_MINUTES, MAX_CLAIM_IDS, MIN_DELTA_WINDOW, applyDistillOps,
-  buildIncrementalDistillPrompt, buildMemoryDistillPrompt, claimProjectTags, decideDistillMode,
+  DEFAULT_INTERVAL_MINUTES, DEFAULT_MAX_PROJECT_CHARS, MAX_CLAIM_IDS, MIN_DELTA_WINDOW, applyDistillOps,
+  buildIncrementalDistillPrompt, buildMemoryDistillPrompt, claimProjectTags, compactionShrank, decideDistillMode,
+  enforceProjectionBudget,
   decideDistillRun, deltaWindowFor, finalizeMergedClaims, NO_PROJECT_LABEL, publishedClaimTexts, readPublishedClaims,
   DEFAULT_STALE_HORIZON_DAYS,
   renderDistilledProjection, resolveDistillConfig, selectCanonForPrompt, selectDeltaForPrompt,
@@ -68,8 +69,9 @@ test('memory is on implies distillation, and only an explicit false switches it 
 
 test('out-of-range distill settings fall back to the documented defaults', () => {
   const resolved = resolveDistillConfig({
-    intervalMinutes: 1, timeoutSeconds: 999999, maxNewClaims: 0, quietMs: -5,
+    intervalMinutes: 1, timeoutSeconds: 999999, maxNewClaims: 0, quietMs: -5, maxProjectChars: 1,
   }, { memoryEnabled: true });
+  assert.equal(resolved.maxProjectChars, DEFAULT_MAX_PROJECT_CHARS);
   assert.equal(resolved.intervalMinutes, DEFAULT_INTERVAL_MINUTES);
   assert.equal(resolved.timeoutSeconds, 900);
   assert.equal(resolved.maxNewClaims, 20);
@@ -583,6 +585,66 @@ test('a project past its claim threshold turns the next run into a full re-disti
   assert.deepEqual(decideDistillMode(standing, { maxProjectClaims: 3 }), { mode: 'full', project: '/repo/big', claims: 4 });
   // Standing claims are a prompt corpus too, so one that no longer fits compacts whatever grew most.
   assert.equal(decideDistillMode(standing, { maxProjectClaims: 500, maxChars: 10 }).mode, 'full');
+});
+
+test('a project past its rendered character ceiling is compacted before any count is consulted', () => {
+  const standing = withHandlesFor([
+    ...Array.from({ length: 4 }, (_unused, n) => claim({
+      project: '/repo/fat', ids: [`m-00000000000000b${n}`], text: `fat ${n} ${'x'.repeat(400)}`,
+    })),
+    ...Array.from({ length: 9 }, (_unused, n) => claim({
+      project: '/repo/many', ids: [`m-00000000000000c${n}`], text: `many ${n}`,
+    })),
+  ]);
+  assert.deepEqual(decideDistillMode(standing, { maxProjectClaims: 50, maxProjectChars: 100000 }), {
+    mode: 'incremental', project: null, claims: 0,
+  });
+  const byBytes = decideDistillMode(standing, { maxProjectClaims: 50, maxProjectChars: 1000 });
+  assert.equal(byBytes.mode, 'full');
+  assert.equal(byBytes.project, '/repo/fat', 'the widest project is compacted, not the one with the most claims');
+});
+
+test('a compaction that keeps its claim count still counts as a shrink when it renders smaller', () => {
+  const standing = withHandlesFor([1, 2].map((n) => claim({
+    ids: [`m-000000000000000${n}`], text: `standing ${n} ${'x'.repeat(300)}`,
+  })));
+  const shorter = [1, 2].map((n) => claim({ ids: [`m-000000000000000${n}`], text: `standing ${n}` }));
+  assert.equal(compactionShrank(standing, shorter, '/repo/glissa').ok, true);
+  assert.equal(compactionShrank(standing, standing, '/repo/glissa').ok, false);
+});
+
+test('the delivered projection is capped in bytes, dropping the least corroborated claims first', () => {
+  const claims = withHandlesFor([
+    claim({ ids: ['m-0000000000000001', 'm-0000000000000002'], text: `corroborated ${'x'.repeat(300)}` }),
+    claim({ ids: ['m-0000000000000003'], text: `lonely ${'x'.repeat(300)}` }),
+    claim({ ids: ['m-0000000000000004'], text: `also lonely ${'x'.repeat(300)}` }),
+  ]);
+  const budgeted = enforceProjectionBudget(claims, { maxProjectChars: 700 });
+  assert.equal(renderDistilledProjection(budgeted.claims, { project: '/repo/glissa' }).length <= 700, true);
+  assert.equal(budgeted.claims.length, 1);
+  assert.equal(budgeted.claims[0].text.startsWith('corroborated'), true);
+  assert.equal(budgeted.evicted.length, 2);
+});
+
+test('the byte cap never drops a locked claim and never empties a project', () => {
+  const locked = claim({ locked: true, ids: ['m-0000000000000001'], text: `locked ${'x'.repeat(900)}` });
+  const spare = claim({ ids: ['m-0000000000000002'], text: `spare ${'x'.repeat(900)}` });
+  const budgeted = enforceProjectionBudget(withHandlesFor([spare, locked]), { maxProjectChars: 1200 });
+  assert.deepEqual(budgeted.claims.map((entry) => entry.text.slice(0, 6)), ['locked']);
+  assert.equal(budgeted.evicted.length, 1);
+  const single = enforceProjectionBudget(withHandlesFor([spare]), { maxProjectChars: 10 });
+  assert.equal(single.claims.length, 1, 'an empty project file reads as an erasure, not as a budget');
+});
+
+test('a dead end is a projected kind of its own, so a failed approach survives its retirement', () => {
+  const claims = [claim({ kind: 'deadend', text: 'polling the PTY body for status was tried and dropped: it scrapes' })];
+  const rendered = renderDistilledProjection(claims, { project: '/repo/glissa' });
+  assert.equal(rendered.includes('## Dead ends'), true);
+  assert.deepEqual(readPublishedClaims([rendered]).map((entry) => [entry.kind, entry.text]), [
+    ['deadend', 'polling the PTY body for status was tried and dropped: it scrapes'],
+  ]);
+  const prompt = buildIncrementalDistillPrompt({ published: [], records: [record()], resultPath: '/tmp/result.json' });
+  assert.match(prompt, /Never retire a "deadend" claim merely because nothing mentions it/);
 });
 
 test('a published projection round-trips back to claims that keep their kind and their project', () => {

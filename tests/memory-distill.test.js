@@ -653,6 +653,33 @@ test('a project past its claim threshold is re-distilled in full, and only that 
   }
 });
 
+test('the published projection is capped in bytes, whatever the model asked to publish', async () => {
+  const dir = tempDir();
+  const clock = { at: START };
+  try {
+    const store = openStore(dir, clock);
+    const seeds = await seed(store, clock, ['one', 'two', 'three']);
+    clock.at += 2 * HOUR;
+    const lane = makeLane(store, clock, {
+      maxProjectChars: 1200,
+      result: distilledResult(seeds.map((entry, index) => ({
+        kind: 'knowledge',
+        project: '/repos/glissa',
+        rank: 'model',
+        ids: [entry.id],
+        text: `standing ${index} ${'x'.repeat(500)}`,
+      }))),
+    });
+    assert.equal((await lane.distiller.runOnce()).status, 'published');
+    const published = readProjectFiles(dir);
+    assert.equal(published.length <= 1200, true, 'the delivered bytes are the wall, not the claim count');
+    assert.equal(published.includes('standing 0'), true, 'a capped project is never emptied');
+    assert.equal(published.includes('standing 2'), false, 'the last claim over the line is dropped');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('a compaction that does not shrink its project is refused rather than published', async () => {
   const dir = tempDir();
   const clock = { at: START };
@@ -673,7 +700,7 @@ test('a compaction that does not shrink its project is refused rather than publi
       maxProjectClaims: 2, result: fullResult(claims),
     }).distiller.runOnce();
     assert.equal(report.status, 'error');
-    assert.match(report.reason, /no fewer than/);
+    assert.match(report.reason, /no smaller than/);
     assert.equal(manifestOf(dir).version, version);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

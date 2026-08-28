@@ -177,17 +177,20 @@ function createMemoryDistiller(deps = {}) {
   }
 
   function filesFor(claims, valid) {
+    const budgeted = distillCore.enforceProjectionBudget(claims, { maxProjectChars: config.maxProjectChars });
     const files = [{
       relPath: core.GLOBAL_PROJECTION_FILE,
-      content: distillCore.renderDistilledProjection(claims, { project: null }),
+      content: distillCore.renderDistilledProjection(budgeted.claims, { project: null }),
     }];
-    for (const tag of distillCore.claimProjectTags(claims)) {
+    for (const tag of distillCore.claimProjectTags(budgeted.claims)) {
       files.push({
         relPath: `${core.PROJECTS_DIR_NAME}/${core.projectFileSlug(tag)}.md`,
-        content: distillCore.renderDistilledProjection(claims, { project: tag }),
+        content: distillCore.renderDistilledProjection(budgeted.claims, { project: tag }),
       });
     }
-    return { files, recordCount: valid.length, claimCount: claims.length };
+    return {
+      files, recordCount: valid.length, claimCount: budgeted.claims.length, evicted: budgeted.evicted.length,
+    };
   }
 
   // Fallback bullets are raw records, not standing claims the incremental prompt may reuse.
@@ -273,6 +276,9 @@ function createMemoryDistiller(deps = {}) {
         version: pending ? pending.version : null, reason: 'a locked record would be re-rendered',
       });
     }
+    if (built.evicted > 0) {
+      log.warn(`${built.evicted} claim(s) were dropped to keep every project under ${config.maxProjectChars} rendered characters`);
+    }
     const published = await memoryStore.publishProjection({
       ...built, source: 'distill', verdict, distilledAt: now(), watermark,
     });
@@ -309,7 +315,10 @@ function createMemoryDistiller(deps = {}) {
     if (!selection.ok) return report({ status: 'error', reason: selection.reason, mode: 'full' });
     const spawned = await spawnForResult({
       prompt: (resultPath) => distillCore.buildMemoryDistillPrompt({
-        records: selection.records, resultPath, maxNewClaims: config.maxNewClaims,
+        records: selection.records,
+        resultPath,
+        maxNewClaims: config.maxNewClaims,
+        maxProjectChars: config.maxProjectChars,
       }),
     });
     if (spawned.error) {
@@ -329,10 +338,10 @@ function createMemoryDistiller(deps = {}) {
       await noteOutcome(memoryStore, { advanced: false, cursor: 0, failures });
       return report({ status: 'error', reason: `${stray.length} compaction claim(s) fell outside ${project || 'global'}`, mode: 'full' });
     }
-    const before = distillCore.claimsByProject(published.claims).get(project) || 0;
-    if (checked.claims.length >= before) {
+    const shrank = distillCore.compactionShrank(published.claims, checked.claims, project);
+    if (!shrank.ok) {
       await noteOutcome(memoryStore, { advanced: false, cursor: 0, failures });
-      return report({ status: 'error', reason: `compaction returned ${checked.claims.length} claim(s), no fewer than the ${before} it replaced`, mode: 'full' });
+      return report({ status: 'error', reason: `compaction returned ${checked.claims.length} claim(s), no smaller than the ${shrank.before} it replaced`, mode: 'full' });
     }
     // Full re-distills rewrite standing ground, so their shrink gate replaces the net-new cap.
     const replaced = distillCore.replaceProjectClaims(published.claims, checked.claims, project);
@@ -459,6 +468,7 @@ function createMemoryDistiller(deps = {}) {
       const mode = distillCore.decideDistillMode(published.claims, {
         maxProjectClaims: config.maxProjectClaims,
         maxChars: config.maxPromptChars,
+        maxProjectChars: config.maxProjectChars,
       });
       const verdict = distillCore.decideDistillRun({
         now: now(),
