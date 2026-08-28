@@ -11,6 +11,7 @@ const {
   POSTHOG_NUMERIC_RANGES,
   PR_REVIEW_NUMERIC_RANGES,
   VISIONS_DISPATCH_NUMERIC_RANGES,
+  VISIONS_INTENT_NUMERIC_RANGES,
 } = require('../server/control-handlers');
 const { MEMORY_SPEC, PACK_DISTILLER_SPEC } = require('../server/core/settings-mill-core');
 const { USAGE_INTEGER_RANGES } = require('../server/usage-wiring');
@@ -30,6 +31,7 @@ test('server resolvers and wire specs reuse the shared range objects', () => {
   assert.strictEqual(PR_REVIEW_NUMERIC_RANGES.intervalMinutes, ranges.PR_REVIEW_INTERVAL_RANGE);
   assert.strictEqual(BRANCH_GC_NUMERIC_RANGES.staleDays, ranges.BRANCH_GC_STALE_DAYS_RANGE);
   assert.strictEqual(VISIONS_DISPATCH_NUMERIC_RANGES.quietMs, ranges.VISIONS_QUIET_MS_RANGE);
+  assert.strictEqual(VISIONS_INTENT_NUMERIC_RANGES.threadTtlMs, ranges.VISIONS_INTENT_THREAD_TTL_MS_RANGE);
   assert.strictEqual(POSTHOG_NUMERIC_RANGES.fixTimeoutSeconds, ranges.POSTHOG_FIX_TIMEOUT_RANGE);
 });
 

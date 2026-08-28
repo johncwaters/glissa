@@ -9,6 +9,7 @@ const BROWSER_MODULES = Object.freeze([
   Object.freeze({ id: '/shared/states.mjs', kind: 'constants', source: 'shared/states.js' }),
   Object.freeze({ id: '/shared/settings-ranges.mjs', kind: 'constants', source: 'shared/settings-ranges.js' }),
   Object.freeze({ id: '/shared/client-trust.mjs', kind: 'esm-file', source: 'shared/client-trust.esm.mjs' }),
+  Object.freeze({ id: '/shared/visions-intent-ids.mjs', kind: 'constants', source: 'shared/visions-intent-ids.js' }),
 ]);
 
 const BROWSER_MODULE_IDS = Object.freeze(BROWSER_MODULES.map((entry) => entry.id));

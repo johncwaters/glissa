@@ -57,7 +57,7 @@ test('an accepted intent proposal reaches the memory store the lane was handed',
 
     assert.equal(store.stats().byKind.intent, 1);
     const written = store.records().filter((record) => record.kind === 'intent');
-    assert.equal(written[0].text, 'the writers are wired');
+    assert.match(written[0].text, /^thread t-[0-9a-f]{8}: the writers are wired$/);
     assert.equal(written[0].source.kind, 'model');
     assert.equal(written[0].source.vendor, 'glissa');
   } finally {
@@ -74,7 +74,7 @@ test('the same proposal with memory off is recorded nowhere and costs the lane n
     lane.applyModelIntent('nothing to write to');
     await lane.whenMemoryIdle();
 
-    assert.equal(lane.getIntentFor(null).text, 'nothing to write to');
+    assert.equal(lane.getIntentFor(null).active.text, 'nothing to write to');
     assert.deepEqual(fs.readdirSync(booted.dir).filter((name) => name.startsWith('memory')), []);
   } finally {
     await booted.close();

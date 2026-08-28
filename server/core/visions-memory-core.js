@@ -4,25 +4,16 @@
 // M16 adds the read half: the lines one dispatch is handed, in the projection's own bullet shape.
 
 const { effectiveRank, projectionBulletFrom } = require('./memory-core');
+const { sanitizeOneLine } = require('./text-core');
+const { THREAD_ID_PATTERN, THREAD_ID_RE } = require('./visions-intent-core');
 
 const MEMORY_VENDOR = 'glissa';
 const MAX_FINDING_ID_CHARS = 120;
 const MAX_SERVED_KEYS = 500;
 const DEFAULT_BASENAME = 'document';
-// Unicode "Other": control, format and surrogate code points, none of which belong on a canon line.
-const OTHER_CATEGORY_RE = /\p{C}+/gu;
 
 function nonEmptyString(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : '';
-}
-
-// Glissa-authored lines are single-line by construction, so remembered text cannot forge one.
-function sanitizeOneLine(raw, maxChars) {
-  const value = String(raw == null ? '' : raw)
-    .replace(OTHER_CATEGORY_RE, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return value.slice(0, maxChars).trim();
 }
 
 function basenameOfUri(uri) {
@@ -49,8 +40,28 @@ function projectTagFor(projectId, scopeProjects) {
   return null;
 }
 
-function slotKeyOf(project) {
+function projectKeyOf(project) {
   return project === null || project === undefined ? '' : String(project);
+}
+
+// The thread an intent record belongs to rides its text as a prefix, since the record shape has no column
+// for it; anchored to the id shape so prose starting "thread pool sizing: " cannot mint a lineage.
+const INTENT_THREAD_PREFIX_RE = new RegExp(`^thread (${THREAD_ID_PATTERN}): `);
+
+function intentRecordText(text, threadId) {
+  const body = sanitizeOneLine(text, 600);
+  if (!body || !threadId || !THREAD_ID_RE.test(threadId)) return body;
+  return `thread ${threadId}: ${body}`;
+}
+
+function threadIdOfIntentText(text) {
+  const match = INTENT_THREAD_PREFIX_RE.exec(typeof text === 'string' ? text : '');
+  return match ? match[1] : null;
+}
+
+// One chain per project AND thread: keying on the project alone would supersede four threads out of five.
+function intentHeadKey(project, threadId) {
+  return `${projectKeyOf(project)}|${threadId || ''}`;
 }
 
 function positiveInteger(value) {
@@ -115,24 +126,27 @@ function memoryInput({
 }
 
 // Semantic, not episodic: a statement of what is being built is a standing claim, not an observed moment.
-function intentMemoryInput({ text, project = null, supersedes = null }) {
+function intentMemoryInput({
+  text, project = null, supersedes = null, threadId = null,
+}) {
   return memoryInput({
     kind: 'intent',
     layer: 'semantic',
     project,
     sourceKind: 'model',
-    text: sanitizeOneLine(text, 600),
+    text: intentRecordText(text, threadId),
     supersedes,
   });
 }
 
-// The chain head per slot, so a proposal supersedes the one it replaced rather than sitting beside it.
+// The chain head per project and thread, so a proposal supersedes the one it replaced rather than
+// sitting beside it. A record written before the prefix existed heads the unthreaded key.
 function latestIntentHeads(records) {
   const heads = new Map();
   const newestByKey = new Map();
   for (const record of Array.isArray(records) ? records : []) {
     if (!record || record.kind !== 'intent') continue;
-    const key = slotKeyOf(record.project);
+    const key = intentHeadKey(record.project, threadIdOfIntentText(record.text));
     const ts = Number(record.ts);
     if (!Number.isFinite(ts)) continue;
     const seen = newestByKey.get(key);
@@ -255,14 +269,14 @@ module.exports = {
   dispatchMemoryInputs,
   displayLineOfFix,
   fixFeedbackInput,
+  intentHeadKey,
   intentMemoryInput,
   latestIntentHeads,
   memoryDeliveryLines,
   projectTagFor,
   readDismissParams,
-  sanitizeOneLine,
   servedFeedbackInput,
   servedFindingOf,
   servedKey,
-  slotKeyOf,
+  threadIdOfIntentText,
 };

@@ -101,6 +101,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - The ceiling on a delivered projection is BYTES per project, not claims: a count bounds nothing an operator feels, so a project over `maxProjectChars` is compacted by a model first and evicted down to fit if that declines, never dropping a locked claim and never emptying a project (`server/core/memory-distill-core.js`).
 - `deadend` is a projected kind of its own because retiring a failed attempt forgets it and the next session proposes it again; it stands until a record shows the approach working.
 - The direct-read pointer line in a repo's own `AGENTS.md` stays operator-authored: it is the one instruction-tier link in the chain, which keeps the store agent-agnostic.
+- An intent record names its thread as a `thread <id>: ` text prefix, never a column: chains are keyed by project AND thread (`latestIntentHeads`), and the id shape has ONE definition, `VISIONS_THREAD_ID_PATTERN` in `shared/visions-intent-ids.js`, which the server cores and the browser decoder both build their regex from, short enough that the entropy screen can never refuse it.
 
 ### Ephemeral Lane Write Boundaries
 

@@ -3507,6 +3507,10 @@ a.pr-title:hover {
   gap: 4px;
 }
 
+.visions-intent-item.visions-intent-active .visions-intent-scope {
+  color: var(--accent, inherit);
+}
+
 .visions-intent-head {
   display: flex;
   align-items: baseline;

@@ -6,7 +6,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // visions-view-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/visions-view-core.mjs');
+const { importBrowserCore } = require('./helpers/browser-core');
+
+const importCore = () => importBrowserCore('public/visions-view-core.mjs');
 
 function finding(line, character, code, message) {
   return {
@@ -234,30 +236,37 @@ test('comment lines are already 1-based, unlike the LSP ranges beside them', asy
   assert.equal(hasComments({}), false);
 });
 
-// --- The intent block (docs/archive/plan-navigator.md, M5) ---
+// --- The intent block as threads (docs/plan-visions-4-focus.md, M20) ---
 
 const NOW = 1700000000000;
+const PROJECT = 'e1f4c0de-0000-4000-8000-000000000001';
+const OTHER_PROJECT = 'e1f4c0de-0000-4000-8000-000000000002';
 
-test('an intent slot is normalized, and anything malformed reads as no intent', async () => {
-  const { emptyIntent, normalizeIntentSlot } = await importCore();
-  assert.deepEqual(normalizeIntentSlot({
-    text: 'refactor of the spawn path', source: 'model', ts: NOW,
+function thread(id, text, ts = NOW, extra = {}) {
+  return {
+    id, text, uris: [], ts, hits: 1, ...extra,
+  };
+}
+
+test('a thread is normalized, and anything malformed reads as no thread', async () => {
+  const { normalizeIntentThread } = await importCore();
+  assert.deepEqual(normalizeIntentThread({
+    id: 't-716d49b4', text: 'refactor of the spawn path', uris: ['file:///a.md', 7], ts: NOW, hits: 3,
   }), {
-    text: 'refactor of the spawn path', source: 'model', ts: NOW,
+    id: 't-716d49b4', text: 'refactor of the spawn path', uris: ['file:///a.md'], ts: NOW, hits: 3,
   });
-
-  assert.deepEqual(normalizeIntentSlot(undefined), emptyIntent());
-  assert.deepEqual(normalizeIntentSlot(null), emptyIntent());
-  assert.deepEqual(normalizeIntentSlot('a bare string'), emptyIntent());
-  assert.deepEqual(normalizeIntentSlot({ text: 'x', source: 'somebody else', ts: 'soon' }), {
-    text: 'x', source: null, ts: 0,
+  assert.deepEqual(normalizeIntentThread({ text: 'a lifted slot', source: 'model', ts: 'soon' }), {
+    id: null, text: 'a lifted slot', uris: [], ts: 0, hits: 1,
   });
+  for (const raw of [undefined, null, 'a bare string', { text: '' }, { id: 't-716d49b4' }]) {
+    assert.equal(normalizeIntentThread(raw), null);
+  }
 });
 
 test('the source line credits the visions when a statement exists', async () => {
   const { intentSourceText } = await importCore();
-  assert.equal(intentSourceText({ text: 'x', source: 'model' }), 'proposed by visions');
-  assert.equal(intentSourceText({ text: '', source: 'model' }), '', 'no statement, nobody to credit');
+  assert.equal(intentSourceText({ text: 'x' }), 'proposed by visions');
+  assert.equal(intentSourceText({ text: '' }), '', 'no statement, nobody to credit');
 });
 
 test('the age reads coarsely, because the question is minutes or days and never seconds', async () => {
@@ -273,103 +282,115 @@ test('the age reads coarsely, because the question is minutes or days and never 
   assert.equal(intentAgeText(0, NOW), '');
 });
 
-test('the meta line joins the two, and says nothing at all when there is no statement', async () => {
-  const { emptyIntent, intentMetaText } = await importCore();
-  assert.equal(intentMetaText({ text: 'x', source: 'model', ts: NOW }, NOW + 120000), 'proposed by visions, 2 minutes ago');
-  assert.equal(intentMetaText({ text: 'x', source: 'model', ts: 0 }, NOW), 'proposed by visions');
-  assert.equal(intentMetaText(emptyIntent(), NOW), '');
+test('the meta line names the thread, the source and the age, and says nothing with no statement', async () => {
+  const { intentMetaText } = await importCore();
+  assert.equal(intentMetaText(thread('t-716d49b4', 'x'), NOW + 120000), 'thread t-716d49b4, proposed by visions, 2 minutes ago');
+  assert.equal(intentMetaText(thread('t-716d49b4', 'x', 0), NOW), 'thread t-716d49b4, proposed by visions');
+  assert.equal(intentMetaText(thread(null, 'x'), NOW + 120000), 'proposed by visions, 2 minutes ago');
+  assert.equal(intentMetaText({ text: '' }, NOW), '');
 });
 
-const PROJECT = 'e1f4c0de-0000-4000-8000-000000000001';
-const OTHER_PROJECT = 'e1f4c0de-0000-4000-8000-000000000002';
-
-test('a snapshot carries the whole per-project state, and the legacy flat shape reads as global', async () => {
+test('a snapshot carries every thread per project, and both legacy slot shapes lift into one thread each', async () => {
   const { emptyIntentState, intentStateOfMessage } = await importCore();
+  const a = thread('t-11111111', 'story A');
+  const b = thread('t-22222222', 'story B');
+  assert.deepEqual(intentStateOfMessage({
+    intent: { byProject: { [PROJECT]: [a, b], [OTHER_PROJECT]: [] }, unowned: [thread('t-33333333', 'unowned')] },
+  }), { byProject: { [PROJECT]: [a, b] }, unowned: [thread('t-33333333', 'unowned')] });
+
   assert.deepEqual(intentStateOfMessage({
     intent: {
       global: { text: 'the machine-wide belief', source: 'model', ts: NOW },
-      byProject: {
-        [PROJECT]: { text: 'this project only', source: 'model', ts: NOW },
-        [OTHER_PROJECT]: { text: '', source: 'model', ts: NOW },
-      },
+      byProject: { [PROJECT]: { text: 'this project only', source: 'model', ts: NOW } },
     },
-  }), {
-    global: { text: 'the machine-wide belief', source: 'model', ts: NOW },
-    byProject: { [PROJECT]: { text: 'this project only', source: 'model', ts: NOW } },
-  });
+  }), { byProject: { [PROJECT]: [thread(null, 'this project only')] }, unowned: [thread(null, 'the machine-wide belief')] });
 
   assert.deepEqual(intentStateOfMessage({ intent: { text: 'an older server', source: 'model', ts: NOW } }), {
-    global: { text: 'an older server', source: 'model', ts: NOW },
-    byProject: {},
+    byProject: {}, unowned: [thread(null, 'an older server')],
   });
-
   for (const msg of [{}, { intent: null }, { intent: 'a bare string' }, { intent: { byProject: 7 } }]) {
     assert.deepEqual(intentStateOfMessage(msg), emptyIntentState());
   }
 });
 
-test('an intent delta lands in the slot it names and leaves the rest of the state alone', async () => {
+test('an intent delta replaces the list of the project it names and leaves the rest alone', async () => {
   const { applyIntentMessage, emptyIntentState } = await importCore();
-  const withGlobal = applyIntentMessage(emptyIntentState(), {
-    intent: { text: 'the machine-wide belief', source: 'model', ts: NOW },
+  const unownedThread = thread('t-33333333', 'the unowned belief');
+  const withUnowned = applyIntentMessage(emptyIntentState(), {
+    intent: { active: unownedThread, threads: [unownedThread] },
   });
-  assert.deepEqual(withGlobal.global, { text: 'the machine-wide belief', source: 'model', ts: NOW });
+  assert.deepEqual(withUnowned, { byProject: {}, unowned: [unownedThread] });
 
-  const withProject = applyIntentMessage(withGlobal, {
-    projectId: PROJECT,
-    intent: { text: 'this project only', source: 'model', ts: NOW },
-  });
-  assert.equal(withProject.global.text, 'the machine-wide belief');
-  assert.equal(withProject.byProject[PROJECT].text, 'this project only');
+  const a = thread('t-11111111', 'story A');
+  const b = thread('t-22222222', 'story B');
+  const withProject = applyIntentMessage(withUnowned, { projectId: PROJECT, intent: { active: b, threads: [b, a] } });
+  assert.deepEqual(withProject, { byProject: { [PROJECT]: [b, a] }, unowned: [unownedThread] });
 
-  const junk = applyIntentMessage(withProject, { projectId: PROJECT, intent: { text: '', source: 'model' } });
-  assert.equal(junk, withProject, 'an empty statement is nothing to apply, never an instruction to blank one');
+  const emptied = applyIntentMessage(withProject, { projectId: PROJECT, intent: { active: null, threads: [] } });
+  assert.deepEqual(emptied, { byProject: {}, unowned: [unownedThread] }, 'an empty list is a project with nothing left');
+  assert.equal(applyIntentMessage(withProject, { projectId: PROJECT, intent: null }), withProject);
 });
 
-test('intent rows put the machine-wide statement first and name each project', async () => {
-  const { intentRows, VISIONS_INTENT_GLOBAL_LABEL } = await importCore();
+test('the active thread on the wire leads the list, and a payload naming none leaves the first one active', async () => {
+  const { applyIntentMessage, emptyIntentState, intentRows } = await importCore();
+  const a = thread('t-11111111', 'story A');
+  const b = thread('t-22222222', 'story B');
+  const named = applyIntentMessage(emptyIntentState(), { projectId: PROJECT, intent: { active: b, threads: [a, b] } });
+  assert.deepEqual(named.byProject[PROJECT], [b, a]);
+  assert.deepEqual(intentRows(named, null, NOW).map((row) => [row.text, row.active]), [['story B', true], ['story A', false]]);
+
+  const unnamed = applyIntentMessage(emptyIntentState(), { projectId: PROJECT, intent: { threads: [a, b] } });
+  assert.deepEqual(unnamed.byProject[PROJECT], [a, b], 'no active on the wire keeps the order it arrived in');
+  assert.deepEqual(intentRows(unnamed, null, NOW).map((row) => row.active), [true, false]);
+
+  const unknown = applyIntentMessage(emptyIntentState(), {
+    projectId: PROJECT, intent: { active: thread('t-99999999', 'gone'), threads: [a, b] },
+  });
+  assert.deepEqual(unknown.byProject[PROJECT], [a, b], 'an active the list does not carry moves nothing');
+});
+
+test('intent rows list the unowned threads first, then each project by name with its active thread first', async () => {
+  const { intentRows, VISIONS_INTENT_UNOWNED_LABEL } = await importCore();
   const state = {
-    global: { text: 'the machine-wide belief', source: 'model', ts: NOW },
     byProject: {
-      [OTHER_PROJECT]: { text: 'the other one', source: 'model', ts: NOW },
-      [PROJECT]: { text: 'this project only', source: 'model', ts: NOW },
+      [OTHER_PROJECT]: [thread('t-44444444', 'the other one')],
+      [PROJECT]: [thread('t-11111111', 'this project, active'), thread('t-22222222', 'this project, also')],
     },
+    unowned: [thread('t-33333333', 'the unowned belief')],
   };
   const names = new Map([[PROJECT, 'Alpha']]);
   const rows = intentRows(state, names, NOW + 120000);
-  assert.deepEqual(rows.map((row) => row.label), [VISIONS_INTENT_GLOBAL_LABEL, 'Alpha', OTHER_PROJECT]);
-  assert.deepEqual(rows.map((row) => row.text), ['the machine-wide belief', 'this project only', 'the other one']);
-  assert.equal(rows[1].meta, 'proposed by visions, 2 minutes ago');
+  assert.deepEqual(rows.map((row) => row.label), [VISIONS_INTENT_UNOWNED_LABEL, 'Alpha', 'Alpha', OTHER_PROJECT]);
+  assert.deepEqual(rows.map((row) => row.text), ['the unowned belief', 'this project, active', 'this project, also', 'the other one']);
+  assert.deepEqual(rows.map((row) => row.active), [true, true, false, true]);
+  assert.equal(rows[1].meta, 'thread t-11111111, proposed by visions, 2 minutes ago');
   assert.equal(rows.every((row) => row.hasText), true);
 });
 
-test('the machine-wide row is the empty state, and steps aside once a project speaks', async () => {
+test('the unowned row is the empty state, and steps aside once anything speaks', async () => {
   const { emptyIntentState, intentRows, VISIONS_INTENT_EMPTY_TEXT } = await importCore();
   const empty = intentRows(emptyIntentState(), null, NOW);
   assert.equal(empty.length, 1);
   assert.equal(empty[0].text, VISIONS_INTENT_EMPTY_TEXT);
   assert.equal(empty[0].hasText, false);
+  assert.equal(empty[0].active, false);
   assert.equal(empty[0].meta, '');
 
-  const scopedOnly = intentRows({
-    global: null,
-    byProject: { [PROJECT]: { text: 'this project only', source: 'model', ts: NOW } },
-  }, null, NOW);
-  assert.deepEqual(scopedOnly.map((row) => row.key), [PROJECT]);
+  const scopedOnly = intentRows({ byProject: { [PROJECT]: [thread('t-11111111', 'this project only')] }, unowned: [] }, null, NOW);
+  assert.deepEqual(scopedOnly.map((row) => row.key), [`${PROJECT}:t-11111111`]);
 });
 
-test('a repaint fires when any slot moves, and never on age alone', async () => {
+test('a repaint fires when a thread moves or the active one changes, and never on age alone', async () => {
   const { emptyIntentState, hasIntentStateChanged } = await importCore();
-  const state = {
-    global: { text: 'the machine-wide belief', source: 'model', ts: NOW },
-    byProject: { [PROJECT]: { text: 'this project only', source: 'model', ts: NOW } },
-  };
+  const a = thread('t-11111111', 'story A');
+  const b = thread('t-22222222', 'story B');
+  const state = { byProject: { [PROJECT]: [a, b] }, unowned: [thread('t-33333333', 'unowned')] };
   assert.equal(hasIntentStateChanged(state, {
-    global: { ...state.global, ts: NOW + 90000 },
-    byProject: { [PROJECT]: { ...state.byProject[PROJECT], ts: NOW + 90000 } },
+    byProject: { [PROJECT]: [{ ...a, ts: NOW + 90000 }, b] }, unowned: [{ ...state.unowned[0], ts: NOW + 90000 }],
   }), false);
-  assert.equal(hasIntentStateChanged(state, { ...state, global: { ...state.global, text: 'moved' } }), true);
-  assert.equal(hasIntentStateChanged(state, { global: state.global, byProject: {} }), true);
+  assert.equal(hasIntentStateChanged(state, { ...state, byProject: { [PROJECT]: [{ ...a, text: 'moved' }, b] } }), true);
+  assert.equal(hasIntentStateChanged(state, { ...state, byProject: { [PROJECT]: [b, a] } }), true, 'the active thread changed');
+  assert.equal(hasIntentStateChanged(state, { byProject: {}, unowned: state.unowned }), true);
   assert.equal(hasIntentStateChanged(emptyIntentState(), state), true);
   assert.equal(hasIntentStateChanged(null, emptyIntentState()), false);
 });

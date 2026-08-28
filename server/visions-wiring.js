@@ -10,12 +10,15 @@ const {
 } = require('./core/visions-buffer-core');
 const {
   ERROR_BACKOFF_THRESHOLD,
+  ORIENTATION_REASON,
   buildVisionsPrompt,
   createDispatchState,
   decideDispatch,
   decideDocumentSize,
   decidePromptSize,
+  filterComments,
   forgetUri,
+  formatDroppedComments,
   hashText,
   commentsToLsp,
   handToLsp,
@@ -25,17 +28,20 @@ const {
   resolveDispatchConfig,
   sanitizeModelDiagnostics,
 } = require('./core/visions-dispatch-core');
+const {
+  createTouchState, formatTouchedRanges, recordChanges, resetUri: resetTouchedUri, touchedRangesFor,
+} = require('./core/visions-touch-core');
 const { isUriInProjects, projectForUri, scopePathsOf } = require('./core/visions-scope-core');
 const {
+  DEFAULT_THREAD_TTL_MS,
   applyModelIntent: mergeModelIntent,
-  createIntentSlot,
   createIntentState,
   intentPayload,
-  intentSlotFor,
-  intentSlotPayload,
-  intentTextFor,
+  intentProjectPayload,
   isEmptyIntent,
+  liveThreadsFor,
   pruneIntentProjects,
+  retireStaleThreads,
   reviveIntentState,
 } = require('./core/visions-intent-core');
 const {
@@ -43,6 +49,7 @@ const {
   dismissFeedbackInput,
   dispatchMemoryInputs,
   fixFeedbackInput,
+  intentHeadKey,
   intentMemoryInput,
   MAX_DELIVERED_RECORDS,
   latestIntentHeads,
@@ -52,7 +59,6 @@ const {
   servedFeedbackInput,
   servedFindingOf,
   servedKey,
-  slotKeyOf,
 } = require('./core/visions-memory-core');
 const { sweepMarkdownWithFixes } = require('./core/visions-rules-core');
 const {
@@ -121,12 +127,13 @@ function readFrame(raw) {
 
 function isPersistedEmptyIntentFile(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
-  const legacyEmpty = createIntentSlot();
-  if (raw.text === legacyEmpty.text && raw.source === legacyEmpty.source && raw.ts === legacyEmpty.ts) return true;
+  if (raw.text === '' && raw.source === null && raw.ts === 0) return true;
   const byProject = raw.byProject;
   const hasEmptyMap = byProject && typeof byProject === 'object' && !Array.isArray(byProject)
     && Object.keys(byProject).length === 0;
-  return raw.global === null && hasEmptyMap;
+  if (!hasEmptyMap) return false;
+  if (Array.isArray(raw.unowned)) return raw.unowned.length === 0;
+  return raw.global === null;
 }
 
 function shouldWarnForInvalidIntentFile(raw, revived) {
@@ -179,7 +186,7 @@ function changeFailureReason(uri, version, result) {
  *   contextDigest?: ((options: { scopes: null, budgetChars: number, now: number }) => string | null) | null, contextSeq?: (() => number | null) | null,
  *   scopeProjects?: { id: string, path: string }[] | null, knownProjectIds?: string[] | null,
  *   getMemoryStore?: (() => { append: (input: object) => Promise<{ id: string } | null>, records?: () => object[], retrieve?: (options: { query: string, project: string | null, limit: number }) => object[], noteDelivered?: (text: string) => void, readPublishedManifest?: () => Promise<{ version?: string } | null> } | null) | null,
- *   onEditorEvent?: ((event: { method: string, uri: string }) => void) | null, memoryDeliveryLimit?: number, intentStatePath?: string | null,
+ *   onEditorEvent?: ((event: { method: string, uri: string }) => void) | null, memoryDeliveryLimit?: number, intentStatePath?: string | null, intentThreadTtlMs?: number,
  *   fsFns?: typeof fs, fsPromises?: typeof fsPromisesDefault, digestBudgetChars?: number, hashFn?: (text: string) => string,
  *   buildPrompt?: typeof buildVisionsPrompt, debug?: boolean | (() => boolean) }} [options]
  */
@@ -221,6 +228,8 @@ function createVisionsWiring({
   // How many remembered records one dispatch prompt may carry (docs/plan-visions-3.md, M16).
   memoryDeliveryLimit = MAX_DELIVERED_RECORDS,
   intentStatePath = null,
+  // A thread nobody advanced for this long retires on the next read (docs/plan-visions-4-focus.md, M20).
+  intentThreadTtlMs = DEFAULT_THREAD_TTL_MS,
   fsFns = fs,
   fsPromises = fsPromisesDefault,
   digestBudgetChars = DIGEST_BUDGET_CHARS,
@@ -264,7 +273,7 @@ function createVisionsWiring({
   // What the lane has actually touched, applied and refused alike: the tab's audit of tier 1.
   let fixLog = [];
   let nextApplyEditId = 1;
-  // The intent model (docs/archive/plan-navigator.md, M5), one statement per project.
+  // The intent model (docs/plan-visions-4-focus.md, M20): threads per project, uri-bound, decaying on read.
   const scopePaths = scopePathsOf(scopeProjects);
   let intentState = loadIntentState({
     intentStatePath, fsFns, warn, knownProjectIds,
@@ -316,7 +325,8 @@ function createVisionsWiring({
     }
   }
   const servedFindingKeys = createBoundedKeySet();
-  const intentHeadByProject = new Map();
+  // Keyed by project AND thread, with the pre-thread legacy head under the thread-less key.
+  const intentHeadByKey = new Map();
   let intentHeadsSeeded = false;
   // One chain for every memory write, so a supersession can never interleave with the record it names.
   let memoryChain = Promise.resolve();
@@ -350,22 +360,39 @@ function createVisionsWiring({
     if (intentHeadsSeeded) return;
     intentHeadsSeeded = true;
     if (typeof store.records !== 'function') return;
-    for (const [key, id] of latestIntentHeads(store.records())) intentHeadByProject.set(key, id);
+    for (const [key, id] of latestIntentHeads(store.records())) intentHeadByKey.set(key, id);
   }
 
-  function rememberIntent(text, projectTag) {
+  /*
+   * The head this advance supersedes: its own thread's, or the unthreaded legacy head under the same
+   * project key, which the first advance of ANY thread closes so it cannot stay valid beside them. The
+   * legacy key only comes back to be closed; the close itself waits for a record that supersedes it.
+   */
+  function readIntentHead(projectTag, threadId) {
+    const own = intentHeadKey(projectTag, threadId);
+    if (intentHeadByKey.has(own)) return { key: own, head: intentHeadByKey.get(own), legacyKey: null };
+    const legacyKey = intentHeadKey(projectTag, null);
+    return { key: own, head: intentHeadByKey.get(legacyKey) || null, legacyKey };
+  }
+
+  function rememberIntent(thread, projectTag) {
+    if (!thread) return;
     queueMemoryWrite(async (store) => {
       seedIntentHeads(store);
-      const key = slotKeyOf(projectTag);
+      const { key, head, legacyKey } = readIntentHead(projectTag, thread.id);
       const input = intentMemoryInput({
-        text, project: projectTag, supersedes: intentHeadByProject.get(key) || null,
+        text: thread.text, project: projectTag, supersedes: head, threadId: thread.id,
       });
-      // Nothing to remember is not a refusal, so it leaves the chain head exactly where it was.
+      // Nothing to remember is not a refusal, so it leaves both heads exactly where they were.
       if (!input) return;
       const record = await store.append(input);
       // A refused write leaves the chain naming a head no later record could resolve, so it starts over.
-      if (!record) intentHeadByProject.delete(key);
-      if (record) intentHeadByProject.set(key, record.id);
+      if (!record) {
+        intentHeadByKey.delete(key);
+        return;
+      }
+      intentHeadByKey.set(key, record.id);
+      if (legacyKey) intentHeadByKey.delete(legacyKey);
     });
   }
 
@@ -434,9 +461,13 @@ function createVisionsWiring({
     }
   }
 
-  function recordModelDiagnostics(uri, result, doc) {
-    const { diagnostics, lintDomainDropped } = sanitizeModelDiagnostics(result?.diagnostics, { text: doc?.text || '' });
+  /** @param {string} uri @param {{ diagnostics?: unknown }} result @param {{ text?: string } | null} doc @param {{ start: number, end: number }[]} touchedRanges */
+  function recordModelDiagnostics(uri, result, doc, touchedRanges) {
+    const { diagnostics, lintDomainDropped, outOfTouchDropped } = sanitizeModelDiagnostics(result?.diagnostics, {
+      text: doc?.text || '', touchedRanges,
+    });
     if (lintDomainDropped > 0) debugNote(() => `dropped ${lintDomainDropped} model diagnostics in the toolchain domain`);
+    if (outOfTouchDropped > 0) note(`dropped ${outOfTouchDropped} model diagnostic(s) for ${uri} outside the edited lines`);
     const hadDiagnostics = modelDiagnosticsByUri.has(uri);
     if (diagnostics.length === 0) modelDiagnosticsByUri.delete(uri);
     if (diagnostics.length > 0) modelDiagnosticsByUri.set(uri, diagnostics);
@@ -570,33 +601,84 @@ function createVisionsWiring({
     }));
   }
 
-  function broadcastIntent(projectId) {
+  /** @param {string | null} projectId @param {string | null} [uri] */
+  function broadcastIntent(projectId, uri = null) {
     if (typeof broadcast !== 'function') return;
     broadcast({
       type: 'visions-intent',
       projectId: projectId || null,
-      intent: intentSlotPayload(intentSlotFor(intentState, projectId)),
+      intent: intentProjectPayload(intentState, projectId, uri),
       ts: nowFn(),
     });
   }
 
-  function commitIntent(merged, projectId) {
+  function persistIntent() {
+    if (!intentStateWriter) return;
+    const payload = intentPayload(intentState);
+    intentStateWriter.write(payload, () => JSON.stringify(payload, null, 2));
+  }
+
+  /** @param {{ changed: boolean, state: import('./core/visions-intent-core').IntentState, thread: import('./core/visions-intent-core').IntentThread | null }} merged @param {string | null} projectId @param {string | null} [uri] */
+  function commitIntent(merged, projectId, uri = null) {
     if (!merged.changed) return false;
     intentState = merged.state;
-    if (intentStateWriter) {
-      const payload = intentPayload(intentState);
-      intentStateWriter.write(payload, () => JSON.stringify(payload, null, 2));
-    }
-    broadcastIntent(projectId);
-    rememberIntent(intentSlotFor(intentState, projectId)?.text, projectTagFor(projectId, scopeProjects));
+    persistIntent();
+    broadcastIntent(projectId, uri);
+    rememberIntent(merged.thread, projectTagFor(projectId, scopeProjects));
     return true;
   }
 
-  function applyModelIntent(text, projectId = null) {
-    const changed = commitIntent(mergeModelIntent(intentState, { text, now: nowFn(), projectId }), projectId);
-    if (!changed) return false;
-    const slot = intentSlotFor(intentState, projectId);
-    note(`intent model-set for ${projectId || 'all projects'} (${(slot ? slot.text : '').length} chars)`);
+  // Decay happens here, on the read, never on a timer; a project whose list shrank is told once.
+  function retireIntentThreads() {
+    const retired = retireStaleThreads(intentState, { now: nowFn(), ttlMs: intentThreadTtlMs });
+    if (!retired.changed) return;
+    intentState = retired.state;
+    persistIntent();
+    for (const projectId of retired.projects) broadcastIntent(projectId);
+    note('intent threads retired on read');
+  }
+
+  // The one way to read the intent: every reader decays first, or a lane with dispatch off serves
+  // threads nothing will ever retire.
+  function currentIntentState() {
+    retireIntentThreads();
+    return intentState;
+  }
+
+  /** @param {unknown} intent @param {string | null} [projectId] @param {string | null} [uri] */
+  function applyModelIntent(intent, projectId = null, uri = null) {
+    // Against the decayed state, never the standing one: a dispatch that outlives the ttl of the thread
+    // it was reading would otherwise revive it by advancing it.
+    const merged = mergeModelIntent(currentIntentState(), {
+      intent, now: nowFn(), projectId, uri,
+    });
+    // A count and never the text: the id a session named is its own claim, not a fact about the canon.
+    if (merged.refused) note(`intent proposal refused for ${projectId || 'unowned'}: ${merged.refused}`);
+    const changed = commitIntent(merged, projectId, uri);
+    const { thread } = merged;
+    if (!changed || !thread) return false;
+    note(`intent model-set for ${projectId || 'unowned'} (thread ${thread.id}, ${thread.text.length} chars)`);
+    return true;
+  }
+
+  /*
+   * THE one place the orientation rule lives (docs/plan-visions-4-focus.md, M21). An orientation is
+   * asked for intent and hand alone, so every comment and diagnostic it returns is discarded unread and
+   * the sections an earlier dispatch published stand: writing its empty answer over them blanked a
+   * window's findings the moment a second window opened the same document. A hand it did not raise is
+   * likewise not a hand it lowered.
+   */
+  function applyOrientationResult(uri, result, doc, send) {
+    const discarded = result.verdict === 'COMMENTS' && Array.isArray(result.comments) ? result.comments.length : 0;
+    if (discarded > 0) note(`refused comments for ${uri}: orientation=${discarded}`);
+    const hand = handFromResult(result);
+    rememberRecords(dispatchMemoryInputs({ uri, project: projectTagForUri(uri), comments: [], hand }));
+    if (!hand) return true;
+    const handUpdate = recordHand(uri, hand, doc);
+    if (!handUpdate.changed) return true;
+    const merged = unionDiagnosticsFor(uri);
+    publishDiagnosticsFrame(send, uri, merged);
+    recordFindings(uri, merged);
     return true;
   }
 
@@ -605,16 +687,29 @@ function createVisionsWiring({
    * verdict, timeout) leaves the standing comments exactly as they were: the lane says nothing rather
    * than inventing something or blanking a section because one session fell over.
    */
-  function applyDispatchResult(uri, result, doc, send) {
+  /**
+   * The focus gate runs HERE, on the returned result, so the wiring tests exercise it behind whatever
+   * fake dispatch they inject and touched ranges never enter the dispatch contract.
+   * @param {{ touchedRanges: { start: number, end: number }[], orientation: boolean, activeThread: object | null }} focus
+   */
+  function applyDispatchResult(uri, result, doc, send, focus) {
     if (result.verdict === 'ERROR') {
       warn(`dispatch for ${uri} failed: ${result.reason || 'no reason given'}`);
       return false;
     }
     if (result.reason) note(`dispatch for ${uri}: ${result.reason}`);
-    const modelUpdate = recordModelDiagnostics(uri, result, doc);
-    const comments = result.verdict === 'COMMENTS' ? result.comments : [];
+    if (focus.orientation) return applyOrientationResult(uri, result, doc, send);
+    const modelUpdate = recordModelDiagnostics(uri, result, doc, focus.touchedRanges);
+    const filtered = filterComments({
+      comments: result.verdict === 'COMMENTS' ? result.comments : [],
+      hand: handFromResult(result),
+      touchedRanges: focus.touchedRanges,
+      activeThread: focus.activeThread,
+    });
+    const refusedCounts = formatDroppedComments(filtered.dropped);
+    if (refusedCounts) note(`refused comments for ${uri}: ${refusedCounts}`);
+    const { comments, hand } = filtered;
     const commentUpdate = recordComments(uri, comments, doc);
-    const hand = handFromResult(result);
     // Recorded BEFORE the publish below, or a hand raised on its own never reaches the editor: the
     // frame it belongs in has already gone out by the time the old order got here.
     const handUpdate = recordHand(uri, hand, doc);
@@ -701,7 +796,7 @@ function createVisionsWiring({
     const documents = documentsSnapshot();
     note(`snapshot served: ${documents.length} documents`);
     return {
-      type: 'visions-snapshot', documents, intent: intentPayload(intentState), fixes: fixLog, ts: nowFn(),
+      type: 'visions-snapshot', documents, intent: intentPayload(currentIntentState()), fixes: fixLog, ts: nowFn(),
     };
   }
 
@@ -710,6 +805,9 @@ function createVisionsWiring({
     const store = createDocStore();
     const sweepTimersByUri = new Map();
     const dispatchTimersByUri = new Map();
+    // Per connection and per open, beside the store: a uri open in two windows orients in each.
+    const touchState = createTouchState();
+    const orientedUris = new Set();
     // applyEdit requests this relay owes an answer for, keyed by the id the lane minted for each.
     const pendingApplyEditById = new Map();
     let closed = false;
@@ -744,6 +842,7 @@ function createVisionsWiring({
       const textHash = hashFn(text);
       const projectId = projectForUri(uri, scopeProjects);
       const seq = readContextSeq();
+      const touchedRanges = touchedRangesFor(touchState, uri);
       const decision = decideDispatch({
         state: dispatchState,
         uri,
@@ -755,6 +854,8 @@ function createVisionsWiring({
         contextSeq: seq,
         armedBy,
         inScope: isUriInScope(uri),
+        editedSinceOpen: touchedRanges.length > 0,
+        oriented: orientedUris.has(uri),
       });
       if (!decision.dispatch) {
         noteGate(uri, decision);
@@ -765,6 +866,12 @@ function createVisionsWiring({
         noteGate(uri, documentSizeDecision);
         return;
       }
+      const orientation = decision.reason === ORIENTATION_REASON;
+      const [activeThread = null, ...rest] = liveThreadsFor(currentIntentState(), projectId, uri);
+      // liveThreadsFor leads with every thread bound to this uri, and "also in flight, not this
+      // document" must name none of them.
+      const otherThreads = rest.filter((thread) => !thread.uris.includes(uri));
+      const focus = { touchedRanges, orientation, activeThread };
       dispatchInFlight = true;
       /** @type {{ verdict: string, errorSource?: string | null, reason?: string | null, diagnostics?: unknown, comments?: unknown, hand?: unknown, intent?: unknown } | null} */
       let result = null;
@@ -775,9 +882,11 @@ function createVisionsWiring({
           uri,
           text,
           findings: standingFindingsFor(uri),
-          intent: intentTextFor(intentState, projectId),
+          intent: { active: activeThread, others: otherThreads },
           digest,
           memory,
+          touchedRanges,
+          orientation,
         });
         const sizeDecision = decidePromptSize(prompt, decision.trigger);
         if (!sizeDecision.dispatch) {
@@ -786,13 +895,15 @@ function createVisionsWiring({
         }
         lastGateByUri.delete(uri);
         recordDispatch(dispatchState, {
-          uri, textHash, now: nowFn(), contextSeq: seq, trigger: decision.trigger,
+          uri, textHash, now: nowFn(), contextSeq: seq, trigger: decision.trigger, reason: decision.reason,
         });
+        if (orientation) orientedUris.add(uri);
+        note(`dispatching ${uri}: ${orientation ? 'orientation' : `edited lines ${formatTouchedRanges(touchedRanges)}`}`);
         result = await dispatch({
           uri,
           text,
           findings: standingFindingsFor(uri),
-          intent: intentTextFor(intentState, projectId),
+          intent: activeThread ? activeThread.text : '',
           digest,
           memory,
           prompt,
@@ -820,9 +931,9 @@ function createVisionsWiring({
         note(`dropped a dispatch result for ${uri}: the buffer moved`);
         return;
       }
-      const recorded = applyDispatchResult(uri, result, currentDoc, send);
+      const recorded = applyDispatchResult(uri, result, currentDoc, send, focus);
       if (!recorded) return;
-      const intentMoved = applyModelIntent(result.intent, projectId);
+      const intentMoved = applyModelIntent(result.intent, projectId, uri);
       note(`dispatch for ${uri} applied: ${result.verdict}, ${(commentsByUri.get(uri) || []).length} comments, hand=${handsByUri.has(uri) ? 'yes' : 'no'}, intent-moved=${intentMoved ? 'yes' : 'no'}`);
     }
 
@@ -988,6 +1099,8 @@ function createVisionsWiring({
         const uri = uriOfParams(params);
         reportEditorEvent('textDocument/didOpen', uri);
         claimUri(uri, connection);
+        resetTouchedUri(touchState, uri);
+        orientedUris.delete(uri);
         const doc = uri ? getDoc(store, uri) : null;
         if (doc) note(`didOpen ${uri} (${doc.text.length} chars, ${listDocs(store).length} open)`);
         scheduleSweep(uri);
@@ -1001,6 +1114,7 @@ function createVisionsWiring({
         if (!result.applied) return changeFailureReason(uri, version, result);
         const doc = uri ? getDoc(store, uri) : null;
         dropDispatchDiagnostics(uri);
+        if (uri && doc && isMarkdownDoc(doc)) recordChanges(touchState, uri, result.changes || [], doc.text);
         // Debug only: this fires once per keystroke burst on every open buffer.
         debugNote(() => `didChange ${uri} v${version} (${result.changeCount} changes, ${result.size} chars)`);
         scheduleSweep(uri);
@@ -1053,6 +1167,8 @@ function createVisionsWiring({
         cancelDispatch(uri);
         const result = applyDidClose(store, params);
         const isLastOwner = releaseUri(uri, connection);
+        resetTouchedUri(touchState, uri);
+        orientedUris.delete(uri);
         if (!result.applied) return result.reason;
         reportEditorEvent('textDocument/didClose', uri);
         note(`didClose ${uri} (${listDocs(store).length} open)`);
@@ -1170,8 +1286,8 @@ function createVisionsWiring({
     snapshotMessage,
     applyModelIntent,
     noteActivity,
-    getIntent: () => intentPayload(intentState),
-    getIntentFor: (projectId = null) => intentSlotPayload(intentSlotFor(intentState, projectId)),
+    getIntent: () => intentPayload(currentIntentState()),
+    getIntentFor: (projectId = null, uri = null) => intentProjectPayload(currentIntentState(), projectId, uri),
     whenIntentPersistenceIdle: () => (intentStateWriter ? intentStateWriter.idle() : Promise.resolve()),
     // Settles once every queued memory write has landed, which is how a test waits for the writers.
     whenMemoryIdle: () => memoryChain,

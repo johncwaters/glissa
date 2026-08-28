@@ -118,6 +118,16 @@ function rangedChangeParams(uri, version, contentChanges) {
 }
 
 /*
+ * A buffer opened AND edited: since M19 a freshly opened document is an orientation (intent and hand
+ * only), so every dispatch test that wants comments or an edit-classified trigger types first. The
+ * open is version 0 so the tests' own didChange versions still count upward from 2.
+ */
+function openEdited(lsp, uri, text) {
+  lsp('textDocument/didOpen', { textDocument: { uri, languageId: 'markdown', version: 0, text: '#\n' } });
+  lsp('textDocument/didChange', didChangeParams(uri, 1, text));
+}
+
+/*
  * The staleness defect this pins: an incremental didChange used to be refused outright, so the mirrored
  * buffer stayed frozen at its didOpen text, no sweep was ever scheduled, and every tier below read a
  * document the carbon unit had already moved on from.
@@ -216,7 +226,8 @@ test('intent lines name the source and the size, never the sentence', (t) => {
 
   wiring.applyModelIntent(statement);
   const intentLines = notes.filter((line) => line.includes('intent '));
-  assert.deepEqual(intentLines, [`[visions] intent model-set for all projects (${statement.length} chars)`]);
+  assert.equal(intentLines.length, 1);
+  assert.match(intentLines[0], new RegExp(`^\\[visions\\] intent model-set for unowned \\(thread t-[0-9a-f]{8}, ${statement.length} chars\\)$`));
   assert.equal(notes.some((line) => line.includes('nobody should find')), false);
 });
 
@@ -454,7 +465,7 @@ test('a lane with no broadcast injected still sweeps and still tracks findings',
 
 // --- Tier 3 model dispatch (docs/archive/plan-navigator.md, M4), spawner injected ---
 
-const COMMENT = { line: 3, message: 'The repeat is a symptom; the sentence is doing two jobs.' };
+const COMMENT = { line: 3, message: 'The repeat is a symptom; the sentence is doing two jobs.', basis: 'edit' };
 const MODEL_DIAGNOSTIC = { line: 1, message: 'The title is missing a concrete noun.' };
 
 /**
@@ -491,7 +502,7 @@ test('a dispatch fires one quiet window after a sweep publishes, carrying the bu
   const { wiring, timers, calls, lsp } = dispatchingConnection();
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   timers.runPending();
   assert.equal(calls.length, 0, 'the publish is not the dispatch');
   assert.equal(timers.pendingCount, 1, 'it armed the quiet window instead');
@@ -509,7 +520,7 @@ test('a scoped visions skips sweep and refuses dispatch for an out-of-scope docu
   const { wiring, timers, sent, calls, notes, lsp } = dispatchingConnection({ scopeProjects: [{ id: PROJECT_ID, path: '/tmp/project' }] });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(uri, 'markdown', '# Title\n\nOutside'));
+  openEdited(lsp, uri, '# Title\n\nOutside');
   assert.equal(timers.pendingCount, 0, 'out-of-scope open does not arm a sweep');
   assert.equal(sent.length, 0, 'out-of-scope open publishes nothing');
 
@@ -526,7 +537,7 @@ test('a scoped visions sweeps and dispatches an in-scope document normally', asy
   const { wiring, timers, sent, calls, lsp } = dispatchingConnection({ scopeProjects: [{ id: PROJECT_ID, path: '/tmp' }] });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   assert.equal(timers.pendingCount, 1);
 
   runSweepThenDispatch(timers);
@@ -539,7 +550,7 @@ test('an edit restarts the quiet window rather than letting the armed one run ou
   const { wiring, connection, timers, calls, lsp } = dispatchingConnection();
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   timers.runPending();
   const armed = timers.pendingIds[0];
 
@@ -558,7 +569,7 @@ test('a save evaluates the same gate at once instead of waiting out the quiet wi
   const { wiring, calls, lsp } = dispatchingConnection();
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
   await wiring.whenDispatchSettled();
   assert.equal(calls.length, 1, 'a save IS the pause boundary');
@@ -568,7 +579,7 @@ test('a blank-line didChange evaluates the dispatch gate without waiting out the
   const { wiring, timers, calls, lsp } = dispatchingConnection();
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', '# Title\n\nA thought'));
+  openEdited(lsp, MARKDOWN_URI, '# Title\n\nA thought');
   lsp('textDocument/didChange', rangedChangeParams(MARKDOWN_URI, 2, [
     { range: { start: { line: 2, character: 9 }, end: { line: 2, character: 9 } }, text: '\n' },
   ]));
@@ -581,7 +592,7 @@ test('a blank-line didChange still obeys dispatch gates', async (t) => {
   const { wiring, calls, notes, lsp } = dispatchingConnection({ dispatch: { cooldownMs: 300000 } });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', '# Title\n\nA thought'));
+  openEdited(lsp, MARKDOWN_URI, '# Title\n\nA thought');
   lsp('textDocument/didChange', rangedChangeParams(MARKDOWN_URI, 2, [
     { range: { start: { line: 2, character: 9 }, end: { line: 2, character: 9 } }, text: '\n' },
   ]));
@@ -600,7 +611,7 @@ test('a non-boundary didChange only arms the normal quiet window', async (t) => 
   const { wiring, timers, calls, lsp } = dispatchingConnection();
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, '# Title\n\nA rewritten line with with a repeat.\n'));
   await wiring.whenDispatchSettled();
   assert.equal(calls.length, 0, 'no immediate dispatch for ordinary edits');
@@ -615,7 +626,7 @@ test('a second boundary inside the cooldown is skipped with one line naming the 
   const { wiring, timers, calls, notes, lsp, clock } = dispatchingConnection({ dispatch: { cooldownMs: 300000 } });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
   assert.equal(calls.length, 1);
@@ -636,7 +647,7 @@ test('an unchanged buffer is never dispatched twice, whatever the boundary', asy
   const { wiring, timers, calls, notes, lsp, clock } = dispatchingConnection({ dispatch: { cooldownMs: 1 } });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -656,7 +667,7 @@ test('a boundary reached while a dispatch is in flight is gated, not queued', as
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   const inFlight = wiring.whenDispatchSettled();
   assert.equal(calls.length, 1);
@@ -676,12 +687,12 @@ test('the hourly budget is machine-wide: a second document is gated once it is s
   const { wiring, timers, calls, notes, lsp } = dispatchingConnection({ dispatch: { cooldownMs: 1, maxPerHour: 1 } });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
   assert.equal(calls.length, 1);
 
-  lsp('textDocument/didOpen', didOpenParams(otherUri, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, otherUri, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
   assert.equal(calls.length, 1, 'a different document, but the same hour');
@@ -694,7 +705,7 @@ test('an oversized prompt spawns nothing and spends neither cooldown nor hourly 
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', `# Title\n\n${'x'.repeat(MAX_PROMPT_BYTES)}\n`));
+  openEdited(lsp, MARKDOWN_URI, `# Title\n\n${'x'.repeat(MAX_PROMPT_BYTES)}\n`);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
   assert.equal(calls.length, 0);
@@ -711,8 +722,8 @@ test('empty and whitespace-only documents spawn nothing and spend no hourly slot
   const { wiring, timers, calls, notes, lsp } = dispatchingConnection({ dispatch: { maxPerHour: 1 } });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', ''));
-  lsp('textDocument/didOpen', didOpenParams(otherUri, 'markdown', '  \n\t'));
+  openEdited(lsp, MARKDOWN_URI, '');
+  openEdited(lsp, otherUri, '  \n\t');
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
   assert.equal(calls.length, 0);
@@ -720,7 +731,7 @@ test('empty and whitespace-only documents spawn nothing and spend no hourly slot
 
   lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
   lsp('textDocument/didClose', { textDocument: { uri: otherUri } });
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
   assert.equal(calls.length, 1);
@@ -737,7 +748,7 @@ test('an oversized document skips memory retrieval and prompt construction', asy
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', 'x'.repeat(MAX_PROMPT_BYTES + 1)));
+  openEdited(lsp, MARKDOWN_URI, 'x'.repeat(MAX_PROMPT_BYTES + 1));
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
   assert.equal(calls.length, 0);
@@ -756,7 +767,7 @@ test('an assembled oversized prompt releases the dispatch gate without charging 
   t.after(() => wiring.stop());
 
   wiring.applyModelIntent('Keep the implementation reviewable.');
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', rawText));
+  openEdited(lsp, MARKDOWN_URI, rawText);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
   assert.equal(calls.length, 0, 'the raw document fits, but its findings, intent, and memory push the prompt over the cap');
@@ -774,7 +785,7 @@ test('a COMMENTS result is broadcast for that uri and joins the connect-time sna
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -797,7 +808,7 @@ test('a dispatch with no model diagnostics leaves the rule-only publish stream u
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -814,7 +825,7 @@ test('model diagnostics publish and broadcast as a union after rule diagnostics'
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -833,7 +844,7 @@ test('a dispatch comment reaches the editor and dies with the next keystroke', a
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -865,7 +876,7 @@ test('lint-domain model diagnostics are dropped with a debug count only', async 
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -891,7 +902,7 @@ test('model diagnostics are replaced wholesale by each dispatch', async (t) => {
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -921,7 +932,7 @@ test('absent model diagnostics clear the standing model diagnostics', async (t) 
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -941,7 +952,7 @@ test('didChange drops model diagnostics before the next rule-only publish', asyn
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -958,7 +969,7 @@ test('didClose clears standing model diagnostics', async (t) => {
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', CLEAN_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, CLEAN_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
   assert.deepEqual(wiring.documentsSnapshot()[0].diagnostics.map((diagnostic) => diagnostic.code), ['model']);
@@ -980,7 +991,7 @@ test('an ERROR verdict leaves standing model diagnostics untouched', async (t) =
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', CLEAN_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, CLEAN_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -1004,7 +1015,7 @@ test('a NONE result clears that document rather than storing an empty section', 
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -1029,7 +1040,7 @@ test('an ERROR verdict warns and leaves the standing comments exactly as they we
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
   const afterFirst = broadcasts.filter((message) => message.type === 'visions-comments').length;
@@ -1050,7 +1061,7 @@ test('didClose drops the comments with the findings and tells the tab about both
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -1064,10 +1075,10 @@ test('didClose drops the comments with the findings and tells the tab about both
 test('shared uri state survives until its last owner closes', async (t) => {
   const harness = dispatchingConnection({
     dispatch: { cooldownMs: 300000 },
-    respond: () => Promise.resolve({
+    respond: (_args, count) => Promise.resolve({
       verdict: 'COMMENTS',
       comments: [COMMENT],
-      hand: 'the document mixes two structures',
+      hand: count === 1 ? 'the document mixes two structures' : null,
       reason: null,
     }),
   });
@@ -1076,7 +1087,7 @@ test('shared uri state survives until its last owner closes', async (t) => {
   const secondConnection = harness.wiring.openConnection({ send: (message) => secondSent.push(message) });
   const secondLsp = (method, params) => secondConnection.handleFrame(JSON.stringify({ type: 'lsp', method, params }));
 
-  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(harness.lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(harness.timers);
   await harness.wiring.whenDispatchSettled();
   secondLsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
@@ -1102,7 +1113,7 @@ test('shared uri state survives until its last owner closes', async (t) => {
   ));
   secondLsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
   await harness.wiring.whenDispatchSettled();
-  assert.equal(harness.calls.length, 1);
+  assert.equal(harness.calls.length, 2, 'the second window oriented on its open, and its edit is held by the cooldown the first dispatch spent');
   assert.ok(harness.notes.some((line) => line.includes('cooldown')));
 
   secondLsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
@@ -1115,8 +1126,8 @@ test('a duplicate didClose leaves no shared uri owner behind', (t) => {
   const secondConnection = wiring.openConnection({ send: () => {} });
   const secondLsp = (method, params) => secondConnection.handleFrame(JSON.stringify({ type: 'lsp', method, params }));
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', CLEAN_MARKDOWN));
-  secondLsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', CLEAN_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, CLEAN_MARKDOWN);
+  openEdited(secondLsp, MARKDOWN_URI, CLEAN_MARKDOWN);
   lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
   lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
   secondLsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
@@ -1132,7 +1143,7 @@ test('connection close clears shared uri state only when its owner is last', (t)
   const secondConnection = wiring.openConnection({ send: () => {} });
   const secondLsp = (method, params) => secondConnection.handleFrame(JSON.stringify({ type: 'lsp', method, params }));
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   secondLsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
   timers.runPending();
   connection.close();
@@ -1150,7 +1161,7 @@ test('a second didClose after clearing shared uri state is tolerated', (t) => {
   const { wiring, timers, broadcasts, warnings, lsp } = drivenConnection();
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   timers.runPending();
   lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
   const clearBroadcasts = broadcasts.filter((message) => message.type === 'visions-findings' && message.diagnostics.length === 0);
@@ -1168,7 +1179,7 @@ test('a result that lands after its buffer closed is dropped rather than resurre
   const { wiring, timers, broadcasts, lsp } = dispatchingConnection({ respond: () => held });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   const inFlight = wiring.whenDispatchSettled();
 
@@ -1187,7 +1198,7 @@ test('an edit during dispatch drops comments diagnostics hand and intent', async
   t.after(() => wiring.stop());
 
   wiring.applyModelIntent('the standing intent');
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   const inFlight = wiring.whenDispatchSettled();
   const surfaceCount = broadcasts.length;
@@ -1206,7 +1217,7 @@ test('an edit during dispatch drops comments diagnostics hand and intent', async
 
   assert.equal(broadcasts.length, surfaceCount);
   assert.equal(sent.length, diagnosticFrameCount);
-  assert.equal(wiring.getIntentFor().text, 'the standing intent');
+  assert.equal(wiring.getIntentFor().active.text, 'the standing intent');
   assert.equal(wiring.documentsSnapshot()[0].comments.length, 0);
   assert.equal(wiring.documentsSnapshot()[0].hand, null);
   assert.ok(notes.some((line) => line.includes('the buffer moved')));
@@ -1224,7 +1235,7 @@ test('a hand is broadcast only when it changes and joins the connect-time snapsh
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -1274,7 +1285,7 @@ test('a handless dispatch clears the standing hand and an ERROR leaves it alone'
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -1302,7 +1313,7 @@ test('a hand raised with nothing else reaches the editor in its own frame', asyn
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', CLEAN_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, CLEAN_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -1322,7 +1333,7 @@ test('didClose clears a standing hand', async (t) => {
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -1334,51 +1345,48 @@ test('didClose clears a standing hand', async (t) => {
   assert.deepEqual(wiring.documentsSnapshot(), []);
 });
 
-// --- The intent model (docs/archive/plan-navigator.md, M5) ---
+// --- The intent model as threads (docs/plan-visions-4-focus.md, M20) ---
 
 function intentBroadcasts(broadcasts) {
   return broadcasts.filter((message) => message.type === 'visions-intent');
 }
 
-test('a model proposal is broadcast once and joins the connect-time snapshot', (t) => {
+function threadShape(thread, { text, uris = [], ts = FIXED_TS, hits = 1 }) {
+  return {
+    id: thread.id, text, uris, ts, hits,
+  };
+}
+
+test('a model proposal opens a thread, is broadcast once, and joins the connect-time snapshot', (t) => {
   const { wiring, broadcasts } = drivenConnection();
   t.after(() => wiring.stop());
 
   assert.equal(wiring.applyModelIntent('reviewing the visions plan, tightening scope'), true);
+  const thread = wiring.getIntentFor().active;
+  assert.match(thread.id, /^t-[0-9a-f]{8}$/);
+  const expected = threadShape(thread, { text: 'reviewing the visions plan, tightening scope' });
   assert.deepEqual(intentBroadcasts(broadcasts), [{
-    type: 'visions-intent',
-    projectId: null,
-    intent: {
-      text: 'reviewing the visions plan, tightening scope', source: 'model', ts: FIXED_TS,
-    },
-    ts: FIXED_TS,
+    type: 'visions-intent', projectId: null, intent: { active: expected, threads: [expected] }, ts: FIXED_TS,
   }]);
-  assert.deepEqual(wiring.snapshotMessage().intent, {
-    global: { text: 'reviewing the visions plan, tightening scope', source: 'model', ts: FIXED_TS },
-    byProject: {},
-  });
+  assert.deepEqual(wiring.snapshotMessage().intent, { byProject: {}, unowned: [expected] });
 });
 
 test('a proposal for one project names it on the wire and leaves the others alone', (t) => {
   const { wiring, broadcasts } = drivenConnection();
   t.after(() => wiring.stop());
 
-  assert.equal(wiring.applyModelIntent('the machine-wide belief'), true);
+  assert.equal(wiring.applyModelIntent('the unowned belief'), true);
   assert.equal(wiring.applyModelIntent('what this repo is for', PROJECT_ID), true);
 
+  const owned = threadShape(wiring.getIntentFor(PROJECT_ID).active, { text: 'what this repo is for' });
   assert.deepEqual(intentBroadcasts(broadcasts).at(-1), {
-    type: 'visions-intent',
-    projectId: PROJECT_ID,
-    intent: {
-      text: 'what this repo is for', source: 'model', ts: FIXED_TS,
-    },
-    ts: FIXED_TS,
+    type: 'visions-intent', projectId: PROJECT_ID, intent: { active: owned, threads: [owned] }, ts: FIXED_TS,
   });
   assert.deepEqual(wiring.snapshotMessage().intent, {
-    global: { text: 'the machine-wide belief', source: 'model', ts: FIXED_TS },
-    byProject: { [PROJECT_ID]: { text: 'what this repo is for', source: 'model', ts: FIXED_TS } },
+    byProject: { [PROJECT_ID]: [owned] },
+    unowned: [threadShape(wiring.getIntentFor().active, { text: 'the unowned belief' })],
   });
-  assert.equal(wiring.getIntentFor(OTHER_PROJECT_ID).text, '', 'another project is untouched by it');
+  assert.deepEqual(wiring.getIntentFor(OTHER_PROJECT_ID), { active: null, threads: [] }, 'another project is untouched by it');
 });
 
 test('a proposal that changes nothing is not broadcast', (t) => {
@@ -1391,24 +1399,41 @@ test('a proposal that changes nothing is not broadcast', (t) => {
   assert.equal(intentBroadcasts(broadcasts).length, 1);
 });
 
-test('a later model proposal replaces the standing statement', (t) => {
+test('a later string proposal advances the standing thread rather than opening a second', (t) => {
   const { wiring, broadcasts } = drivenConnection();
   t.after(() => wiring.stop());
 
   wiring.applyModelIntent('rewriting the merge gate, not the spawn path');
-  assert.deepEqual(wiring.getIntentFor(), {
-    text: 'rewriting the merge gate, not the spawn path', source: 'model', ts: FIXED_TS,
-  });
-
+  const { id } = wiring.getIntentFor().active;
   assert.equal(wiring.applyModelIntent('a plan doc about spawning'), true);
   assert.equal(intentBroadcasts(broadcasts).length, 2);
-  assert.equal(wiring.getIntentFor().text, 'a plan doc about spawning');
+  assert.deepEqual(wiring.getIntentFor().active, {
+    id, text: 'a plan doc about spawning', uris: [], ts: FIXED_TS, hits: 2,
+  });
+  assert.equal(wiring.getIntentFor().threads.length, 1);
+});
+
+test('an object proposal opens or names a thread, and an unknown id is refused as a count only', (t) => {
+  const { wiring, notes } = drivenConnection();
+  t.after(() => wiring.stop());
+
+  wiring.applyModelIntent('story A', PROJECT_ID, MARKDOWN_URI);
+  assert.equal(wiring.applyModelIntent({ thread: 'new', text: 'story B' }, PROJECT_ID, SCRIPT_URI), true);
+  const threads = wiring.getIntentFor(PROJECT_ID).threads;
+  assert.deepEqual(threads.map((thread) => thread.text).sort(), ['story A', 'story B']);
+  const storyA = threads.find((thread) => thread.text === 'story A');
+  assert.equal(wiring.applyModelIntent({ thread: storyA.id, text: 'story A, refined' }, PROJECT_ID, MARKDOWN_URI), true);
+  assert.equal(wiring.getIntentFor(PROJECT_ID, MARKDOWN_URI).active.text, 'story A, refined', 'the uri binding picks the active thread');
+
+  assert.equal(wiring.applyModelIntent({ thread: 't-00000000', text: 'the secret plan' }, PROJECT_ID, MARKDOWN_URI), false);
+  assert.ok(notes.some((line) => line.includes('intent proposal refused') && line.includes('unknown-thread')));
+  assert.equal(notes.some((line) => line.includes('the secret plan')), false, 'the refused text never reaches the log');
 });
 
 test('an empty lane still carries an intent field on its snapshot', (t) => {
   const { wiring } = drivenConnection();
   t.after(() => wiring.stop());
-  assert.deepEqual(wiring.snapshotMessage().intent, { global: null, byProject: {} });
+  assert.deepEqual(wiring.snapshotMessage().intent, { byProject: {}, unowned: [] });
 });
 
 test('model intent persists on change only and revives on the next wiring', async (t) => {
@@ -1418,12 +1443,14 @@ test('model intent persists on change only and revives on the next wiring', asyn
   t.after(() => wiring.stop());
 
   assert.equal(wiring.applyModelIntent('  durable belief  '), true);
-  assert.equal(wiring.applyModelIntent('a belief about one repo', PROJECT_ID), true);
+  assert.equal(wiring.applyModelIntent('a belief about one repo', PROJECT_ID, MARKDOWN_URI), true);
   await wiring.whenIntentPersistenceIdle();
   assert.equal(counted.writes.length, 2);
+  const unowned = threadShape(wiring.getIntentFor().active, { text: 'durable belief' });
+  const owned = threadShape(wiring.getIntentFor(PROJECT_ID).active, { text: 'a belief about one repo', uris: [MARKDOWN_URI] });
   assert.deepEqual(JSON.parse(fs.readFileSync(intentStatePath, 'utf8')), {
-    global: { text: 'durable belief', source: 'model', ts: FIXED_TS },
-    byProject: { [PROJECT_ID]: { text: 'a belief about one repo', source: 'model', ts: FIXED_TS } },
+    byProject: { [PROJECT_ID]: [owned] },
+    unowned: [unowned],
   });
 
   assert.equal(wiring.applyModelIntent('durable belief'), false);
@@ -1432,72 +1459,52 @@ test('model intent persists on change only and revives on the next wiring', asyn
 
   const revived = drivenConnection({ intentStatePath });
   t.after(() => revived.wiring.stop());
-  assert.deepEqual(revived.wiring.getIntentFor(), {
-    text: 'durable belief', source: 'model', ts: FIXED_TS,
-  });
-  assert.deepEqual(revived.wiring.getIntentFor(PROJECT_ID), {
-    text: 'a belief about one repo', source: 'model', ts: FIXED_TS,
-  });
+  assert.deepEqual(revived.wiring.getIntentFor(), { active: unowned, threads: [unowned] });
+  assert.deepEqual(revived.wiring.getIntentFor(PROJECT_ID), { active: owned, threads: [owned] });
 });
 
-test('a project the config no longer knows loses its slot on the next load', async (t) => {
+test('a project the config no longer knows loses its threads on the next load', async (t) => {
   const intentStatePath = tempIntentStatePath(t);
   fs.writeFileSync(intentStatePath, JSON.stringify({
-    global: { text: 'the global belief', source: 'model', ts: FIXED_TS },
     byProject: {
-      [PROJECT_ID]: { text: 'still configured', source: 'model', ts: FIXED_TS },
-      [OTHER_PROJECT_ID]: { text: 'deleted project', source: 'model', ts: FIXED_TS },
+      [PROJECT_ID]: [{ id: 't-11111111', text: 'still configured', uris: [], ts: FIXED_TS, hits: 1 }],
+      [OTHER_PROJECT_ID]: [{ id: 't-22222222', text: 'deleted project', uris: [], ts: FIXED_TS, hits: 1 }],
     },
+    unowned: [],
   }), 'utf8');
 
   const { wiring, warnings } = drivenConnection({ intentStatePath, knownProjectIds: [PROJECT_ID] });
   t.after(() => wiring.stop());
 
-  assert.deepEqual(wiring.getIntent(), {
-    global: { text: 'the global belief', source: 'model', ts: FIXED_TS },
-    byProject: { [PROJECT_ID]: { text: 'still configured', source: 'model', ts: FIXED_TS } },
-  });
+  assert.deepEqual(Object.keys(wiring.getIntent().byProject), [PROJECT_ID]);
   assert.deepEqual(warnings, [], 'a deleted project is routine, not a corrupt file');
 });
 
-test('a legacy locked intent file revives with model ownership', async (t) => {
-  const intentStatePath = tempIntentStatePath(t);
-  fs.writeFileSync(intentStatePath, JSON.stringify({
+test('both legacy slot files revive as one thread each, and the next persist writes threads', async (t) => {
+  const flatPath = tempIntentStatePath(t);
+  fs.writeFileSync(flatPath, JSON.stringify({
     text: 'durable correction', source: 'operator', locked: true, ts: FIXED_TS,
   }), 'utf8');
-  const counted = countingFsPromises();
-  const { wiring } = drivenConnection({ intentStatePath, fsPromises: counted.fsPromises });
-  t.after(() => wiring.stop());
+  const flat = drivenConnection({ intentStatePath: flatPath });
+  t.after(() => flat.wiring.stop());
+  assert.equal(flat.wiring.getIntentFor().active.text, 'durable correction');
+  assert.equal(flat.wiring.applyModelIntent('durable model belief'), true);
+  await flat.wiring.whenIntentPersistenceIdle();
+  const persisted = JSON.parse(fs.readFileSync(flatPath, 'utf8'));
+  assert.deepEqual(Object.keys(persisted).sort(), ['byProject', 'unowned']);
+  assert.equal(persisted.unowned[0].text, 'durable model belief');
+  assert.equal(persisted.unowned[0].hits, 2, 'the lifted thread was advanced, not replaced');
 
-  assert.deepEqual(wiring.getIntentFor(), {
-    text: 'durable correction', source: 'model', ts: FIXED_TS,
-  });
-  assert.equal(wiring.applyModelIntent('durable model belief'), true);
-  assert.deepEqual(wiring.getIntentFor(), {
-    text: 'durable model belief', source: 'model', ts: FIXED_TS,
-  });
-
-  // The next persist writes the per-project shape, so the flat file is read once and never rewritten.
-  await wiring.whenIntentPersistenceIdle();
-  assert.deepEqual(JSON.parse(fs.readFileSync(intentStatePath, 'utf8')), {
-    global: { text: 'durable model belief', source: 'model', ts: FIXED_TS },
-    byProject: {},
-  });
-});
-
-test('a model intent persists without a locked field', async (t) => {
-  const intentStatePath = tempIntentStatePath(t);
-  const counted = countingFsPromises();
-  const { wiring } = drivenConnection({ intentStatePath, fsPromises: counted.fsPromises });
-  t.after(() => wiring.stop());
-
-  assert.equal(wiring.applyModelIntent('durable model belief'), true);
-  await wiring.whenIntentPersistenceIdle();
-  assert.equal(counted.writes.length, 1);
-  assert.deepEqual(JSON.parse(fs.readFileSync(intentStatePath, 'utf8')), {
-    global: { text: 'durable model belief', source: 'model', ts: FIXED_TS },
-    byProject: {},
-  });
+  const scopedPath = tempIntentStatePath(t);
+  fs.writeFileSync(scopedPath, JSON.stringify({
+    global: { text: 'the global belief', source: 'model', ts: FIXED_TS },
+    byProject: { [PROJECT_ID]: { text: 'this project only', source: 'model', ts: FIXED_TS } },
+  }), 'utf8');
+  const scoped = drivenConnection({ intentStatePath: scopedPath });
+  t.after(() => scoped.wiring.stop());
+  assert.equal(scoped.wiring.getIntentFor(PROJECT_ID).active.text, 'this project only');
+  assert.equal(scoped.wiring.getIntentFor().active.text, 'the global belief');
+  assert.deepEqual(scoped.wiring.getIntentFor(OTHER_PROJECT_ID), { active: null, threads: [] }, 'the lifted global text is unowned, never a fallback');
 });
 
 test('a legacy flat empty intent file is not a corrupt one', (t) => {
@@ -1507,7 +1514,7 @@ test('a legacy flat empty intent file is not a corrupt one', (t) => {
   const { wiring, warnings } = drivenConnection({ intentStatePath });
   t.after(() => wiring.stop());
 
-  assert.deepEqual(wiring.getIntent(), { global: null, byProject: {} });
+  assert.deepEqual(wiring.getIntent(), { byProject: {}, unowned: [] });
   assert.deepEqual(warnings, [], 'a file that only ever said nothing says nothing on every boot');
 });
 
@@ -1518,7 +1525,7 @@ test('a corrupt intent file starts empty and warns once', (t) => {
   const { wiring, warnings } = drivenConnection({ intentStatePath });
   t.after(() => wiring.stop());
 
-  assert.deepEqual(wiring.getIntent(), { global: null, byProject: {} });
+  assert.deepEqual(wiring.getIntent(), { byProject: {}, unowned: [] });
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /intent state unreadable, starting empty/);
 });
@@ -1534,21 +1541,17 @@ test('without an intent path the lane keeps the same in-memory behavior and touc
   const { wiring, broadcasts, warnings } = drivenConnection({ fsFns, fsPromises });
   t.after(() => wiring.stop());
 
-  assert.deepEqual(wiring.snapshotMessage().intent, { global: null, byProject: {} });
+  assert.deepEqual(wiring.snapshotMessage().intent, { byProject: {}, unowned: [] });
   assert.equal(wiring.applyModelIntent('memory only'), true);
   await wiring.whenIntentPersistenceIdle();
+  const thread = threadShape(wiring.getIntentFor().active, { text: 'memory only' });
   assert.deepEqual(intentBroadcasts(broadcasts), [{
-    type: 'visions-intent',
-    projectId: null,
-    intent: {
-      text: 'memory only', source: 'model', ts: FIXED_TS,
-    },
-    ts: FIXED_TS,
+    type: 'visions-intent', projectId: null, intent: { active: thread, threads: [thread] }, ts: FIXED_TS,
   }]);
   assert.deepEqual(warnings, []);
 });
 
-test('the standing intent rides the dispatch, and the result updates it after the comments', async (t) => {
+test('the standing intent rides the dispatch, and the result advances it after the comments', async (t) => {
   const { wiring, timers, calls, broadcasts, lsp } = dispatchingConnection({
     respond: () => Promise.resolve({
       verdict: 'COMMENTS', comments: [COMMENT], intent: 'a plan doc for the visions intent model', reason: null,
@@ -1557,37 +1560,45 @@ test('the standing intent rides the dispatch, and the result updates it after th
   t.after(() => wiring.stop());
 
   wiring.applyModelIntent('an early guess');
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
   assert.equal(calls[0].intent, 'an early guess', 'the prompt is built from what the lane currently believes');
-  assert.equal(wiring.getIntentFor().text, 'a plan doc for the visions intent model');
+  assert.match(calls[0].prompt, /Current working intent: thread t-[0-9a-f]{8}\./);
+  assert.match(calls[0].prompt, /<<<GLISSA-INTENT-[0-9A-F]{16}\nt-[0-9a-f]{8}: an early guess\n>>>GLISSA-INTENT-/);
+  assert.deepEqual(wiring.getIntentFor().active, {
+    id: wiring.getIntentFor().active.id, text: 'a plan doc for the visions intent model', uris: [MARKDOWN_URI], ts: FIXED_TS, hits: 2,
+  });
   const order = broadcasts.filter((message) => ['visions-comments', 'visions-intent'].includes(message.type));
   assert.deepEqual(order.map((message) => message.type), ['visions-intent', 'visions-comments', 'visions-intent'],
     'the dispatch result lands comments first, then the belief it came with');
 });
 
-test('a dispatch intent result replaces the standing intent', async (t) => {
-  const { wiring, timers, calls, broadcasts, lsp } = dispatchingConnection({
-    respond: () => Promise.resolve({
-      verdict: 'NONE', comments: [], intent: 'what the model would rather believe', reason: null,
+test('a dispatch result may open a second thread, and the next prompt names the other one', async (t) => {
+  const { wiring, timers, calls, lsp, clock } = dispatchingConnection({
+    dispatch: { cooldownMs: 1 },
+    respond: (_args, count) => Promise.resolve({
+      verdict: 'NONE', comments: [], intent: count === 1 ? { thread: 'new', text: 'a second story' } : null, reason: null,
     }),
   });
   t.after(() => wiring.stop());
 
-  wiring.applyModelIntent('what I am actually doing');
-  const beforeDispatch = intentBroadcasts(broadcasts).length;
+  wiring.applyModelIntent('the first story');
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(wiring.getIntentFor().threads.length, 2);
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  clock.now += 60000;
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, `${REPEATED_WORD_MARKDOWN}\nmore\n`));
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
-  assert.equal(calls[0].intent, 'what I am actually doing');
-  assert.deepEqual(wiring.getIntentFor(), {
-    text: 'what the model would rather believe', source: 'model', ts: FIXED_TS,
-  });
-  assert.equal(intentBroadcasts(broadcasts).length, beforeDispatch + 1);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].intent, 'a second story', 'the thread bound to this uri is the active one');
+  assert.match(calls[1].prompt, /Also in flight in this project, not this document: t-[0-9a-f]{8}\.\n/);
+  assert.match(calls[1].prompt, /\nt-[0-9a-f]{8}: the first story\n>>>GLISSA-INTENT-/);
 });
 
 test('an ERROR result cannot move the standing intent', async (t) => {
@@ -1600,15 +1611,15 @@ test('an ERROR result cannot move the standing intent', async (t) => {
 
   wiring.applyModelIntent('the accepted belief');
   const beforeDispatch = intentBroadcasts(broadcasts).length;
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
-  assert.equal(wiring.getIntentFor().text, 'the accepted belief');
+  assert.equal(wiring.getIntentFor().active.text, 'the accepted belief');
   assert.equal(intentBroadcasts(broadcasts).length, beforeDispatch);
 });
 
-test('a dispatch on an owned uri reads and writes that project slot, falling back to global for the prompt', async (t) => {
+test('a dispatch on an owned uri reads only that project, and an unowned thread never reaches its prompt', async (t) => {
   const { wiring, timers, calls, broadcasts, lsp } = dispatchingConnection({
     scopeProjects: [{ id: PROJECT_ID, path: '/tmp' }],
     respond: () => Promise.resolve({
@@ -1617,18 +1628,20 @@ test('a dispatch on an owned uri reads and writes that project slot, falling bac
   });
   t.after(() => wiring.stop());
 
-  wiring.applyModelIntent('the machine-wide belief');
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  wiring.applyModelIntent('the unowned belief');
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
-  assert.equal(calls[0].intent, 'the machine-wide belief', 'a project with no statement reads the global one');
-  assert.equal(wiring.getIntentFor(PROJECT_ID).text, 'what this project is really for');
-  assert.equal(wiring.getIntentFor().text, 'the machine-wide belief', 'the global slot is not overwritten by it');
+  assert.equal(calls[0].intent, '', 'a project with no thread delivers no intent line, and never the unowned text');
+  assert.equal(calls[0].prompt.includes('the unowned belief'), false);
+  assert.equal(calls[0].prompt.includes('Current working intent'), false);
+  assert.equal(wiring.getIntentFor(PROJECT_ID).active.text, 'what this project is really for');
+  assert.equal(wiring.getIntentFor().active.text, 'the unowned belief', 'the unowned list is not overwritten by it');
   assert.equal(intentBroadcasts(broadcasts).at(-1).projectId, PROJECT_ID);
 });
 
-test('a second dispatch on the same project reads the project statement, not the global one', async (t) => {
+test('a second dispatch on the same project reads the project thread it opened', async (t) => {
   const { wiring, timers, calls, lsp, clock } = dispatchingConnection({
     scopeProjects: [{ id: PROJECT_ID, path: '/tmp' }],
     dispatch: { cooldownMs: 1 },
@@ -1638,8 +1651,7 @@ test('a second dispatch on the same project reads the project statement, not the
   });
   t.after(() => wiring.stop());
 
-  wiring.applyModelIntent('the machine-wide belief');
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -1652,18 +1664,40 @@ test('a second dispatch on the same project reads the project statement, not the
   assert.equal(calls[1].intent, 'what this project is really for');
 });
 
-test('a result with no intent field leaves the statement exactly as it was', async (t) => {
+test('a result with no intent field leaves the thread exactly as it was', async (t) => {
   const { wiring, timers, lsp } = dispatchingConnection({
     respond: () => Promise.resolve({ verdict: 'NONE', comments: [], reason: null }),
   });
   t.after(() => wiring.stop());
 
   wiring.applyModelIntent('still the current belief');
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
-  assert.equal(wiring.getIntentFor().text, 'still the current belief');
+  assert.equal(wiring.getIntentFor().active.text, 'still the current belief');
+  assert.equal(wiring.getIntentFor().active.hits, 1);
+});
+
+test('a thread nobody advanced within the ttl retires on the next dispatch read, and the tab is told', async (t) => {
+  const { wiring, timers, broadcasts, notes, lsp, clock } = dispatchingConnection({
+    intentThreadTtlMs: 1000,
+    respond: () => Promise.resolve({ verdict: 'NONE', comments: [], reason: null }),
+  });
+  t.after(() => wiring.stop());
+
+  wiring.applyModelIntent('a stale belief');
+  clock.now += 1001;
+  const beforeDispatch = intentBroadcasts(broadcasts).length;
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  assert.deepEqual(wiring.getIntentFor(), { active: null, threads: [] });
+  assert.deepEqual(intentBroadcasts(broadcasts).slice(beforeDispatch), [{
+    type: 'visions-intent', projectId: null, intent: { active: null, threads: [] }, ts: FIXED_TS + 1001,
+  }]);
+  assert.ok(notes.some((line) => line.includes('intent threads retired on read')));
 });
 
 // The M3 lane, byte for byte: an absent config.visions.dispatch must cost nothing at all.
@@ -1675,7 +1709,7 @@ test('with no dispatch config the lane arms no dispatch timer and calls nothing'
   t.after(() => wiring.stop());
   assert.equal(wiring.dispatchEnabled, false);
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   timers.runPending();
   assert.equal(connection.pendingDispatchCount, 0);
   assert.equal(timers.pendingCount, 0, 'the publish armed nothing');
@@ -1728,7 +1762,7 @@ test('a code action is answered from what the last sweep computed, never from a 
   const harness = drivenConnection();
   t.after(() => harness.wiring.stop());
 
-  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(harness.lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   harness.timers.runPending();
 
   const actions = requestCodeActions(harness);
@@ -1742,7 +1776,7 @@ test('each sweep replaces the stored fixes, so a corrected buffer offers nothing
   const harness = drivenConnection();
   t.after(() => harness.wiring.stop());
 
-  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(harness.lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   harness.timers.runPending();
   assert.equal(requestCodeActions(harness, { id: 'ca-before' }).length, 1);
 
@@ -1755,7 +1789,7 @@ test('a selection is answered with the fixes it touches and nothing else', (t) =
   const harness = drivenConnection();
   t.after(() => harness.wiring.stop());
 
-  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', TWO_REPEATS_AND_A_FENCE));
+  openEdited(harness.lsp, MARKDOWN_URI, TWO_REPEATS_AND_A_FENCE);
   harness.timers.runPending();
 
   assert.equal(requestCodeActions(harness, { id: 'ca-all' }).length, 3, 'the whole document offers every fix');
@@ -1770,7 +1804,7 @@ test('a fix set is never served against text the buffer has already moved on fro
   const harness = drivenConnection();
   t.after(() => harness.wiring.stop());
 
-  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(harness.lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   harness.timers.runPending();
   assert.equal(requestCodeActions(harness, { id: 'ca-fresh' }).length, 1);
 
@@ -1809,7 +1843,7 @@ test('with autoFix off a sweep offers its fixes and asks for nothing', (t) => {
   const harness = drivenConnection();
   t.after(() => harness.wiring.stop());
 
-  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', TWO_REPEATS_AND_A_FENCE));
+  openEdited(harness.lsp, MARKDOWN_URI, TWO_REPEATS_AND_A_FENCE);
   harness.timers.runPending();
 
   assert.deepEqual(applyEditRequests(harness), []);
@@ -1821,7 +1855,7 @@ test('with autoFix on one sweep asks for one versioned edit carrying only the au
   const harness = drivenConnection({ autoFix: true });
   t.after(() => harness.wiring.stop());
 
-  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', TWO_REPEATS_AND_A_FENCE));
+  openEdited(harness.lsp, MARKDOWN_URI, TWO_REPEATS_AND_A_FENCE);
   harness.timers.runPending();
 
   const requests = applyEditRequests(harness);
@@ -1837,7 +1871,7 @@ test('an applied edit is logged and broadcast once per fix, and joins the snapsh
   const harness = drivenConnection({ autoFix: true });
   t.after(() => harness.wiring.stop());
 
-  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', TWO_REPEATS_AND_A_FENCE));
+  openEdited(harness.lsp, MARKDOWN_URI, TWO_REPEATS_AND_A_FENCE);
   harness.timers.runPending();
   answerRequest(harness.connection, applyEditRequests(harness)[0].id, { applied: true });
 
@@ -1863,7 +1897,7 @@ test('a refused edit is logged exactly as loudly and is never retried', (t) => {
   const harness = drivenConnection({ autoFix: true });
   t.after(() => harness.wiring.stop());
 
-  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(harness.lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   harness.timers.runPending();
   answerRequest(harness.connection, applyEditRequests(harness)[0].id, { applied: false });
 
@@ -1877,7 +1911,7 @@ test('an editor that never answers is logged as a refusal once the wait is up', 
   const harness = drivenConnection({ autoFix: true });
   t.after(() => harness.wiring.stop());
 
-  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(harness.lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   harness.timers.runPending();
   assert.deepEqual(fixBroadcasts(harness), [], 'nothing is logged while the editor is still deciding');
 
@@ -1890,7 +1924,7 @@ test('an answer for an id the lane never asked about changes nothing', (t) => {
   const harness = drivenConnection({ autoFix: true });
   t.after(() => harness.wiring.stop());
 
-  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(harness.lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   harness.timers.runPending();
   answerRequest(harness.connection, 'visions-fix-999', { applied: true });
 
@@ -1902,7 +1936,7 @@ test('the changelog is capped, so an unattended lane cannot grow it without end'
   const harness = drivenConnection({ autoFix: true });
   t.after(() => harness.wiring.stop());
 
-  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(harness.lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   harness.timers.runPending();
   answerRequest(harness.connection, applyEditRequests(harness)[0].id, { applied: true });
 
@@ -1921,7 +1955,7 @@ test('didClose drops the stored fixes and settles the edit the buffer will never
   const harness = drivenConnection({ autoFix: true });
   t.after(() => harness.wiring.stop());
 
-  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(harness.lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   harness.timers.runPending();
   harness.lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
 
@@ -1933,7 +1967,7 @@ test('a relay that drops mid-edit settles it rather than owing the changelog a l
   const harness = drivenConnection({ autoFix: true });
   t.after(() => harness.wiring.stop());
 
-  harness.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(harness.lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   harness.timers.runPending();
   harness.connection.close();
 
@@ -2156,7 +2190,7 @@ test('with no ingest lane injected the dispatch carries an empty digest and noth
   const { wiring, timers, calls, lsp } = dispatchingConnection();
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -2174,7 +2208,7 @@ test('the digest is read once per dispatch and rides into the prompt builder', a
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -2189,7 +2223,7 @@ test('a sweep that never dispatches never asks the ingest lane for a digest', as
   const { wiring, timers, lsp } = drivenConnection({ contextDigest: () => { digestCalls.push(1); return 'x'; } });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   timers.runPending();
   timers.runPending();
 
@@ -2202,7 +2236,7 @@ test('a throwing ingest lane costs the prompt its context section, never the dis
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -2215,7 +2249,7 @@ test('a digest that is not a string is treated as absent rather than stringified
   const { wiring, timers, calls, lsp } = dispatchingConnection({ contextDigest: () => ({ oops: true }) });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -2246,8 +2280,8 @@ test('a poke arms one quiet window per open markdown buffer and leaves other doc
   } = pokableConnection();
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
-  lsp('textDocument/didOpen', didOpenParams(otherUri, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
+  openEdited(lsp, otherUri, REPEATED_WORD_MARKDOWN);
   lsp('textDocument/didOpen', didOpenParams(SCRIPT_URI, 'javascript', 'const the the = 1;\n'));
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
@@ -2262,7 +2296,7 @@ test('a stream of activity never resets an armed window, or a busy machine would
   const { wiring, timers, lsp } = pokableConnection();
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -2280,7 +2314,7 @@ test('a closed connection is poked no more than a closed buffer is', async (t) =
   } = pokableConnection();
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -2290,7 +2324,7 @@ test('a closed connection is poked no more than a closed buffer is', async (t) =
   assert.equal(timers.pendingCount, 0);
 });
 
-test('activity alone re-dispatches an untouched buffer, and the belief it comes back with lands', async (t) => {
+test('activity alone re-dispatches an edited buffer, and the belief it comes back with lands', async (t) => {
   const {
     wiring, timers, calls, lsp, clock, machine,
   } = pokableConnection({
@@ -2300,7 +2334,7 @@ test('activity alone re-dispatches an untouched buffer, and the belief it comes 
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
   assert.equal(calls.length, 1);
@@ -2314,7 +2348,7 @@ test('activity alone re-dispatches an untouched buffer, and the belief it comes 
 
   assert.equal(calls.length, 2, 'new events are what re-open a document nobody is editing');
   assert.equal(calls[1].text, REPEATED_WORD_MARKDOWN);
-  assert.equal(wiring.getIntentFor().text, 'wiring the ingest lane into the visions gate');
+  assert.equal(wiring.getIntentFor().active.text, 'wiring the ingest lane into the visions gate');
 });
 
 test('a poke with no new events behind it is refused, so an aging digest cannot buy a dispatch', async (t) => {
@@ -2323,7 +2357,7 @@ test('a poke with no new events behind it is refused, so an aging digest cannot 
   } = pokableConnection();
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -2348,7 +2382,7 @@ test('the cooldown still holds a document a busy machine keeps poking', async (t
   } = pokableConnection({ dispatch: { cooldownMs: 300000 } });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -2370,7 +2404,7 @@ test('with no ingest lane wired a poke changes nothing about what the gate decid
   t.after(() => wiring.stop());
   assert.equal(wiring.latestContextSeq(), null);
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -2386,7 +2420,7 @@ test('a lane with dispatch off arms nothing at all when the machine moves', (t) 
   const { wiring, connection, timers, lsp } = drivenConnection({ contextSeq: () => 9 });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   timers.runPending();
   wiring.noteActivity();
   assert.equal(connection.pendingDispatchCount, 0);
@@ -2399,7 +2433,7 @@ test('a seq provider that throws costs the movement signal, never the dispatch',
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -2414,7 +2448,7 @@ test('the machine cannot poke its way past its own quota, and typing still gets 
   } = pokableConnection({ dispatch: { activityMaxPerHour: 1 } });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
   assert.equal(calls.length, 1, 'the buffer was read once when it was opened');
@@ -2438,12 +2472,12 @@ test('the machine cannot poke its way past its own quota, and typing still gets 
 });
 
 /*
- * The cold start at the wiring altitude: a buffer whose first sweep-armed window was turned away has no
- * recorded hash, so when a poke later arms it the gate has nothing to read but the arming reason. The
- * quota is zero here, which makes the classification directly visible: 'activity-cap' can only be
- * reached by a dispatch classified as the machine's, and 'hour-cap' is what a misread would say.
+ * The cold start at the wiring altitude (M19): a buffer nobody has edited since it was opened is an
+ * orientation, charged to the machine whatever armed it. The activity quota is zero here, which makes
+ * the classification directly visible: 'activity-cap' can only be reached by a dispatch classified as
+ * the machine's, and 'hour-cap' is what a misread would say.
  */
-test('a buffer first read after a poke is charged to the machine, not to nobody typing', async (t) => {
+test('a buffer nobody has edited is charged to the machine, whether a sweep or a poke armed it', async (t) => {
   const otherUri = 'file:///tmp/other.md';
   const {
     wiring, timers, calls, notes, lsp, clock, machine,
@@ -2453,27 +2487,24 @@ test('a buffer first read after a poke is charged to the machine, not to nobody 
   lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
-  assert.equal(calls.length, 1, 'the first buffer spends the whole budget');
+  assert.equal(calls.length, 0, 'an orientation spends the activity quota, and that quota is zero');
+  assert.ok(notes.some((line) => line.includes('activity-cap')), `the sweep-armed cold open reads as the machine's, saw ${JSON.stringify(notes)}`);
 
-  lsp('textDocument/didOpen', didOpenParams(otherUri, 'markdown', REPEATED_WORD_MARKDOWN));
-  runSweepThenDispatch(timers);
-  await wiring.whenDispatchSettled();
-  assert.equal(calls.length, 1);
-  assert.ok(notes.some((line) => line.includes('hour-cap')), 'its sweep-armed window was turned away, so it recorded no hash');
-
-  // Only the second buffer stays open, so the poke below reaches exactly one document.
   lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
+  lsp('textDocument/didOpen', didOpenParams(otherUri, 'markdown', REPEATED_WORD_MARKDOWN));
   clock.now += 1000;
   machine.seq = 5;
   wiring.noteActivity();
   timers.runPending();
   await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 0);
+  assert.equal(notes.some((line) => line.includes('hour-cap')), false, 'nothing here was ever a carbon unit typing');
 
-  assert.equal(calls.length, 1);
-  assert.ok(
-    notes.some((line) => line.includes('activity-cap')),
-    `a poke-armed first read must be classified as activity, saw ${JSON.stringify(notes)}`,
-  );
+  clock.now += 1000;
+  lsp('textDocument/didChange', didChangeParams(otherUri, 2, '# Title\n\nA sentence they just typed.\n'));
+  lsp('textDocument/didSave', { textDocument: { uri: otherUri } });
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1, 'the edit is what the whole budget was kept for');
 });
 
 test('a refusal is logged when the gate changes, not once per quiet window forever', async (t) => {
@@ -2483,7 +2514,7 @@ test('a refusal is logged when the gate changes, not once per quiet window forev
   t.after(() => wiring.stop());
   const unchangedLines = () => notes.filter((line) => line.includes('unchanged')).length;
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -2519,10 +2550,10 @@ test('a save refused by the same cap as a poke is logged, not swallowed as a rep
   } = pokableConnection({ dispatch: { maxPerHour: 2, activityMaxPerHour: 1 } });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
-  lsp('textDocument/didOpen', didOpenParams(otherUri, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, otherUri, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
   assert.equal(calls.length, 2, 'two buffers read once each, and the hourly budget is spent');
@@ -2551,7 +2582,7 @@ test('a seq that is not a finite number is read as no lane rather than as moveme
   } = dispatchingConnection({ dispatch: { cooldownMs: 1 }, contextSeq: () => '12' });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
@@ -2580,7 +2611,7 @@ test('a raised hand never returns as a standing finding the next prompt says not
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
   assert.equal(wiring.documentsSnapshot()[0].hand, HAND);
@@ -2612,7 +2643,7 @@ test('a throw before the spawn is logged and never counts toward the lane backof
   });
   t.after(() => wiring.stop());
 
-  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
   for (const version of [2, 3, 4]) {
@@ -2637,7 +2668,7 @@ test('a session-authored ERROR leaves the lane healthy, and a transport failure 
     }),
   });
   const drive = async ({ wiring, timers, lsp, clock }) => {
-    lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+    openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
     runSweepThenDispatch(timers);
     await wiring.whenDispatchSettled();
     for (const version of [2, 3, 4]) {
@@ -2658,4 +2689,255 @@ test('a session-authored ERROR leaves the lane healthy, and a transport failure 
   await drive(transportLane);
   assert.equal(transportLane.calls.length, 3, 'three failures to reach the CLI open the cooling period');
   assert.ok(transportLane.warnings.some((line) => line.includes('failed in a row')));
+});
+
+// --- Focus (docs/plan-visions-4-focus.md, M19 and M21) ---
+
+test('a freshly opened buffer orients once: intent and hand land, comments and diagnostics never do', async (t) => {
+  const { wiring, timers, calls, notes, broadcasts, lsp, clock, machine } = pokableConnection({
+    respond: () => Promise.resolve({
+      verdict: 'COMMENTS',
+      comments: [COMMENT],
+      diagnostics: [MODEL_DIAGNOSTIC],
+      hand: 'the document has two introductions',
+      intent: 'a plan doc about spawning',
+      reason: null,
+    }),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].prompt, /orientation pass/);
+  assert.ok(notes.some((line) => line.includes(`dispatching ${MARKDOWN_URI}: orientation`)));
+  const [document] = wiring.documentsSnapshot();
+  assert.deepEqual(document.comments, []);
+  assert.deepEqual(document.diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word', 'hand']);
+  assert.equal(document.hand, 'the document has two introductions');
+  assert.equal(wiring.getIntentFor().active.text, 'a plan doc about spawning');
+  assert.equal(broadcasts.some((message) => message.type === 'visions-comments' && message.comments.length > 0), false);
+  assert.ok(notes.some((line) => line.includes(`refused comments for ${MARKDOWN_URI}: orientation=1`)));
+  assert.equal(notes.some((line) => line.includes(COMMENT.message)), false, 'a refused comment is a count, never a text');
+
+  clock.now += 600000;
+  machine.seq = 4;
+  wiring.noteActivity();
+  timers.runPending();
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1, 'activity alone never re-orients an idle document');
+  assert.ok(notes.some((line) => line.includes('oriented')));
+
+  lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  clock.now += 600000;
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 2, 'a reopen is a new open, so it orients again');
+});
+
+test('an edit dispatch is scoped to the edited lines, and comments or diagnostics outside them never survive', async (t) => {
+  const longDocument = `# Title\n\n${Array.from({ length: 28 }, (_, index) => `Line ${index + 3} of the document.`).join('\n')}\n`;
+  const { wiring, timers, calls, notes, lsp } = dispatchingConnection({
+    respond: () => Promise.resolve({
+      verdict: 'COMMENTS',
+      comments: [
+        { line: 12, message: 'about the edit', basis: 'edit' },
+        { line: 28, message: 'about something else entirely', basis: 'edit' },
+        { line: 1, message: 'a structural thought', basis: 'structure' },
+        { line: 12, message: 'no basis' },
+      ],
+      diagnostics: [{ line: 11, message: 'near the edit' }, { line: 27, message: 'far from the edit' }],
+      reason: null,
+    }),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', longDocument));
+  lsp('textDocument/didChange', rangedChangeParams(MARKDOWN_URI, 2, [
+    { range: { start: { line: 11, character: 0 }, end: { line: 11, character: 0 } }, text: 'Edited: ' },
+  ]));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].prompt, /Lines edited this session: 12\./);
+  assert.ok(notes.some((line) => line.includes(`dispatching ${MARKDOWN_URI}: edited lines 12`)));
+  const [document] = wiring.documentsSnapshot();
+  assert.deepEqual(document.comments.map((comment) => comment.message), ['about the edit']);
+  assert.equal(document.hand, 'a structural thought', 'the structure comment folded into the hand');
+  assert.deepEqual(document.diagnostics.filter((diagnostic) => diagnostic.code === 'model').map((diagnostic) => diagnostic.message), ['near the edit']);
+  assert.ok(notes.some((line) => line.includes(`refused comments for ${MARKDOWN_URI}: edit=1 untagged=1`)));
+  assert.ok(notes.some((line) => line.includes(`dropped 1 model diagnostic(s) for ${MARKDOWN_URI} outside the edited lines`)));
+});
+
+test('an intent-based comment lands anywhere while a thread stands, and nowhere without one', async (t) => {
+  const longDocument = `# Title\n\n${Array.from({ length: 28 }, (_, index) => `Line ${index + 3} of the document.`).join('\n')}\n`;
+  const respond = () => Promise.resolve({
+    verdict: 'COMMENTS', comments: [{ line: 28, message: 'this drifts from the story', basis: 'intent' }], reason: null,
+  });
+
+  const withThread = dispatchingConnection({ respond });
+  t.after(() => withThread.wiring.stop());
+  withThread.wiring.applyModelIntent('the story', null, MARKDOWN_URI);
+  withThread.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', longDocument));
+  withThread.lsp('textDocument/didChange', rangedChangeParams(MARKDOWN_URI, 2, [
+    { range: { start: { line: 2, character: 0 }, end: { line: 2, character: 0 } }, text: 'Edited: ' },
+  ]));
+  runSweepThenDispatch(withThread.timers);
+  await withThread.wiring.whenDispatchSettled();
+  assert.deepEqual(withThread.wiring.documentsSnapshot()[0].comments.map((comment) => comment.message), ['this drifts from the story']);
+
+  const withoutThread = dispatchingConnection({ respond });
+  t.after(() => withoutThread.wiring.stop());
+  withoutThread.lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', longDocument));
+  withoutThread.lsp('textDocument/didChange', rangedChangeParams(MARKDOWN_URI, 2, [
+    { range: { start: { line: 2, character: 0 }, end: { line: 2, character: 0 } }, text: 'Edited: ' },
+  ]));
+  runSweepThenDispatch(withoutThread.timers);
+  await withoutThread.wiring.whenDispatchSettled();
+  assert.deepEqual(withoutThread.wiring.documentsSnapshot(), []);
+  assert.ok(withoutThread.notes.some((line) => line.includes(`refused comments for ${MARKDOWN_URI}: intent=1`)));
+});
+
+test('touched ranges are per connection and per open, so a second window orients on its own', async (t) => {
+  const harness = dispatchingConnection({
+    dispatch: { cooldownMs: 300000 },
+    respond: () => Promise.resolve({ verdict: 'COMMENTS', comments: [COMMENT], reason: null }),
+  });
+  t.after(() => harness.wiring.stop());
+  const secondSent = [];
+  const secondConnection = harness.wiring.openConnection({ send: (message) => secondSent.push(message) });
+  const secondLsp = (method, params) => secondConnection.handleFrame(JSON.stringify({ type: 'lsp', method, params }));
+
+  openEdited(harness.lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
+  runSweepThenDispatch(harness.timers);
+  await harness.wiring.whenDispatchSettled();
+  assert.equal(harness.calls.length, 1);
+  assert.equal(harness.calls[0].prompt.includes('orientation pass'), false);
+
+  harness.clock.now += 1000;
+  secondLsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(harness.timers);
+  await harness.wiring.whenDispatchSettled();
+  assert.equal(harness.calls.length, 2, 'text the lane already dispatched is still unread by this window');
+  assert.match(harness.calls[1].prompt, /orientation pass/, 'the other window edited nothing');
+});
+
+test('an orientation leaves the comments, model diagnostics and hand an edit dispatch published standing', async (t) => {
+  const harness = dispatchingConnection({
+    dispatch: { cooldownMs: 300000 },
+    respond: (_args, count) => Promise.resolve(count === 1 ? {
+      verdict: 'COMMENTS',
+      comments: [COMMENT],
+      diagnostics: [MODEL_DIAGNOSTIC],
+      hand: 'the document mixes two structures',
+      reason: null,
+    } : { verdict: 'NONE', comments: [], reason: null }),
+  });
+  t.after(() => harness.wiring.stop());
+  const secondConnection = harness.wiring.openConnection({ send: () => {} });
+  const secondLsp = (method, params) => secondConnection.handleFrame(JSON.stringify({ type: 'lsp', method, params }));
+
+  openEdited(harness.lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
+  runSweepThenDispatch(harness.timers);
+  await harness.wiring.whenDispatchSettled();
+  const [published] = harness.wiring.documentsSnapshot();
+  assert.deepEqual(published.comments, [COMMENT]);
+  assert.equal(published.hand, 'the document mixes two structures');
+  assert.deepEqual(published.diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word', 'model', 'comment', 'hand']);
+  const beforeOrientation = harness.broadcasts.length;
+
+  harness.clock.now += 1000;
+  secondLsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(harness.timers);
+  await harness.wiring.whenDispatchSettled();
+
+  assert.equal(harness.calls.length, 2);
+  assert.match(harness.calls[1].prompt, /orientation pass/);
+  assert.deepEqual(harness.wiring.documentsSnapshot(), [published], 'the orientation answered none of these sections');
+  const blanking = harness.broadcasts.slice(beforeOrientation)
+    .filter((message) => ['visions-comments', 'visions-hand'].includes(message.type));
+  assert.deepEqual(blanking, []);
+});
+
+test('an orientation spends no cooldown, so the first edit after an open dispatches inside it', async (t) => {
+  const { wiring, timers, calls, clock, lsp } = dispatchingConnection({ dispatch: { cooldownMs: 300000 } });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].prompt, /orientation pass/);
+
+  clock.now += 60000;
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, `${REPEATED_WORD_MARKDOWN}\nA sentence the carbon unit typed.\n`));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 2, 'the edit is not held by a cooldown the orientation never spent');
+  assert.match(calls[1].prompt, /Lines edited this session/);
+
+  clock.now += 60000;
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 3, `${REPEATED_WORD_MARKDOWN}\nA sentence the carbon unit typed.\nAnd another.\n`));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 2, 'the edit dispatch does spend it');
+});
+
+test('a thread bound to this document is never listed as also in flight elsewhere', async (t) => {
+  const { wiring, timers, calls, lsp } = dispatchingConnection();
+  t.after(() => wiring.stop());
+
+  wiring.applyModelIntent({ thread: 'new', text: 'the story of this document' }, null, MARKDOWN_URI);
+  wiring.applyModelIntent({ thread: 'new', text: 'a second story of this document' }, null, MARKDOWN_URI);
+  wiring.applyModelIntent({ thread: 'new', text: 'the story of another document' }, null, 'file:///tmp/other-plan.md');
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].prompt.includes('a second story of this document'), false, 'a thread this uri is bound to is not elsewhere');
+  assert.match(calls[0].prompt, /\nt-[0-9a-f]{8}: the story of another document\n>>>GLISSA-INTENT-/);
+});
+
+test('a thread that expires while its dispatch runs is retired, and the result opens a fresh one', async (t) => {
+  const { wiring, timers, calls, clock, lsp } = dispatchingConnection({
+    intentThreadTtlMs: 60000,
+    respond: () => {
+      clock.now += 60001;
+      return Promise.resolve({ verdict: 'NONE', comments: [], intent: 'what the session came to believe', reason: null });
+    },
+  });
+  t.after(() => wiring.stop());
+
+  wiring.applyModelIntent('the belief the dispatch was reading', null, MARKDOWN_URI);
+  const expiredId = wiring.getIntentFor(null, MARKDOWN_URI).active.id;
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].intent, 'the belief the dispatch was reading', 'the prompt read the thread while it was live');
+  const threads = wiring.getIntentFor(null, MARKDOWN_URI).threads;
+  assert.deepEqual(threads.map((thread) => thread.text), ['what the session came to believe']);
+  assert.notEqual(threads[0].id, expiredId, 'the expired thread is retired rather than revived by the advance');
+  assert.equal(threads[0].hits, 1);
+});
+
+test('a stale thread is retired by any read, so a lane with dispatch off never serves one', async (t) => {
+  const { wiring, broadcasts, clock } = drivenConnection({ intentThreadTtlMs: 60000 });
+  t.after(() => wiring.stop());
+
+  wiring.applyModelIntent('a belief nobody advanced again', null, MARKDOWN_URI);
+  assert.equal(wiring.getIntentFor().threads.length, 1);
+
+  clock.now += 60001;
+  assert.deepEqual(wiring.snapshotMessage().intent, { byProject: {}, unowned: [] });
+  assert.equal(wiring.getIntentFor().active, null);
+  assert.deepEqual(wiring.getIntent(), { byProject: {}, unowned: [] });
+  assert.deepEqual(intentBroadcasts(broadcasts).at(-1), {
+    type: 'visions-intent', projectId: null, intent: { active: null, threads: [] }, ts: clock.now,
+  }, 'the retirement is broadcast once, for the key that shrank');
 });

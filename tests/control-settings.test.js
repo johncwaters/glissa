@@ -211,6 +211,7 @@ test('a valid visions payload persists and echoes in settings-updated', () => {
       model: 'claude-sonnet-4-20250514',
       junk: 'drop-me',
     },
+    intent: { threadTtlMs: 3600000, junk: 'drop-me' },
   };
   const sanitized = {
     enabled: true,
@@ -225,6 +226,7 @@ test('a valid visions payload persists and echoes in settings-updated', () => {
       dispatchTimeoutSeconds: 180,
       model: 'claude-sonnet-4-20250514',
     },
+    intent: { threadTtlMs: 3600000 },
   };
 
   h.send({ type: 'update-settings', settings: { visions } });
@@ -247,6 +249,7 @@ test('visions validation rejects wrong scalar types and ranges', () => {
     [{ dispatch: { quietMs: 0 } }, /visions.dispatch.quietMs must be a positive number/],
     [{ dispatch: { activityMaxPerHour: -1 } }, /visions.dispatch.activityMaxPerHour must be zero or more/],
     [{ dispatch: { model: 42 } }, /visions.dispatch.model must be a string/],
+    [{ intent: { threadTtlMs: 0 } }, /visions.intent.threadTtlMs must be a positive number/],
   ];
   for (const [visions, pattern] of cases) {
     const h = harness({ projects: [], teams: [] });

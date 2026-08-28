@@ -1,6 +1,6 @@
 'use strict';
 
-// The browser can import five modules from outside public/. Each is served twice: by the Vite plugin
+// The browser can import six modules from outside public/. Each is served twice: by the Vite plugin
 // for a bundled build, and by an Express route for the no-build path. They used to be two hand-written
 // lists, and a contracts module reached the browser on one path and 404'd on the other. Both now derive
 // from server/core/browser-modules-core.js; this pins that a public/ import cannot outrun either.

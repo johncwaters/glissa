@@ -238,6 +238,7 @@ function createBackendLanes(dependencies) {
       debug: () => configStore.getSettings().debugMode === true,
       dispatchConfig,
       autoFix: visionsConfig.autoFix,
+      intentThreadTtlMs: visionsConfig.intent.threadTtlMs,
       intentStatePath: configSiblingPath(configStore.configPath, 'visions-intent.json'),
       dispatch: dispatchConfig.enabled
         ? createVisionsDispatcher({

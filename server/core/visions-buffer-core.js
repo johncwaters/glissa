@@ -48,6 +48,22 @@ function lineStartOffsets(text) {
   return starts;
 }
 
+// The inverse of offsetOfPosition: which 1-based line an offset falls on, by binary search over the
+// same line starts.
+function lineOfOffset(lineStarts, offset) {
+  let low = 0;
+  let high = lineStarts.length - 1;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (lineStarts[middle] <= offset) {
+      low = middle;
+      continue;
+    }
+    high = middle - 1;
+  }
+  return low + 1;
+}
+
 function isPositionShape(position) {
   if (!position || typeof position !== 'object') return false;
   if (!Number.isInteger(position.line) || position.line < 0) return false;
@@ -125,6 +141,7 @@ function applyDidChange(store, params) {
 
   const changes = Array.isArray(params.contentChanges) ? params.contentChanges : [];
   let text = doc.text;
+  const applied = [];
   for (let index = 0; index < changes.length; index += 1) {
     const change = changes[index];
     const spliced = applyContentChange(text, change);
@@ -134,6 +151,7 @@ function applyDidChange(store, params) {
         applied: false, reason: spliced.reason, index, range: change?.range ?? null,
       };
     }
+    applied.push({ change, textBefore: text });
     text = spliced.text;
   }
 
@@ -143,7 +161,9 @@ function applyDidChange(store, params) {
     version,
     text,
   };
-  return { applied: true, changeCount: changes.length, size: text.length };
+  return {
+    applied: true, changeCount: changes.length, size: text.length, changes: applied,
+  };
 }
 
 function isNewlineWithOptionalIndent(text) {
@@ -173,8 +193,10 @@ function isBoundaryInsertion(previousText, nextText, insertionOffset, insertedTe
   return isLineBlankAtOffset(nextText, insertionOffset + insertedText.length);
 }
 
-function insertionFromWholeTextChange(previousText, nextText) {
-  if (nextText.length <= previousText.length) return null;
+// The minimal span a whole-buffer replacement changed: one prefix and suffix walk, or null for no change.
+function replacedSpanOfWholeTextChange(previousText, nextText) {
+  if (typeof previousText !== 'string' || typeof nextText !== 'string') return null;
+  if (previousText === nextText) return null;
   let prefixLength = 0;
   while (
     prefixLength < previousText.length
@@ -191,9 +213,18 @@ function insertionFromWholeTextChange(previousText, nextText) {
   ) {
     suffixLength += 1;
   }
-  const insertedText = nextText.slice(prefixLength, nextText.length - suffixLength);
-  if (previousText !== nextText.slice(0, prefixLength) + nextText.slice(nextText.length - suffixLength)) return null;
-  return { offset: prefixLength, text: insertedText };
+  return {
+    offset: prefixLength,
+    removedText: previousText.slice(prefixLength, previousText.length - suffixLength),
+    insertedText: nextText.slice(prefixLength, nextText.length - suffixLength),
+  };
+}
+
+function insertionFromWholeTextChange(previousText, nextText) {
+  if (nextText.length <= previousText.length) return null;
+  const span = replacedSpanOfWholeTextChange(previousText, nextText);
+  if (!span || span.removedText !== '') return null;
+  return { offset: span.offset, text: span.insertedText };
 }
 
 function detectBlankLineBoundary({ previousText, nextText, changes }) {
@@ -242,7 +273,9 @@ module.exports = {
   applyDidClose,
   formatRange,
   getDoc,
+  lineOfOffset,
   lineStartOffsets,
   listDocs,
   offsetOfPosition,
+  replacedSpanOfWholeTextChange,
 };

@@ -35,7 +35,9 @@ function fakeTimers() {
   };
 }
 
-function fakeMemoryStore({ refuse = false, throws = false, seeded = [] } = {}) {
+function fakeMemoryStore({
+  refuse = false, refuseFirst = false, throws = false, seeded = [],
+} = {}) {
   const appended = [];
   let minted = 0;
   return {
@@ -44,7 +46,7 @@ function fakeMemoryStore({ refuse = false, throws = false, seeded = [] } = {}) {
     append(input) {
       appended.push(input);
       if (throws) return Promise.reject(new Error('the canon is unwritable'));
-      if (refuse) return Promise.resolve(null);
+      if (refuse || (refuseFirst && appended.length === 1)) return Promise.resolve(null);
       minted += 1;
       return Promise.resolve({ ...input, id: `m-${minted}` });
     },
@@ -79,15 +81,24 @@ function harness({ store = null, ...options } = {}) {
   };
 }
 
+// Opened and then edited, since an unedited buffer is an orientation that carries no comments (M19).
 function openMarkdown(driver, uri = MARKDOWN_URI, text = REPEATED_WORD_MARKDOWN) {
-  driver.lsp('textDocument/didOpen', { textDocument: { uri, languageId: 'markdown', version: 1, text } });
+  driver.lsp('textDocument/didOpen', { textDocument: { uri, languageId: 'markdown', version: 0, text: '#\n' } });
+  driver.lsp('textDocument/didChange', { textDocument: { uri, version: 1 }, contentChanges: [{ text }] });
   driver.timers.runPending();
+}
+
+const THREAD_PREFIX_RE = /^thread (t-[0-9a-f]{8}): /;
+
+function threadIdOf(text) {
+  const match = THREAD_PREFIX_RE.exec(text);
+  return match ? match[1] : null;
 }
 
 function dispatchResult(overrides = {}) {
   return {
     verdict: 'COMMENTS',
-    comments: [{ line: 3, message: 'the sentence is doing two jobs' }],
+    comments: [{ line: 3, message: 'the sentence is doing two jobs', basis: 'edit' }],
     hand: 'the document has two introductions',
     reason: null,
     ...overrides,
@@ -111,14 +122,30 @@ test('an accepted intent proposal is remembered as a model-stamped record tagged
   await driver.wiring.whenMemoryIdle();
 
   assert.equal(store.appended.length, 1);
+  const threadId = threadIdOf(store.appended[0].text);
+  assert.equal(threadId, driver.wiring.getIntentFor(PROJECT_ID).active.id);
   assert.deepEqual(store.appended[0], {
     kind: 'intent',
     layer: 'semantic',
     project: PROJECT_PATH,
     source: { kind: 'model', vendor: 'glissa', sessionId: null },
-    text: 'shipping the memory writers',
+    text: `thread ${threadId}: shipping the memory writers`,
     supersedes: null,
   });
+});
+
+test('the thread prefix passes the entropy screen, so a threaded intent enters the canon', () => {
+  const { screenMemoryText } = require('../server/core/memory-core');
+  const screened = screenMemoryText('thread t-716d49b4: shipping the memory writers');
+  assert.equal(screened.ok, true, JSON.stringify(screened));
+});
+
+test('the delivered bullet carries the thread prefix intact', () => {
+  const { memoryDeliveryLines } = require('../server/core/visions-memory-core');
+  const [line] = memoryDeliveryLines([{
+    id: 'm-1', text: 'thread t-716d49b4: shipping the memory writers', rank: 'model', kind: 'intent',
+  }]);
+  assert.ok(line.includes('thread t-716d49b4: shipping the memory writers'), line);
 });
 
 test('an intent proposal that changed nothing writes nothing', async (t) => {
@@ -133,37 +160,106 @@ test('an intent proposal that changed nothing writes nothing', async (t) => {
   assert.equal(store.appended.length, 1);
 });
 
-test('each intent record supersedes the previous one for its own slot', async (t) => {
+test('each intent record supersedes the previous one for its own project and thread', async (t) => {
   const store = fakeMemoryStore();
   const driver = harness({ store });
   t.after(() => driver.wiring.stop());
 
   driver.wiring.applyModelIntent('first', PROJECT_ID);
-  driver.wiring.applyModelIntent('global first', null);
+  driver.wiring.applyModelIntent('unowned first', null);
   driver.wiring.applyModelIntent('second', PROJECT_ID);
   await driver.wiring.whenMemoryIdle();
 
+  const threadId = driver.wiring.getIntentFor(PROJECT_ID).active.id;
+  const unownedId = driver.wiring.getIntentFor(null).active.id;
   assert.deepEqual(store.appended.map((input) => [input.project, input.text, input.supersedes]), [
-    [PROJECT_PATH, 'first', null],
-    [null, 'global first', null],
-    [PROJECT_PATH, 'second', 'm-1'],
+    [PROJECT_PATH, `thread ${threadId}: first`, null],
+    [null, `thread ${unownedId}: unowned first`, null],
+    [PROJECT_PATH, `thread ${threadId}: second`, 'm-1'],
   ]);
 });
 
-test('the intent chain is seeded from the loaded canon, so a restart continues it', async (t) => {
+test('two threads in one project advance along two independent head chains', async (t) => {
+  const store = fakeMemoryStore();
+  const driver = harness({ store });
+  t.after(() => driver.wiring.stop());
+
+  driver.wiring.applyModelIntent({ thread: 'new', text: 'story A' }, PROJECT_ID, MARKDOWN_URI);
+  driver.wiring.applyModelIntent({ thread: 'new', text: 'story B' }, PROJECT_ID, OUTSIDE_URI);
+  await driver.wiring.whenMemoryIdle();
+  const threads = driver.wiring.getIntentFor(PROJECT_ID).threads;
+  const storyA = threads.find((thread) => thread.text === 'story A');
+  const storyB = threads.find((thread) => thread.text === 'story B');
+  driver.wiring.applyModelIntent({ thread: storyA.id, text: 'story A, refined' }, PROJECT_ID, MARKDOWN_URI);
+  driver.wiring.applyModelIntent({ thread: storyB.id, text: 'story B, refined' }, PROJECT_ID, OUTSIDE_URI);
+  await driver.wiring.whenMemoryIdle();
+
+  assert.deepEqual(store.appended.map((input) => [threadIdOf(input.text), input.supersedes]), [
+    [storyA.id, null],
+    [storyB.id, null],
+    [storyA.id, 'm-1'],
+    [storyB.id, 'm-2'],
+  ]);
+});
+
+test('the intent chain is seeded from the loaded canon by project and thread, so a restart continues it', async (t) => {
   const store = fakeMemoryStore({
     seeded: [
-      { kind: 'intent', project: PROJECT_PATH, id: 'm-old', ts: 10 },
-      { kind: 'intent', project: PROJECT_PATH, id: 'm-older', ts: 5 },
+      { kind: 'intent', project: PROJECT_PATH, id: 'm-old', ts: 10, text: 'thread t-716d49b4: story A' },
+      { kind: 'intent', project: PROJECT_PATH, id: 'm-older', ts: 5, text: 'thread t-716d49b4: story A, older' },
+      { kind: 'intent', project: PROJECT_PATH, id: 'm-other', ts: 50, text: 'thread t-0badf00d: story B' },
+    ],
+  });
+  const intentStatePath = require('node:path').join(require('node:fs').mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'glissa-intent-')), 'visions-intent.json');
+  require('node:fs').writeFileSync(intentStatePath, JSON.stringify({
+    byProject: { [PROJECT_ID]: [{ id: 't-716d49b4', text: 'story A', uris: [MARKDOWN_URI], ts: FIXED_TS - 1000, hits: 1 }] },
+    unowned: [],
+  }));
+  const driver = harness({ store, intentStatePath });
+  t.after(() => driver.wiring.stop());
+
+  driver.wiring.applyModelIntent('after a restart', PROJECT_ID, MARKDOWN_URI);
+  await driver.wiring.whenMemoryIdle();
+
+  assert.equal(threadIdOf(store.appended[0].text), 't-716d49b4');
+  assert.equal(store.appended[0].supersedes, 'm-old');
+});
+
+test('an unthreaded legacy record is superseded by the next advance under its own head key, whatever the thread', async (t) => {
+  const store = fakeMemoryStore({
+    seeded: [
+      { kind: 'intent', project: PROJECT_PATH, id: 'm-legacy', ts: 10, text: 'a statement from before threads' },
+      { kind: 'intent', project: null, id: 'm-legacy-unowned', ts: 10, text: 'an unowned statement from before threads' },
     ],
   });
   const driver = harness({ store });
   t.after(() => driver.wiring.stop());
 
-  driver.wiring.applyModelIntent('after a restart', PROJECT_ID);
+  driver.wiring.applyModelIntent({ thread: 'new', text: 'story A' }, PROJECT_ID, MARKDOWN_URI);
+  driver.wiring.applyModelIntent({ thread: 'new', text: 'story B' }, PROJECT_ID, OUTSIDE_URI);
+  await driver.wiring.whenMemoryIdle();
+  assert.deepEqual(store.appended.map((input) => input.supersedes), ['m-legacy', null], 'closed once, by the first advance, and never by a second');
+
+  driver.wiring.applyModelIntent('the unowned story', null);
+  await driver.wiring.whenMemoryIdle();
+  assert.equal(store.appended.at(-1).project, null);
+  assert.equal(store.appended.at(-1).supersedes, 'm-legacy-unowned', 'the null-project lineage is closed by its own next advance, not by a project');
+});
+
+test('a refused append leaves the unthreaded legacy head standing for the next advance to close', async (t) => {
+  const store = fakeMemoryStore({
+    refuseFirst: true,
+    seeded: [{ kind: 'intent', project: PROJECT_PATH, id: 'm-legacy', ts: 10, text: 'a statement from before threads' }],
+  });
+  const driver = harness({ store });
+  t.after(() => driver.wiring.stop());
+
+  driver.wiring.applyModelIntent({ thread: 'new', text: 'story A' }, PROJECT_ID, MARKDOWN_URI);
+  driver.wiring.applyModelIntent({ thread: 'new', text: 'story B' }, PROJECT_ID, OUTSIDE_URI);
   await driver.wiring.whenMemoryIdle();
 
-  assert.equal(store.appended[0].supersedes, 'm-old');
+  assert.deepEqual(store.appended.map((input) => input.supersedes), ['m-legacy', 'm-legacy'],
+    'a write nobody accepted spends no legacy head');
 });
 
 test('a refused intent write restarts the chain rather than naming a head that does not exist', async (t) => {
@@ -188,7 +284,7 @@ test('an intent proposal with nothing to remember leaves the chain head where it
   driver.wiring.applyModelIntent('second', PROJECT_ID);
   await driver.wiring.whenMemoryIdle();
 
-  assert.deepEqual(store.appended.map((input) => [input.text, input.supersedes]), [
+  assert.deepEqual(store.appended.map((input) => [input.text.replace(THREAD_PREFIX_RE, ''), input.supersedes]), [
     ['first', null],
     ['second', 'm-1'],
   ]);
@@ -344,7 +440,7 @@ test('every writer is inert when no memory store is configured', async (t) => {
   await driver.wiring.whenMemoryIdle();
 
   assert.deepEqual(driver.warnings, []);
-  assert.equal(driver.wiring.getIntentFor(PROJECT_ID).text, 'nothing to write to');
+  assert.equal(driver.wiring.getIntentFor(PROJECT_ID).active.text, 'nothing to write to');
 });
 
 test('a store rejecting with a non-Error still names something in its one warning', async (t) => {
@@ -375,5 +471,5 @@ test('a store that throws costs one warning and never reaches the relay or the d
 
   driver.wiring.applyModelIntent('the lane keeps going', PROJECT_ID);
   await driver.wiring.whenMemoryIdle();
-  assert.equal(driver.wiring.getIntentFor(PROJECT_ID).text, 'the lane keeps going');
+  assert.equal(driver.wiring.getIntentFor(PROJECT_ID).active.text, 'the lane keeps going');
 });

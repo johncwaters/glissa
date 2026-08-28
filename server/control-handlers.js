@@ -41,6 +41,7 @@ const {
   VISIONS_ACTIVITY_MAX_PER_HOUR_RANGE,
   VISIONS_COOLDOWN_MS_RANGE,
   VISIONS_DISPATCH_TIMEOUT_RANGE,
+  VISIONS_INTENT_THREAD_TTL_MS_RANGE,
   VISIONS_MAX_PER_HOUR_RANGE,
   VISIONS_QUIET_MS_RANGE,
   USAGE_INTEGER_RANGES,
@@ -95,6 +96,8 @@ const VISIONS_DISPATCH_NUMERIC_RANGES = Object.freeze({
   activityMaxPerHour: VISIONS_ACTIVITY_MAX_PER_HOUR_RANGE,
   dispatchTimeoutSeconds: VISIONS_DISPATCH_TIMEOUT_RANGE,
 });
+const VISIONS_INTENT_NUMERIC_KEYS = Object.freeze(['threadTtlMs']);
+const VISIONS_INTENT_NUMERIC_RANGES = Object.freeze({ threadTtlMs: VISIONS_INTENT_THREAD_TTL_MS_RANGE });
 const POSTHOG_NUMERIC_KEYS = Object.freeze([
   'intervalMinutes',
   'maxConcurrentInvestigations',
@@ -158,6 +161,7 @@ const DASHBOARD_SETTING_PATHS = Object.freeze([
   ...VISIONS_DISPATCH_BOOLEAN_KEYS.map((key) => `visions.dispatch.${key}`),
   ...VISIONS_DISPATCH_STRING_KEYS.map((key) => `visions.dispatch.${key}`),
   ...VISIONS_DISPATCH_NUMERIC_KEYS.map((key) => `visions.dispatch.${key}`),
+  ...VISIONS_INTENT_NUMERIC_KEYS.map((key) => `visions.intent.${key}`),
   ...POSTHOG_BOOLEAN_KEYS.map((key) => `posthog.${key}`),
   ...POSTHOG_STRING_KEYS.map((key) => `posthog.${key}`),
   ...POSTHOG_VALUE_KEYS.map((key) => `posthog.${key}`),
@@ -1106,5 +1110,6 @@ module.exports = {
   POSTHOG_NUMERIC_RANGES,
   PR_REVIEW_NUMERIC_RANGES,
   VISIONS_DISPATCH_NUMERIC_RANGES,
+  VISIONS_INTENT_NUMERIC_RANGES,
   registerControlHandlers,
 };

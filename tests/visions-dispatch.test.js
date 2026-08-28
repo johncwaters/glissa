@@ -155,16 +155,16 @@ test('an intent claim is read, trimmed and capped, whatever the verdict says', a
     intent: '  a plan doc for the visions intent model  ',
   }));
   t.after(withComments.cleanup);
-  assert.equal((await readCommentsResult(withComments.file, { lineCount: 4 })).intent, 'a plan doc for the visions intent model');
+  assert.deepEqual((await readCommentsResult(withComments.file, { lineCount: 4 })).intent, { thread: null, text: 'a plan doc for the visions intent model' });
 
   // A session with nothing to comment on can still have moved its belief.
   const quiet = tempFile(JSON.stringify({ verdict: 'NONE', comments: [], intent: 'a quieter belief' }));
   t.after(quiet.cleanup);
-  assert.equal((await readCommentsResult(quiet.file, { lineCount: 4 })).intent, 'a quieter belief');
+  assert.deepEqual((await readCommentsResult(quiet.file, { lineCount: 4 })).intent, { thread: null, text: 'a quieter belief' });
 
   const long = tempFile(JSON.stringify({ verdict: 'NONE', comments: [], intent: 'z'.repeat(700) }));
   t.after(long.cleanup);
-  assert.equal((await readCommentsResult(long.file, { lineCount: 4 })).intent.length, 300);
+  assert.equal((await readCommentsResult(long.file, { lineCount: 4 })).intent.text.length, 300);
 });
 
 test('an invalid intent claim is ignored rather than believed or thrown over', async (t) => {
@@ -294,7 +294,7 @@ test('a session that writes the result file yields its comments, and the work di
   });
 
   assert.equal(seen.length, 1);
-  assert.match(promptOnDisk, /Current working intent: a plan doc about the spawn path/);
+  assert.match(promptOnDisk, /<<<GLISSA-INTENT-[0-9A-F]{16}\na plan doc about the spawn path\n>>>GLISSA-INTENT-/);
   assert.equal(seen[0].id, `visions:${URI}`);
   assert.equal(seen[0].model, 'sonnet', 'the configured model reaches the spawn');
   assert.equal(seen[0].cwd, workDirs[0], 'the session runs in the throwaway dir, never a repo');
@@ -449,4 +449,43 @@ test('the lane bounds its writes with acceptEdits over its cwd, no allow list, n
   for (const tool of ['Read', 'Write', 'Glob', 'Grep']) {
     assert.equal(posture.permissions.deny.includes(tool), false, `${tool} must not be denied: a bare deny of it refuses the result-file write`);
   }
+});
+
+// --- Intent threads in the result contract (docs/plan-visions-4-focus.md, M20) ---
+
+test('the object intent form survives with its thread, and a bad thread value is dropped', async (t) => {
+  const named = tempFile(JSON.stringify({ verdict: 'NONE', comments: [], intent: { thread: 't-716d49b4', text: '  story A, refined  ' } }));
+  t.after(named.cleanup);
+  assert.deepEqual((await readCommentsResult(named.file, { lineCount: 4 })).intent, { thread: 't-716d49b4', text: 'story A, refined' });
+
+  const opened = tempFile(JSON.stringify({ verdict: 'NONE', comments: [], intent: { thread: 'new', text: 'story B' } }));
+  t.after(opened.cleanup);
+  assert.deepEqual((await readCommentsResult(opened.file, { lineCount: 4 })).intent, { thread: 'new', text: 'story B' });
+
+  // A null thread is the parsed form of a plain string, so it reads back as an advance of the active one.
+  const active = tempFile(JSON.stringify({ verdict: 'NONE', comments: [], intent: { thread: null, text: 'story C' } }));
+  t.after(active.cleanup);
+  assert.deepEqual((await readCommentsResult(active.file, { lineCount: 4 })).intent, { thread: null, text: 'story C' });
+
+  for (const intent of [{ thread: 'T-716D49B4', text: 'x' }, { thread: 't-716d49b', text: 'x' }, { thread: 'new', text: '' }, { thread: 7, text: 'x' }]) {
+    const { file, cleanup } = tempFile(JSON.stringify({ verdict: 'NONE', comments: [], intent }));
+    t.after(cleanup);
+    const result = await readCommentsResult(file, { lineCount: 4 });
+    assert.equal(result.intent, null, `${JSON.stringify(intent)} is not an accepted proposal`);
+    assert.equal(result.verdict, 'NONE');
+  }
+});
+
+test('a comment basis rides through the result reader as shape, never as policy', async (t) => {
+  const { file, cleanup } = tempFile(JSON.stringify({
+    verdict: 'COMMENTS',
+    comments: [{ line: 1, message: 'on the edit', basis: 'edit' }, { line: 2, message: 'untagged' }, { line: 3, message: 'junk basis', basis: 'vibes' }],
+  }));
+  t.after(cleanup);
+  const result = await readCommentsResult(file, { lineCount: 4 });
+  assert.deepEqual(result.comments, [
+    { line: 1, message: 'on the edit', basis: 'edit' },
+    { line: 2, message: 'untagged' },
+    { line: 3, message: 'junk basis' },
+  ]);
 });

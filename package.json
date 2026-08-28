@@ -31,7 +31,8 @@
     "shared/settings-ranges.js",
     "shared/contracts/",
     "shared/paths.js",
-    "shared/usage-config.js"
+    "shared/usage-config.js",
+    "shared/visions-intent-ids.js"
   ],
   "engines": {
     "node": ">=22.16.0"

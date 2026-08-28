@@ -1,7 +1,8 @@
 # Plan: Visions part 4 (focus)
 
-Status: drafted 2026-08-27 from a code audit of the lane as shipped through M18. Nothing here is
-built. Predecessors: `docs/archive/plan-navigator.md` (M1 to M5), `docs/archive/plan-navigator-2.md`
+Status: drafted 2026-08-27 from a code audit of the lane as shipped through M18; M19 to M21 shipped
+2026-08-27 (`server/core/visions-touch-core.js`, `filterComments` in `server/core/visions-dispatch-core.js`,
+threads in `server/core/visions-intent-core.js`). Predecessors: `docs/archive/plan-navigator.md` (M1 to M5), `docs/archive/plan-navigator-2.md`
 (M6 to M11), `docs/plan-visions-3.md` (M12 to M18). `AGENTS.md` and the code win over this doc.
 Milestone numbering continues from M18.
 

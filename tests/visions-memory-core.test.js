@@ -11,13 +11,15 @@ const {
   servedFindingOf,
   fixFeedbackInput,
   intentMemoryInput,
+  intentHeadKey,
   latestIntentHeads,
   projectTagFor,
   readDismissParams,
-  sanitizeOneLine,
   servedFeedbackInput,
   servedKey,
+  threadIdOfIntentText,
 } = require('../server/core/visions-memory-core');
+const { sanitizeOneLine } = require('../server/core/text-core');
 
 const SCOPE = [
   { id: 'p1', path: 'c:/repos/glissa' },
@@ -68,9 +70,31 @@ test('the intent head per slot is the newest record for that slot', () => {
     { kind: 'intent', project: 'c:/repos/glissa', id: 'p1', ts: 30 },
     { kind: 'knowledge', project: null, id: 'k1', ts: 99 },
   ]);
-  assert.equal(heads.get(''), 'g2');
-  assert.equal(heads.get('c:/repos/glissa'), 'p1');
+  assert.equal(heads.get('|'), 'g2');
+  assert.equal(heads.get('c:/repos/glissa|'), 'p1');
   assert.equal(heads.has('k1'), false);
+});
+
+test('the intent head is keyed by project AND thread, read from the record text prefix', () => {
+  const heads = latestIntentHeads([
+    { kind: 'intent', project: 'c:/repos/glissa', id: 'a1', ts: 10, text: 'thread t-716d49b4: story A' },
+    { kind: 'intent', project: 'c:/repos/glissa', id: 'a2', ts: 20, text: 'thread t-716d49b4: story A, refined' },
+    { kind: 'intent', project: 'c:/repos/glissa', id: 'b1', ts: 30, text: 'thread t-0badf00d: story B' },
+    { kind: 'intent', project: 'c:/repos/glissa', id: 'legacy', ts: 40, text: 'thread pool sizing: not a thread id' },
+  ]);
+  assert.equal(heads.get(intentHeadKey('c:/repos/glissa', 't-716d49b4')), 'a2');
+  assert.equal(heads.get(intentHeadKey('c:/repos/glissa', 't-0badf00d')), 'b1');
+  assert.equal(heads.get(intentHeadKey('c:/repos/glissa', null)), 'legacy', 'an unanchored prefix is unthreaded');
+  assert.equal(threadIdOfIntentText('thread t-716d49b4: story A'), 't-716d49b4');
+  assert.equal(threadIdOfIntentText('thread T-716D49B4: story A'), null);
+  assert.equal(threadIdOfIntentText('thread t-716d49b4 story A'), null);
+});
+
+test('an intent record carries its thread as a text prefix with no square brackets', () => {
+  const input = intentMemoryInput({ text: '  story A  ', project: 'c:/repos/glissa', threadId: 't-716d49b4' });
+  assert.equal(input.text, 'thread t-716d49b4: story A');
+  assert.equal(intentMemoryInput({ text: 'story A', threadId: 'nope' }).text, 'story A', 'a malformed id is no prefix');
+  assert.equal(/[[\]]/.test(input.text), false);
 });
 
 test('dispatch comments and the tier 4 hand become episodic model knowledge', () => {

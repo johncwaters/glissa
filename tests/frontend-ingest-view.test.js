@@ -8,7 +8,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // visions-view-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/visions-view-core.mjs');
+const { importBrowserCore } = require('./helpers/browser-core');
+
+const importCore = () => importBrowserCore('public/visions-view-core.mjs');
 
 const NOW = 1700000000000;
 

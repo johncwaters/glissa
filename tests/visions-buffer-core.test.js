@@ -10,6 +10,9 @@ const {
   createDocStore,
   detectBlankLineBoundary,
   getDoc,
+  lineOfOffset,
+  lineStartOffsets,
+  offsetOfPosition,
   listDocs,
   uriOfParams,
 } = require('../server/core/visions-buffer-core');
@@ -45,7 +48,9 @@ test('applyDidChange supports full text replacement', () => {
     textDocument: { uri: 'file:///a.md', version: 2 },
     contentChanges: [{ text: 'new text' }],
   });
-  assert.deepEqual(change, { applied: true, changeCount: 1, size: 'new text'.length });
+  assert.deepEqual(change, {
+    applied: true, changeCount: 1, size: 'new text'.length, changes: [{ change: { text: 'new text' }, textBefore: 'old' }],
+  });
   assert.equal(getDoc(store, 'file:///a.md').text, 'new text');
 });
 
@@ -341,4 +346,19 @@ test('applyDidClose removes documents and reports unknown uris', () => {
     applied: false,
     reason: 'unknown-uri',
   });
+});
+
+// lineOfOffset is the inverse of offsetOfPosition, so the two live together and are pinned together.
+test('lineOfOffset names the 1-based line an offset falls on, across every break style', () => {
+  const text = 'first\nsecond\r\nthird\rfourth';
+  const starts = lineStartOffsets(text);
+  assert.deepEqual(starts.map((start) => lineOfOffset(starts, start)), [1, 2, 3, 4]);
+  assert.equal(lineOfOffset(starts, 0), 1);
+  assert.equal(lineOfOffset(starts, 4), 1);
+  assert.equal(lineOfOffset(starts, text.indexOf('third') + 2), 3);
+  assert.equal(lineOfOffset(starts, text.length), 4, 'an offset past the last break is the last line');
+  assert.equal(lineOfOffset(lineStartOffsets(''), 0), 1);
+
+  const roundTrip = { line: 2, character: 3 };
+  assert.equal(lineOfOffset(starts, offsetOfPosition(text, starts, roundTrip)), roundTrip.line + 1);
 });

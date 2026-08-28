@@ -302,6 +302,11 @@ export const SETTINGS_MAP = Object.freeze([
         control: 'number', range: 'VISIONS_DISPATCH_TIMEOUT_RANGE', keywords: ['deadline', 'review'], defaultValue: 180,
       },
       {
+        id: 'visions-intent-thread-ttl', path: 'visions.intent.threadTtlMs', title: 'Intent thread lifetime (ms)',
+        description: 'How long an intent thread nobody advanced stays live before it retires.',
+        control: 'number', range: 'VISIONS_INTENT_THREAD_TTL_MS_RANGE', keywords: ['intent', 'decay', 'thread'], defaultValue: 259200000,
+      },
+      {
         id: 'visions-model', path: 'visions.dispatch.model', title: 'Model override',
         description: 'Leave blank to use the configured Claude Code default.',
         control: 'text', keywords: ['claude', 'override'], defaultValue: '',

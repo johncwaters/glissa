@@ -60,6 +60,9 @@ const VisionsSettings = optionalObject('visions', {
     activityMaxPerHour: optionalNumber('visions.dispatch.activityMaxPerHour', ranges.VISIONS_ACTIVITY_MAX_PER_HOUR_RANGE),
     dispatchTimeoutSeconds: optionalNumber('visions.dispatch.dispatchTimeoutSeconds', ranges.VISIONS_DISPATCH_TIMEOUT_RANGE),
   }),
+  intent: optionalObject('visions.intent', {
+    threadTtlMs: optionalNumber('visions.intent.threadTtlMs', ranges.VISIONS_INTENT_THREAD_TTL_MS_RANGE),
+  }),
 });
 
 const posthogNumberRanges = {

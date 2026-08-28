@@ -1,64 +1,84 @@
+import { VISIONS_THREAD_ID_PATTERN } from '/shared/visions-intent-ids.mjs';
+
 export const VISIONS_EMPTY_TEXT = 'No findings. Open a markdown file in a connected editor.';
 
 export const VISIONS_INTENT_EMPTY_TEXT = 'No intent yet. The visions proposes one after its first pass.';
 
-// The slot a uri no configured project owns lands in, and the fallback a project with none reads.
-export const VISIONS_INTENT_GLOBAL_LABEL = 'All projects';
+// The list a uri no configured project owns lands in. It is never read into a project's prompt.
+export const VISIONS_INTENT_UNOWNED_LABEL = 'Unowned';
 
-/** @typedef {{ text: string, source: 'model'|null, ts: number }} IntentSlot */
-/** @typedef {{ global: IntentSlot|null, byProject: Record<string, IntentSlot> }} IntentState */
+/** @typedef {{ id: string|null, text: string, uris: string[], ts: number, hits: number }} IntentThread */
+/** @typedef {{ byProject: Record<string, IntentThread[]>, unowned: IntentThread[] }} IntentState */
 
-export function emptyIntent() {
-  return { text: '', source: null, ts: 0 };
-}
+const THREAD_ID_RE = new RegExp(`^${VISIONS_THREAD_ID_PATTERN}$`);
 
 /** @returns {IntentState} */
 export function emptyIntentState() {
-  return { global: null, byProject: {} };
+  return { byProject: {}, unowned: [] };
 }
 
-export function normalizeIntentSlot(raw) {
-  if (!raw || typeof raw !== 'object') return emptyIntent();
+/** @returns {IntentThread|null} */
+export function normalizeIntentThread(raw) {
+  if (!raw || typeof raw !== 'object') return null;
   const text = typeof raw.text === 'string' ? raw.text : '';
+  if (!text) return null;
   const ts = Number(raw.ts);
+  const hits = Number(raw.hits);
   return {
+    id: typeof raw.id === 'string' && THREAD_ID_RE.test(raw.id) ? raw.id : null,
     text,
-    source: raw.source === 'model' ? raw.source : null,
+    uris: Array.isArray(raw.uris) ? raw.uris.filter((uri) => typeof uri === 'string' && uri) : [],
     ts: Number.isFinite(ts) && ts > 0 ? ts : 0,
+    hits: Number.isInteger(hits) && hits > 0 ? hits : 1,
   };
 }
 
-function statedSlot(raw) {
-  const slot = normalizeIntentSlot(raw);
-  return slot.text ? slot : null;
+// A thread list, or a single pre-thread slot lifted into one thread; junk reads as no threads.
+function threadsOf(raw) {
+  if (Array.isArray(raw)) return raw.map(normalizeIntentThread).filter((thread) => thread !== null);
+  const lifted = normalizeIntentThread(raw);
+  return lifted ? [lifted] : [];
 }
 
-// Tolerant of the pre-per-project flat shape: a tab that outlives a server update reads it as global.
+// Tolerant of both slot shapes: a tab that outlives a server update reads them as one thread each.
 /** @returns {IntentState} */
 export function intentStateOfMessage(msg) {
   const raw = msg?.intent;
   if (!raw || typeof raw !== 'object') return emptyIntentState();
-  const isScoped = Object.hasOwn(raw, 'global') || Object.hasOwn(raw, 'byProject');
-  if (!isScoped) return { global: statedSlot(raw), byProject: {} };
+  const isKeyed = Object.hasOwn(raw, 'byProject') || Object.hasOwn(raw, 'unowned') || Object.hasOwn(raw, 'global');
+  if (!isKeyed) return { byProject: {}, unowned: threadsOf(raw) };
   const rawByProject = raw.byProject && typeof raw.byProject === 'object' ? raw.byProject : {};
   const entries = [];
-  for (const [projectId, slotRaw] of Object.entries(rawByProject)) {
-    const slot = statedSlot(slotRaw);
-    if (!slot || !projectId) continue;
-    entries.push([projectId, slot]);
+  for (const [projectId, value] of Object.entries(rawByProject)) {
+    const threads = threadsOf(value);
+    if (threads.length === 0 || !projectId) continue;
+    entries.push([projectId, threads]);
   }
-  return { global: statedSlot(raw.global), byProject: Object.fromEntries(entries) };
+  return { byProject: Object.fromEntries(entries), unowned: threadsOf(Object.hasOwn(raw, 'unowned') ? raw.unowned : raw.global) };
 }
 
-// One slot moved. An empty statement is never broadcast, so it reads as nothing to apply rather than
-// as an instruction to blank the slot.
+// The wire names the active thread; a payload that names none (the snapshot path) leaves the first one
+// active, which is the order every sender already sends.
+function activeFirst(threads, active) {
+  const activeId = typeof active?.id === 'string' ? active.id : null;
+  if (!activeId) return threads;
+  const index = threads.findIndex((thread) => thread.id === activeId);
+  if (index <= 0) return threads;
+  return [threads[index], ...threads.slice(0, index), ...threads.slice(index + 1)];
+}
+
+// One project moved: its whole list arrives, active first. An empty list is a project with nothing left.
 export function applyIntentMessage(state, msg) {
   const current = state || emptyIntentState();
-  const slot = statedSlot(msg?.intent);
-  if (!slot) return current;
+  const raw = msg?.intent;
+  if (!raw || typeof raw !== 'object') return current;
+  const threads = activeFirst(Array.isArray(raw.threads) ? threadsOf(raw.threads) : threadsOf(raw), raw.active);
   const projectId = typeof msg?.projectId === 'string' && msg.projectId ? msg.projectId : null;
-  if (!projectId) return { global: slot, byProject: { ...current.byProject } };
-  return { global: current.global, byProject: { ...current.byProject, [projectId]: slot } };
+  if (!projectId) return { byProject: { ...current.byProject }, unowned: threads };
+  const byProject = { ...current.byProject };
+  if (threads.length === 0) delete byProject[projectId];
+  if (threads.length > 0) byProject[projectId] = threads;
+  return { byProject, unowned: current.unowned };
 }
 
 /** @param {Map<string, string>|null} namesById */
@@ -67,28 +87,33 @@ export function intentProjectLabel(projectId, namesById = null) {
   return typeof name === 'string' && name ? name : projectId;
 }
 
+function threadRows(threads, { key, label, now }) {
+  return threads.map((thread, index) => ({
+    key: `${key}:${thread.id || index}`,
+    label,
+    text: thread.text,
+    hasText: true,
+    active: index === 0,
+    meta: intentMetaText(thread, now),
+  }));
+}
+
+// One row per live thread, the active one first inside its project, projects by name.
 /** @param {Map<string, string>|null} namesById */
 export function intentRows(state, namesById = null, now = Date.now()) {
   const current = state || emptyIntentState();
   const projects = Object.entries(current.byProject || {})
-    .filter(([projectId, slot]) => projectId && slot && slot.text)
-    .map(([projectId, slot]) => ({
-      key: projectId,
-      label: intentProjectLabel(projectId, namesById),
-      text: slot.text,
-      hasText: true,
-      meta: intentMetaText(slot, now),
-    }))
-    .sort((left, right) => left.label.localeCompare(right.label));
-  const global = current.global?.text ? current.global : null;
-  if (!global && projects.length > 0) return projects;
+    .filter(([projectId, threads]) => projectId && Array.isArray(threads) && threads.length > 0)
+    .map(([projectId, threads]) => ({ projectId, label: intentProjectLabel(projectId, namesById), threads }))
+    .sort((left, right) => left.label.localeCompare(right.label))
+    .flatMap(({ projectId, label, threads }) => threadRows(threads, { key: projectId, label, now }));
+  const unowned = threadRows(Array.isArray(current.unowned) ? current.unowned : [], {
+    key: 'unowned', label: VISIONS_INTENT_UNOWNED_LABEL, now,
+  });
+  if (projects.length + unowned.length > 0) return [...unowned, ...projects];
   return [{
-    key: 'global',
-    label: VISIONS_INTENT_GLOBAL_LABEL,
-    text: global ? global.text : VISIONS_INTENT_EMPTY_TEXT,
-    hasText: !!global,
-    meta: intentMetaText(global, now),
-  }, ...projects];
+    key: 'unowned', label: VISIONS_INTENT_UNOWNED_LABEL, text: VISIONS_INTENT_EMPTY_TEXT, hasText: false, active: false, meta: '',
+  }];
 }
 
 export function intentSourceText(intent) {
@@ -116,13 +141,14 @@ export function intentAgeText(ts, now = Date.now()) {
 export function intentMetaText(intent, now = Date.now()) {
   const source = intentSourceText(intent);
   if (!source) return '';
+  const thread = typeof intent?.id === 'string' && intent.id ? `thread ${intent.id}, ` : '';
   const age = intentAgeText(intent?.ts, now);
-  if (!age) return source;
-  return `${source}, ${age}`;
+  if (!age) return `${thread}${source}`;
+  return `${thread}${source}, ${age}`;
 }
 
 function intentSignature(state) {
-  return intentRows(state, null, 0).map((row) => `${row.key}\u0000${row.text}\u0000${row.hasText}`).join('\u0001');
+  return intentRows(state, null, 0).map((row) => `${row.key}\u0000${row.text}\u0000${row.hasText}\u0000${row.active}`).join('\u0001');
 }
 
 export function hasIntentStateChanged(previous, next) {

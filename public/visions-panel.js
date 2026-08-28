@@ -95,6 +95,7 @@ function buildIntentRow(row) {
   head.append(el('span', 'visions-intent-scope', row.label), el('span', 'visions-intent-meta', row.meta));
   const statement = el('p', 'visions-intent-text', row.text);
   statement.classList.toggle('visions-intent-none', !row.hasText);
+  item.classList.toggle('visions-intent-active', row.active === true);
   item.append(head, statement);
   return item;
 }

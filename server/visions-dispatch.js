@@ -36,7 +36,7 @@ const {
   sanitizeCommentsWithDrops,
 } = require('./core/visions-dispatch-core');
 const { buildLanePermissions } = require('./core/lane-permissions-core');
-const { sanitizeIntentText } = require('./core/visions-intent-core');
+const { readIntentProposal, sanitizeIntentText } = require('./core/visions-intent-core');
 const { createLaneLog } = require('./lane-log');
 
 const RESULT_VERDICTS = new Set(['COMMENTS', 'NONE', 'ERROR']);
@@ -98,9 +98,9 @@ async function readCommentsResult(resultPath, { lineCount = 0, onBytesRead = nul
     return errorResult('invalid verdict in result file', ERROR_SOURCE_SESSION);
   }
   if (verdict === 'ERROR') return errorResult('session reported an error verdict', ERROR_SOURCE_SESSION);
-  // Optional, and validated exactly like a comment message: a non-string or empty claim is simply not
-  // an updated belief, so it is dropped rather than clearing the standing statement.
-  const intent = sanitizeIntentText(parsed.intent) || null;
+  // Optional: a string advances the active thread, { thread, text } names one or opens one, and anything
+  // else is simply not an updated belief, dropped rather than clearing the standing statement.
+  const intent = readIntentProposal(parsed.intent);
   const hand = sanitizeIntentText(parsed.hand, { maxChars: MAX_HAND_CHARS }) || null;
   const diagnosticsResult = sanitizeCommentsWithDrops(parsed.diagnostics, { lineCount });
   const diagnostics = diagnosticsResult.comments;
