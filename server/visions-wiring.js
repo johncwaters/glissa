@@ -9,14 +9,18 @@ const {
   applyDidChange, applyDidClose, applyDidOpen, createDocStore, detectBlankLineBoundary, formatRange, getDoc, listDocs, uriOfParams,
 } = require('./core/visions-buffer-core');
 const {
+  ERROR_BACKOFF_THRESHOLD,
   buildVisionsPrompt,
   createDispatchState,
   decideDispatch,
+  decideDocumentSize,
   decidePromptSize,
   forgetUri,
   hashText,
   commentsToLsp,
+  handToLsp,
   mergeDiagnostics,
+  noteDispatchOutcome,
   recordDispatch,
   resolveDispatchConfig,
   sanitizeModelDiagnostics,
@@ -247,6 +251,9 @@ function createVisionsWiring({
   // keystroke exactly as the model diagnostics beside them do.
   const commentDiagnosticsByUri = new Map();
   const handsByUri = new Map();
+  // The same hand as an LSP diagnostic, on the same lifecycle as the comment diagnostics beside it: it
+  // describes the text the dispatch read, so a buffer that moved invalidates it too.
+  const handDiagnosticsByUri = new Map();
   const openOwnersByUri = new Map();
   /*
    * Tier 1 fixes from the last sweep of each uri, stored WITH the text hash they were computed against.
@@ -393,7 +400,17 @@ function createVisionsWiring({
       ruleFindingsByUri.get(uri) || [],
       modelDiagnosticsByUri.get(uri) || [],
       commentDiagnosticsByUri.get(uri) || [],
+      handDiagnosticsByUri.get(uri) || [],
     );
+  }
+
+  /*
+   * What the next prompt is told not to repeat: the tier 2 RULE findings alone, never the union the tab
+   * renders. The union carries this lane's own hand and comments, so feeding it back told the session
+   * to omit a hand nobody had lowered, and the empty answer then lowered it.
+   */
+  function standingFindingsFor(uri) {
+    return ruleFindingsByUri.get(uri) || [];
   }
 
   function recordRuleFindings(uri, diagnostics) {
@@ -430,6 +447,7 @@ function createVisionsWiring({
   function dropDispatchDiagnostics(uri) {
     modelDiagnosticsByUri.delete(uri);
     commentDiagnosticsByUri.delete(uri);
+    handDiagnosticsByUri.delete(uri);
   }
 
   function broadcastComments(uri, comments) {
@@ -469,13 +487,20 @@ function createVisionsWiring({
     });
   }
 
-  function recordHand(uri, hand) {
+  /** @param {string} uri @param {string | null} hand @param {{ text?: string } | null} [doc] */
+  function recordHand(uri, hand, doc = null) {
     const next = typeof hand === 'string' && hand ? hand : null;
     const previous = handsByUri.get(uri) || null;
-    if (previous === next) return;
     if (!next) handsByUri.delete(uri);
     if (next) handsByUri.set(uri, next);
-    broadcastHand(uri, next);
+    // Rebuilt whatever the text says, since a didChange dropped the diagnostic while the tab kept the
+    // hand: an equality shortcut here left the editor warning gone for good on a repeated hand.
+    const diagnostics = handToLsp(next, { text: doc?.text || '' });
+    const hadDiagnostics = handDiagnosticsByUri.has(uri);
+    if (diagnostics.length === 0) handDiagnosticsByUri.delete(uri);
+    if (diagnostics.length > 0) handDiagnosticsByUri.set(uri, diagnostics);
+    if (previous !== next) broadcastHand(uri, next);
+    return { changed: hadDiagnostics !== (diagnostics.length > 0) || previous !== next };
   }
 
   function clearHand(uri) {
@@ -589,13 +614,15 @@ function createVisionsWiring({
     const modelUpdate = recordModelDiagnostics(uri, result, doc);
     const comments = result.verdict === 'COMMENTS' ? result.comments : [];
     const commentUpdate = recordComments(uri, comments, doc);
-    if (modelUpdate.changed || commentUpdate.changed) {
+    const hand = handFromResult(result);
+    // Recorded BEFORE the publish below, or a hand raised on its own never reaches the editor: the
+    // frame it belongs in has already gone out by the time the old order got here.
+    const handUpdate = recordHand(uri, hand, doc);
+    if (modelUpdate.changed || commentUpdate.changed || handUpdate.changed) {
       const merged = unionDiagnosticsFor(uri);
       publishDiagnosticsFrame(send, uri, merged);
       recordFindings(uri, merged);
     }
-    const hand = handFromResult(result);
-    recordHand(uri, hand);
     rememberRecords(dispatchMemoryInputs({
       uri, project: projectTagForUri(uri), comments, hand,
     }));
@@ -733,13 +760,13 @@ function createVisionsWiring({
         noteGate(uri, decision);
         return;
       }
-      const documentSizeDecision = decidePromptSize(text, decision.trigger);
+      const documentSizeDecision = decideDocumentSize(text, decision.trigger);
       if (!documentSizeDecision.dispatch) {
         noteGate(uri, documentSizeDecision);
         return;
       }
       dispatchInFlight = true;
-      /** @type {{ verdict: string, reason?: string | null, diagnostics?: unknown, comments?: unknown, hand?: unknown, intent?: unknown } | null} */
+      /** @type {{ verdict: string, errorSource?: string | null, reason?: string | null, diagnostics?: unknown, comments?: unknown, hand?: unknown, intent?: unknown } | null} */
       let result = null;
       try {
         const memory = memoryStoreOf() ? await readMemorySection(uri, text) : null;
@@ -747,7 +774,7 @@ function createVisionsWiring({
         const prompt = buildPrompt({
           uri,
           text,
-          findings: findingsByUri.get(uri) || [],
+          findings: standingFindingsFor(uri),
           intent: intentTextFor(intentState, projectId),
           digest,
           memory,
@@ -764,7 +791,7 @@ function createVisionsWiring({
         result = await dispatch({
           uri,
           text,
-          findings: findingsByUri.get(uri) || [],
+          findings: standingFindingsFor(uri),
           intent: intentTextFor(intentState, projectId),
           digest,
           memory,
@@ -775,7 +802,15 @@ function createVisionsWiring({
       } finally {
         dispatchInFlight = false;
       }
+      // Only a finished spawn is evidence about the LANE: the throw above never reached the CLI, and a
+      // real spawn failure still arrives here as a result whose verdict is ERROR.
       if (!result) return;
+      const outcome = noteDispatchOutcome(dispatchState, {
+        verdict: result.verdict, errorSource: result.errorSource, now: nowFn(),
+      });
+      if (outcome.backingOff) {
+        warn(`${ERROR_BACKOFF_THRESHOLD} dispatches failed in a row; no dispatch until ${new Date(outcome.backoffUntil).toISOString()}`);
+      }
       const currentDoc = getDoc(store, uri);
       if (closed || !currentDoc) {
         note(`dropped a dispatch result for ${uri}: the buffer is gone`);

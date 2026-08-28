@@ -11,7 +11,7 @@
  *   - The deny list below is the guard on top of that. Read is deliberately NOT denied: a bare `Read`
  *     deny refuses the Write tool too (probed), so denying reads and keeping the result contract are
  *     mutually exclusive with this plumbing.
- *   - Re-probed against 2.1.241; every clause and its counter-example is in
+ *   - Re-probed against 2.1.250; every clause and its counter-example is in
  *     server/core/lane-permissions-core.js.
  */
 
@@ -26,12 +26,14 @@ const {
 } = require('./ephemeral-session');
 const {
   DEFAULT_TIMEOUT_SECONDS,
+  ERROR_SOURCE_SESSION,
+  ERROR_SOURCE_TRANSPORT,
   MAX_HAND_CHARS,
   VISIONS_RESULT_FILE,
   buildVisionsPrompt,
   countLines,
   decidePromptSize,
-  sanitizeComments,
+  sanitizeCommentsWithDrops,
 } = require('./core/visions-dispatch-core');
 const { buildLanePermissions } = require('./core/lane-permissions-core');
 const { sanitizeIntentText } = require('./core/visions-intent-core');
@@ -45,14 +47,20 @@ const VISIONS_BOOTSTRAP_PROMPT = 'Read visions-prompt.txt and follow all instruc
 
 // Verbs a visions never needs: no shell, no editing, no network, no sub-agents.
 const VISIONS_DENY_TOOLS = Object.freeze(['Bash', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task']);
+// The whole built-in set this lane gets: read the prompt file, write the result file. The deny list
+// above stays as the guard, since an allow list that grows by one entry must not silently grant a verb.
+const VISIONS_ALLOW_TOOLS = Object.freeze(['Read', 'Write']);
 
 function visionsPermissions() {
-  return buildLanePermissions({ denyTools: VISIONS_DENY_TOOLS });
+  return buildLanePermissions({ denyTools: VISIONS_DENY_TOOLS, allowTools: VISIONS_ALLOW_TOOLS });
 }
 
-function errorResult(reason) {
+// `errorSource` is what the lane's health counter reads: everything here is a transport or spawn
+// failure except the one verdict the session itself authored, which proves the CLI ran.
+/** @param {string | null} reason @param {string} [errorSource] */
+function errorResult(reason, errorSource = ERROR_SOURCE_TRANSPORT) {
   return {
-    verdict: 'ERROR', comments: [], diagnostics: [], intent: null, hand: null, reason,
+    verdict: 'ERROR', comments: [], diagnostics: [], intent: null, hand: null, outOfRange: 0, errorSource, reason,
   };
 }
 
@@ -63,41 +71,54 @@ function errorResult(reason) {
  */
 /** @param {string} resultPath @param {{ lineCount?: number, onBytesRead?: ((bytes: number) => void) | null }} [options] */
 async function readCommentsResult(resultPath, { lineCount = 0, onBytesRead = null } = {}) {
+  /** @type {string} */
+  let raw = '';
+  try {
+    raw = await fs.readFile(resultPath, 'utf8');
+  } catch {
+    // Stays transport: four dispatches died against an account rate limit before the CLI ran at all on
+    // 2026-08-27, and NO file is exactly that signature, which the lane backoff exists to catch.
+    return errorResult('no readable result file');
+  }
+  if (typeof onBytesRead === 'function') onBytesRead(Buffer.byteLength(raw));
   /** @type {{ verdict?: unknown, intent?: unknown, hand?: unknown, diagnostics?: unknown, comments?: unknown } | null} */
   let parsed = null;
   try {
-    const raw = await fs.readFile(resultPath, 'utf8');
-    if (typeof onBytesRead === 'function') onBytesRead(Buffer.byteLength(raw));
     parsed = JSON.parse(raw);
   } catch {
-    return errorResult('no readable result file');
+    // Its own try, because a file that EXISTS proves the session ran and wrote it: sharing the catch
+    // above let buffer text that steers the session into unparsable output reach the lane-wide backoff.
+    return errorResult('result file is not JSON', ERROR_SOURCE_SESSION);
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return errorResult('result file is not an object');
+    return errorResult('result file is not an object', ERROR_SOURCE_SESSION);
   }
   const verdict = String(parsed.verdict || '').toUpperCase();
   if (!RESULT_VERDICTS.has(verdict)) {
-    return errorResult('invalid verdict in result file');
+    return errorResult('invalid verdict in result file', ERROR_SOURCE_SESSION);
   }
-  if (verdict === 'ERROR') return errorResult('session reported an error verdict');
+  if (verdict === 'ERROR') return errorResult('session reported an error verdict', ERROR_SOURCE_SESSION);
   // Optional, and validated exactly like a comment message: a non-string or empty claim is simply not
   // an updated belief, so it is dropped rather than clearing the standing statement.
   const intent = sanitizeIntentText(parsed.intent) || null;
   const hand = sanitizeIntentText(parsed.hand, { maxChars: MAX_HAND_CHARS }) || null;
-  const diagnostics = sanitizeComments(parsed.diagnostics, { lineCount });
+  const diagnosticsResult = sanitizeCommentsWithDrops(parsed.diagnostics, { lineCount });
+  const diagnostics = diagnosticsResult.comments;
   if (verdict !== 'COMMENTS') {
     return {
-      verdict, comments: [], diagnostics, intent, hand, reason: null,
+      verdict, comments: [], diagnostics, intent, hand, outOfRange: diagnosticsResult.outOfRange, errorSource: null, reason: null,
     };
   }
-  const comments = sanitizeComments(parsed.comments, { lineCount });
+  const commentsResult = sanitizeCommentsWithDrops(parsed.comments, { lineCount });
+  const comments = commentsResult.comments;
+  const outOfRange = commentsResult.outOfRange + diagnosticsResult.outOfRange;
   if (comments.length === 0) {
     return {
-      verdict: 'NONE', comments: [], diagnostics, intent, hand, reason: 'no comment in the result file survived validation',
+      verdict: 'NONE', comments: [], diagnostics, intent, hand, outOfRange, errorSource: null, reason: 'no comment in the result file survived validation',
     };
   }
   return {
-    verdict, comments, diagnostics, intent, hand, reason: null,
+    verdict, comments, diagnostics, intent, hand, outOfRange, errorSource: null, reason: null,
   };
 }
 
@@ -124,7 +145,7 @@ function createVisionsSpawn({
     // Required here, not at module load: an inert lane must not pay for resolving `claude` on PATH.
     const { Session } = require('../session/sessions');
     const posture = visionsPermissions();
-    const extraClaudeArgs = ['-p'];
+    const extraClaudeArgs = ['-p', ...posture.args];
     if (model) extraClaudeArgs.push('--model', model);
     const sess = new Session({
       id,
@@ -143,6 +164,10 @@ function createVisionsSpawn({
 
     await awaitSessionExit(sess, { signal, spawnGate });
   };
+}
+
+function makeVisionsWorkDir() {
+  return fs.mkdtemp(path.join(os.tmpdir(), 'glissa-visions-'));
 }
 
 /**
@@ -165,7 +190,7 @@ function createVisionsDispatcher({
   nowFn = Date.now,
   setTimeoutFn = setTimeout,
   clearTimeoutFn = clearTimeout,
-  makeWorkDir = () => fs.mkdtemp(path.join(os.tmpdir(), 'glissa-visions-')),
+  makeWorkDir = makeVisionsWorkDir,
   removeWorkDir = async (dir) => { try { await fs.rm(dir, { recursive: true, force: true }); } catch { /* best-effort */ } },
   readResult = readCommentsResult,
   idFor = (uri) => `visions:${uri}:${Date.now()}`,
@@ -205,6 +230,9 @@ function createVisionsDispatcher({
           let bytesRead = 0;
           const result = await readDispatchResult(resultPath, { lineCount, onBytesRead: (bytes) => { bytesRead = bytes; } });
           note(`dispatch result for ${uri}: ${result.verdict} (${bytesRead} bytes, ${elapsed()}ms)`);
+          // Never silent: an off-buffer line means the session numbered against something that is not
+          // this buffer, so the entries that DID land are suspect rather than merely fewer.
+          if (result.outOfRange > 0) warn(`dispatch for ${uri} reported ${result.outOfRange} line(s) past the ${lineCount}-line buffer; the entries it kept may be anchored wrong`);
           return result;
         })
         .catch((error) => errorResult(firstLine(error.message))),
@@ -260,5 +288,6 @@ module.exports = {
   visionsPermissions,
   createVisionsDispatcher,
   createVisionsSpawn,
+  makeVisionsWorkDir,
   readCommentsResult,
 };

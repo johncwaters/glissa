@@ -187,6 +187,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - No lane may deny bare `Read`, `Write`, `Glob` or `Grep`: a bare `Read` deny refuses the Write tool, mutually exclusive with a result-file contract.
 - The mode is set in the lane's managed settings file, overriding the operator's own, or `defaultMode: auto` leaves a classifier deciding these writes instead of a rule.
 - A lane prompt is written in its throwaway cwd and invoked by a constant bootstrap argument, since a Windows `.cmd` shim re-parses argv through `cmd.exe` (`server/visions-dispatch.js`, `server/pack-distiller.js`).
+- The visions buffer carries a `N| ` prefix per line: told to count from the fence, the session used the prompt file's `cat -n` numbering and every comment landed offset.
 
 ### Security: Trust Boundary
 

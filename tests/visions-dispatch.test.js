@@ -49,6 +49,8 @@ test('a COMMENTS result is believed for the entries that pass validation', async
     diagnostics: [],
     intent: null,
     hand: null,
+    outOfRange: 1,
+    errorSource: null,
     reason: null,
   });
 });
@@ -57,7 +59,7 @@ test('NONE is a first-class answer, and carries no comments', async (t) => {
   const { file, cleanup } = tempFile(JSON.stringify({ verdict: 'none', comments: [] }));
   t.after(cleanup);
   assert.deepEqual(await readCommentsResult(file, { lineCount: 4 }), {
-    verdict: 'NONE', comments: [], diagnostics: [], intent: null, hand: null, reason: null,
+    verdict: 'NONE', comments: [], diagnostics: [], intent: null, hand: null, outOfRange: 0, errorSource: null, reason: null,
   });
 });
 
@@ -73,21 +75,33 @@ test('a COMMENTS verdict whose every entry is junk reports NONE and says why', a
 test('a missing, unparsable, non-object or unknown-verdict file is an ERROR, never a comment', async (t) => {
   const missing = path.join(os.tmpdir(), `glissa-visions-absent-${process.pid}.json`);
   assert.deepEqual(await readCommentsResult(missing), {
-    verdict: 'ERROR', comments: [], diagnostics: [], intent: null, hand: null, reason: 'no readable result file',
+    verdict: 'ERROR', comments: [], diagnostics: [], intent: null, hand: null, outOfRange: 0, errorSource: 'transport', reason: 'no readable result file',
   });
 
   const bad = tempFile('{not json');
   t.after(bad.cleanup);
   assert.equal((await readCommentsResult(bad.file)).verdict, 'ERROR');
 
+  // A file that exists proves the session ran, so an unparsable one is its output, never lane evidence.
+  const unparsable = await readCommentsResult(bad.file);
+  assert.equal(unparsable.errorSource, 'session');
+  assert.equal(unparsable.reason, 'result file is not JSON');
+  const absent = await readCommentsResult(path.join(os.tmpdir(), `glissa-visions-gone-${process.pid}.json`));
+  assert.equal(
+    absent.errorSource, 'transport',
+    'NO file is the rate-limit signature the backoff exists to catch, so it stays transport',
+  );
+
   const array = tempFile(JSON.stringify([{ verdict: 'COMMENTS' }]));
   t.after(array.cleanup);
-  assert.match((await readCommentsResult(array.file)).reason, /not an object/);
+  const arrayResult = await readCommentsResult(array.file);
+  assert.match(arrayResult.reason, /not an object/);
+  assert.equal(arrayResult.errorSource, 'session');
 
   const unknown = tempFile(JSON.stringify({ verdict: 'LOOKS_FINE', comments: [{ line: 1, message: 'trust me' }] }));
   t.after(unknown.cleanup);
   assert.deepEqual(await readCommentsResult(unknown.file, { lineCount: 4 }), {
-    verdict: 'ERROR', comments: [], diagnostics: [], intent: null, hand: null, reason: 'invalid verdict in result file',
+    verdict: 'ERROR', comments: [], diagnostics: [], intent: null, hand: null, outOfRange: 0, errorSource: 'session', reason: 'invalid verdict in result file',
   });
 });
 
@@ -107,6 +121,8 @@ test('an ERROR verdict cannot carry result surfaces', async (t) => {
     diagnostics: [],
     intent: null,
     hand: null,
+    outOfRange: 0,
+    errorSource: 'session',
     reason: 'session reported an error verdict',
   });
 });
@@ -119,7 +135,7 @@ test('onBytesRead reports what was read without changing the result shape', asyn
 
   const sizes = [];
   assert.deepEqual(await readCommentsResult(file, { lineCount: 4, onBytesRead: (bytes) => sizes.push(bytes) }), {
-    verdict: 'NONE', comments: [], diagnostics: [], intent: null, hand: null, reason: null,
+    verdict: 'NONE', comments: [], diagnostics: [], intent: null, hand: null, outOfRange: 0, errorSource: null, reason: null,
   });
   assert.deepEqual(sizes, [Buffer.byteLength(content)]);
 
@@ -272,6 +288,8 @@ test('a session that writes the result file yields its comments, and the work di
     diagnostics: [],
     intent: null,
     hand: null,
+    outOfRange: 0,
+    errorSource: null,
     reason: null,
   });
 
@@ -343,7 +361,7 @@ test('a spawn that throws becomes an ERROR verdict rather than a rejected dispat
   const { dispatch } = dispatcherWithSpawn(async () => { throw new Error('claude is not on PATH'); });
   const result = await dispatch({ uri: URI, text: TEXT });
   assert.deepEqual(result, {
-    verdict: 'ERROR', comments: [], diagnostics: [], intent: null, hand: null, reason: 'claude is not on PATH',
+    verdict: 'ERROR', comments: [], diagnostics: [], intent: null, hand: null, outOfRange: 0, errorSource: 'transport', reason: 'claude is not on PATH',
   });
 });
 
@@ -372,7 +390,7 @@ test('a hung session is aborted at the hard timeout and resolves ERROR, so the l
   // The injected timer never fires on its own; firing it here IS the hard timeout.
   fire();
   assert.deepEqual(await pending, {
-    verdict: 'ERROR', comments: [], diagnostics: [], intent: null, hand: null, reason: 'dispatch timed out',
+    verdict: 'ERROR', comments: [], diagnostics: [], intent: null, hand: null, outOfRange: 0, errorSource: 'transport', reason: 'dispatch timed out',
   });
   await eventLoopTurn();
   assert.equal(aborted, true, 'the session was told to stop, not just abandoned');
@@ -405,7 +423,7 @@ test('a timed-out dispatch waits for the killed session before removing its work
 
   releaseSpawn();
   assert.deepEqual(await pending, {
-    verdict: 'ERROR', comments: [], diagnostics: [], intent: null, hand: null, reason: 'dispatch timed out',
+    verdict: 'ERROR', comments: [], diagnostics: [], intent: null, hand: null, outOfRange: 0, errorSource: 'transport', reason: 'dispatch timed out',
   });
   assert.deepEqual(removals, [workDirs[0]], 'and is removed once the session is gone');
   assert.equal(fs.existsSync(workDirs[0]), false);

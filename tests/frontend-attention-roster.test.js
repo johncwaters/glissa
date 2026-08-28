@@ -160,3 +160,36 @@ test('attentionSummaryText: resting reads as a sentence, never an empty slot', a
   assert.equal(attentionSummaryText(1), '1 NEEDS YOU');
   assert.equal(attentionSummaryText(4), '4 NEED YOU');
 });
+
+test('pickStrongestAttention: a raised hand outranks an arrival dot whatever the order', async () => {
+  const { pickStrongestAttention } = await importCore();
+  assert.equal(pickStrongestAttention(['unseen', 'hand']), 'hand');
+  assert.equal(pickStrongestAttention(['hand', 'unseen']), 'hand');
+  assert.equal(pickStrongestAttention([false, true, 'hand', false]), 'hand');
+  assert.equal(pickStrongestAttention(['hand', true]), 'hand');
+});
+
+test('pickStrongestAttention: equal-rank levels resolve to the first one asking', async () => {
+  const { pickStrongestAttention } = await importCore();
+  assert.equal(pickStrongestAttention([false, 'unseen', true]), 'unseen');
+  assert.equal(pickStrongestAttention([true, 'unseen']), true);
+  assert.equal(pickStrongestAttention([false, true]), true);
+});
+
+test('pickStrongestAttention: nothing asking is false, never a stray truthy level', async () => {
+  const { pickStrongestAttention } = await importCore();
+  assert.equal(pickStrongestAttention([]), false);
+  assert.equal(pickStrongestAttention([false, false]), false);
+  assert.equal(pickStrongestAttention([null, undefined, '']), false);
+  assert.equal(pickStrongestAttention(), false);
+});
+
+test('attentionRank: an unknown level still counts as asking, below a raised hand', async () => {
+  const { attentionRank } = await importCore();
+  assert.equal(attentionRank('hand'), 2);
+  assert.equal(attentionRank('unseen'), 1);
+  assert.equal(attentionRank('something-new'), 1);
+  assert.equal(attentionRank(true), 1);
+  assert.equal(attentionRank(false), 0);
+  assert.equal(attentionRank(undefined), 0);
+});

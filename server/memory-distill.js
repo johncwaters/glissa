@@ -75,7 +75,7 @@ function createMemoryDistillSpawn({
     const { Session } = require('../session/sessions');
     const posture = buildLanePermissions({ denyTools: MEMORY_DISTILL_DENY_TOOLS });
     const standalone = hookRouter ? null : writeStandaloneDenySettings(posture.permissions);
-    const extraClaudeArgs = ['-p', ...(standalone ? standalone.args : [])];
+    const extraClaudeArgs = ['-p', ...posture.args, ...(standalone ? standalone.args : [])];
     if (model) extraClaudeArgs.push('--model', model);
     const sess = new Session({
       id,
@@ -109,6 +109,10 @@ async function readDistillResultFile(resultPath) {
   }
 }
 
+function makeMemoryDistillWorkDir() {
+  return fsPromises.mkdtemp(path.join(os.tmpdir(), `${WORK_DIR_PREFIX}work-`));
+}
+
 /**
  * @param {{ store?: NonNullable<ReturnType<typeof import('./memory-store').createMemoryStore>> | null,
  *   config?: ReturnType<typeof distillCore.resolveDistillConfig>,
@@ -128,7 +132,7 @@ function createMemoryDistiller(deps = {}) {
     config = distillCore.resolveDistillConfig(null, { memoryEnabled: false }),
     spawnDistill = createMemoryDistillSpawn(),
     readResult = readDistillResultFile,
-    makeWorkDir = () => fsPromises.mkdtemp(path.join(os.tmpdir(), `${WORK_DIR_PREFIX}work-`)),
+    makeWorkDir = makeMemoryDistillWorkDir,
     writePrompt = (promptPath, content) => fsPromises.writeFile(promptPath, content, 'utf8'),
     removeWorkDir = async (dir) => { try { await fsPromises.rm(dir, { recursive: true, force: true }); } catch { /* best-effort */ } },
     now = () => Date.now(),
@@ -530,5 +534,6 @@ module.exports = {
   WORK_DIR_PREFIX,
   createMemoryDistillSpawn,
   createMemoryDistiller,
+  makeMemoryDistillWorkDir,
   readDistillResultFile,
 };

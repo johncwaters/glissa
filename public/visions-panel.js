@@ -25,6 +25,7 @@ import {
   applyIntentMessage,
   basenameOfUri,
   commentLineLabel,
+  decideVisionsAttention,
   emptyIntentState,
   findingLineLabel,
   fixCountText,
@@ -60,7 +61,7 @@ let _root = null;
 let _feed = null;
 /** @type {{ list: HTMLDivElement }|null} */
 let _intentUI = null;
-/** @type {((unseen: boolean) => void)|null} */
+/** @type {((level: string | null) => void)|null} */
 let _activityCallback = null;
 /** @type {boolean|null} */
 let _isEnabled = null;
@@ -288,7 +289,7 @@ function renderFixes({ force = false } = {}) {
 
 function refreshActivity() {
   if (!_activityCallback) return;
-  _activityCallback(_unseen);
+  _activityCallback(decideVisionsAttention({ unseen: _unseen, handCount: totalHandCount(_handsByUri) }));
 }
 
 function noteArrival(arrived) {
@@ -297,7 +298,9 @@ function noteArrival(arrived) {
   _unseen = true;
 }
 
-// The tab-activity seam (defined in pr-panel.js): the view owns the condition, app.js owns the dot element.
+// The tab-activity seam (defined in pr-panel.js): the view owns the condition, app.js owns the dot
+// element. This one hands over a LEVEL rather than a boolean, since a raised hand is not the same ask
+// as an unread arrival; the other panels still pass a boolean.
 export function setVisionsActivityCallback(callback) {
   _activityCallback = callback;
   refreshActivity();

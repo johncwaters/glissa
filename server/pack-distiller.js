@@ -127,7 +127,7 @@ function createDistillSpawn({
       name,
       path: cwd,
       dangerouslySkipPermissions: false,
-      extraClaudeArgs: standalone ? ['-p', ...standalone.args] : ['-p'],
+      extraClaudeArgs: ['-p', ...posture.args, ...(standalone ? standalone.args : [])],
       initialPrompt: PACK_DISTILL_BOOTSTRAP_PROMPT,
       ephemeral: true,
       settingsPermissions: posture.permissions,
@@ -143,6 +143,10 @@ function createDistillSpawn({
       if (standalone) standalone.cleanup();
     }
   };
+}
+
+function makePackDistillResultFile(packName, index) {
+  return createJobResultFile(`glissa-distill-${packName}-${index}`);
 }
 
 /**
@@ -176,7 +180,7 @@ function createPackDistiller(deps = {}) {
     // createJobResultFile). ONE dep, returning { path, cleanup }, because the cleanup closure is what
     // owns the directory: a separate remove-by-path dep would have to guess from the string whether the
     // parent is ours to delete, and an injected path would then take its directory down with it.
-    createResultFile = (packName, index) => createJobResultFile(`glissa-distill-${packName}-${index}`),
+    createResultFile = makePackDistillResultFile,
     readResult = readDistillResult,
     intervalHours = DEFAULT_INTERVAL_HOURS,
     timeoutSeconds = DEFAULT_TIMEOUT_SECONDS,
@@ -386,6 +390,7 @@ module.exports = {
   PACK_DISTILL_PROMPT_FILE,
   createDistillSpawn,
   createPackDistiller,
+  makePackDistillResultFile,
   packDistillerPermissions,
   readDistillResult,
   writeOutputNoFollow,

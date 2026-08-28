@@ -3913,6 +3913,18 @@ a.pr-title:hover {
   box-shadow: 0 0 6px var(--accent);
   animation: tab-pulse 1.4s ease-in-out infinite;
 }
+/* A raised hand is the rarest thing the Visions lane produces and the only standing one: bigger, in the
+   colour this dashboard already spends on "needs you", and not pulsing, so it reads as a condition
+   rather than as an arrival. */
+.tab-activity.active[data-attention="hand"] {
+  width: 8px;
+  height: 8px;
+  top: 3px;
+  right: 3px;
+  background: var(--state-waiting);
+  box-shadow: 0 0 6px var(--state-waiting);
+  animation: none;
+}
 @keyframes tab-pulse {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.35; }
@@ -6306,6 +6318,15 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-nav { displa
   background: var(--state-waiting);
 }
 .phone-nav-dot[hidden] { display: none; }
+/* The phone peer of the tab dot above: a raised hand is a standing condition, not an arrival, so it is
+   the larger mark. The board dot is already in the "needs you" colour, which leaves size to say it. */
+.phone-nav-dot[data-attention="hand"] {
+  width: 9px;
+  height: 9px;
+  box-shadow: 0 0 6px var(--state-waiting);
+}
+/* Only the corner-hung nav dot needs the offset back when it grows; the More sheet's stays centred. */
+.phone-nav-dot[data-attention="hand"]:not(.phone-nav-menu-dot) { top: 3px; }
 .phone-nav-menu-dot {
   top: 50%;
   right: 12px;

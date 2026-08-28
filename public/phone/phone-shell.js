@@ -22,6 +22,7 @@
 import { STATES } from '/shared/states.mjs';
 import { sendControlMsg } from '../control-ws.js';
 import { adoptElement, el, releaseElement } from '../dom-helpers.js';
+import { pickStrongestAttention } from '../focus-view/attention-core.mjs';
 import { sessionUIs } from '../session-card/card-registry.js';
 import { reparentReviewPanel } from '../sidebar/review-sidebar.js';
 import { setSelectedId } from '../sidebar/selection.js';
@@ -51,6 +52,7 @@ const SCREENS = Object.freeze([
 let shellEl = null;
 const navButtonById = new Map();
 const screenElById = new Map();
+/** @type {Map<string, string | boolean>} */
 const screenAttentionById = new Map();
 /** @type {ReturnType<typeof createBoardScreen>|null} */
 let boardScreen = null;
@@ -170,17 +172,23 @@ function dotOf(button) {
   return button?.querySelector('.phone-nav-dot') || null;
 }
 
+function applyDotAttention(dot, attention) {
+  if (!dot) return;
+  dot.hidden = !attention;
+  if (typeof attention === 'string') dot.dataset.attention = attention;
+  if (typeof attention !== 'string') delete dot.dataset.attention;
+}
+
 function syncMoreAttention() {
-  let hasNestedAttention = false;
+  /** @type {(string | boolean)[]} */
+  const nestedLevels = [];
   for (const screen of SCREENS) {
     if (!screen.nested) continue;
-    const hasAttention = screenAttentionById.get(screen.id) === true;
-    if (hasAttention) hasNestedAttention = true;
-    const dot = dotOf(menuButtonById.get(screen.id));
-    if (dot) dot.hidden = !hasAttention;
+    const attention = screenAttentionById.get(screen.id) || false;
+    nestedLevels.push(attention);
+    applyDotAttention(dotOf(menuButtonById.get(screen.id)), attention);
   }
-  const moreDot = dotOf(moreButtonEl);
-  if (moreDot) moreDot.hidden = !hasNestedAttention;
+  applyDotAttention(dotOf(moreButtonEl), pickStrongestAttention(nestedLevels));
 }
 
 // The More sheet: nested screens' entries, floated above the nav from the More item. It is a plain
@@ -543,8 +551,14 @@ export function showPhoneScreen(screenId) {
   return true;
 }
 
-export function setPhoneScreenAttention(screenId, hasAttention) {
-  screenAttentionById.set(screenId, hasAttention === true);
+/*
+ * A LEVEL, not a boolean: the Visions panel distinguishes a raised hand from an unseen arrival, and a
+ * boolean map here made the two look identical on the phone board. A caller with only a condition to
+ * report still passes `true`, which reads as the ordinary level.
+ */
+/** @param {string} screenId @param {string | boolean | null} attention */
+export function setPhoneScreenAttention(screenId, attention) {
+  screenAttentionById.set(screenId, typeof attention === 'string' && attention ? attention : attention === true);
   syncMoreAttention();
 }
 

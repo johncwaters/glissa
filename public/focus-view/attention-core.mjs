@@ -59,3 +59,34 @@ export function attentionSummaryText(count) {
   if (count === 1) return '1 NEEDS YOU';
   return `${count} NEED YOU`;
 }
+
+// The More sheet's dot stands for several nested screens at once, so the aggregate is a RANK, not the
+// first truthy level: a raised hand (a standing ask) must outrank an arrival dot behind the same sheet.
+const ATTENTION_RANK_BY_LEVEL = new Map([['hand', 2]]);
+const ATTENTION_RANK_PRESENT = 1;
+
+/**
+ * @param {string | boolean | null | undefined} level
+ */
+export function attentionRank(level) {
+  if (!level) return 0;
+  if (typeof level === 'string') return ATTENTION_RANK_BY_LEVEL.get(level) || ATTENTION_RANK_PRESENT;
+  return ATTENTION_RANK_PRESENT;
+}
+
+/**
+ * @param {(string | boolean | null | undefined)[]} [levels]
+ * @returns {string | boolean}
+ */
+export function pickStrongestAttention(levels) {
+  /** @type {string | boolean} */
+  let strongest = false;
+  let strongestRank = 0;
+  for (const level of (levels || [])) {
+    const rank = attentionRank(level);
+    if (rank <= strongestRank) continue;
+    strongest = typeof level === 'string' ? level : true;
+    strongestRank = rank;
+  }
+  return strongest;
+}

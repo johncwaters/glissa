@@ -527,9 +527,13 @@ setMillActivityCallback((active) => {
   tabMillActivityEl.classList.toggle('active', active);
   setPhoneScreenAttention('mill', active);
 });
-setVisionsActivityCallback((active) => {
+setVisionsActivityCallback((level) => {
+  const active = level !== null;
   tabVisionsActivityEl.classList.toggle('active', active);
-  setPhoneScreenAttention('visions', active);
+  // The level decides how the dot reads; `active` alone would make a raised hand look like an ingest row.
+  if (!active) tabVisionsActivityEl.removeAttribute('data-attention');
+  if (active) tabVisionsActivityEl.setAttribute('data-attention', level);
+  setPhoneScreenAttention('visions', level);
 });
 // A Radar PR row points at the full PR view: the phone screen when that layout owns the panel, the
 // desktop tab otherwise. Radar never navigates itself.

@@ -1085,7 +1085,7 @@ test('shared uri state survives until its last owner closes', async (t) => {
 
   harness.lsp('textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
   const [document] = harness.wiring.documentsSnapshot();
-  assert.deepEqual(document.diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word', 'comment']);
+  assert.deepEqual(document.diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word', 'comment', 'hand']);
   assert.deepEqual(document.comments, [COMMENT]);
   assert.equal(document.hand, 'the document mixes two structures');
 
@@ -1218,7 +1218,7 @@ test('a hand is broadcast only when it changes and joins the connect-time snapsh
     { verdict: 'NONE', comments: [], hand: 'the doc mixes migration plan and incident review', reason: null },
     { verdict: 'NONE', comments: [], hand: 'the conclusion answers a different question', reason: null },
   ];
-  const { wiring, timers, broadcasts, lsp, clock } = dispatchingConnection({
+  const { wiring, timers, broadcasts, sent, lsp, clock } = dispatchingConnection({
     dispatch: { cooldownMs: 1 },
     respond: (_args, callNumber) => Promise.resolve(results[callNumber - 1]),
   });
@@ -1232,6 +1232,12 @@ test('a hand is broadcast only when it changes and joins the connect-time snapsh
   lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, '# Title\n\nA changed line with with a repeat.\n'));
   lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
   await wiring.whenDispatchSettled();
+
+  const republished = sent.filter((message) => message.type === 'publishDiagnostics').at(-1).params.diagnostics;
+  assert.ok(
+    republished.some((diagnostic) => diagnostic.code === 'hand'),
+    'the didChange dropped the diagnostic, so a repeated hand has to rebuild it or the warning is gone for good',
+  );
 
   clock.now += 1000;
   lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 3, '# Title\n\nAnother changed line with with a repeat.\n'));
@@ -1286,6 +1292,26 @@ test('a handless dispatch clears the standing hand and an ERROR leaves it alone'
   const hands = broadcasts.filter((message) => message.type === 'visions-hand');
   assert.deepEqual(hands.map((message) => message.hand), ['the document has no single reader', null]);
   assert.deepEqual(wiring.documentsSnapshot(), []);
+});
+
+test('a hand raised with nothing else reaches the editor in its own frame', async (t) => {
+  const { wiring, timers, sent, lsp } = dispatchingConnection({
+    respond: () => Promise.resolve({
+      verdict: 'NONE', comments: [], hand: 'the outline and the conclusion argue different plans', reason: null,
+    }),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', CLEAN_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  const published = sent.filter((message) => message.type === 'publishDiagnostics' && message.params.uri === MARKDOWN_URI);
+  const diagnostics = published.at(-1).params.diagnostics;
+  assert.deepEqual(diagnostics.map((diagnostic) => diagnostic.code), ['hand']);
+  assert.equal(diagnostics[0].severity, 2, 'a warning, so it outranks the comments it sits beside');
+  assert.equal(diagnostics[0].message, 'the outline and the conclusion argue different plans');
+  assert.deepEqual(diagnostics[0].range.start, { line: 0, character: 0 });
 });
 
 test('didClose clears a standing hand', async (t) => {
@@ -2535,4 +2561,101 @@ test('a seq that is not a finite number is read as no lane rather than as moveme
   await wiring.whenDispatchSettled();
   assert.equal(calls.length, 1);
   assert.equal(wiring.latestContextSeq(), null);
+});
+
+/*
+ * The union the tab renders carries this lane's OWN hand, so feeding it back as the standing tier 2
+ * findings told the next session not to repeat the hand; it obeyed, and the empty answer lowered a hand
+ * nobody had resolved. That is the failure the whole tier 4 surface exists to prevent.
+ */
+test('a raised hand never returns as a standing finding the next prompt says not to repeat', async (t) => {
+  const HAND = 'the outline and the conclusion argue different plans';
+  let seq = 1;
+  const { wiring, timers, calls, lsp, clock } = dispatchingConnection({
+    dispatch: { cooldownMs: 1 },
+    contextSeq: () => seq,
+    respond: () => Promise.resolve({
+      verdict: 'COMMENTS', comments: [COMMENT], hand: HAND, reason: null,
+    }),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(wiring.documentsSnapshot()[0].hand, HAND);
+
+  // No didChange, so nothing dropped the hand: this is the activity-triggered dispatch that used to be
+  // handed its own standing hand back.
+  seq += 1;
+  clock.now += 1000;
+  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+  await wiring.whenDispatchSettled();
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].prompt.includes(HAND), false, 'obeying "do not repeat" here is what lowers the hand');
+  assert.equal(calls[1].prompt.includes(COMMENT.message), false, 'a tier 3 comment is not a standing tier 2 finding either');
+  assert.deepEqual(calls[1].findings.map((finding) => finding.code), ['repeated-word'], 'the rule findings alone');
+});
+
+// A memory store or a digest that falls over says nothing about the CLI, and three of them used to open
+// a half-hour backoff on a lane that had never been asked to spawn.
+test('a throw before the spawn is logged and never counts toward the lane backoff', async (t) => {
+  let promptAttempts = 0;
+  const { wiring, timers, calls, warnings, lsp, clock } = dispatchingConnection({
+    dispatch: { cooldownMs: 1 },
+    buildPrompt: (options) => {
+      promptAttempts += 1;
+      if (promptAttempts <= 3) throw new Error('the memory store is gone');
+      return `prompt for ${options.uri}`;
+    },
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  for (const version of [2, 3, 4]) {
+    clock.now += 1000;
+    lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, version, `# Title\n\nRevision ${version} with with a repeat.\n`));
+    lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+    await wiring.whenDispatchSettled();
+  }
+
+  assert.equal(promptAttempts, 4);
+  assert.equal(calls.length, 1, 'the fourth attempt still spawned: three pre-spawn throws are not a broken lane');
+  assert.equal(warnings.filter((line) => line.includes('threw')).length, 3, 'and every one of them was said out loud');
+});
+
+// The buffer is untrusted text: text that induces the session to answer ERROR must not be able to
+// silence tier 3 for every open document for half an hour.
+test('a session-authored ERROR leaves the lane healthy, and a transport failure still backs it off', async (t) => {
+  const laneOf = (errorSource) => dispatchingConnection({
+    dispatch: { cooldownMs: 1 },
+    respond: () => Promise.resolve({
+      verdict: 'ERROR', comments: [], errorSource, reason: 'session reported an error verdict',
+    }),
+  });
+  const drive = async ({ wiring, timers, lsp, clock }) => {
+    lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', REPEATED_WORD_MARKDOWN));
+    runSweepThenDispatch(timers);
+    await wiring.whenDispatchSettled();
+    for (const version of [2, 3, 4]) {
+      clock.now += 1000;
+      lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, version, `# Title\n\nRevision ${version} with with a repeat.\n`));
+      lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+      await wiring.whenDispatchSettled();
+    }
+  };
+
+  const sessionLane = laneOf('session');
+  t.after(() => sessionLane.wiring.stop());
+  await drive(sessionLane);
+  assert.equal(sessionLane.calls.length, 4, 'the session answered every time, so the CLI is proven to work');
+
+  const transportLane = laneOf('transport');
+  t.after(() => transportLane.wiring.stop());
+  await drive(transportLane);
+  assert.equal(transportLane.calls.length, 3, 'three failures to reach the CLI open the cooling period');
+  assert.ok(transportLane.warnings.some((line) => line.includes('failed in a row')));
 });

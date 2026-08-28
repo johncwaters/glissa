@@ -22,7 +22,7 @@ const {
 } = require('../server/pack-distiller');
 const { distillOutputPath } = require('../server/pack-builder');
 const { buildStampLine, needsDistill } = require('../server/core/distill-core');
-const { buildLanePermissions } = require('../server/core/lane-permissions-core');
+const { LANE_ENVIRONMENT_ARGS, buildLanePermissions } = require('../server/core/lane-permissions-core');
 const {
   MAX_DISTILL_PROMPT_BYTES,
   MAX_DISTILL_RESULT_BYTES,
@@ -316,7 +316,7 @@ test('the spawned Session receives the shared posture and never skips permission
     assert.equal(constructed[0].dangerouslySkipPermissions, false);
     assert.equal(constructed[0].initialPrompt, PACK_DISTILL_BOOTSTRAP_PROMPT);
     assert.deepEqual(constructed[0].settingsPermissions, distillerModule.packDistillerPermissions().permissions);
-    assert.deepEqual(constructed[0].extraClaudeArgs, ['-p']);
+    assert.deepEqual(constructed[0].extraClaudeArgs, ['-p', ...LANE_ENVIRONMENT_ARGS]);
   });
 });
 

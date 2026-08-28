@@ -3,7 +3,7 @@
 /*
  * The write boundary an ephemeral lane hands its headless session, as pure string building.
  *
- * Every clause here was settled by live probes against the real CLI (2.1.241) reading the machine
+ * Every clause here was settled by live probes against the real CLI (2.1.250) reading the machine
  * readable `tool_result` and `permission_denials` of a `--output-format stream-json` run, because four
  * plausible spellings of "may write only here" fail SILENTLY:
  *   - `Write(<glob>)` in an allow list is refused by name: "not matched by file permission checks -
@@ -30,13 +30,57 @@
 
 const ACCEPT_EDITS_MODE = 'acceptEdits';
 
-/**
- * One lane's permission posture. No allow list at all: a bare `Write` allow is exactly what unbounds
- * the writes, and nothing narrower grants the tool.
+/*
+ * The second half of a lane's posture: what the CLI is told to LOAD, which the settings file cannot
+ * say. A lane inherits the operator's whole working environment by default, and on 2026-08-27 a visions
+ * dispatch reading a 108-line prose buffer was carrying 66 MCP tools (Gmail, Notion, Calendar among
+ * them), a 44-entry skill listing, and three of the operator's own SessionStart hooks instructing its
+ * output style. None of that is a capability any lane asked for, and the MCP half is reach a lane
+ * reading untrusted fenced text must not have at all.
+ *
+ * Probed against 2.1.250 in a throwaway cwd, each flag confirmed by counting what the transcript
+ * actually loaded (skill_listing, deferred_tools_delta, hook_success) rather than by reading the help:
+ *   - `--strict-mcp-config` with no `--mcp-config`: 66 MCP tools to 0. It also defeats
+ *     `enableAllProjectMcpServers`, which detection/settings-injector.js plumbs into the same session's
+ *     `--settings` file: a lane opting into that would get zero servers, decided here rather than there.
+ *   - `--disable-slash-commands`: 44 skills to 0.
+ *   - `--setting-sources project,local`: the operator's three SessionStart hooks to 0, and Glissa's OWN
+ *     hooks, which ride `--settings`, still fired. That separation is the whole reason this is safe;
+ *     a probe with a Stop hook in the lane settings file confirmed it rather than assuming it. The two
+ *     sources it does keep are inert only because every lane on this seam cwds into an empty mkdtemp
+ *     dir, so a lane run inside a real checkout would load that repo's settings and its hooks.
+ * Together they took one lane spawn from 20191 to 3523 cache-create tokens with the write boundary and
+ * the result file unchanged.
+ *
+ * The seam covers the THREE lanes that spawn in a throwaway cwd (visions, memory-distill,
+ * pack-distill). pr-review and posthog are deliberately outside it: they cwd into a real repository
+ * worktree and need Bash and gh, so they keep the operator's whole environment. The split is pinned by
+ * tests/lane-permissions-core.test.js rather than left to be rediscovered.
  */
-/** @param {{ denyTools?: readonly string[] }} [options] */
-function buildLanePermissions({ denyTools = [] } = {}) {
-  return { permissions: { deny: [...denyTools], defaultMode: ACCEPT_EDITS_MODE } };
+const LANE_ENVIRONMENT_ARGS = Object.freeze([
+  '--strict-mcp-config',
+  '--disable-slash-commands',
+  '--setting-sources', 'project,local',
+]);
+
+/**
+ * One lane's permission posture: the settings the CLI is handed, plus the argv that decides what it
+ * loads. No allow list in the settings at all: a bare `Write` allow is exactly what unbounds the
+ * writes, and nothing narrower grants the tool.
+ *
+ * `allowTools` is a different mechanism from the deny list and not a substitute for it: `--tools` picks
+ * the BUILT-IN set the session gets at all, so a lane naming it never has to enumerate the verbs it
+ * does not want. Only a FOLLOWING OPTION-LIKE TOKEN ends that variadic flag, never the comma: probed on
+ * 2.1.250, `--tools Read,Write "prompt"` ate the prompt and died with "Input must be provided", and the
+ * same line with `--model opus` after the value ran. So it is emitted FIRST, ahead of the environment
+ * flags, which is what makes every lane on this seam safe by construction rather than by argv luck.
+ */
+/** @param {{ denyTools?: readonly string[], allowTools?: readonly string[] }} [options] */
+function buildLanePermissions({ denyTools = [], allowTools = [] } = {}) {
+  const args = [];
+  if (allowTools.length > 0) args.push('--tools', allowTools.join(','));
+  args.push(...LANE_ENVIRONMENT_ARGS);
+  return { permissions: { deny: [...denyTools], defaultMode: ACCEPT_EDITS_MODE }, args };
 }
 
-module.exports = { ACCEPT_EDITS_MODE, buildLanePermissions };
+module.exports = { ACCEPT_EDITS_MODE, LANE_ENVIRONMENT_ARGS, buildLanePermissions };

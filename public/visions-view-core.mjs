@@ -232,6 +232,23 @@ export function totalHandCount(handsByUri) {
   return handsByUri.size;
 }
 
+export const VISIONS_ATTENTION_HAND = 'hand';
+export const VISIONS_ATTENTION_UNSEEN = 'unseen';
+
+/*
+ * What the Visions tab is asking of the operator, as one level rather than one boolean.
+ *
+ * A raised hand outranks unseen arrivals and, unlike them, is a STANDING condition rather than an
+ * arrival: it survives the panel being looked at and clears only when the lane lowers it. Sharing one
+ * dot meant the rarest thing the lane produces looked exactly like the noisiest (an ingest activity
+ * row), which is how a hand went unnoticed on a tab nobody was watching.
+ */
+export function decideVisionsAttention({ unseen = false, handCount = 0 } = {}) {
+  if (handCount > 0) return VISIONS_ATTENTION_HAND;
+  if (unseen) return VISIONS_ATTENTION_UNSEEN;
+  return null;
+}
+
 export function commentLineLabel(comment) {
   const line = Number(comment?.line);
   if (!Number.isFinite(line) || line < 1) return 'L?';

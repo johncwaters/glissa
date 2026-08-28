@@ -449,3 +449,16 @@ test('the rendered changelog is capped, however long the tab is left open', asyn
   assert.equal(rows.length, MAX_RENDERED_FIXES);
   assert.equal(rows[0].line, MAX_RENDERED_FIXES + 4);
 });
+
+test('a raised hand outranks unseen arrivals, and stands even while the panel is open', async () => {
+  const { decideVisionsAttention, VISIONS_ATTENTION_HAND, VISIONS_ATTENTION_UNSEEN } = await importCore();
+
+  assert.equal(decideVisionsAttention({ unseen: false, handCount: 0 }), null);
+  assert.equal(decideVisionsAttention({ unseen: true, handCount: 0 }), VISIONS_ATTENTION_UNSEEN);
+  assert.equal(decideVisionsAttention({ unseen: false, handCount: 1 }), VISIONS_ATTENTION_HAND);
+  assert.equal(
+    decideVisionsAttention({ unseen: true, handCount: 2 }), VISIONS_ATTENTION_HAND,
+    'the rarest thing the lane produces must not look like the noisiest',
+  );
+  assert.equal(decideVisionsAttention(), null, 'no state is no ask');
+});
