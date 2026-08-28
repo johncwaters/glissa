@@ -55,8 +55,12 @@ test('the ingest mapper stamps a known project before the record reaches storage
   assert.equal(input.project, 'c:/work/glissa');
 });
 
-test('a tool call is knowledge too, and its ts rides the event', () => {
-  const input = memoryInputFromEvent(event({ kind: 'agent-tool', summary: 'claude: Read a.js', ts: 42 }));
+test('a tool call never becomes a record, however well formed the event is', () => {
+  assert.equal(memoryInputFromEvent(event({ kind: 'agent-tool', summary: 'claude: Read a.js', ts: 42 })), null);
+});
+
+test('an agent turn is knowledge, and its ts rides the event', () => {
+  const input = memoryInputFromEvent(event({ kind: 'agent-turn', summary: 'claude: shipped M15', ts: 42 }));
   assert.equal(input.kind, 'knowledge');
   assert.equal(input.ts, 42);
 });

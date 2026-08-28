@@ -386,6 +386,11 @@ export const SETTINGS_MAP = Object.freeze([
         control: 'number', range: 'QUIET_MS_RANGE', keywords: ['idle', 'debounce'], defaultValue: 60000,
       },
       {
+        id: 'memory-distill-horizon', path: 'memory.distill.staleHorizonDays', title: 'Stale record horizon (days)',
+        description: 'Records older than this are stepped over instead of distilled.',
+        control: 'number', range: 'STALE_HORIZON_DAYS_RANGE', keywords: ['age', 'skip'], defaultValue: 7,
+      },
+      {
         id: 'ingest-enabled', path: 'ingest.enabled', title: 'Enable machine context ingest',
         description: 'Enable the local activity feed behind memory and Visions. Turning Visions on turns this on for you.',
         control: 'toggle', keywords: ['events', 'activity'], defaultValue: false,

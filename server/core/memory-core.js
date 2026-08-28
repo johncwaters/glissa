@@ -891,15 +891,26 @@ function looksLikeRecordId(needle) {
   return /^m-[0-9a-f]{16}$/.test(String(needle || ''));
 }
 
+// A list of ids removes them WHOLE in one pass: a text pattern would redact the matched substring and
+// leave the rest of the record standing, which is the wrong shape for expunging a class of record.
 function makeForgetMatcher(needle) {
+  if (Array.isArray(needle)) {
+    const ids = new Set(needle.filter((entry) => looksLikeRecordId(entry)));
+    if (ids.size === 0) return null;
+    return { pattern: null, byId: false, byIds: ids, expression: null };
+  }
   const pattern = nonEmptyString(needle);
   if (!pattern) return null;
   const byId = looksLikeRecordId(pattern);
-  return { pattern, byId, expression: byId ? null : new RegExp(escapeForRegExp(pattern), 'gi') };
+  return { pattern, byId, byIds: null, expression: byId ? null : new RegExp(escapeForRegExp(pattern), 'gi') };
 }
 
 function decideForget(record, matcher) {
   if (!matcher || !record) return { action: 'keep', text: null };
+  if (matcher.byIds) {
+    if (!matcher.byIds.has(record.id)) return { action: 'keep', text: null };
+    return { action: 'remove', text: null };
+  }
   if (matcher.byId) {
     if (record.id !== matcher.pattern) return { action: 'keep', text: null };
     return { action: 'remove', text: null };
@@ -917,6 +928,7 @@ function decideForget(record, matcher) {
 function matchesForgetPattern(rawLine, matcher) {
   if (!matcher) return false;
   const line = String(rawLine || '');
+  if (matcher.byIds) return [...matcher.byIds].some((id) => line.includes(id));
   if (matcher.byId) return line.includes(matcher.pattern);
   matcher.expression.lastIndex = 0;
   return matcher.expression.test(line);

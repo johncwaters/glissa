@@ -7,6 +7,7 @@ const {
   MAX_NEW_CLAIMS_RANGE,
   MAX_PROJECT_CLAIMS_RANGE,
   QUIET_MS_RANGE,
+  STALE_HORIZON_DAYS_RANGE,
   TIMEOUT_SECONDS_RANGE,
 } = require('../../shared/settings-ranges');
 
@@ -22,6 +23,9 @@ const DEFAULT_INTERVAL_MINUTES = 1440;
 const DEFAULT_TIMEOUT_SECONDS = 900;
 const DEFAULT_MAX_NEW_CLAIMS = 20;
 const DEFAULT_QUIET_MS = 60000;
+// Age is a reason to skip work, never a reason to do it: past this the record is dropped from the delta
+// and the cursor steps over it, the way the PostHog lane prunes vanished issues instead of replaying them.
+const DEFAULT_STALE_HORIZON_DAYS = 7;
 const DEFAULT_MAX_PROJECT_CLAIMS = 200;
 // How often the loop looks, as opposed to how often it distills: a tick skipped for a busy canon must
 // retry in minutes, not tomorrow.
@@ -59,6 +63,7 @@ function resolveDistillConfig(raw, { memoryEnabled = false } = {}) {
     maxNewClaims: integerWithin(source.maxNewClaims, MAX_NEW_CLAIMS_RANGE, DEFAULT_MAX_NEW_CLAIMS),
     maxProjectClaims: integerWithin(source.maxProjectClaims, MAX_PROJECT_CLAIMS_RANGE, DEFAULT_MAX_PROJECT_CLAIMS),
     quietMs: integerWithin(source.quietMs, QUIET_MS_RANGE, DEFAULT_QUIET_MS),
+    staleHorizonDays: integerWithin(source.staleHorizonDays, STALE_HORIZON_DAYS_RANGE, DEFAULT_STALE_HORIZON_DAYS),
     maxPromptRecords: MAX_PROMPT_RECORDS,
     maxPromptChars: MAX_PROMPT_CHARS,
   };
@@ -256,27 +261,51 @@ function recordSeq(record) {
   return Number.isInteger(record?.seq) ? record.seq : 0;
 }
 
+function recordTs(record) {
+  const ts = Number(record?.ts);
+  return Number.isFinite(ts) ? ts : 0;
+}
+
 // Delta results merge into standing claims, so unread records retain their existing claims.
 function selectDeltaForPrompt(records, {
-  sinceSeq = 0, limit = MAX_PROMPT_RECORDS, maxChars = MAX_PROMPT_CHARS,
+  sinceSeq = 0, limit = MAX_PROMPT_RECORDS, maxChars = MAX_PROMPT_CHARS, now = 0, horizonMs = 0,
 } = {}) {
   const floor = Number.isFinite(sinceSeq) ? Math.max(0, Math.floor(sinceSeq)) : 0;
   const above = (Array.isArray(records) ? records : [])
     .filter((record) => PROJECTED_KINDS.includes(record.kind) && recordSeq(record) > floor)
     .sort((left, right) => recordSeq(left) - recordSeq(right) || compareRecords(left, right));
+  const horizon = Number.isFinite(horizonMs) && horizonMs > 0 && Number.isFinite(now) && now > 0
+    ? now - horizonMs
+    : null;
   const window = Math.max(MIN_DELTA_WINDOW, Math.floor(limit));
   const selected = [];
   let chars = 0;
+  let stale = 0;
+  let cursorAt = floor;
   for (const record of above) {
     if (selected.length >= window) break;
+    // Stepping the cursor over it is the whole point: an unadvanced cursor replays the same tail forever.
+    if (horizon !== null && recordTs(record) < horizon) {
+      stale += 1;
+      cursorAt = recordSeq(record);
+      continue;
+    }
     chars += canonLine(record).length + 1;
     // The first record always rides, or one oversized record stalls the cursor at its own seq forever.
     if (chars > maxChars && selected.length > 0) break;
     selected.push(record);
+    cursorAt = recordSeq(record);
   }
-  const nextCursor = selected.length === 0 ? floor : recordSeq(selected[selected.length - 1]);
+  const fresh = horizon === null
+    ? above.length
+    : above.filter((record) => recordTs(record) >= horizon).length;
   return {
-    records: selected, nextCursor, pending: above.length, remaining: above.length - selected.length,
+    records: selected,
+    nextCursor: cursorAt,
+    // `pending` gates whether a run happens at all, so it counts only what a run would actually read.
+    pending: fresh,
+    stale,
+    remaining: fresh - selected.length,
   };
 }
 
@@ -599,6 +628,7 @@ module.exports = {
   DEFAULT_MAX_NEW_CLAIMS,
   DEFAULT_MAX_PROJECT_CLAIMS,
   DEFAULT_QUIET_MS,
+  DEFAULT_STALE_HORIZON_DAYS,
   DEFAULT_TIMEOUT_SECONDS,
   INTERVAL_MINUTES_RANGE,
   MAX_CLAIMS,
