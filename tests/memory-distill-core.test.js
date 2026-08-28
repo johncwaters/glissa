@@ -445,6 +445,20 @@ test('the window is spent on fresh records, never burned by the stale ones it st
   assert.equal(delta.stale, 1);
 });
 
+test('both prompts say what one overlong claim costs, since a silent cap refused whole runs', () => {
+  const one = record({ id: 'm-000000000000002a', seq: 1, text: 'the poller ticks every 15 minutes' });
+  const full = buildMemoryDistillPrompt({ records: [one], resultPath: '/tmp/result.json' });
+  const incremental = buildIncrementalDistillPrompt({
+    published: withHandlesFor([claim({ ids: ['m-000000000000002b'], text: 'a standing fact' })]),
+    records: [one],
+    resultPath: '/tmp/result.json',
+  });
+  for (const prompt of [full, incremental]) {
+    assert.equal(prompt.includes('refuses this whole run'), true);
+    assert.equal(prompt.includes('split a long fact into two claims'), true);
+  }
+});
+
 test('the horizon default is seven days and stays inside its range', () => {
   assert.equal(resolveDistillConfig(null, { memoryEnabled: true }).staleHorizonDays, DEFAULT_STALE_HORIZON_DAYS);
   assert.equal(resolveDistillConfig({ staleHorizonDays: 30 }, { memoryEnabled: true }).staleHorizonDays, 30);
