@@ -15,6 +15,7 @@ const {
   DEFAULT_INTERVAL_MINUTES, MAX_CLAIM_IDS, MIN_DELTA_WINDOW, applyDistillOps,
   buildIncrementalDistillPrompt, buildMemoryDistillPrompt, claimProjectTags, decideDistillMode,
   decideDistillRun, deltaWindowFor, finalizeMergedClaims, NO_PROJECT_LABEL, publishedClaimTexts, readPublishedClaims,
+  DEFAULT_STALE_HORIZON_DAYS,
   renderDistilledProjection, resolveDistillConfig, selectCanonForPrompt, selectDeltaForPrompt,
   validateDistillOps, validateDistillResult,
 } = require('../server/core/memory-distill-core');
@@ -395,6 +396,62 @@ test('an empty delta leaves the cursor exactly where it was', () => {
   const delta = selectDeltaForPrompt([record({ seq: 4 })], { sinceSeq: 9, limit: 10 });
   assert.deepEqual(delta.records, []);
   assert.equal(delta.nextCursor, 9);
+});
+
+const DAY = 86400000;
+
+test('a record past the horizon is stepped over and the cursor moves past it', () => {
+  const records = [
+    record({ id: 'm-0000000000000001', seq: 1, ts: NOW - 30 * DAY, text: 'ancient' }),
+    record({ id: 'm-0000000000000002', seq: 2, ts: NOW - 20 * DAY, text: 'also ancient' }),
+    record({ id: 'm-0000000000000003', seq: 3, ts: NOW - 1 * DAY, text: 'fresh' }),
+  ];
+  const delta = selectDeltaForPrompt(records, { sinceSeq: 0, limit: 10, now: NOW, horizonMs: 7 * DAY });
+  assert.deepEqual(delta.records.map((entry) => entry.seq), [3]);
+  assert.equal(delta.stale, 2);
+  assert.equal(delta.nextCursor, 3);
+  assert.equal(delta.pending, 1, 'only what a run would read gates the run');
+  assert.equal(delta.remaining, 0);
+});
+
+test('an all-stale delta spawns nothing yet still advances the cursor past the tail', () => {
+  const records = [1, 2, 3].map((seq) => record({
+    id: `m-000000000000000${seq}`, seq, ts: NOW - 30 * DAY, text: `old ${seq}`,
+  }));
+  const delta = selectDeltaForPrompt(records, { sinceSeq: 0, limit: 10, now: NOW, horizonMs: 7 * DAY });
+  assert.deepEqual(delta.records, []);
+  assert.equal(delta.stale, 3);
+  assert.equal(delta.nextCursor, 3);
+  assert.equal(delta.pending, 0);
+});
+
+test('no horizon reads the whole backlog, however old it is', () => {
+  const records = [1, 2].map((seq) => record({
+    id: `m-000000000000000${seq}`, seq, ts: NOW - 400 * DAY, text: `old ${seq}`,
+  }));
+  const delta = selectDeltaForPrompt(records, { sinceSeq: 0, limit: 10, now: NOW, horizonMs: 0 });
+  assert.deepEqual(delta.records.map((entry) => entry.seq), [1, 2]);
+  assert.equal(delta.stale, 0);
+});
+
+test('the window is spent on fresh records, never burned by the stale ones it steps over', () => {
+  const records = [
+    record({ id: 'm-0000000000000001', seq: 1, ts: NOW - 30 * DAY, text: 'old' }),
+    record({ id: 'm-0000000000000002', seq: 2, ts: NOW - 1 * DAY, text: 'fresh one' }),
+    record({ id: 'm-0000000000000003', seq: 3, ts: NOW - 1 * DAY, text: 'fresh two' }),
+  ];
+  const delta = selectDeltaForPrompt(records, { sinceSeq: 0, limit: 2, now: NOW, horizonMs: 7 * DAY });
+  assert.deepEqual(delta.records.map((entry) => entry.seq), [2, 3]);
+  assert.equal(delta.stale, 1);
+});
+
+test('the horizon default is seven days and stays inside its range', () => {
+  assert.equal(resolveDistillConfig(null, { memoryEnabled: true }).staleHorizonDays, DEFAULT_STALE_HORIZON_DAYS);
+  assert.equal(resolveDistillConfig({ staleHorizonDays: 30 }, { memoryEnabled: true }).staleHorizonDays, 30);
+  assert.equal(
+    resolveDistillConfig({ staleHorizonDays: 0 }, { memoryEnabled: true }).staleHorizonDays,
+    DEFAULT_STALE_HORIZON_DAYS,
+  );
 });
 
 test('a run of failures halves the window down to one record, never to zero', () => {

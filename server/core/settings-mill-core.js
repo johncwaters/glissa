@@ -11,6 +11,7 @@ const {
   PACK_DISTILLER_INTERVAL_RANGE,
   PACK_DISTILLER_TIMEOUT_RANGE,
   QUIET_MS_RANGE,
+  STALE_HORIZON_DAYS_RANGE,
   TIMEOUT_SECONDS_RANGE,
 } = require('../../shared/settings-ranges');
 const { SOURCE_NAMES } = require('./ingest-core');
@@ -27,6 +28,7 @@ const MEMORY_DISTILL_SPEC = Object.freeze({
     maxNewClaims: MAX_NEW_CLAIMS_RANGE,
     maxProjectClaims: MAX_PROJECT_CLAIMS_RANGE,
     quietMs: QUIET_MS_RANGE,
+    staleHorizonDays: STALE_HORIZON_DAYS_RANGE,
   }),
   blocks: NO_BLOCKS,
 });

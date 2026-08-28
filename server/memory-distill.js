@@ -452,7 +452,10 @@ function createMemoryDistiller(deps = {}) {
         sinceSeq: cursor,
         limit: distillCore.deltaWindowFor(config.maxPromptRecords, failures),
         maxChars: Math.max(MIN_DELTA_CHARS, config.maxPromptChars - standing),
+        now: now(),
+        horizonMs: config.staleHorizonDays * 86400000,
       });
+      if (delta.stale > 0) log.note(`stepped over ${delta.stale} record(s) older than ${config.staleHorizonDays} day(s)`);
       const mode = distillCore.decideDistillMode(published.claims, {
         maxProjectClaims: config.maxProjectClaims,
         maxChars: config.maxPromptChars,
@@ -485,7 +488,7 @@ function createMemoryDistiller(deps = {}) {
       }
       if (delta.records.length === 0) {
         return await reconcile({
-          memoryStore, valid, watermark, published, cursor, failures,
+          memoryStore, valid, watermark, published, cursor: delta.nextCursor, failures,
         });
       }
       return await distillDelta({

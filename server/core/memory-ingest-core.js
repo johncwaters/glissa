@@ -14,9 +14,11 @@ const { SOURCE_VENDORS, canonicalProjectPath, dropEchoedLines } = require('./mem
 const AGENT_LOG_SOURCE = 'agentLogs';
 
 // `prompt` is absent from PROJECTED_KINDS on purpose: raw operator text must never reach dist/.
+// `agent-tool` is absent because a tool invocation is activity, not a remembered fact: admitting it made
+// 53% of the canon verbatim `Bash` command lines, which the distill lane then paid prompt tokens to read
+// (2026-08-27). Tool events still reach the live ingest ring; they just stop becoming records.
 const RECORD_KIND_BY_EVENT_KIND = Object.freeze({
   'agent-turn': 'knowledge',
-  'agent-tool': 'knowledge',
   [PROMPT_KIND]: 'prompt',
 });
 

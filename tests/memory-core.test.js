@@ -463,6 +463,21 @@ test('forget by id removes the record; forget by pattern redacts what survives',
   assert.equal(decideForget(other, byPattern).action, 'keep');
 });
 
+test('a list of ids removes every one of them whole, and nothing else', () => {
+  const first = build({ text: 'claude: Bash grep -rn foo' });
+  const second = build({ text: 'claude: Bash sed -n 1,20p bar' }, NOW + 1);
+  const keeper = build({ text: 'the poller ticks every 15 minutes' }, NOW + 2);
+  const matcher = makeForgetMatcher([first.id, second.id]);
+  assert.deepEqual(decideForget(first, matcher), { action: 'remove', text: null });
+  assert.deepEqual(decideForget(second, matcher), { action: 'remove', text: null });
+  assert.deepEqual(decideForget(keeper, matcher), { action: 'keep', text: null });
+});
+
+test('a list holding no usable id is no matcher at all, so a forget cannot run unbounded', () => {
+  assert.equal(makeForgetMatcher([]), null);
+  assert.equal(makeForgetMatcher(['not-an-id', '']), null);
+});
+
 test('a record that is nothing but the forgotten text is removed, not left as a placeholder', () => {
   const target = build({ text: 'hunter2wasthepassphrase' });
   assert.deepEqual(
