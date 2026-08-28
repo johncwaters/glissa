@@ -78,3 +78,21 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 - `tailwindcss` v4 via `@tailwindcss/vite`
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->
+
+## Invariants
+
+Each entry is a rule, its why, and where it is pinned. Mechanism lives in the code.
+
+### Dashboard Layouts
+
+- Two first-class layouts, not one responsive shell. `decideLayout` needs a coarse pointer AND a narrow viewport: a narrowed desktop window keeps the three-panel IA, and a coarse-pointer tablet has room for it. All phone styling keys off `[data-layout="phone"]`.
+- Nothing is duplicated; live elements are RE-PARENTED into the phone screens and back, a second copy meaning a second state pipeline for the same facts. The card-borrow seam holds a GLOBAL single borrower, a session owning one xterm.
+- Board order is attention-first, the opposite of the rail's stable identity order: a rail needs a fixed spatial map, a phone answers "who needs me". The "needs you" RULE lives once, in `public/focus-view/attention-core.mjs`.
+- Touch scroll is ours because xterm 6.0.0 has no touch path at all. The alternate buffer re-emits the drag as synthetic wheel notches so xterm's OWN listeners decide the meaning.
+- Predictive text bypasses xterm's input path on PHONE ONLY: xterm 6.0.0 mishandles autocorrect events (upstream `xtermjs/xterm.js#3600`, open). Desktop is untouched, where the same takeover would regress CJK composition.
+
+## CSS Convention
+
+- Tailwind utility classes for static markup in `index.html`; semantic classes in `style.css` for JS-created DOM.
+- State-driven styles via `[data-state]` selectors; layout branches via `[data-layout]`.
+- Animations and pseudo-elements live in `style.css`; theme tokens in `public/tailwind.css` via `@theme`, applied by `public/theme.js`.

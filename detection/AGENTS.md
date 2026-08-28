@@ -44,3 +44,20 @@ Status detection and change watching. Session status is derived from machine-emi
 - `../session/core/status-mapper.js` - the pure signal-to-event decision
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->
+
+## Invariants
+
+Each entry is a rule, its why, and where it is pinned. Mechanism lives in the code.
+
+### Status Detection
+
+- Machine signals only: hooks authoritative, OSC-0 title a fallback that never emits `awaiting-input`. Scraping the rendered TUI false-fires on redraw races (`session/core/status-mapper.js`, `docs/postmortem-terminal-detection.md`).
+- A held `ready` is cancelled by `working`/`resume` in the conflict window, since resolving it fired a false COMPLETE after a fast re-prompt; `/clear` and `/compact` latch the title off likewise. `idle_prompt` is low confidence: it may only confirm quiescence from RUNNING.
+- A main `Stop` is held for live work; an orphan `SubagentStop` proves a lost Start, so an empty Stop waits one quiet window (2026-08-25 recordings; `tests/sessions-detection.test.js`).
+- A held ready releases on live evidence, never the count, sequence-ordered, its quiet window starting at the first evaluation that OBSERVES the drain (false COMPLETEs, 2026-08-14).
+- Declared entries are TTL-bounded per kind: `shell`/`monitor` get no completion hook and an idle teammate is declared running forever, which pinned cards WORKING. Kill switch `detectBackgroundAgents`.
+
+### Session Recording
+
+- Signal-level recording is ON by default: the detection design is only debuggable after the fact, and an incident with it off costs a reconstruction, not one grep.
+- Recordings land in `~/.glissa/recordings`, never cwd-relative, or an always-on recorder scatters files through whichever repo launched it.

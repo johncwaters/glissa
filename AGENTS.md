@@ -1,6 +1,6 @@
 # glissa
 
-This file is instruction-tier: conventions and invariants with their why, plus a lean map. Never restate what code shows. Feature rationale beyond an invariant one-liner does not belong here. Size is budget-gated by `tests/agents-md-size.test.js`.
+This file is loaded into EVERY session, so it holds only what every session needs: cross-cutting conventions and a lean map. A rule about one subsystem belongs in that subsystem's own AGENTS.md, which loads when that code is open. Never restate what code shows. Size, placement and citation rot are gated by `tests/agents-md-size.test.js`.
 
 ## Purpose
 
@@ -60,169 +60,17 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 
 ## Invariants
 
-Each entry is a rule, its why, and where it is pinned. Mechanism lives in the code.
+Each subsystem states its own rules beside its code, so a rule is loaded when that code is open and never charged to every session. Never restate one here.
 
-### Status Detection
-
-- Machine signals only: hooks authoritative, OSC-0 title a fallback that never emits `awaiting-input`. Scraping the rendered TUI false-fires on redraw races (`session/core/status-mapper.js`, `docs/postmortem-terminal-detection.md`).
-- A held `ready` is cancelled by `working`/`resume` in the conflict window, since resolving it fired a false COMPLETE after a fast re-prompt; `/clear` and `/compact` latch the title off likewise. `idle_prompt` is low confidence: it may only confirm quiescence from RUNNING.
-- A main `Stop` is held for live work; an orphan `SubagentStop` proves a lost Start, so an empty Stop waits one quiet window (2026-08-25 recordings; `tests/sessions-detection.test.js`).
-- A held ready releases on live evidence, never the count, sequence-ordered, its quiet window starting at the first evaluation that OBSERVES the drain (false COMPLETEs, 2026-08-14).
-- Declared entries are TTL-bounded per kind: `shell`/`monitor` get no completion hook and an idle teammate is declared running forever, which pinned cards WORKING. Kill switch `detectBackgroundAgents`.
-
-### Agent Adapters
-
-- An adapter is TABLES and PURE FUNCTIONS: what varies between agent CLIs is vocabulary, and flags cannot express one (`docs/plan-agent-adapters.md`). `resolveCommand` is lazy and cached per id, or a `require` costs a PATH lookup.
-- Key on `capabilities`, never `adapter.id`, which rots once a third agent shares a behavior with the first. An UNDECLARED capability is absent (`tests/agent-capabilities.test.js`).
-- The Add Session agent picker and the card badge are adapter-driven and BINARY-GATED: `list-agents` probes each registered adapter's `resolveCommand` (cached per id), `decideAgentPicker` offers only the ones that resolve and hides itself for a single-agent install, and the badge shows a short label for a non-default agent only, so a Claude-Code-only machine looks unchanged (`public/session-card/agent-core.mjs`, `tests/frontend-agent-core.test.js`). `glissa doctor` prints the same per-agent resolution.
-- rtk is self-installed from a PINNED release with a PINNED sha256 into `~/.glissa/bin`, never "latest" and never a checksum fetched beside the binary, or one compromised release page swaps both halves (`server/core/rtk-install-core.js`).
-- A relay hook forwards the envelope UNTOUCHED and exits 0 whatever happened, since a hook that fails must never fail its turn. Field aliasing stays server-side.
-- The relay target rides `GLISSA_HOOK_URL` in the spawn env, never argv: a command line is readable by any local process, and an env target leaves an installed hooks file inert unsupervised.
-- Codex (`agent: "codex"`) reaches the hook tier: snake_case payloads mapped by a table (`session/adapters/codex.js`, live-verified 0.149.0), hooks injected as `-c 'hooks.<Event>=...'` argv (the only form `exec resume` takes). Gaps: no `Notification` event, so a prose question looks like a finished turn, and `backgroundAgents: false` (a live child spawn emitted only the main Stop); statusLine and anti-slop are off. rtk is ON via its own `PreToolUse` group (`session/rtk-relay.js`): codex honours `updatedInput` only beside `permissionDecision: allow`, which rtk omits for some rewrites, so the relay stamps it (`session/core/rtk-hook-core.js`).
-- Grok uses an opt-in home hooks file inert without `GLISSA_HOOK_URL`; injection is refused when operator Claude settings have hooks, `Stop(end_turn)`, `StopFailure` and `StopCancelled` complete, subagent hooks plus camelCase `backgroundTasks` gate completion, Stop feedback carries pack notices, titles never default ready, packs ride one `--rules` index-pointer token (`session/adapters/grok.js`, `tests/agent-grok.test.js`).
-- The codex hook-trust bypass is `projects[].codexBypassHookTrust`, config-file only, default OFF, and refused even when opted in if the cwd ancestry holds a `.codex/config.toml` that could contribute hooks or a `.codex/hooks.json` at all. The bypass is not scoped to Glissa's own hooks: it runs every hook the invocation loads (operator config PLUS repo-shipped PLUS agent-written), so it fails toward the title tier (`session/sessions.js._decideHookTrustBypass`, `tests/agent-codex.test.js`).
-- A captured resume id is validated before it becomes argv: `RESUME_ID_RE` requires an alphanumeric first char (one shared definition), or a forged hook payload of `--dangerously-bypass-approvals-and-sandbox` would ride `args.push("resume", id)` as a flag (`session/core/auto-resume.js`).
-- `dangerouslySkipPermissions` on a codex card keeps the sandbox: it maps to `-a never -s workspace-write`, never `--dangerously-bypass-approvals-and-sandbox`, so the same checkbox that only silences prompts on Claude does not buy an unrestricted, network-capable session on codex.
-- The codex title tier reads the WHOLE title against this session's cwd basename (`OscTitleSource.setContext`) and never emits a transition, anything unrecognized being `unknown`. A `quietUntilFirstPrompt` latch (with a `titleQuietFallbackMs` deadline) swallows codex's boot title spin that once flashed a fresh card COMPLETE. `-c check_for_update_on_startup=false` kills the blocking self-update prompt; a supervised session never self-updates.
-
-### Session Spawning
-
-- Claude CLI produces zero output with piped stdio, so a real PTY is required.
-- Resolve-then-branch: a PE image spawns directly, a shim falls back to `cmd.exe /c`, avoiding cmd's double command-line parse and console-title write (`session/core/spawn-command.js`).
-- The env scrub removes the Glissa marker vars, or Claude believes it runs inside itself.
-
-### Auto-Resume and Shutdown
-
-- The Claude session id is captured from WHICHEVER main-agent hook arrives: SessionStart does not reliably fire, and keying it there left boot auto-resume dead in production.
-- It persists at HOOK time, not shutdown, which makes a hard kill lossless. Shutdown never writes config, since `wasActive` surviving IS the resume signal.
-- No captured id means dormant; never guess with `--continue`. A stale id fails the session, flipping `wasActive` false, so there is no retry loop.
-- Every lane's `stop()` is awaited under a bound, or a restart runs a fresh backend while the old one still writes the same state file; an overrunning lane is named and left behind. Cleanup waits for the killed PTY tree's reap, a surviving handle inside a worktree having failed the discard and leaked the checkout.
-
-### Notifications
-
-- Acknowledge the old entry BEFORE deciding the new one, or a WAITING to COMPLETE hop lands on a live DELIVERED entry and delivers nothing.
-- Terminal categories fire once per WORK CYCLE, started only by a USER-driven RUNNING entry, so a lead waking N times per prompt fires once. `user_kill` is always silent.
-- Focus suppression DEFERS, never drops, and is PER-CONNECTION: a global rule was right with one device and wrong once a paired phone existed. Zero connections never suppresses.
-- Telegram pings are durable, browser notifications are not (operator ruling): a lost phone ping is unacceptable, a duplicate is a shrug. It gates on ZERO open control connections, not focus, an unfocused tab being what a browser notification is for.
-
-### Worktree Auto-Rebase
-
-- It rides the existing change funnel (no timer) and runs BEFORE the signature dedup, since a moved integration branch leaves the signature byte-identical. Every guard is pure in `session/core/rebase-gate.js`, and the guard ORDER is stated only by `tests/rebase-gate.test.js`.
-- WAITING is the load-bearing exclusion: it is a permission prompt PAUSING a turn, and the agent resumes into the files an unattended rebase would have rewritten under it.
-- `rebaseOnly` never stashes and merges nothing back: it runs unattended under a live agent, so a dirty tree is a hard refusal.
-- A conflict is never escalated: the worktree is left byte-identical for the operator's own Merge. A cooldown key of both shas stops the retry loop; a sibling's resolution retriggers it.
-- The completeness proof is "no unmerged paths remain". `git rerere remaining` may NEVER be one: it ignores binary conflicts, so continuing on its silence silently drops the commit (`tests/git-workspace-rebase.test.js`).
-- Which paths rerere replayed is deliberately unreported: git clears `MERGE_RR` as it resolves, so any list would be a guess, and a guess in a forensic trace is worse than a silence.
-- rerere config is seeded only when UNSET, an operator who disabled it meaning it. A rebase suppresses the change funnel while it runs, or the review gate self-heals to none mid-rebase.
-
-### Remote Branch GC
-
-- Remote cleanup is default-on and opts out only through `branchGc.enabled: false`; it is confined to `glissa/session/`, protects every configured session id, and otherwise requires merge proof or orphan staleness, so unattended cleanup cannot become branch loss (`server/core/branch-gc-core.js`, `tests/branch-gc-core.test.js`).
-
-### GitHub PR Auto-Review (opt-in)
-
-- Inert unless both `config.prReview.enabled` and `config.telegram` are set. A clean PR is reviewed IN PLACE (diff only) so it coexists with a live session in the repo; a conflicting one gets a worktree, discarded on every exit path.
-- Only the POLLER merges; the agent never does. The verdict travels via a result file, since `gh pr review` 422s on your own PR, and a missing one reads as ERROR, never a false clean.
-- Every merge gate fails CLOSED: reviewed head must equal current head, checks must be green (no checks is never green), and a `gh` error on the workflow-files query defers a tick (`server/core/pr-review-core.js`).
-- All `gh` and `git` go through `child-process-safe` and `git-workspace` (`tests/no-direct-child-process.test.js`, `tests/no-direct-git-worktree.test.js`).
-
-### Radar / PostHog Auto-Fix (opt-in)
-
-- The agent COMMITS; the server pushes and opens the PR. `FIX_DENY` denies `git push` and `gh` outright, since a prefix deny-list cannot constrain a push TARGET or a merge API call.
-- The server REFUSES the handoff when the diff touches `.github/workflows/`, making "never touches CI" structural; the PR url comes from `gh` stdout, never the agent.
-- Nothing here merges. With `prReview.enabled` also on, unattended code can reach the base branch with no carbon unit in the loop; the operator opts into that knowingly.
-- The branch name carries a random discriminator: a deterministic one collides with a previous fix's pushed branch, burning the timeout on a regression after a fix.
-
-### Usage Tracking
-
-- Costs are estimates against list price, not bills, over local transcripts only. Only a COMPLETE scan pass writes the warehouse or evaluates budgets: a partial pass would store an undercount as durable truth and burn a once-per-period alert.
-- The warehouse exists because Claude Code deletes transcripts after about 30 days; it extends the DAILY series only. Live wins inside live coverage, history fills in only behind it and is labelled: a day Glissa remembers is a different claim from one it can still see.
-- Lane attribution is EXACT, never inferred: a session counts only because Glissa recorded spawning it, everything else is `other`. Guessing from a cwd would mis-bill a lane.
-- The ledger (`usage-lanes.json`) is keyed by a VENDOR-NAMESPACED composite `<vendor>:<sessionId>`, the same shape the scanner's dedup uses, so a codex id cannot collide with a claude one now that Glissa supervises both; a pre-M5 file keyed `claudeSessionId` round-trips as vendor `claude`. It is written from the `claude-session-id` event (name kept for wire/back-compat; payload now carries `{ vendor, sessionId }`, `vendor` from the session's adapter `usageVendor`).
-- A supervised codex/grok card attributes to its lane and shows its own token/cost chip, joined by the card's captured session id against that vendor's transcript entries (the scanner already parses them). Blocks, burn rate and plan limits stay Claude-only and labelled as such: they are subscription concepts, so mixing another vendor's tokens in would misread a plan window.
-- Wire-unit traps, normalized once in `public/usage-view-core.mjs`: `tokenLimit.pct` is a RATIO, not a percentage, and `scan.dirs` an ARRAY, not a count; face-value reads fail silently. Today is the SERVER's day, or a viewer in another zone reads the wrong bucket.
-- Official plan limits OUTRANK the largest-block heuristic, and provenance is never implied: the heuristic is labelled estimated, and a stale snapshot shows its age rather than being swapped.
-- The statusLine relay MUST chain the operator's own, since a per-session settings file REPLACES the global one and would delete their HUD; its POST is abandoned quickly to add no latency. The reply stays plain `{ ok, reason }`: `additionalContext` is confined to the adapter-declared pack-notice hook, and telemetry must never become a second injection point.
-
-### Session Recording
-
-- Signal-level recording is ON by default: the detection design is only debuggable after the fact, and an incident with it off costs a reconstruction, not one grep.
-- Recordings land in `~/.glissa/recordings`, never cwd-relative, or an always-on recorder scatters files through whichever repo launched it.
-
-### Context Packs
-
-- Deterministic by contract, so the version is a hash and a rebuild diffable. It hashes every DELIVERED file, not just sources, or an edited rule rides out under an unchanged version.
-- Budgets are hard gates and a failed build writes NOTHING, leaving the last good `current/` untouched. The always-loaded index has a tighter cap: context rot bites the discovery tier first.
-- Both rebuild loops are CONSUMER-GATED, a tree worth packing being one whose walk is expensive; `glissa pack build` stays always allowed. A newly assigned pack builds BEFORE the reload that recreates the session, or it lands after the spawn it exists for.
-- The staleness notice is Glissa-AUTHORED only, never pack content, or the hook response becomes an injection relay; only an ACCEPTED callback may consume one.
-- An unbuilt, unreadable, `self-referential` or `empty` pack is SKIPPED with a decision-trace entry (`decidePackDelivery`): additive context must never block a spawn, and a pack sourced from inside the consumer's own checkout is a drifting copy of what that session already loads.
-- A `data: true` source publishes outside the instruction tier, and the build FAILS if a data line appears in the index or under `.claude/rules/`: a build gate beats a convention.
-- Per-project variants flatten into independent pack NAMES, so one version per pack still holds. A foreign project's slug in a delivered path fails the build.
-- Sources are local files only: pack bytes land in permissionless sessions, so the boundary stays at files the operator already controls.
-- Assignment is a DELTA message: the list is re-read inside the config write, so two dashboards cannot clobber each other.
-- Delivery is addressed per PROJECT (its resolved path), never per card record: two records may share one checkout, and a per-record control offered the same project twice. One delta fans over every record on that path, refusing whole when any is at the cap, and the Mill's rows count sessions per project (`server/core/pack-core.js` packConsumerGroups, `tests/control-project-packs.test.js`).
-- A reload restarts a recreated session only if it was LIVE: starting a dormant card would spawn a session, with that project's permission setting, nobody asked for.
-- A codex card gets packs as ONE `-c developer_instructions` token: a constant directive plus index paths, never `--add-dir` (a writable root), pack bytes, or memory bytes (`session/adapters/codex.js.renderPackArgs`, `tests/agent-codex.test.js`).
-
-### Long-Term Memory (plan: `docs/plan-visions-3.md`)
-
-- Trust is stamped by the WRITE PATH, never read off the event; ranks fall but never rise along a lineage (`server/core/memory-core.js`).
-- A user prompt becomes a `prompt` record, never projected and refused as knowledge, its kind absent from the ingest ring's table, so operator text reaches neither `dist/` nor the control WS.
-- Memory alone never widens what leaves the machine: with the ingest lane off it builds its own source, and no ring, frame or digest sees those events.
-- Expunging is THREE writes, all needed: `secure_delete` (a DELETE leaves plaintext greppable), an FTS5 rebuild (a delete only tombstones terms), and a WAL truncate checkpoint. Canary in `tests/memory-store.test.js`.
-- A transcript-supplied timestamp is untrusted and clamped: a future-dated record lands in a segment retention can never prune and heads every recency ranking forever.
-- A verdict is never trusted alone: the session answers with structured CLAIMS and Glissa renders the bytes, so no remembered byte reaches a file except through the renderer; a bad result is refused as ONE.
-- Implied-rank rule: a rank may never exceed the highest among its cited records, and anything above `model` must cite one record and copy it verbatim, which makes verbatim locked facts mechanical.
-- Net-new claims are capped, a run inventing thirty facts at once being what that gate exists for. A run reads only the delta above a durable `seq` cursor and MERGES into the standing claims: replacing them made the canon one prompt, refusing every run. Age SKIPS work and never causes it: past `staleHorizonDays` the delta steps over a record AND the cursor moves with it, or that tail replays forever. A LOCKED diff still diverts to `dist-pending/`.
-- Echo suppression closes the loop: delivered line hashes are registered and matching transcript lines dropped, so a session quoting its memory back is not re-ingested as fresh fact.
-- A tool call is activity, not a fact: `agent-tool` left the ingest kind table at 53% of the canon, `Bash` lines a run paid to read.
-- One `contentMarker` PER untrusted corpus, so one fence cannot close another, and it is a sha256 digest rather than a cheap hash an attacker's text could fix-point.
-- Only memory TOGGLES cross the control WS: settings are an allow-list of booleans and clamped ints, so no `memory-*` type, path, record or lane log line rides one, a knob being tunable where a filename would be a leak (`tests/memory-delivery-negative.test.js`).
-- The direct-read pointer line in a repo's own `AGENTS.md` stays operator-authored: it is the one instruction-tier link in the chain, which keeps the store agent-agnostic.
-
-### Ephemeral Lane Write Boundaries
-
-- THE boundary is `defaultMode: acceptEdits` plus a throwaway cwd holding only the result file. Four plausible spellings fail SILENTLY, so every clause below comes from live probes recorded in `server/core/lane-permissions-core.js`.
-- No lane may grant a bare `Write` allow, which unbounds the writes, and nothing narrower grants the tool.
-- A PATH DENY is not a write boundary: probed with a bare `Write` allow present, both spellings let the write through, and a rule that looks like a boundary and is not is worse than none.
-- No lane may deny bare `Read`, `Write`, `Glob` or `Grep`: a bare `Read` deny refuses the Write tool, mutually exclusive with a result-file contract.
-- The mode is set in the lane's managed settings file, overriding the operator's own, or `defaultMode: auto` leaves a classifier deciding these writes instead of a rule.
-- A lane prompt is written in its throwaway cwd and invoked by a constant bootstrap argument, since a Windows `.cmd` shim re-parses argv through `cmd.exe` (`server/visions-dispatch.js`, `server/pack-distiller.js`).
-
-### Security: Trust Boundary
-
-- Glissa binds localhost only. Any local PROCESS is trusted; it is deliberately NOT "any local web page", and three layers keep a page on another local port out of the control WS.
-- Host allow-list first (`server/core/host-policy.js`). An ABSENT Host passes, since rebinding always carries a name and refusing it would only break HTTP/1.0 clients.
-- Port-exact Origin, the port read from the socket so nothing a client sends decides it; a mismatch falls THROUGH to the allow-list. Browser channels demand an Origin, non-browser ingresses do not.
-- A per-process page token guards local control and data upgrades, riding the query string since a browser cannot set a WS handshake header. `GET /control-token` refuses a disallowed Origin outright.
-- Trust is the LISTENER PORT, never a header or IP: a reverse proxy makes remote traffic look loopback, so an IP or `X-Forwarded-For` rule would hand every visitor local trust (`tests/request-trust.test.js`).
-- A pairing cookie is RCE as the server account, the control WS accepting any project path plus `dangerouslySkipPermissions`. Pairing URLs are single-use, short-TTL, never logged or stored in plaintext; the store fails CLOSED on corruption.
-- The `/pair/*` exemption is judged on the DECODED pathname: `express.static` resolves dot segments, so an un-normalized check served the dashboard bundle under `/pair/%2e%2e/`.
-- Remote config is unreachable from the control WS, and remote-off is fully inert: no route, no middleware, no file (`tests/backend-remote-disabled.test.js`). Binding wider needs `GLISSA_INSECURE_BIND=1`.
-- Two HTTP write ingresses. `POST /hook/:glissaId/:event` keeps its per-session bearer token, and its RESPONSE is also an ingress, so only Glissa-authored text may be injected. `POST /upload/:sessionId` sits behind remote-auth with a type and size cap.
-- If network exposure is ever needed, add authentication to the control WebSocket first.
-
-### Transport and Session Identity
-
-- The dual WebSocket split is deliberate: do NOT merge the channels. They want opposite loss policies (data drops and backfills by offset, control JSON must not drop), `bufferedAmount` is per-socket so one buffer cannot tell which stalled, and one stream would let a PTY flood block a kill frame.
-- Control backpressure drops only what the next push repairs, and a type not listed as refreshable is never droppable, so a new frame cannot silently go stale under load.
-- Both servers are heartbeat-reaped: focus suppression and the Telegram zero-connections gate COUNT open connections, so a half-open socket silently blocks the channel of last resort.
-- Resize is arbitrated by ACTIVE VIEWER, not last write: one PTY has many viewers, and last-write-wins left a desktop stuck at a phone's column count forever.
-- xterm.js handles ALL ANSI rendering; the server is a dumb pipe.
-
-### Dashboard Layouts
-
-- Two first-class layouts, not one responsive shell. `decideLayout` needs a coarse pointer AND a narrow viewport: a narrowed desktop window keeps the three-panel IA, and a coarse-pointer tablet has room for it. All phone styling keys off `[data-layout="phone"]`.
-- Nothing is duplicated; live elements are RE-PARENTED into the phone screens and back, a second copy meaning a second state pipeline for the same facts. The card-borrow seam holds a GLOBAL single borrower, a session owning one xterm.
-- Board order is attention-first, the opposite of the rail's stable identity order: a rail needs a fixed spatial map, a phone answers "who needs me". The "needs you" RULE lives once, in `public/focus-view/attention-core.mjs`.
-- Touch scroll is ours because xterm 6.0.0 has no touch path at all. The alternate buffer re-emits the drag as synthetic wheel notches so xterm's OWN listeners decide the meaning.
-- Predictive text bypasses xterm's input path on PHONE ONLY: xterm 6.0.0 mishandles autocorrect events (upstream `xtermjs/xterm.js#3600`, open). Desktop is untouched, where the same takeover would regress CJK composition.
-
-## CSS Convention
-
-- Tailwind utility classes for static markup in `index.html`; semantic classes in `style.css` for JS-created DOM.
-- State-driven styles via `[data-state]` selectors; layout branches via `[data-layout]`.
-- Animations and pseudo-elements live in `style.css`; theme tokens in `public/tailwind.css` via `@theme`, applied by `public/theme.js`.
+| Subsystem | Rules live in |
+|---|---|
+| Status Detection, Session Recording | `detection/AGENTS.md` |
+| Agent Adapters | `session/adapters/AGENTS.md` |
+| Session Spawning, Auto-Resume and Shutdown | `session/AGENTS.md` |
+| Notifications | `notifications/AGENTS.md` |
+| Worktree Auto-Rebase, Remote Branch GC, GitHub PR Auto-Review, Radar / PostHog Auto-Fix, Usage Tracking, Long-Term Memory, Ephemeral Lane Write Boundaries, Security: Trust Boundary, Transport and Session Identity | `server/AGENTS.md` |
+| Context Packs | `packs/AGENTS.md` |
+| Dashboard Layouts | `public/AGENTS.md` |
 
 ## Coding Style
 

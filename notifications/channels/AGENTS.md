@@ -21,7 +21,7 @@ Notification delivery adapters consumed by `notification-manager.js`. Channels a
 - `toast.js` shells out to PowerShell; escape single quotes (`escapeForPowerShell`) and never interpolate untrusted text unescaped.
 
 ### Testing Requirements
-- `tests/` covers the manager (`test/test-notification-manager.js` is the manual harness); channel changes are verified by triggering a notification in `npm run dev`.
+- `tests/notification-manager.test.js` covers the manager; channel changes are verified by triggering a notification in `npm run dev`.
 
 ## Dependencies
 
