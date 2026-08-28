@@ -71,7 +71,7 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 
 ### Internal
 - `/shared/states.mjs` (generated from `shared/states.js`: a Vite virtual module in the bundle, a backend-generated route in no-build mode)
-- `../backend.js` - the WS endpoints this client speaks to
+- `server/backend.js` - the WS endpoints this client speaks to
 
 ### External
 - `@xterm/xterm`, `@xterm/addon-fit`, `@xterm/addon-webgl` - bundled by Vite, browser only

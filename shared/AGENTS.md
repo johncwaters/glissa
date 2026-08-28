@@ -29,6 +29,6 @@ State constants used by BOTH the CommonJS server and the ESM browser bundle. Sin
 ## Dependencies
 
 ### Internal
-- Consumed by `../sessions.js`, `../notification-manager.js`, `../control-handlers.js`, and the entire `public/` frontend.
+- Consumed by `session/sessions.js`, `notifications/notification-manager.js`, `server/control-handlers.js`, and the entire `public/` frontend.
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

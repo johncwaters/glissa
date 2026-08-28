@@ -39,8 +39,8 @@ Status detection and change watching. Session status is derived from machine-emi
 ## Dependencies
 
 ### Internal
-- `../sessions.js` - consumes StatusSource, owns transitions
-- `../session-recorder.js` - produces the JSONL that `replay.js` consumes
+- `session/sessions.js` - consumes StatusSource, owns transitions
+- `session/session-recorder.js` - produces the JSONL that `replay.js` consumes
 - `../session/core/status-mapper.js` - the pure signal-to-event decision
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

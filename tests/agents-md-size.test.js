@@ -30,7 +30,7 @@ function citedPaths(markdown) {
   for (const match of markdown.matchAll(/`([^`]+)`/g)) {
     const raw = match[1].trim();
     if (!raw.includes('/') || /[<>*: #]/.test(raw)) continue;
-    if (/^([~/]|https?:|\.)/.test(raw)) continue;
+    if (/^([~/]|https?:|\.[A-Za-z])/.test(raw)) continue;
     if (CITATION_EXTENSIONS.test(raw)) { cited.add(raw); continue; }
     const withoutSymbol = raw.replace(/\.[A-Za-z_$][\w$]*$/, '');
     if (CITATION_EXTENSIONS.test(withoutSymbol)) cited.add(withoutSymbol);

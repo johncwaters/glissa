@@ -26,7 +26,7 @@ Notification delivery adapters consumed by `notification-manager.js`. Channels a
 ## Dependencies
 
 ### Internal
-- `../notification-manager.js` - the only consumer
-- `../backend.js` - control-WS broadcast used by `web-notification.js`
+- `notifications/notification-manager.js` - the only consumer
+- `server/backend.js` - control-WS broadcast used by `web-notification.js`
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

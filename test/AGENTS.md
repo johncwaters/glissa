@@ -28,6 +28,6 @@ Manual smoke tests and harnesses run directly with `node`, separate from the aut
 ## Dependencies
 
 ### Internal
-- `../backend.js`, `../sessions.js`
+- `server/backend.js`, `session/sessions.js`
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->
