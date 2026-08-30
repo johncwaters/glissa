@@ -62,6 +62,41 @@ function advanceRemote(publisher, name) {
   return git(['rev-parse', 'HEAD'], publisher).trim();
 }
 
+test('syncIntegrationBranch skips a repository without origin', { skip: !GIT }, async () => {
+  const fixture = createFixture();
+  try {
+    git(['remote', 'remove', 'origin'], fixture.repo);
+    const developSha = git(['rev-parse', 'develop'], fixture.repo).trim();
+    const gitWorkspace = createGitWorkspace();
+
+    const synced = await gitWorkspace.syncIntegrationBranch({ projectPath: fixture.repo, branch: 'develop' });
+
+    assert.deepEqual(synced, { outcome: 'no-remote', from: null, to: null });
+    assert.equal(git(['rev-parse', 'develop'], fixture.repo).trim(), developSha);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('syncIntegrationBranch fetch is bounded and non-interactive', async () => {
+  let fetchCall = null;
+  const gitWorkspace = createGitWorkspace({
+    git: (args, cwd, extra) => {
+      if (args.join(' ') === 'remote get-url origin') return 'remote.git';
+      if (args[0] === 'fetch' && args[1] === '--prune') fetchCall = { args, cwd, extra };
+      return '';
+    },
+  });
+
+  await gitWorkspace.syncIntegrationBranch({ projectPath: '/repo', branch: 'main' });
+
+  assert.deepEqual(fetchCall, {
+    args: ['fetch', '--prune', 'origin', '+refs/heads/*:refs/remotes/origin/*'],
+    cwd: '/repo',
+    extra: { timeout: 8000, env: { GIT_TERMINAL_PROMPT: '0' } },
+  });
+});
+
 test('syncIntegrationBranch fast-forwards an unchecked local integration branch', { skip: !GIT }, async () => {
   const fixture = createFixture();
   try {

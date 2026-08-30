@@ -8,7 +8,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { decideSignatureDemotion, decideDiffSelfHeal } = require('../session/core/merge-gate');
+const {
+  decideSignatureDemotion,
+  decideBaseSyncDemotion,
+  decideDiffSelfHeal,
+} = require('../session/core/merge-gate');
 
 function sig(over = {}) {
   return { dirty: false, ahead: '0', behind: '0', rebaseInProgress: false, ...over };
@@ -39,6 +43,16 @@ test('signature demotion: non-reviewable statuses never demote', () => {
     assert.equal(decideSignatureDemotion(status, sig()), null, status);
     assert.equal(decideSignatureDemotion(status, sig({ ahead: '2' })), null, status);
   }
+});
+
+test('H1 base-diverged park demotes once origin is no longer diverged', () => {
+  for (const baseSyncState of ['in-sync', 'ahead', 'behind']) {
+    assert.equal(decideBaseSyncDemotion('parked', 'base-diverged', baseSyncState), 'pending-review');
+  }
+  assert.equal(decideBaseSyncDemotion('parked', 'base-diverged', 'diverged'), null);
+  assert.equal(decideBaseSyncDemotion('parked', 'base-diverged', 'unknown'), null);
+  assert.equal(decideBaseSyncDemotion('parked', 'rebase-conflict', 'in-sync'), null);
+  assert.equal(decideBaseSyncDemotion('pending-review', 'base-diverged', 'in-sync'), null);
 });
 
 test('diff self-heal: reviewable gate over an empty diff drops to none', () => {

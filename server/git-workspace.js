@@ -7,6 +7,7 @@ const { execFileAsync, execFileSync } = require('../server/child-process-safe');
 const { createSerialQueue } = require('./spawn-gate');
 const { sessionIdFromBranch } = require('./core/branch-gc-core');
 const {
+  GIT_FETCH_TIMEOUT_MS,
   parseLeftRightCount,
   decideBranchSyncState,
   decideResyncAction,
@@ -91,10 +92,10 @@ function hasWorkFrom(dirty, ahead) {
 const markerFrom = (result) => (result.ok && result.out ? result.out : null);
 
 // Run each isolated lane (a session, a PR review) inside a throwaway git worktree on a dedicated
-// branch, so its writes never touch the user's working tree or current branch during the
+// branch, so its writes never touch the carbon unit's working tree or current branch during the
 // (multi-minute) run. On a terminal outcome the work is fast-forwarded back into the base branch when
 // that is safe; if the base moved meanwhile, the branch is kept for a manual merge. A non-git project,
-// a repo with no commits, or a detached HEAD falls back to running in place (no isolation, no merge).
+// a repo with no commits falls back to running in place (no isolation, no merge).
 //
 // The git runner is injected so the branch/worktree/merge sequence is unit-testable without a repo;
 // backend.js wires the real `git` via execFileSync.
@@ -116,6 +117,7 @@ function createGitWorkspace(opts = {}) {
     return stdout;
   });
   const mkdtemp = opts.mkdtemp || ((prefix) => fs.mkdtempSync(prefix));
+  const log = opts.log || console;
   // Share recorded conflict resolutions across every linked worktree of a repo (git's rr-cache lives in
   // the COMMON gitdir, so the sharing is free once rerere.enabled is set). False switches off both the
   // config write and every replay attempt, leaving the merge paths exactly as they were.
@@ -181,6 +183,10 @@ function createGitWorkspace(opts = {}) {
     };
   }
 
+  async function hasOriginRemote(projectPath) {
+    return (await run(['remote', 'get-url', 'origin'], projectPath)).ok;
+  }
+
   async function fastForwardBaseFromOrigin(projectPath, branch, upstream) {
     const checkedOut = (await run(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath)).out;
     const decision = decideResyncAction('behind', checkedOut === branch);
@@ -189,11 +195,22 @@ function createGitWorkspace(opts = {}) {
     return (await run(command.args, projectPath, { timeout: command.opts.timeout })).ok;
   }
 
-  /** @param {{ ok: boolean, out: string, err?: string } | null} [fetched] */
+  /**
+   * @param {{ ok: boolean, out: string, err?: string } | null} [fetched]
+   * @returns {Promise<{ state: string, upstream: string, fetched: boolean | null, error?: string }>}
+   */
   async function synchronizeBaseWithOrigin(projectPath, branch, fetched = null) {
+    if (!(await hasOriginRemote(projectPath))) return { state: 'no-upstream', upstream: `origin/${branch}`, fetched: null };
     const fetchResult = fetched || await fetchOriginBody({ projectPath, branch });
-    if (!fetchResult.ok) return { state: 'unknown', fetched: false, error: fetchResult.err || fetchResult.out };
+    if (!fetchResult.ok) {
+      const fullError = fetchResult.err || fetchResult.out;
+      log.warn(`[git-workspace] fetch origin/${branch} failed: ${fullError}`);
+      return {
+        state: 'unknown', upstream: `origin/${branch}`, fetched: false, error: firstGitErrorLine(fullError),
+      };
+    }
     const classified = await classifyBaseAgainstOrigin(projectPath, branch);
+    if (classified.state === 'no-upstream') return { ...classified, fetched: null };
     if (classified.state !== 'behind') return { ...classified, fetched: true };
     const fastForwarded = await fastForwardBaseFromOrigin(projectPath, branch, classified.upstream);
     if (!fastForwarded) return { ...classified, fetched: true, error: 'fast-forward failed' };
@@ -201,13 +218,21 @@ function createGitWorkspace(opts = {}) {
   }
 
   async function pushBaseToOrigin(projectPath, branch) {
-    const command = buildResyncCommand('push', { upstream: `origin/${branch}`, branch, remote: 'origin', opts: {} });
+    if (!(await hasOriginRemote(projectPath))) return false;
+    const classified = await classifyBaseAgainstOrigin(projectPath, branch);
+    const decision = decideResyncAction(classified.state, false);
+    const command = buildResyncCommand(decision, {
+      upstream: classified.upstream, branch, remote: 'origin', opts: {},
+    });
     if (!command) return false;
-    return (await run(command.args, projectPath, { timeout: command.opts.timeout })).ok;
+    return (await run(command.args, projectPath, {
+      timeout: command.opts.timeout,
+      env: { GIT_TERMINAL_PROMPT: '0' },
+    })).ok;
   }
 
   function mergeSyncWarning(baseSync, branch) {
-    if (!baseSync.fetched) return `could not fetch origin/${branch}; merged with local base`;
+    if (baseSync.fetched === false) return `could not fetch origin/${branch}; merged with local base: ${baseSync.error}`;
     if (baseSync.error) return `could not fast-forward ${branch} from origin/${branch}; merged with local base`;
     return null;
   }
@@ -246,7 +271,15 @@ function createGitWorkspace(opts = {}) {
   // Create an isolated worktree on `glissa/<teamId>/<label>`. `teamId` names the LANE ("session",
   // "pr-review"); the segment name is on-disk branch shape that boot reconciliation matches, so it
   // stays. Returns { cwd, isGit, branch, base, baseSha }; falls back to { cwd: projectPath, isGit: false }.
-  async function createBody({ projectPath, teamId, label, baseBranch, worktreeBase, shareList }) {
+  async function createBody({
+    projectPath,
+    teamId,
+    label,
+    baseBranch = null,
+    forkFromHead = false,
+    worktreeBase,
+    shareList,
+  }) {
     const inside = await run(['rev-parse', '--is-inside-work-tree'], projectPath);
     if (!inside.ok || inside.out !== 'true') return { cwd: projectPath, isGit: false };
     const head = await run(['rev-parse', 'HEAD'], projectPath);
@@ -276,10 +309,14 @@ function createGitWorkspace(opts = {}) {
         };
       }
     }
-    let base = (await run(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath)).out || 'HEAD';
-    if (baseBranch !== undefined) base = baseBranch || await detectDefaultBranch({ projectPath });
+    const currentBranch = (await run(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath)).out || 'HEAD';
+    /** @type {string | null} */
+    let base = currentBranch;
+    if (!forkFromHead) base = baseBranch || await detectDefaultBranch({ projectPath });
     if (!base) return { cwd: projectPath, isGit: false, reason: 'no-base-branch' };
-    const ref = await run(['rev-parse', '--verify', '--quiet', `refs/heads/${base}`], projectPath);
+    const ref = forkFromHead
+      ? head
+      : await run(['rev-parse', '--verify', '--quiet', `refs/heads/${base}`], projectPath);
     const baseSha = ref.ok ? ref.out : await ensureLocalBranch(projectPath, base);
     if (!baseSha) return { cwd: projectPath, isGit: false, reason: 'no-base-branch' };
     await run(['branch', '-D', branch], projectPath); // drop a stale branch left by a crashed prior run
@@ -718,8 +755,16 @@ function createGitWorkspace(opts = {}) {
 
   /** @param {{ projectPath: string, branch?: string | null }} options */
   async function fetchOriginBody({ projectPath, branch = null }) {
-    if (branch) return run(['fetch', '--quiet', 'origin', branch], projectPath, { timeout: 8000 });
-    return run(['fetch', '--prune', 'origin'], projectPath);
+    const fetchOptions = {
+      timeout: GIT_FETCH_TIMEOUT_MS,
+      env: { GIT_TERMINAL_PROMPT: '0' },
+    };
+    if (branch) {
+      return run([
+        'fetch', '--quiet', '--prune', 'origin', 'refs/heads/*:refs/remotes/origin/*',
+      ], projectPath, fetchOptions);
+    }
+    return run(['fetch', '--prune', 'origin'], projectPath, fetchOptions);
   }
 
   /** @returns {Promise<IntegrationSyncResult>} */
@@ -741,6 +786,7 @@ function createGitWorkspace(opts = {}) {
 
   /** @returns {Promise<IntegrationSyncResult>} */
   async function syncIntegrationBranchBody({ projectPath, branch }) {
+    if (!(await hasOriginRemote(projectPath))) return { outcome: 'no-remote', from: null, to: null };
     const localRef = `refs/heads/${branch}`;
     const remoteRef = `refs/remotes/origin/${branch}`;
     // The ONE network call on the spawn path refreshes the full tracking namespace so a missing target
@@ -748,7 +794,7 @@ function createGitWorkspace(opts = {}) {
     const fetched = await run(
       ['fetch', '--prune', 'origin', '+refs/heads/*:refs/remotes/origin/*'],
       projectPath,
-      { timeout: 8000, env: { GIT_TERMINAL_PROMPT: '0' } },
+      { timeout: GIT_FETCH_TIMEOUT_MS, env: { GIT_TERMINAL_PROMPT: '0' } },
     );
     if (!fetched.ok) return { outcome: 'fetch-failed', from: null, to: null };
 

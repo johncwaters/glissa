@@ -22,8 +22,9 @@ function snapshotSource() {
     pendingWakeup: null,
     pendingPromptKind: null,
     mergeStatus: "pending-review",
+    mergeReason: null,
     worktreeNotice: null,
-    effectiveBase: "origin/main",
+    effectiveBase: "main",
     auditLog: [{ from: "RUNNING", to: "COMPLETE", event: "task_complete", timestamp: 41, detail: { source: "hook" } }],
     detection: { hookSeen: true },
     decisions: [{ kind: "signal", decision: "transition" }],
@@ -48,4 +49,14 @@ test("wire and debug snapshots share state and redacted pack projections", () =>
 test("debug projection retains only its historical public shape", () => {
   const { debug } = projectSessionSnapshots(snapshotSource());
   assert.deepEqual(Object.keys(debug), ["state", "transitions", "detection", "packs", "decisions"]);
+});
+
+test("L7 effective base projection preserves producer-normalized branch names", () => {
+  const releaseSnapshot = snapshotSource();
+  releaseSnapshot.effectiveBase = "release/1.x";
+  assert.equal(projectSessionSnapshots(releaseSnapshot).wire.effectiveBase, "release/1.x");
+  assert.equal(projectSessionSnapshots(snapshotSource()).wire.effectiveBase, "main");
+  const remoteQualifiedSnapshot = snapshotSource();
+  remoteQualifiedSnapshot.effectiveBase = "origin/main";
+  assert.equal(projectSessionSnapshots(remoteQualifiedSnapshot).wire.effectiveBase, "origin/main");
 });

@@ -3,11 +3,12 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
 const SOURCE_DIRS = ['server', 'session', 'shared', 'public'];
-const HARDCODED_BRANCH = /['"]develop['"]|into develop/g;
+const HARDCODED_BRANCH = /['"`]develop['"`]|into develop/g;
 
 function collectSourceFiles(directory, files = []) {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
@@ -32,4 +33,16 @@ test('runtime sources contain no hardcoded integration branch', () => {
     }
   }
   assert.deepEqual(offenders, []);
+});
+
+test('L6 hardcoded branch gate catches quoted, template, and prose forms', () => {
+  const scratchDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-hardcoded-branch-'));
+  const scratchFile = path.join(scratchDirectory, 'scratch.js');
+  try {
+    fs.writeFileSync(scratchFile, "'develop'\n\"develop\"\n`develop`\ninto develop\n", 'utf8');
+    const source = fs.readFileSync(scratchFile, 'utf8');
+    assert.deepEqual(source.match(HARDCODED_BRANCH), ["'develop'", '"develop"', '`develop`', 'into develop']);
+  } finally {
+    fs.rmSync(scratchDirectory, { recursive: true, force: true });
+  }
 });

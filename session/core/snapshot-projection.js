@@ -49,7 +49,7 @@ function projectSessionSnapshots(source) {
     mergeStatus: source.mergeStatus,
     mergeReason: source.mergeReason,
     worktreeNotice: source.worktreeNotice,
-    effectiveBase: source.effectiveBase?.replace(/^[^/]+\//, "") ?? null,
+    effectiveBase: source.effectiveBase ?? null,
     auditLog: source.auditLog.slice(-100),
   };
   const debug = {

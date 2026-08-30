@@ -1,5 +1,7 @@
 'use strict';
 
+const GIT_FETCH_TIMEOUT_MS = 8000;
+
 // Pure parsing/decision logic for the review sidebar's branch-sync indicator: whether a project's
 // LOCAL base branch is ahead of and/or behind its remote upstream tracking branch. No
 // IO here; the caller (session/sessions.js getBranchSync) runs the git commands and hands the raw
@@ -59,7 +61,7 @@ function decideResyncAction(state, isCheckedOut) {
 
 function buildResyncCommand(decision, { upstream, branch, remote, opts }) {
   if (decision === 'ff-merge') return { args: ['merge', '--ff-only', upstream], opts, successAction: 'fast-forwarded' };
-  if (decision === 'ff-fetch') return { args: ['fetch', '--quiet', remote, `${branch}:${branch}`], opts: { ...opts, timeout: 8000 }, successAction: 'fast-forwarded' };
+  if (decision === 'ff-fetch') return { args: ['fetch', '--quiet', remote, `${branch}:${branch}`], opts: { ...opts, timeout: GIT_FETCH_TIMEOUT_MS }, successAction: 'fast-forwarded' };
   if (decision === 'push') return { args: ['push', remote, branch], opts: { ...opts, timeout: 15000 }, successAction: 'pushed' };
   return null;
 }
@@ -83,6 +85,7 @@ function firstGitErrorLine(err) {
 }
 
 module.exports = {
+  GIT_FETCH_TIMEOUT_MS,
   parseLeftRightCount,
   decideBranchSyncState,
   parseRemoteFromUpstream,

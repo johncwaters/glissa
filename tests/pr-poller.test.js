@@ -213,6 +213,7 @@ test('conflict lane: branch checked out locally -> ERROR, no worktree, no spawn'
 
 test('conflict lane: resolved in worktree -> discard + leaked branch delete + resolved ping', async () => {
   let discarded = 0;
+  let createOptions = null;
   const deletedBranches = [];
   const { poller, pings } = harness({
     gh: {
@@ -222,6 +223,10 @@ test('conflict lane: resolved in worktree -> discard + leaked branch delete + re
     },
     workspace: {
       listWorktreeBranches: async () => [],
+      create: async (options) => {
+        createOptions = options;
+        return { isGit: true, cwd: '/wt', branch: 'glissa/pr-review/pr-7', base: 'HEAD' };
+      },
       discard: async () => { discarded += 1; },
     },
     spawnReview: async (a) => {
@@ -236,6 +241,7 @@ test('conflict lane: resolved in worktree -> discard + leaked branch delete + re
   assert.equal(entry.phase, 'awaiting-checks');
   assert.equal(entry.reviewedHead, 'sha2', 'recorded the re-queried post-push head');
   assert.equal(discarded, 1, 'worktree discarded');
+  assert.equal(createOptions.forkFromHead, true, 'PR review explicitly forks from the checkout HEAD');
   assert.deepEqual(deletedBranches, ['feature'], 'leaked pr-head branch deleted');
   assert.match(pings[0], /conflicts resolved on me\/repo#7/);
 });

@@ -25,7 +25,14 @@ import { sessionUIs } from '../session-card/card-registry.js';
 import { openConfirmDialog } from '../session-card/modal.js';
 import { getSidebarWidth, setSidebarWidth } from '../ui-prefs.js';
 import { parseUnifiedDiff, shouldDropDiffCache, summarizeFiles } from './diff-core.mjs';
-import { baseLabel, mergeActionTitle, mergeTargetText, parkedStatusText } from './review-copy-core.mjs';
+import {
+  baseLabel,
+  decideMergeAction,
+  mergeActionTitle,
+  mergeDisabledReason,
+  mergeTargetText,
+  parkedStatusText,
+} from './review-copy-core.mjs';
 import { getSelectedId, onSelectionChange, setSelectedId } from './selection.js';
 
 const REVIEWABLE = new Set(['pending-review', 'parked']);
@@ -303,10 +310,14 @@ export function mergeSelectedSession() {
   const ui = sessionUIs.get(id);
   if (!ui) return false;
   const curStatus = statusById.get(id) || 'none';
-  if (curStatus === 'merging' || curStatus === 'parked') return false; // in-flight or conflict needs resolving
   const payload = diffById.get(id);
   const hasCommits = !!(payload?.hasCommits);
-  if (!isMergeableLive(ui.currentState, hasCommits)) return false;
+  const mergeAction = decideMergeAction(
+    curStatus,
+    reasonById.get(id) || null,
+    isMergeableLive(ui.currentState, hasCommits),
+  );
+  if (!mergeAction.isEnabled) return false;
   sendMergeContinue(id, ui.currentState);
   return true;
 }
@@ -375,23 +386,6 @@ function sendMergeContinue(id, state) {
 // the in-worktree "Resolve in session" action and the discard safety check; shared by render and Alt+R.
 function isLive(state) {
   return state !== STATES.DORMANT && state !== STATES.DONE && state !== STATES.FAILED;
-}
-
-// Pure: the one-line reason Merge is unavailable, or null when no line is needed. Centralizes the
-// disabled-state copy so the always-visible control region can say WHY the operator cannot merge yet.
-// Only called when Merge is disabled; ordered most-specific first. No-changes states return null:
-// the empty diff body already shows that, and restating it here was noise.
-function mergeDisabledReason({ status, fetched, hasCommits, live, state }) {
-  if (status === 'merging') return null;                       // the status note already says "Merging..."
-  if (status === 'parked') return 'Resolve the conflict, then merge.';
-  if (!fetched) return 'Checking for changes...';
-  if (!hasCommits) return null;
-  if (!live) return 'Session ended.';                          // committed work, but no PTY to keep running
-  // isMergeableLive now includes RUNNING (via sendMergeContinue's confirm + force), so the only
-  // live, hasCommits states that still reach here are INITIALIZING/STARTING, before the worktree
-  // exists to merge from.
-  if (state === STATES.INITIALIZING || state === STATES.STARTING) return 'Starting up. Mergeable once the session is live.';
-  return null;
 }
 
 function requestDiff(id) {
@@ -498,8 +492,7 @@ function render() {
   // committed there is nothing to merge, so the button is disabled (with a reason) rather than withheld.
   const live = isLive(state);
   const mergeableLive = isMergeableLive(state, hasCommits);
-  // Parked means a conflict needs resolving first; suppress Merge entirely until it clears.
-  const mergeEnabled = mergeableLive && status !== 'merging' && status !== 'parked';
+  const mergeAction = decideMergeAction(status, mergeReason, mergeableLive);
 
   // Resync is orthogonal to the merge/worktree gate above (it acts on the project's base branch vs its
   // own remote, not this session's worktree), so it renders regardless of merge `status`.
@@ -525,7 +518,7 @@ function render() {
   // and a pinned grand total only repeated those numbers one scroll-line above them.
   const effectiveBase = baseLabel(ui.effectiveBase);
   const actions = renderActions(id, {
-    status, reviewable, mergeEnabled, live, state, sync, resyncing, effectiveBase, mergeReason,
+    status, reviewable, mergeAction, live, state, sync, resyncing, effectiveBase, mergeReason,
   });
   controlsEl.append(actions);
 
@@ -543,8 +536,8 @@ function render() {
 
   // Disabled reason only when Merge is rendered (not suppressed by parked) and unavailable.
   let reasonShown = false;
-  if (!mergeEnabled && status !== 'parked') {
-    const reason = mergeDisabledReason({ status, fetched, hasCommits, live, state });
+  if (mergeAction.isRendered && !mergeAction.isEnabled) {
+    const reason = mergeDisabledReason({ status, mergeReason, fetched, hasCommits, live, state });
     if (reason) {
       // While the diff is unfetched the reason line IS the loading indicator (it replaced the body's
       // "Loading diff..." placeholder), so it carries the loading pulse.
@@ -738,18 +731,16 @@ function actionButton({ id, label, shortcut, title, disabled = false, danger = f
   return btn;
 }
 
-function renderActions(id, { status, reviewable, mergeEnabled, live, state, sync, resyncing, effectiveBase, mergeReason }) {
+function renderActions(id, { status, reviewable, mergeAction, live, state, sync, resyncing, effectiveBase, mergeReason }) {
   const actions = el('div', 'review-actions');
 
-  // Suppress Merge when parked: Resolve is the only path forward until the conflict clears.
-  // When not parked, Merge always leads so the operator knows exactly where it lives.
-  if (status !== 'parked') {
+  if (mergeAction.isRendered) {
     actions.append(actionButton({
       id: 'review-merge-btn',
       label: 'Merge',
       shortcut: 'alt+m',
       title: mergeActionTitle(effectiveBase),
-      disabled: !mergeEnabled,
+      disabled: !mergeAction.isEnabled,
       onClick: () => sendMergeContinue(id, state),
     }));
   }

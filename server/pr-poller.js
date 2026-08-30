@@ -121,7 +121,11 @@ function createPrPoller(deps) {
         return;
       }
       const ws = await gitWorkspace.create({
-        projectPath, teamId: 'pr-review', label: `pr-${pr.number}`, worktreeBase: getWorktreeBase(projectPath),
+        projectPath,
+        teamId: 'pr-review',
+        label: `pr-${pr.number}`,
+        forkFromHead: true,
+        worktreeBase: getWorktreeBase(projectPath),
       });
       if (!ws || !ws.isGit) {
         await finishReview(key, 'ERROR', { reason: (ws?.reason) || 'cannot isolate worktree' }, pr, true);

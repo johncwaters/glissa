@@ -91,7 +91,7 @@ const FORCE_TICK_DEBOUNCE_MS = 3000;
  *     trafficSpikeMultiplier?: number, transientRecurrenceLimit?: number, userEscalationThreshold?: number } | null,
  *   telegram?: { botToken?: string, chatId?: string } | null }} PosthogWiringConfig */
 /** @typedef {{
- *   create: (options: { projectPath: string, teamId: string, label: string, worktreeBase: string, baseBranch: string | null }) =>
+ *   create: (options: { projectPath: string, teamId: string, label: string, worktreeBase: string, baseBranch?: string | null, forkFromHead?: boolean }) =>
  *     Promise<{ isGit: boolean, cwd: string, branch: string, base: string, baseSha?: string } | null> |
  *     { isGit: boolean, cwd: string, branch: string, base: string, baseSha?: string } | null,
  *   discard: (options: { projectPath: string, workspace: {

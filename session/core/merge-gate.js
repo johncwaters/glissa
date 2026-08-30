@@ -24,6 +24,12 @@ function decideSignatureDemotion(mergeStatus, sig) {
   return null;
 }
 
+function decideBaseSyncDemotion(mergeStatus, mergeReason, baseSyncState) {
+  if (mergeStatus !== "parked" || mergeReason !== "base-diverged") return null;
+  if (!["in-sync", "ahead", "behind"].includes(baseSyncState)) return null;
+  return "pending-review";
+}
+
 // Self-heal for a stranded review gate over an empty diff (operator committed-and-merged
 // or cleaned the worktree inside the still-live PTY). Returns 'none' or null.
 function decideDiffSelfHeal(mergeStatus, committedDiff, uncommittedDiff) {
@@ -32,4 +38,4 @@ function decideDiffSelfHeal(mergeStatus, committedDiff, uncommittedDiff) {
   return "none";
 }
 
-module.exports = { decideSignatureDemotion, decideDiffSelfHeal };
+module.exports = { decideSignatureDemotion, decideBaseSyncDemotion, decideDiffSelfHeal };

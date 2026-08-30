@@ -63,7 +63,7 @@ test('rebaseOnly (real git): replays the worktree onto a moved develop and leave
   const repo = initRepoOnDevelop();
   try {
     const gw = createGitWorkspace();
-    const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'eager' });
+    const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'eager', baseBranch: 'develop' });
     commitFile(repo, 'other.js', 'other\n', 'develop advances');
     const developSha = git(['rev-parse', 'develop'], repo).trim();
     commitFile(ws.cwd, 'session.js', 'session\n', 'session work');
@@ -89,7 +89,7 @@ test('rebaseOnly (real git): a worktree already on top of develop is upToDate an
   const repo = initRepoOnDevelop();
   try {
     const gw = createGitWorkspace();
-    const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'current' });
+    const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'current', baseBranch: 'develop' });
     commitFile(ws.cwd, 'session.js', 'session\n', 'session work');
     const before = git(['rev-parse', 'HEAD'], ws.cwd).trim();
 
@@ -107,7 +107,7 @@ test('rebaseOnly (real git): a DIRTY worktree is refused and left exactly as it 
   const repo = initRepoOnDevelop();
   try {
     const gw = createGitWorkspace();
-    const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'dirty' });
+    const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'dirty', baseBranch: 'develop' });
     commitFile(repo, 'other.js', 'other\n', 'develop advances');
     commitFile(ws.cwd, 'session.js', 'session\n', 'session work');
     const before = git(['rev-parse', 'HEAD'], ws.cwd).trim();
@@ -127,7 +127,7 @@ test('rebaseOnly (real git): an unreplayable conflict aborts cleanly, reports th
   const repo = initRepoOnDevelop('conflict.txt', 'base\n');
   try {
     const gw = createGitWorkspace();
-    const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'cflt' });
+    const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'cflt', baseBranch: 'develop' });
     commitFile(repo, 'conflict.txt', 'develop-side\n', 'develop edits');
     commitFile(ws.cwd, 'conflict.txt', 'session-side\n', 'session edits');
     const before = git(['rev-parse', 'HEAD'], ws.cwd).trim();
@@ -149,7 +149,7 @@ test('rebaseOnly (real git): a missing target branch is refused, no rebase attem
   const repo = initRepoOnDevelop();
   try {
     const gw = createGitWorkspace();
-    const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'notarget' });
+    const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'notarget', baseBranch: 'develop' });
     const r = await gw.rebaseOnly({
       projectPath: repo,
       workspace: { ...ws, base: null },
@@ -176,8 +176,8 @@ test('rebaseOnly: a non-git workspace is refused without touching git', async ()
 // Resolving the conflict by hand in the first records it in the common gitdir's rr-cache; the second
 // hits a byte-identical conflict, which is exactly what rerere replays. Returns both workspaces.
 async function seedRecordedResolution(gw, repo) {
-  const first = await gw.create({ projectPath: repo, teamId: 'session', label: 'first' });
-  const second = await gw.create({ projectPath: repo, teamId: 'session', label: 'second' });
+  const first = await gw.create({ projectPath: repo, teamId: 'session', label: 'first', baseBranch: 'develop' });
+  const second = await gw.create({ projectPath: repo, teamId: 'session', label: 'second', baseBranch: 'develop' });
   commitFile(repo, 'conflict.txt', 'develop-side\n', 'develop edits');
   commitFile(first.cwd, 'conflict.txt', 'session-side\n', 'first session edits');
   commitFile(second.cwd, 'conflict.txt', 'session-side\n', 'second session edits');
@@ -271,8 +271,8 @@ test('rerere (real git): a BINARY conflict aborts and never reports success, eve
   git(['commit', '-m', 'seed binary'], repo);
   try {
     const gw = createGitWorkspace();
-    const first = await gw.create({ projectPath: repo, teamId: 'session', label: 'first' });
-    const second = await gw.create({ projectPath: repo, teamId: 'session', label: 'second' });
+    const first = await gw.create({ projectPath: repo, teamId: 'session', label: 'first', baseBranch: 'develop' });
+    const second = await gw.create({ projectPath: repo, teamId: 'session', label: 'second', baseBranch: 'develop' });
 
     // develop moves BOTH files; both worktrees edit both the same way, so the text conflict is
     // byte-identical (and therefore replayable) while the binary one can never be.
@@ -341,8 +341,8 @@ test('rerere (real git): a replay that empties the patch skips that commit and s
   const repo = initRepoOnDevelop('conflict.txt', 'base\n');
   try {
     const gw = createGitWorkspace();
-    const first = await gw.create({ projectPath: repo, teamId: 'session', label: 'first' });
-    const second = await gw.create({ projectPath: repo, teamId: 'session', label: 'second' });
+    const first = await gw.create({ projectPath: repo, teamId: 'session', label: 'first', baseBranch: 'develop' });
+    const second = await gw.create({ projectPath: repo, teamId: 'session', label: 'second', baseBranch: 'develop' });
     commitFile(repo, 'conflict.txt', 'develop-side\n', 'develop edits');
 
     // The first worktree's commit also touches a second file, so its own patch is NOT empty and the
@@ -376,7 +376,7 @@ test('rerere: a rerere:false engine writes no rerere config when it creates a wo
   const repo = initRepoOnDevelop();
   try {
     const gwOff = createGitWorkspace({ rerere: false });
-    const ws = await gwOff.create({ projectPath: repo, teamId: 'session', label: 'off' });
+    const ws = await gwOff.create({ projectPath: repo, teamId: 'session', label: 'off', baseBranch: 'develop' });
     assert.equal(ws.isGit, true);
     assert.throws(() => git(['config', '--local', '--get', 'rerere.enabled'], repo), 'the key was never written');
     await gwOff.discard({ projectPath: repo, workspace: ws });
@@ -391,7 +391,7 @@ test('rerere: an explicit rerere.enabled=false in the repo is respected, not ove
   git(['config', 'rerere.enabled', 'false'], repo);
   try {
     const gw = createGitWorkspace();
-    const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'opted-out' });
+    const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'opted-out', baseBranch: 'develop' });
     assert.equal(git(['config', '--get', 'rerere.enabled'], repo).trim(), 'false', 'left as the operator set it');
     assert.throws(() => git(['config', '--get', 'rerere.autoUpdate'], repo), 'autoUpdate is never written');
     await gw.discard({ projectPath: repo, workspace: ws });

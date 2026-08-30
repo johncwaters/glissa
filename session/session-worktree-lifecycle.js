@@ -10,10 +10,11 @@ const { createWorktreeWatcher, readWorktreeGitdirPointer } = require("../detecti
 const { createIntegrationRefWatcher } = require("../detection/integration-ref-watch");
 const { createRerereWatcher } = require("../detection/rerere-watch");
 const { buildMergePrompt } = require("./core/merge-prompt");
-const { decideSignatureDemotion, decideDiffSelfHeal } = require("./core/merge-gate");
+const { decideSignatureDemotion, decideBaseSyncDemotion, decideDiffSelfHeal } = require("./core/merge-gate");
 const { decideAutoRebase, decideRerereCooldownClear, AUTO_REBASE_STATES, SPAWN_GAP_TRIGGER } = require("./core/rebase-gate");
 const { projectMergeState } = require("./core/worktree-state");
 const {
+  GIT_FETCH_TIMEOUT_MS,
   parseLeftRightCount,
   decideBranchSyncState,
   parseRemoteFromUpstream,
@@ -29,7 +30,8 @@ const WORKTREE_CHECK_DEBOUNCE_MS = 400;
  * @typedef {{ state: import('../shared/states').SessionState, isDestroyed: boolean, isTeardownPending: boolean, hasLivePty: boolean }} SessionSnapshot
  * @typedef {{ merged: boolean, parked?: boolean, refused?: boolean, reason?: string, conflicts?: string[], baseSha?: string, restoreConflict?: boolean, warning?: string }} MergeResult
  * @typedef {{ branch: string | null, upstream: string | null, state: string, ahead: number, behind: number, fetched: boolean | null, action: string, error: string | null }} BranchSyncResult
- * @typedef {{ create: (...args: unknown[]) => Workspace | Promise<Workspace>, populate: (...args: unknown[]) => unknown, hasUnmergedWork: (...args: unknown[]) => boolean | Promise<boolean>, discard: (...args: unknown[]) => unknown, mergeBack: (...args: unknown[]) => MergeResult | Promise<MergeResult>, mergeKeep: (...args: unknown[]) => MergeResult | Promise<MergeResult>, rebaseOnly: (...args: unknown[]) => Promise<{ ok?: boolean, upToDate?: boolean, rebased?: boolean, baseSha?: string, headSha?: string, rerereReplayed?: boolean, reason?: string, conflicts?: string[] }>, syncIntegrationBranch?: (...args: unknown[]) => Promise<{ outcome: string, from: string | null, to: string | null, error?: string }>, detectDefaultBranch?: (options: { projectPath: string }) => Promise<string | null> }} GitWorkspace
+ * @typedef {{ projectPath: string, teamId: string, label: string, baseBranch?: string | null, forkFromHead?: boolean, worktreeBase?: string | null, shareList?: string[] | null }} WorkspaceCreateOptions
+ * @typedef {{ create: (options: WorkspaceCreateOptions) => Workspace | Promise<Workspace>, populate: (...args: unknown[]) => unknown, hasUnmergedWork: (...args: unknown[]) => boolean | Promise<boolean>, discard: (...args: unknown[]) => unknown, mergeBack: (...args: unknown[]) => MergeResult | Promise<MergeResult>, mergeKeep: (...args: unknown[]) => MergeResult | Promise<MergeResult>, rebaseOnly: (...args: unknown[]) => Promise<{ ok?: boolean, upToDate?: boolean, rebased?: boolean, baseSha?: string, headSha?: string, rerereReplayed?: boolean, reason?: string, conflicts?: string[] }>, syncIntegrationBranch?: (...args: unknown[]) => Promise<{ outcome: string, from: string | null, to: string | null, error?: string }>, detectDefaultBranch?: (options: { projectPath: string }) => Promise<string | null> }} GitWorkspace
  * @typedef {{ state: () => SessionSnapshot, projectPath?: () => string, emit: (event: string, detail: Record<string, unknown>) => void, recordDecision: (entry: Record<string, unknown>) => void, pasteText: (text: string) => Record<string, unknown> }} SessionPort
  * @typedef {{ id: string, projectPath: string, integrationBranch?: string | null, gitWorkspace?: GitWorkspace | null, autoRebase?: boolean, syncOnStart?: boolean, liveWorktreeReview?: boolean, worktreeRoot?: string | null, worktreeShare?: string[] | null, port: SessionPort }} WorktreeLifecycleOptions
  * @typedef {object} WorktreeLifecycleState
@@ -78,8 +80,14 @@ function detectLinkedWorktree(directory) {
   return readWorktreeGitdirPointer(directory) !== null;
 }
 
+function branchFromRemoteRef(upstream) {
+  const separatorIndex = upstream.indexOf("/");
+  if (separatorIndex === -1) return upstream;
+  return upstream.slice(separatorIndex + 1);
+}
+
 function isOwnRemoteCopy(upstream, branch) {
-  return upstream.replace(/^[^/]+\//, "") === branch;
+  return branchFromRemoteRef(upstream) === branch;
 }
 
 /** @param {WorktreeLifecycleOptions} options */
@@ -477,7 +485,7 @@ function createSessionWorktreeLifecycle({
     const hasUpstream = Boolean(upstream) && !upstream.includes("@{");
     const branch = hasUpstream ? (await gitOut(["rev-parse", "--abbrev-ref", "HEAD"], opts)).trim() : "";
     if (hasUpstream && !isOwnRemoteCopy(upstream, branch)) {
-      lifecycleState.effectiveBase = upstream;
+      lifecycleState.effectiveBase = branchFromRemoteRef(upstream);
       return upstream;
     }
     lifecycleState.effectiveBase = effectiveIntegrationBranch();
@@ -540,7 +548,11 @@ function createSessionWorktreeLifecycle({
 
   async function fetchBranch(remote, branch, opts) {
     try {
-      await gitStrict(["fetch", "--quiet", remote, branch], { ...opts, timeout: 8000 });
+      await gitStrict(["fetch", "--quiet", remote, branch], {
+        ...opts,
+        timeout: GIT_FETCH_TIMEOUT_MS,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      });
       return true;
     } catch {
       return false;
@@ -556,6 +568,16 @@ function createSessionWorktreeLifecycle({
     };
   }
 
+  function applyBaseSyncDemotion(sync) {
+    const nextStatus = decideBaseSyncDemotion(
+      lifecycleState.mergeStatus,
+      lifecycleState.mergeReason,
+      sync.state,
+    );
+    if (nextStatus !== null) setMergeStatus(nextStatus);
+    return sync;
+  }
+
   async function getBranchSync() {
     const branch = effectiveIntegrationBranch();
     if (!branch || !currentProjectPath()) return noUpstream(branch);
@@ -563,7 +585,7 @@ function createSessionWorktreeLifecycle({
     const upstream = await branchUpstream(branch, opts);
     if (!upstream) return noUpstream(branch);
     const fetched = await fetchBranch(parseRemoteFromUpstream(upstream), branch, opts);
-    return { branch, upstream, fetched, ...(await branchCounts(upstream, branch, opts)) };
+    return applyBaseSyncDemotion({ branch, upstream, fetched, ...(await branchCounts(upstream, branch, opts)) });
   }
 
   async function resyncBranchBody() {
@@ -588,7 +610,7 @@ function createSessionWorktreeLifecycle({
         error = firstGitErrorLine(commandError);
       }
     }
-    return { branch, upstream, fetched, ...(await branchCounts(upstream, branch, opts)), action, error };
+    return applyBaseSyncDemotion({ branch, upstream, fetched, ...(await branchCounts(upstream, branch, opts)), action, error });
   }
 
   function resyncBranch() {

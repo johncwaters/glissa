@@ -1227,6 +1227,23 @@ test('getBranchSync reports in-sync right after a push', { skip: !GIT }, async (
   }
 });
 
+test('H1 branch sync clears a base-diverged park after manual base recovery', { skip: !GIT }, async () => {
+  const { dir: repo, remoteDir } = initRepoWithRemote();
+  const s = makeSession({ integrationBranch: 'develop' });
+  s.path = repo;
+  s.worktreeLifecycle.setMergeStatus('parked', { reason: 'base-diverged' }, { emit: false });
+  try {
+    const sync = await s.getBranchSync();
+    assert.equal(sync.state, 'in-sync');
+    assert.equal(s.mergeStatus, 'pending-review');
+    assert.equal(s.mergeReason, null);
+  } finally {
+    s.destroy();
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(remoteDir, { recursive: true, force: true });
+  }
+});
+
 // Push a single extra commit from a fresh clone of `remoteDir`, so the ORIGINAL checkout's cached
 // origin/<branch> ref goes stale (remote-only work it does not yet know about) until a fetch catches
 // it up. -b <branch>: the bare remote's symbolic HEAD is whatever init.defaultBranch left it (often
@@ -1621,6 +1638,20 @@ test('_resolveEffectiveBase ignores an upstream that is the branch\'s own remote
     const sig = await s.worktreeLifecycle.computeWorktreeSignature();
     assert.equal(sig.ahead, '1');
   } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
+});
+
+test('_resolveEffectiveBase displays origin and non-origin upstreams as branch names', { skip: !GIT }, async () => {
+  for (const remoteName of ['origin', 'upstream']) {
+    const repo = initRepoDevelopFeature();
+    git(['remote', 'add', remoteName, repo], repo);
+    git(['update-ref', `refs/remotes/${remoteName}/main`, git(['rev-parse', 'develop'], repo).trim()], repo);
+    git(['branch', `--set-upstream-to=${remoteName}/main`, 'feat'], repo);
+    const s = makeSession({ integrationBranch: 'develop' });
+    try {
+      assert.equal(await s.worktreeLifecycle.resolveEffectiveBase({ cwd: repo }), `${remoteName}/main`);
+      assert.equal(s.toSnapshot().effectiveBase, 'main');
+    } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
+  }
 });
 
 test('_computeWorktreeSignature reports behind and rebaseInProgress', { skip: !GIT }, async () => {
