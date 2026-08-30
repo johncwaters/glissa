@@ -9,8 +9,7 @@ changelog:
   path: CHANGELOG.md
   format: keep_a_changelog          # [Unreleased] on top; scripts/release.js extracts the version section for GitHub release notes
 git:
-  release_from: develop             # reality: releases are cut from develop; main historically drifts behind
-  integration: develop
+  release_from: main                # trunk-based since 2026-08-30 (docs/plan-base-branch.md); no integration branch
   release_commit_pattern: "chore(release): X.Y.Z"
   require: [clean_tree]
 gates:
@@ -21,7 +20,6 @@ gates:
     - git ls-remote --tags origin vX.Y.Z           # GitHub has the tag
     - gh release view vX.Y.Z
     - git ls-remote --tags origin vX.Y.Z^{}        # the startup update check can see the peeled release tag
-    - sync main: git fetch . develop:main && git push origin main   # close the standing main-drift for clone updates
   evidence: [git_tag, github_release_url, remote_release_tag]
 publish:
   trigger: local_script
@@ -35,7 +33,7 @@ rollback:
   steps:
     - "git push origin :refs/tags/vX.Y.Z && git tag -d vX.Y.Z"
     - "gh release delete vX.Y.Z"
-    - "Revert the release commit on develop, or forward-fix with a new patch version"
+    - "Revert the release commit on main, or forward-fix with a new patch version"
   never: [reuse_version, force_push_main]
 approval:
   human_before: [npm_run_release]

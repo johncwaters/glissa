@@ -269,3 +269,27 @@ Steps 1-2 and 3 are independent and can run as separate sessions; 4 waits on bot
    offline or mid-resolution.
 2. B3 `MAINLINE_AHEAD` **refuses**. Pushing local mainline first would silently publish whatever
    happens to be sitting on local `main`, which is exactly what remote-as-truth forbids.
+
+## Implementation notes (2026-08-30, after review)
+
+Both parts landed on feature branches after two independent review rounds each. Deviations from
+the text above, all deliberate:
+
+- **Before-fork sync is upstream's.** Commit 651b17f (another session) shipped a create-time and
+  fresh-restart sync (`server/core/integration-sync-core.js`, `worktreeSyncOnStart`) while this
+  work was in flight; our duplicate was deleted and the auto-detected base is routed through it.
+  That path refuses to fast-forward a base that is checked out in the main checkout (unattended
+  code must not touch the operator's working tree), so a fork from a checked-out `main` starts
+  from the local tip with a warning instead of the A3 "ff-merge when checked out". Merge-back and
+  keep-working still sync through the operator-invoked path, which does ff-merge a checked-out base.
+- `createBody` takes an explicit `forkFromHead: true` (PR review) instead of an omitted `baseBranch`;
+  `baseBranch: null` means auto everywhere.
+- `/commit`: `MAINLINE_AHEAD` and `PROMOTE_CONFLICT` push the feature branch as a fallback (mainline
+  untouched) rather than "nothing touched", so work is never stranded locally. New typed outcomes:
+  `POLICY_INVALID` 27, `BRANCH_FORBIDDEN` 28 (also when the current branch is the resolved mainline
+  even if not in `forbid`), `MAINLINE_UNVERIFIED` 29 (fetch failed or origin has no mainline: never
+  create it). A mainline present only on origin is materialized locally as a tracking branch.
+  `--no-push` suppresses every push. Preflight reads `.claude/release-profile.json` first, `.yml` as
+  the retired fallback.
+- Step 4's `release-profile.yml` edit rides on the feature branch. The machine config
+  (`~/.glissa/config.json` `integrationBranch` -> `null`) is left for the operator.
