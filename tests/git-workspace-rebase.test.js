@@ -374,7 +374,7 @@ test('rerere: a rerere:false engine writes no rerere config when it creates a wo
     const gwOff = createGitWorkspace({ rerere: false });
     const ws = await gwOff.create({ projectPath: repo, teamId: 'session', label: 'off' });
     assert.equal(ws.isGit, true);
-    assert.throws(() => git(['config', '--get', 'rerere.enabled'], repo), 'the key was never written');
+    assert.throws(() => git(['config', '--local', '--get', 'rerere.enabled'], repo), 'the key was never written');
     await gwOff.discard({ projectPath: repo, workspace: ws });
   } finally { fs.rmSync(repo, { recursive: true, force: true }); }
 });

@@ -58,6 +58,19 @@ function fakePty(pid = 2147483646) {
   return { pid, onData() {}, onExit() {}, write() {}, resize() {}, kill() {} };
 }
 
+function exitablePty(pid = 2147483646) {
+  const handlers = {};
+  return {
+    pid,
+    onData() {},
+    onExit(cb) { handlers.exit = cb; },
+    write() {},
+    resize() {},
+    kill() {},
+    fireExit(exitCode = 0) { if (handlers.exit) handlers.exit({ exitCode, signal: 0 }); },
+  };
+}
+
 // A PTY that records what gets written to it, so the parked-merge handoff (pasteMergePrompt) can be asserted.
 function capturingPty(writes, pid = 2147483646) {
   return { pid, onData() {}, onExit() {}, write(d) { writes.push(d); }, resize() {}, kill() {} };
@@ -69,7 +82,17 @@ function realWorktreeDir() {
 }
 
 function fakeGitWorkspace(opts = {}) {
-  const calls = { create: [], mergeBack: [], mergeKeep: [], discard: [], populate: [], hasUnmergedWork: [] };
+  const calls = {
+    create: [],
+    syncIntegrationBranch: [],
+    rebaseOnly: [],
+    mergeBack: [],
+    mergeKeep: [],
+    discard: [],
+    populate: [],
+    hasUnmergedWork: [],
+    sequence: [],
+  };
   // Models the git-workspace seam Session.hasUnmergedWork delegates to: work is a DIRTY tree or commits
   // the integration branch does not have (the committed-but-clean case, which the old porcelain-only
   // probe read as "no work" and discarded). Mutable, so a test flips it after start() the way a live
@@ -89,10 +112,22 @@ function fakeGitWorkspace(opts = {}) {
     },
     // Sync no-op on purpose: the adopt path must tolerate a populate that does not return a promise.
     populate(args) { calls.populate.push(args); },
+    async syncIntegrationBranch(args) {
+      calls.syncIntegrationBranch.push(args);
+      calls.sequence.push('sync');
+      if (opts.syncError) throw opts.syncError;
+      return opts.syncResult || { outcome: 'up-to-date', from: 'basesha', to: 'basesha' };
+    },
     create(args) {
       calls.create.push(args);
+      calls.sequence.push('create');
       if (opts.createResult) return opts.createResult;
       return { cwd: opts.worktreeDir, isGit: true, branch: `glissa/session/${args.label}`, base: args.baseBranch, baseSha: 'basesha' };
+    },
+    rebaseOnly(args) {
+      calls.rebaseOnly.push(args);
+      calls.sequence.push('rebaseOnly');
+      return opts.rebaseResult || { ok: true, upToDate: true };
     },
     mergeBack(args) { calls.mergeBack.push(args); return opts.mergeResult || { merged: true, branch: null }; },
     mergeKeep(args) {
@@ -104,6 +139,21 @@ function fakeGitWorkspace(opts = {}) {
   };
 }
 
+function stubSignature(session, extra = {}) {
+  session.worktreeLifecycle.computeWorktreeSignature = async () => ({
+    sig: 'sig-1',
+    dirty: false,
+    ahead: '1',
+    behind: '2',
+    rebaseInProgress: false,
+    headSha: 'headsha',
+    targetSha: 'targetsha',
+    ...extra,
+  });
+}
+
+const rebaseDecisions = (session) => session.getDebugState().decisions.filter((d) => d.kind === 'rebase');
+
 function makeSession(extra = {}) {
   return new Session({
     id: 'wt-sess',
@@ -113,6 +163,8 @@ function makeSession(extra = {}) {
     ptySpawn: extra.ptySpawn,
     gitWorkspace: extra.gitWorkspace,
     integrationBranch: extra.integrationBranch,
+    syncOnStart: extra.syncOnStart,
+    autoRebase: extra.autoRebase,
     platform: extra.platform,
     signalProc: extra.signalProc,
   });
@@ -181,6 +233,7 @@ test('start() provisions a worktree off the integration branch and spawns the PT
   });
   try {
     await s.start();
+    assert.deepEqual(gw.calls.sequence.slice(0, 2), ['sync', 'create']);
     assert.equal(gw.calls.create.length, 1, 'worktree created once');
     assert.equal(gw.calls.create[0].teamId, 'session');
     assert.equal(gw.calls.create[0].label, 'wt-sess');
@@ -366,6 +419,419 @@ test('restart REUSES the existing worktree (never silently recreates over in-pro
     await s.start(); // restart funnels through start()
     assert.equal(gw.calls.create.length, 1, 'worktree created once across two starts');
     assert.equal(s.worktreeDir, wt);
+  } finally {
+    s.destroy();
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test('fresh restart syncs the integration branch and rebases the reused worktree', async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt, rebaseResult: { ok: true, rebased: true, headSha: 'newhead', baseSha: 'newbase' } });
+  const spawned = [];
+  const s = makeSession({
+    gitWorkspace: gw,
+    integrationBranch: 'develop',
+    ptySpawn: () => { spawned.push('spawn'); return fakePty(); },
+  });
+  try {
+    await s.start();
+    stubSignature(s);
+    gw.calls.sequence.length = 0;
+    s.ptyProcess = null;
+    s._ptyAlive = false;
+    s.state = STATES.DONE;
+
+    assert.equal(s.restart({ fresh: true }), true);
+    await s._startPending;
+
+    assert.deepEqual(gw.calls.sequence, ['sync', 'rebaseOnly']);
+    assert.equal(gw.calls.create.length, 1);
+    assert.equal(spawned.length, 2);
+    const traced = rebaseDecisions(s);
+    assert.equal(traced[0].decision, 'auto-rebased');
+    assert.equal(traced[0].trigger, 'fresh-restart', 'the trace tells the two rebase entry points apart');
+    assert.equal(s.baseSha, 'newbase', 'and the session tracks the tip the worktree now sits on');
+  } finally {
+    s.destroy();
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test('plain restart reuses the worktree without syncing or rebasing', async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt });
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  try {
+    await s.start();
+    gw.calls.sequence.length = 0;
+    s.ptyProcess = null;
+    s._ptyAlive = false;
+    s.state = STATES.DONE;
+
+    assert.equal(s.restart(), true);
+    await s._startPending;
+
+    assert.deepEqual(gw.calls.sequence, []);
+    assert.equal(gw.calls.create.length, 1);
+  } finally {
+    s.destroy();
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+// worktreeSyncOnStart gates BOTH halves. Gating only the fetch would leave the operator who turned the
+// feature off still getting the unattended rebase, which is the half they can actually feel.
+test('fresh restart with sync-on-start off neither syncs nor rebases', async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt });
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', syncOnStart: false, ptySpawn: () => fakePty() });
+  try {
+    await s.start();
+    stubSignature(s);
+    gw.calls.sequence.length = 0;
+    s.ptyProcess = null;
+    s._ptyAlive = false;
+    s.state = STATES.DONE;
+
+    assert.equal(s.restart({ fresh: true }), true);
+    await s._startPending;
+
+    assert.deepEqual(gw.calls.sequence, [], 'the switch is off, so the spawn gap does nothing at all');
+    assert.equal(gw.calls.rebaseOnly.length, 0);
+    assert.deepEqual(rebaseDecisions(s), [], 'and nothing is traced: it was never asked');
+  } finally {
+    s.destroy();
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+// One timer field serves one wait, so arming a second wait on a pid already being polled settles the
+// first EARLY. The shutdown coordinator and the ephemeral lanes await _killReap to learn the tree is
+// gone, and would have proceeded under surviving descendants.
+test('start() on a still-assigned PTY reuses the in-flight kill reap instead of settling it early', async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt, aheadCount: 1 });
+  let treeAlive = true;
+  const s = makeSession({
+    gitWorkspace: gw,
+    integrationBranch: 'develop',
+    ptySpawn: () => fakePty(),
+    platform: 'linux',
+    signalProc: (_target, signal) => {
+      if (signal === 0 && !treeAlive) throw Object.assign(new Error('ESRCH'), { code: 'ESRCH' });
+    },
+  });
+  try {
+    await s.start();
+    s.kill(); // leaves ptyProcess ASSIGNED: only _handlePtyExit clears it
+    const reap = s._killReap;
+    let settled = false;
+    void reap.then(() => { settled = true; });
+    await drain();
+    assert.equal(settled, false, 'the kill reap is still polling a live tree');
+
+    const restarted = s.start();
+    await drain();
+    assert.equal(s._killReap, reap, 'the start reused the in-flight reap rather than arming a second');
+    assert.equal(settled, false, 'so the promise the shutdown coordinator awaits did not resolve early');
+
+    treeAlive = false;
+    await restarted;
+    assert.equal(settled, true, 'and it still settles once the tree is actually gone');
+  } finally {
+    s.destroy();
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test('fresh restart with auto-rebase off syncs but never rewrites the worktree', async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt });
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', autoRebase: false, ptySpawn: () => fakePty() });
+  try {
+    await s.start();
+    stubSignature(s);
+    gw.calls.sequence.length = 0;
+    s.ptyProcess = null;
+    s._ptyAlive = false;
+    s.state = STATES.DONE;
+
+    assert.equal(s.restart({ fresh: true }), true);
+    await s._startPending;
+
+    assert.deepEqual(gw.calls.sequence, ['sync'], 'the branch is synced, the worktree is left alone');
+    assert.equal(gw.calls.rebaseOnly.length, 0);
+    assert.deepEqual(rebaseDecisions(s), [{
+      kind: 'rebase',
+      ts: rebaseDecisions(s)[0].ts,
+      decision: 'skipped',
+      trigger: 'fresh-restart',
+      reason: 'disabled',
+    }], 'and the refusal is traced, so the fresh path is never silently absent');
+  } finally {
+    s.destroy();
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test('fresh restart honours the auto-rebase gate: a parked merge is never replayed', async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt });
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  try {
+    await s.start();
+    stubSignature(s);
+    s.worktreeLifecycle.setMergeStatus('parked', { reason: 'conflict' }, { emit: false });
+    gw.calls.sequence.length = 0;
+    s.ptyProcess = null;
+    s._ptyAlive = false;
+    s.state = STATES.DONE;
+
+    assert.equal(s.restart({ fresh: true }), true);
+    await s._startPending;
+
+    assert.deepEqual(gw.calls.sequence, ['sync']);
+    assert.equal(rebaseDecisions(s)[0].reason, 'parked');
+  } finally {
+    s.destroy();
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test('fresh restart is skipped while a funnel rebase is already in flight', async () => {
+  const wt = realWorktreeDir();
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const gw = fakeGitWorkspace({ worktreeDir: wt });
+  const engineRebase = gw.rebaseOnly;
+  gw.rebaseOnly = async (args) => { const r = engineRebase(args); await held; return r; };
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  try {
+    await s.start();
+    stubSignature(s);
+    s.state = STATES.IDLE;
+    gw.calls.sequence.length = 0;
+    const funnel = s.checkWorktreeChange();
+    await drain();
+    assert.deepEqual(gw.calls.sequence, ['rebaseOnly'], 'the funnel holds the mutex');
+
+    s.ptyProcess = null;
+    s._ptyAlive = false;
+    s.state = STATES.DONE;
+    assert.equal(s.restart({ fresh: true }), true);
+    await s._startPending;
+
+    assert.deepEqual(gw.calls.sequence, ['rebaseOnly', 'sync'], 'the fresh path did not re-enter the engine');
+    release();
+    await funnel;
+  } finally {
+    release();
+    s.destroy();
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test('a fresh restart waits for the pending kill reap before it touches the worktree', async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt });
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  try {
+    await s.start();
+    stubSignature(s);
+    gw.calls.sequence.length = 0;
+    s.ptyProcess = null;
+    s._ptyAlive = false;
+    s.state = STATES.DONE;
+    let releaseReap;
+    s._killReap = new Promise((resolve) => { releaseReap = resolve; });
+
+    assert.equal(s.restart({ fresh: true }), true);
+    await drain();
+    await drain();
+    assert.deepEqual(gw.calls.sequence, [], 'nothing is synced or rebased under a tree still being reaped');
+
+    releaseReap();
+    await s._startPending;
+    assert.deepEqual(gw.calls.sequence, ['sync', 'rebaseOnly']);
+  } finally {
+    s.destroy();
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test('an abandoned fresh restart strands no flag: the next plain restart syncs nothing', async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt });
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  try {
+    await s.start();
+    stubSignature(s);
+    gw.calls.sequence.length = 0;
+    s.state = STATES.RUNNING;
+
+    assert.equal(s.forceRestart({ fresh: true }), true);
+    s.state = STATES.DORMANT;
+    s.emit('exit', { code: 0 });
+    await drain();
+    assert.equal(s._startPending, null, 'the abandoned restart never started');
+    assert.deepEqual(gw.calls.sequence, []);
+
+    s.ptyProcess = null;
+    s._ptyAlive = false;
+    s.state = STATES.DONE;
+    assert.equal(s.restart(), true);
+    await s._startPending;
+
+    assert.deepEqual(gw.calls.sequence, [], 'the plain restart that follows is a plain restart');
+  } finally {
+    s.destroy();
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test('integration sync failure does not block initial worktree spawn', async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt, syncError: new Error('offline') });
+  const spawned = [];
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (message) => warnings.push(String(message));
+  const s = makeSession({
+    gitWorkspace: gw,
+    integrationBranch: 'develop',
+    ptySpawn: () => { spawned.push('spawn'); return fakePty(); },
+  });
+  try {
+    await s.start();
+    assert.deepEqual(gw.calls.sequence, ['sync', 'create']);
+    assert.equal(spawned.length, 1);
+    assert.match(warnings.join('\n'), /integration sync failed during initial-create: offline/);
+  } finally {
+    console.warn = originalWarn;
+    s.destroy();
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test('a session destroyed during the initial-create sync never creates a worktree', async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt });
+  const spawned = [];
+  let session = null;
+  const engineSync = gw.syncIntegrationBranch;
+  gw.syncIntegrationBranch = async (args) => {
+    const result = await engineSync(args);
+    session.destroy();
+    return result;
+  };
+  const s = makeSession({
+    gitWorkspace: gw,
+    integrationBranch: 'develop',
+    ptySpawn: () => { spawned.push('spawn'); return fakePty(); },
+  });
+  session = s;
+  try {
+    await s.start();
+
+    assert.deepEqual(gw.calls.sequence, ['sync'], 'the sync ran, the create did not');
+    assert.equal(gw.calls.create.length, 0, 'no orphan worktree or branch left behind');
+    assert.equal(spawned.length, 0, 'and nothing spawned');
+    assert.equal(s.worktreeNotice, null, 'a removed session gets no blocked notice: there is no card for it');
+  } finally {
+    s.destroy();
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test('a fresh restart destroyed during the integration sync never rebases', async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt });
+  let session = null;
+  let armed = false;
+  const engineSync = gw.syncIntegrationBranch;
+  gw.syncIntegrationBranch = async (args) => {
+    const result = await engineSync(args);
+    if (armed) session.destroy();
+    return result;
+  };
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  session = s;
+  try {
+    await s.start();
+    stubSignature(s);
+    armed = true;
+    gw.calls.sequence.length = 0;
+    s.ptyProcess = null;
+    s._ptyAlive = false;
+    s.state = STATES.DONE;
+
+    assert.equal(s.restart({ fresh: true }), true);
+    await s._startPending;
+
+    assert.deepEqual(gw.calls.sequence, ['sync'], 'the destroyed continuation stops before the rewrite');
+    assert.equal(gw.calls.rebaseOnly.length, 0);
+  } finally {
+    s.destroy();
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test('a fresh restart waits for the natural-exit reap before it touches the worktree', async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt, aheadCount: 1 });
+  const pty = exitablePty();
+  let treeAlive = true;
+  const s = makeSession({
+    gitWorkspace: gw,
+    integrationBranch: 'develop',
+    ptySpawn: () => pty,
+    platform: 'linux',
+    signalProc: (_target, signal) => {
+      if (signal === 0 && !treeAlive) throw Object.assign(new Error('ESRCH'), { code: 'ESRCH' });
+    },
+  });
+  try {
+    await s.start();
+    stubSignature(s);
+    gw.calls.sequence.length = 0;
+
+    pty.fireExit(0);
+    await drain();
+    assert.ok(s._exitReap, 'the natural exit parked a reap for the next start to wait on');
+    assert.ok([STATES.DONE, STATES.FAILED].includes(s.state), 'the natural exit settled the session');
+
+    assert.equal(s.restart({ fresh: true }), true);
+    await drain();
+    await drain();
+    assert.deepEqual(gw.calls.sequence, [], 'descendants are still alive, so nothing rewrites the tree');
+
+    treeAlive = false;
+    await s._startPending;
+    assert.deepEqual(gw.calls.sequence, ['sync', 'rebaseOnly']);
+  } finally {
+    s.destroy();
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test('a reap that never settles does not strand the start forever', async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({ worktreeDir: wt });
+  const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
+  try {
+    await s.start();
+    stubSignature(s);
+    gw.calls.sequence.length = 0;
+    s.ptyProcess = null;
+    s._ptyAlive = false;
+    s.state = STATES.DONE;
+    s._killReap = new Promise(() => {});
+
+    assert.equal(s.restart({ fresh: true }), true);
+    await s._startPending;
+
+    assert.deepEqual(gw.calls.sequence, ['sync', 'rebaseOnly'], 'the start proceeded on the budget');
   } finally {
     s.destroy();
     fs.rmSync(wt, { recursive: true, force: true });

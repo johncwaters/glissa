@@ -21,6 +21,13 @@ const AUTO_REBASE_STATES = Object.freeze([
   STATES.DORMANT,
 ]);
 
+// The one caller that cannot prove quiescence from the session state. A FRESH restart runs in the spawn
+// gap, after the old PTY is reaped and before the new one exists, where the state already reads whatever
+// the restart transition set it to (STARTING) and so says nothing about what is running in the tree. It
+// proves the same fact with the PTY itself, which is why the state guard above stays load-bearing for
+// every other caller: this trigger substitutes a stronger proof, it does not waive the requirement.
+const SPAWN_GAP_TRIGGER = "fresh-restart";
+
 // The signature carries counts as trimmed git output (strings), while a caller with real numbers is just
 // as valid; both spellings of "no commits" must read as zero.
 function isZeroCount(count) {
@@ -36,13 +43,16 @@ function skip(reason) {
 // `currentKey` / `lastConflictKey` are opaque strings the caller builds from whatever it wants the
 // cooldown keyed on; an equal, non-empty pair means the last attempt already hit this exact conflict.
 /**
- * @param {{ enabled?: boolean, state?: string, mergeStatus?: string, dirty?: boolean,
+ * @param {{ enabled?: boolean, trigger?: string, state?: string, hasLivePty?: boolean,
+ *   mergeStatus?: string, dirty?: boolean,
  *   behind?: string | number | null, rebaseInProgress?: boolean, teardownPending?: boolean,
  *   currentKey?: string | null, lastConflictKey?: string | null }} [options]
  */
 function decideAutoRebase({
   enabled,
+  trigger,
   state,
+  hasLivePty,
   mergeStatus,
   dirty,
   behind,
@@ -51,11 +61,13 @@ function decideAutoRebase({
   currentKey,
   lastConflictKey,
 } = {}) {
+  const spawnGap = trigger === SPAWN_GAP_TRIGGER;
   if (!enabled) return skip("disabled");
   if (teardownPending) return skip("teardown");
   if (mergeStatus === "merging") return skip("merging");
   if (mergeStatus === "parked") return skip("parked");
-  if (typeof state !== "string" || !AUTO_REBASE_STATES.includes(state)) return skip("busy");
+  if (spawnGap && hasLivePty) return skip("live-pty");
+  if (!spawnGap && (typeof state !== "string" || !AUTO_REBASE_STATES.includes(state))) return skip("busy");
   if (rebaseInProgress) return skip("rebase-in-progress");
   if (dirty) return skip("dirty");
   if (isZeroCount(behind)) return skip("current");
@@ -84,4 +96,4 @@ function decideRerereCooldownClear({ enabled, hasCooldown, teardownPending } = {
   return { clear: true, reason: "rerere-recorded" };
 }
 
-module.exports = { decideAutoRebase, decideRerereCooldownClear, AUTO_REBASE_STATES };
+module.exports = { decideAutoRebase, decideRerereCooldownClear, AUTO_REBASE_STATES, SPAWN_GAP_TRIGGER };

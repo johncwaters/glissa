@@ -177,6 +177,7 @@ const ConfigUpdate = z.object({
   phoneEscalationMs: z.number({ error: 'phoneEscalationMs must be a positive number' }).finite().positive({ error: 'phoneEscalationMs must be a positive number' }).optional(),
   replayBufferKB: optionalNumber('replayBufferKB', ranges.REPLAY_BUFFER_KB_RANGE),
   worktreeAutoRebase: optionalBoolean('worktreeAutoRebase'),
+  worktreeSyncOnStart: optionalBoolean('worktreeSyncOnStart'),
   worktreeRerere: optionalBoolean('worktreeRerere'),
 }).omit({ port: true, worktreeShare: true }).strict();
 const ProjectConfig = z.object({
@@ -202,6 +203,7 @@ const Config = z.object({
   ...FILE_CONFIG_SHAPE,
   detectScheduledWakeups: optionalBoolean('detectScheduledWakeups'),
   worktreeAutoRebase: optionalBoolean('worktreeAutoRebase'),
+  worktreeSyncOnStart: optionalBoolean('worktreeSyncOnStart'),
   worktreeRerere: optionalBoolean('worktreeRerere'),
   postTurnChecks: z.record(z.string(), z.unknown()).optional(),
   remote: z.object({
@@ -221,10 +223,16 @@ const CONFIG_SCALAR_KEYS = Object.freeze(Object.keys(BROWSER_CONFIG_SHAPE).filte
   if (CONFIG_BLOCK_KEYS.includes(key)) return false;
   return key !== 'port' && key !== 'repoRoots' && key !== 'worktreeShare';
 }));
-const RUNTIME_CONFIG_SCALAR_KEYS = Object.freeze([...CONFIG_SCALAR_KEYS, 'worktreeAutoRebase', 'worktreeRerere']);
+const RUNTIME_CONFIG_SCALAR_KEYS = Object.freeze([
+  ...CONFIG_SCALAR_KEYS,
+  'worktreeAutoRebase',
+  'worktreeSyncOnStart',
+  'worktreeRerere',
+]);
 const HIDDEN_CONFIG_KEYS = Object.freeze([
   'detectScheduledWakeups',
   'worktreeAutoRebase',
+  'worktreeSyncOnStart',
   'worktreeRerere',
   'postTurnChecks',
   'remote',
