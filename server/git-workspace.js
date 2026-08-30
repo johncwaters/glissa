@@ -6,8 +6,13 @@ const path = require('node:path');
 const { execFileAsync, execFileSync } = require('../server/child-process-safe');
 const { createSerialQueue } = require('./spawn-gate');
 const { sessionIdFromBranch } = require('./core/branch-gc-core');
+const { firstGitErrorLine } = require('./core/branch-sync-core');
+const { decideIntegrationSync, classifyRefusedIntegrationSync } = require('./core/integration-sync-core');
 
 const fsp = fs.promises;
+
+/** @typedef {import('./core/integration-sync-core').IntegrationSyncOutcome} IntegrationSyncOutcome */
+/** @typedef {{ outcome: IntegrationSyncOutcome, from: string | null, to: string | null, error?: string }} IntegrationSyncResult */
 
 // Shared {ok,out}/{ok:false,out,err} result shaping for the sync and async `run()` git helpers below.
 function okResult(out) {
@@ -94,10 +99,12 @@ function createGitWorkspace(opts = {}) {
   // may inject a sync fake (returns a string or throws); `await` resolves the string and a sync throw
   // rejects the awaited expression into the same catch, so sync fakes stay valid unchanged.
   // `extra.env` overlays the inherited environment for the one call that needs it (GIT_EDITOR on a
-  // rebase --continue). An injected fake simply ignores the third argument.
+  // rebase --continue), and `extra.timeout` tightens the generic budget for a call that must not hold
+  // the engine queue that long (the network fetch on the spawn path). An injected fake simply ignores
+  // the third argument.
   const git = opts.git || (async (args, cwd, extra) => {
     const { stdout } = await execFileAsync('git', args, {
-      cwd, encoding: 'utf8', timeout: 20000,
+      cwd, encoding: 'utf8', timeout: extra?.timeout || 20000,
       ...(extra?.env ? { env: { ...process.env, ...extra.env } } : {}),
     });
     return stdout;
@@ -288,14 +295,22 @@ function createGitWorkspace(opts = {}) {
     if (branch) await run(['branch', '-D', branch], projectPath);
   }
 
-  // Advance `target` to `branch`'s tip: an ff-only merge when `target` is the checked-out HEAD in
-  // projectPath (advances the working tree too), else a direct ref update via `fetch` (no checkout of
-  // the target required).
-  async function fastForwardTarget(projectPath, branch, target, targetIsHead) {
+  // THE fast-forward mechanism: advance `target` to `sourceRef`'s tip. An ff-only merge when `target` is
+  // the checked-out HEAD in projectPath (which advances the working tree with it), else a LOCAL fetch
+  // (`.` is this repo: no network, and no checkout of the target required). That fetch is enforcement,
+  // not just plumbing: with no leading `+` git refuses a non-fast-forward, and it refuses any branch
+  // checked out in ANY worktree, so a caller cannot move a ref out from under a live index. `sourceRef`
+  // is a FULL ref, since the sources are not all under refs/heads (the integration sync feeds it a
+  // remote-tracking ref). Returns { ok, err } so the caller can report why git refused.
+  async function fastForwardTarget(projectPath, sourceRef, target, targetIsHead) {
     if (!targetIsHead) {
-      return (await run(['fetch', '.', `refs/heads/${branch}:refs/heads/${target}`], projectPath)).ok;
+      const fetched = await run(['fetch', '.', `${sourceRef}:refs/heads/${target}`], projectPath);
+      return { ok: fetched.ok, err: fetched.ok ? '' : fetched.err };
     }
-    return (await run(['merge', '--ff-only', branch], projectPath)).ok;
+    // The merge takes the SHORT name: `merge --ff-only` resolves either spelling to the same commit, and
+    // the short form is the command every existing caller and its pins already issue.
+    const merged = await run(['merge', '--ff-only', String(sourceRef).replace(/^refs\/heads\//, '')], projectPath);
+    return { ok: merged.ok, err: merged.ok ? '' : merged.err };
   }
 
   // The files git left unmerged in `wt` right now.
@@ -406,8 +421,8 @@ function createGitWorkspace(opts = {}) {
 
     // Fast-forward the integration branch to the rebased session branch.
     const head = (await run(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath)).out;
-    const merged = await fastForwardTarget(projectPath, branch, target, head === target);
-    if (!merged) {
+    const merged = await fastForwardTarget(projectPath, `refs/heads/${branch}`, target, head === target);
+    if (!merged.ok) {
       if (stashed) await run(['stash', 'pop'], wt);
       return { committed: true, merged: false, reason: 'not-fast-forward', parked: true, rerereReplayed };
     }
@@ -624,6 +639,67 @@ function createGitWorkspace(opts = {}) {
     return run(['fetch', '--prune', 'origin'], projectPath);
   }
 
+  /** @returns {Promise<IntegrationSyncResult>} */
+  async function classifyRefusedSync({ projectPath, branch, localRef, localSha, remoteSha, err }) {
+    const current = await run(['rev-parse', '--verify', '--quiet', localRef], projectPath);
+    const currentSha = current.ok && current.out ? current.out : localSha;
+    /** @type {boolean | null} */
+    let ancestry = null;
+    if (currentSha && remoteSha && currentSha !== remoteSha) {
+      const probe = await isAncestor({ projectPath, ancestorSha: currentSha, descendantSha: remoteSha });
+      ancestry = probe.ok ? probe.isAncestor : null;
+    }
+    const listed = await run(['worktree', 'list', '--porcelain'], projectPath);
+    const checkedOut = !listed.ok || Boolean(findWorktreeForBranch(listed.out, branch));
+    const { outcome } = classifyRefusedIntegrationSync({ currentSha, remoteSha, isAncestor: ancestry, checkedOut });
+    if (outcome !== 'update-failed') return { outcome, from: currentSha, to: remoteSha };
+    return { outcome, from: currentSha, to: remoteSha, error: firstGitErrorLine(err) };
+  }
+
+  /** @returns {Promise<IntegrationSyncResult>} */
+  async function syncIntegrationBranchBody({ projectPath, branch }) {
+    const localRef = `refs/heads/${branch}`;
+    const remoteRef = `refs/remotes/origin/${branch}`;
+    // The ONE network call on the spawn path, and it rides the queue every session's merges share, so it
+    // gets its own short budget and a non-interactive environment: a credential prompt on the generic
+    // 20s would wedge that queue for every other session. The refspec is explicit (a branch named `-u`
+    // would parse as an option as a bare positional) and force-updates only the REMOTE-TRACKING ref,
+    // which is what git's own configured refspec does; the local branch is never touched here.
+    const fetched = await run(
+      ['fetch', 'origin', `+${localRef}:${remoteRef}`],
+      projectPath,
+      { timeout: 8000, env: { GIT_TERMINAL_PROMPT: '0' } },
+    );
+    if (!fetched.ok) return { outcome: 'fetch-failed', from: null, to: null };
+
+    const local = await run(['rev-parse', '--verify', '--quiet', localRef], projectPath);
+    const remote = await run(['rev-parse', '--verify', '--quiet', remoteRef], projectPath);
+    const localSha = local.ok ? local.out : null;
+    const remoteSha = remote.ok ? remote.out : null;
+    /** @type {boolean | null} */
+    let ancestryVerdict = null;
+    let ancestryError = '';
+    let checkedOut = false;
+    if (localSha && remoteSha && localSha !== remoteSha) {
+      const ancestry = await isAncestor({ projectPath, ancestorSha: localSha, descendantSha: remoteSha });
+      ancestryVerdict = ancestry.ok ? ancestry.isAncestor : null;
+      if (!ancestry.ok) ancestryError = 'err' in ancestry ? ancestry.err : '';
+      if (ancestryVerdict === true) {
+        const listed = await run(['worktree', 'list', '--porcelain'], projectPath);
+        checkedOut = !listed.ok || Boolean(findWorktreeForBranch(listed.out, branch));
+      }
+    }
+
+    const decision = decideIntegrationSync({ localSha, remoteSha, isAncestor: ancestryVerdict, checkedOut });
+    if (decision.outcome === 'update-failed') {
+      return { outcome: decision.outcome, from: localSha, to: remoteSha, error: firstGitErrorLine(ancestryError) };
+    }
+    if (decision.action !== 'update') return { outcome: decision.outcome, from: localSha, to: remoteSha };
+    const updated = await fastForwardTarget(projectPath, remoteRef, branch, false);
+    if (updated.ok) return { outcome: 'updated', from: localSha, to: remoteSha };
+    return classifyRefusedSync({ projectPath, branch, localRef, localSha, remoteSha, err: updated.err });
+  }
+
   async function listRemoteSessionBranches({ projectPath }) {
     const listed = await run([
       'for-each-ref',
@@ -697,6 +773,7 @@ function createGitWorkspace(opts = {}) {
     populate: serialized(populateShare),
     removeWorktreeByPath: serialized(removeWorktreeByPathBody),
     fetchOrigin: serialized(fetchOriginBody),
+    syncIntegrationBranch: serialized(syncIntegrationBranchBody),
     deleteRemoteBranch: serialized(deleteRemoteBranchBody),
     listSessionWorktrees, listWorktreeBranches, hasUnmergedWork,
     listRemoteSessionBranches, listIntegrationTips, isAncestor, resolveProjectPath,

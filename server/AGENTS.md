@@ -47,6 +47,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 ### Worktree Auto-Rebase
 
+- Initial creation and fresh restart sync the integration branch fast-forward-only and never block spawn (`tests/git-workspace-integration-sync.test.js`, `tests/sessions-worktree.test.js`).
 - It rides the existing change funnel (no timer) and runs BEFORE the signature dedup, since a moved integration branch leaves the signature byte-identical. Every guard is pure in `session/core/rebase-gate.js`, and the guard ORDER is stated only by `tests/rebase-gate.test.js`.
 - WAITING is the load-bearing exclusion: it is a permission prompt PAUSING a turn, and the agent resumes into the files an unattended rebase would have rewritten under it.
 - `rebaseOnly` never stashes and merges nothing back: it runs unattended under a live agent, so a dirty tree is a hard refusal.

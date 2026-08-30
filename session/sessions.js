@@ -97,6 +97,7 @@ const DISMISSIBLE_STATES = new Set([STATES.WAITING, STATES.COMPLETE]);
  * @property {Parameters<typeof createSessionWorktreeLifecycle>[0]['gitWorkspace']} [gitWorkspace]
  * @property {string | null} [integrationBranch]
  * @property {boolean} [autoRebase]
+ * @property {boolean} [syncOnStart]
  * @property {boolean} [liveWorktreeReview]
  * @property {string | null} [worktreeRoot]
  * @property {string[] | null} [worktreeShare]
@@ -227,6 +228,7 @@ class Session extends EventEmitter {
     // (config worktreeAutoRebase). Read at construction like every other spawn-time option, so a
     // settings change applies to the next construction of this session, not to the live one.
     autoRebase = true,
+    syncOnStart = true,
     // Master kill switch for the live cross-session review liveness: with it false the integration-ref
     // watcher is never started, so a branch move reaches this session only via the turn-end recheck.
     liveWorktreeReview = true,
@@ -254,6 +256,10 @@ class Session extends EventEmitter {
     // requestRestart/requestShutdown) awaits these before exit/respawn so the PTY tree (cmd/claude/conhost
     // there, the setsid'd process group here) is reaped instead of orphaned. Never gates a transition.
     this._killReap = null;
+    // The reap of a NATURALLY exited PTY tree (see _handlePtyExit). A sibling of _killReap rather than
+    // the same field: three subsystems await _killReap for "the kill I asked for is done", and a natural
+    // exit is not that. Both are awaited together before a (re)start touches the worktree.
+    this._exitReap = null;
     this._sleeping = false;
     this._sleepKillTimer = null;
     this._autoKilled = false;
@@ -382,6 +388,7 @@ class Session extends EventEmitter {
       integrationBranch,
       gitWorkspace,
       autoRebase,
+      syncOnStart,
       liveWorktreeReview,
       worktreeRoot,
       worktreeShare,
@@ -772,7 +779,7 @@ class Session extends EventEmitter {
 
   effectiveCwd() { return this.worktreeLifecycle.effectiveCwd(); }
 
-  _provisionWorktree() { return this.worktreeLifecycle.provision(); }
+  _provisionWorktree({ fresh = false } = {}) { return this.worktreeLifecycle.provision({ fresh }); }
 
   _settleWorktreeOnExit() { return this.worktreeLifecycle.settleOnExit(); }
 
@@ -965,13 +972,17 @@ class Session extends EventEmitter {
   // the ptyProcess/DORMANT guards during the async provision gap: the first creates the session worktree,
   // the second then sees its OWN fresh branch as branch-in-use, clobbers worktreeDir back to null, and
   // spawns a SECOND Claude in place - leaking the first PTY inside the worktree it holds checked out.
-  start() {
+  // `fresh` travels as an ARGUMENT rather than a field set by _prepareRestart: a field survives every
+  // path that arms a fresh restart and then abandons it (forceRestart's exit handler returning on a
+  // destroyed or non-restartable session, restart({fresh:true}) collapsing onto an in-flight start),
+  // and a stranded one turns the operator's next plain Restart into a silent sync-and-rebase.
+  start(options = {}) {
     if (this._startPending) return this._startPending;
-    this._startPending = this._startBody().finally(() => { this._startPending = null; });
+    this._startPending = this._startBody(options).finally(() => { this._startPending = null; });
     return this._startPending;
   }
 
-  async _startBody() {
+  async _startBody({ fresh = false } = {}) {
     if (this._destroyed) return;
     // Defensive cleanup: if a prior PTY is still alive (e.g. _handlePtyExit
     // hasn't propagated yet after a sleep-kill race), force-kill it before
@@ -980,22 +991,24 @@ class Session extends EventEmitter {
     if (this.ptyProcess) {
       console.warn(`[session:${this.name}] start() called while PTY exists - killing previous PTY first`);
       const oldPid = this.ptyProcess.pid;
-      if (this._platform === "win32") {
-        // Await the reap (bounded by a 2s timeout) so the new PTY is not spawned until the old one is
-        // gone, preserving the "kill previous first" intent now that start() is async.
-        await this._taskkill(oldPid, { timeout: 2000 }).catch(() => { /* already dead/unkillable/timed out - proceed */ });
-      }
-      if (this._platform !== "win32") {
-        // Same intent, same bound: a single-pid SIGHUP here returned instantly and left the old tree
-        // running alongside the fresh spawn.
-        await this._reapProcessGroup(oldPid, { maxWaitMs: 2000 });
-      }
+      // Kill NOW, wait ONCE below. The reap is parked on the same field every other reap uses instead of
+      // being awaited inline, so the single bounded join covers this tree too: two independent awaits
+      // doubled the worst case a start could spend waiting before it even reached the provision.
+      this._killReap = this._reapTreeOnce(oldPid);
       this.ptyProcess = null;
     }
+    // THE wait for a previous PTY tree, and the only one. It covers the block above plus both respawn
+    // paths that cleared ptyProcess earlier: a forceRestart riding the exit event while kill()'s reap is
+    // still walking the dead tree, and a plain restart from DONE following a NATURAL exit whose reap is
+    // parked on _exitReap. A fresh provision REWRITES this worktree (integration sync, then a rebase),
+    // so it waits them out or the rewrite lands under descendants still holding files open in there.
+    const pendingReaps = this._awaitPendingReaps();
+    if (pendingReaps) await pendingReaps;
+    if (this._destroyed) return;
     // Provision (or reuse) this session's isolated worktree before spawn. All spawn entry points
     // funnel through start(), so each inherits isolation. A blocked provision (integration branch
     // absent) leaves the session DORMANT with a notice and does NOT run in the operator's real tree.
-    if (!(await this._provisionWorktree())) return;
+    if (!(await this._provisionWorktree({ fresh }))) return;
     // Re-check destruction AFTER the provision await: a destroy() that landed during the microtask gap
     // must not let the spawn below proceed (the teardown mutex blocks lifecycle re-entry, but a direct
     // destroy() races this await window). Guards against a double-spawn / spawn-after-destroy.
@@ -1260,15 +1273,15 @@ class Session extends EventEmitter {
     this._ptyAlive = false;
     this.ptyProcess = null;
 
-    // Reap orphan grandchildren. Fire-and-forget: the PTY is already nulled and the settle/emit
-    // sequence below does not depend on the reap completing, so swallow any error (pid already exited).
-    if (pid && this._platform === "win32") {
-      this._taskkill(pid).catch(() => { /* pid already exited or taskkill unavailable - nothing to do */ });
-    }
+    // Reap orphan grandchildren. NOT awaited here: the settle/emit sequence below does not depend on it,
+    // and blocking the exit emit on a reap would strand every queued once("exit") handler. It is PARKED
+    // on _exitReap instead, because the next start() must not rewrite this worktree while descendants of
+    // the exited tree can still write in it, and a fire-and-forget reap gave that start nothing to wait
+    // on. Bounded on both platforms and never rejecting: an awaiter only needs to know the wait is over.
     // Off Windows the dead pty child's own process group is where those grandchildren still sit, holding
     // handles inside the worktree; an empty group answers ESRCH, which is the ordinary case here.
-    if (pid && this._platform !== "win32") {
-      this._killProcessGroup(pid);
+    if (pid) {
+      this._exitReap = this._reapTreeOnce(pid);
     }
 
     const { event, detail } = decideExitTransition(this.state, exitCode, signal, this._receivedFirstOutput);
@@ -1393,6 +1406,39 @@ class Session extends EventEmitter {
   // but the tree's death is not, and restart / shutdown / the ephemeral-lane worktree discard all act on
   // what that tree still holds open. Never rejects - an awaiter only needs to know the wait is over. A
   // zombie keeps answering signal 0 until node-pty waitpid()s it, which is what the budget bounds.
+  // Reap the tree behind `pid`, REUSING an in-flight reap rather than arming a second wait on it. One
+  // timer field serves one wait (see _awaitProcessGone), so a second one settles the first EARLY, and the
+  // shutdown coordinator and the ephemeral lanes await _killReap to know the tree is gone: they would
+  // have proceeded under surviving descendants. A non-null _resolveKillReap IS "a wait is running right
+  // now"; with none, this caller owns the group signal and the poll. Bounded and never rejecting on both
+  // platforms, since an awaiter only needs to know the wait is over.
+  _reapTreeOnce(pid) {
+    if (this._platform === "win32") {
+      return this._taskkill(pid, { timeout: KILL_REAP_MAX_WAIT_MS })
+        .catch(() => { /* already dead/unkillable/timed out - proceed */ });
+    }
+    if (this._resolveKillReap) return this._killReap;
+    return this._reapProcessGroup(pid);
+  }
+
+  // Join every in-flight reap of a previous PTY tree, or null when there is none to wait for. BOUNDED,
+  // and that is the point: start() is single-flight, and the win32 reap is a taskkill that can wedge with
+  // no timeout of its own, so an unbounded wait here would strand every later start on this session
+  // forever. The cap is the POSIX reap's own budget, which is what the wait is worth; past it the tree is
+  // not coming back and proceeding beats never starting. Never rejects.
+  _awaitPendingReaps() {
+    const pending = [this._killReap, this._exitReap].filter(Boolean);
+    if (pending.length === 0) return null;
+    // The cap timer is deliberately NOT unref'd: it is the only thing keeping the loop alive while a
+    // wedged reap is waited out, and an unref'd one lets the process resolve out from under this await.
+    // The race always settles, so the clearTimeout below always runs and nothing is left armed.
+    /** @type {NodeJS.Timeout | undefined} */
+    let capTimer;
+    const capped = new Promise((resolve) => { capTimer = setTimeout(resolve, KILL_REAP_MAX_WAIT_MS); });
+    return Promise.race([Promise.allSettled(pending), capped])
+      .then(() => { clearTimeout(capTimer); });
+  }
+
   _reapProcessGroup(pid, { maxWaitMs = KILL_REAP_MAX_WAIT_MS } = {}) {
     this._killProcessGroup(pid);
     return this._awaitProcessGone(pid, maxWaitMs);
@@ -1548,7 +1594,7 @@ class Session extends EventEmitter {
     if (!RESTARTABLE_STATES.includes(this.state)) return false;
     this._prepareRestart(options);
     this.transition("user_restart");
-    this.start();
+    this.start({ fresh: options.fresh === true });
     return true;
   }
 
@@ -1609,13 +1655,14 @@ class Session extends EventEmitter {
     if (this._teardownPending()) return false;
     if (KILLABLE_STATES.includes(this.state)) {
       this._prepareRestart(options);
+      const fresh = options.fresh === true;
       this._pendingRestart = true;
       this.once("exit", () => {
         this._pendingRestart = false;
         if (this._destroyed) return;
         if (!RESTARTABLE_STATES.includes(this.state)) return;
         this.transition("user_restart");
-        this.start();
+        this.start({ fresh });
       });
       this.kill();
       this.transition("user_kill");

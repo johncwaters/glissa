@@ -88,6 +88,7 @@ const DEFAULT_CONFIG = {
   // is clean and the session quiescent (see AGENTS.md "Worktree auto-rebase"). Read at session
   // construction, so a change applies to the next construction rather than to a live session.
   worktreeAutoRebase: true,
+  worktreeSyncOnStart: true,
   // Enable git rerere per repo, so a conflict resolved once is replayed automatically on every later
   // rebase of every linked worktree. Read once when the worktree engine is built (server restart).
   worktreeRerere: true,

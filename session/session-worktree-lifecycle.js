@@ -11,7 +11,7 @@ const { createIntegrationRefWatcher } = require("../detection/integration-ref-wa
 const { createRerereWatcher } = require("../detection/rerere-watch");
 const { buildMergePrompt } = require("./core/merge-prompt");
 const { decideSignatureDemotion, decideDiffSelfHeal } = require("./core/merge-gate");
-const { decideAutoRebase, decideRerereCooldownClear, AUTO_REBASE_STATES } = require("./core/rebase-gate");
+const { decideAutoRebase, decideRerereCooldownClear, AUTO_REBASE_STATES, SPAWN_GAP_TRIGGER } = require("./core/rebase-gate");
 const { projectMergeState } = require("./core/worktree-state");
 const {
   parseLeftRightCount,
@@ -28,9 +28,9 @@ const WORKTREE_CHECK_DEBOUNCE_MS = 400;
  * @typedef {{ state: import('../shared/states').SessionState, isDestroyed: boolean, isTeardownPending: boolean, hasLivePty: boolean }} SessionSnapshot
  * @typedef {{ merged: boolean, parked?: boolean, refused?: boolean, reason?: string, conflicts?: string[], baseSha?: string, restoreConflict?: boolean }} MergeResult
  * @typedef {{ branch: string | null, upstream: string | null, state: string, ahead: number, behind: number, fetched: boolean | null, action: string, error: string | null }} BranchSyncResult
- * @typedef {{ create: (...args: unknown[]) => Workspace | Promise<Workspace>, populate: (...args: unknown[]) => unknown, hasUnmergedWork: (...args: unknown[]) => boolean | Promise<boolean>, discard: (...args: unknown[]) => unknown, mergeBack: (...args: unknown[]) => MergeResult | Promise<MergeResult>, mergeKeep: (...args: unknown[]) => MergeResult | Promise<MergeResult>, rebaseOnly: (...args: unknown[]) => Promise<{ ok?: boolean, rebased?: boolean, baseSha?: string, headSha?: string, rerereReplayed?: boolean, reason?: string, conflicts?: string[] }> }} GitWorkspace
+ * @typedef {{ create: (...args: unknown[]) => Workspace | Promise<Workspace>, populate: (...args: unknown[]) => unknown, hasUnmergedWork: (...args: unknown[]) => boolean | Promise<boolean>, discard: (...args: unknown[]) => unknown, mergeBack: (...args: unknown[]) => MergeResult | Promise<MergeResult>, mergeKeep: (...args: unknown[]) => MergeResult | Promise<MergeResult>, rebaseOnly: (...args: unknown[]) => Promise<{ ok?: boolean, upToDate?: boolean, rebased?: boolean, baseSha?: string, headSha?: string, rerereReplayed?: boolean, reason?: string, conflicts?: string[] }>, syncIntegrationBranch?: (...args: unknown[]) => Promise<{ outcome: string, from: string | null, to: string | null, error?: string }> }} GitWorkspace
  * @typedef {{ state: () => SessionSnapshot, projectPath?: () => string, emit: (event: string, detail: Record<string, unknown>) => void, recordDecision: (entry: Record<string, unknown>) => void, pasteText: (text: string) => Record<string, unknown> }} SessionPort
- * @typedef {{ id: string, projectPath: string, integrationBranch?: string | null, gitWorkspace?: GitWorkspace | null, autoRebase?: boolean, liveWorktreeReview?: boolean, worktreeRoot?: string | null, worktreeShare?: string[] | null, port: SessionPort }} WorktreeLifecycleOptions
+ * @typedef {{ id: string, projectPath: string, integrationBranch?: string | null, gitWorkspace?: GitWorkspace | null, autoRebase?: boolean, syncOnStart?: boolean, liveWorktreeReview?: boolean, worktreeRoot?: string | null, worktreeShare?: string[] | null, port: SessionPort }} WorktreeLifecycleOptions
  * @typedef {object} WorktreeLifecycleState
  * @property {string | null} worktreeDir
  * @property {string | null} commonGitDir
@@ -94,6 +94,7 @@ function createSessionWorktreeLifecycle({
   integrationBranch = null,
   gitWorkspace = null,
   autoRebase = true,
+  syncOnStart = true,
   liveWorktreeReview = true,
   worktreeRoot = null,
   worktreeShare = null,
@@ -261,9 +262,59 @@ function createSessionWorktreeLifecycle({
     if (watch) startWatching();
   }
 
-  async function provision() {
+  /** @returns {(GitWorkspace & Required<Pick<GitWorkspace, 'syncIntegrationBranch'>>) | null} */
+  function syncableGitWorkspace() {
+    if (syncOnStart === false) return null;
+    if (!gitWorkspace || typeof gitWorkspace.syncIntegrationBranch !== "function") return null;
+    return /** @type {GitWorkspace & Required<Pick<GitWorkspace, 'syncIntegrationBranch'>>} */ (gitWorkspace);
+  }
+
+  async function syncIntegrationBranchForStart(trigger) {
+    const syncGitWorkspace = syncableGitWorkspace();
+    if (!syncGitWorkspace) return;
+    try {
+      const sync = await syncGitWorkspace.syncIntegrationBranch({
+        projectPath: currentProjectPath(),
+        branch: integrationBranch,
+      });
+      port.recordDecision({
+        kind: "integration-sync",
+        ts: Date.now(),
+        decision: trigger,
+        outcome: sync.outcome,
+        from: sync.from,
+        to: sync.to,
+      });
+      if (sync.outcome === "fetch-failed" || sync.outcome === "update-failed") {
+        const detail = sync.error ? `${sync.outcome}: ${sync.error}` : sync.outcome;
+        console.warn(`[session ${id}] integration sync failed during ${trigger}: ${detail}`);
+      }
+    } catch (error) {
+      console.warn(`[session ${id}] integration sync failed during ${trigger}: ${error.message}`);
+    }
+  }
+
+  async function syncFreshWorktree() {
+    // The switch gates BOTH halves. With syncOnStart off there is no sync AND no replay: the operator who
+    // turned the feature off would otherwise still get an unattended rewrite of their worktree in the
+    // spawn gap, which is the half of it they can actually feel.
+    if (!syncableGitWorkspace()) return;
+    await syncIntegrationBranchForStart(SPAWN_GAP_TRIGGER);
+    if (port.state().isDestroyed) return;
+    if (!lifecycleState.workspace) return;
+    const signature = await api.computeWorktreeSignature();
+    if (!signature) return;
+    await runAutoRebase(SPAWN_GAP_TRIGGER, signature);
+  }
+
+  async function provision({ fresh = false } = {}) {
     if (!gitWorkspace || !integrationBranch) return true;
-    if (lifecycleState.worktreeDir && fs.existsSync(lifecycleState.worktreeDir)) return true;
+    if (lifecycleState.worktreeDir && fs.existsSync(lifecycleState.worktreeDir)) {
+      if (fresh) await syncFreshWorktree();
+      return true;
+    }
+    await syncIntegrationBranchForStart("initial-create");
+    if (port.state().isDestroyed) return false;
     let workspace;
     try {
       workspace = await gitWorkspace.create({
@@ -538,13 +589,16 @@ function createSessionWorktreeLifecycle({
     return { sig, dirty: status.trim() !== "", ahead, behind, rebaseInProgress, headSha: head, targetSha };
   }
 
-  async function maybeAutoRebase(signature) {
+  async function runAutoRebase(trigger, signature) {
     if (lifecycleState.autoRebasing) return;
     const session = port.state();
+    if (session.isDestroyed) return;
     const currentKey = `${signature.headSha || ""}::${signature.targetSha || ""}`;
     const verdict = decideAutoRebase({
       enabled: autoRebase !== false && Boolean(gitWorkspace && lifecycleState.workspace),
+      trigger,
       state: session.state,
+      hasLivePty: session.hasLivePty,
       mergeStatus: lifecycleState.mergeStatus,
       dirty: signature.dirty,
       behind: signature.behind,
@@ -553,7 +607,12 @@ function createSessionWorktreeLifecycle({
       currentKey,
       lastConflictKey: lifecycleState.rebaseConflictKey,
     });
-    if (verdict.action !== "rebase") return;
+    if (verdict.action !== "rebase") {
+      if (trigger === SPAWN_GAP_TRIGGER) {
+        port.recordDecision({ kind: "rebase", ts: Date.now(), decision: "skipped", trigger, reason: verdict.reason });
+      }
+      return;
+    }
     if (!gitWorkspace || !lifecycleState.workspace) return;
     const workspace = lifecycleState.workspace;
     lifecycleState.autoRebasing = true;
@@ -564,7 +623,7 @@ function createSessionWorktreeLifecycle({
         targetBranch: integrationBranch,
       });
       const currentSession = port.state();
-      if (!AUTO_REBASE_STATES.includes(currentSession.state)) {
+      if (trigger !== SPAWN_GAP_TRIGGER && !AUTO_REBASE_STATES.includes(currentSession.state)) {
         port.recordDecision({ kind: "rebase", ts: Date.now(), decision: "state-moved", state: currentSession.state });
       }
       if (rebase?.ok && rebase.rebased) {
@@ -577,6 +636,7 @@ function createSessionWorktreeLifecycle({
           kind: "rebase",
           ts: Date.now(),
           decision: "auto-rebased",
+          trigger,
           from: signature.headSha || null,
           to: rebase.headSha || null,
           rerereReplayed: rebase.rerereReplayed === true,
@@ -585,7 +645,7 @@ function createSessionWorktreeLifecycle({
       }
       if (rebase?.reason === "rebase-conflict") {
         lifecycleState.rebaseConflictKey = currentKey;
-        port.recordDecision({ kind: "rebase", ts: Date.now(), decision: "conflict", conflicts: rebase.conflicts || [] });
+        port.recordDecision({ kind: "rebase", ts: Date.now(), decision: "conflict", trigger, conflicts: rebase.conflicts || [] });
       }
     } catch (error) {
       console.warn(`[session ${id}] auto-rebase failed: ${error.message}`);
@@ -605,7 +665,7 @@ function createSessionWorktreeLifecycle({
     const nextStatus = decideSignatureDemotion(lifecycleState.mergeStatus, signature);
     const demoted = nextStatus !== null;
     if (demoted) setMergeStatus(nextStatus);
-    await maybeAutoRebase(signature);
+    await runAutoRebase("change", signature);
     session = port.state();
     if (session.isDestroyed || lifecycleState.mergeStatus === "merging") return;
     if (signature.sig === lifecycleState.lastSignature && !demoted) return;

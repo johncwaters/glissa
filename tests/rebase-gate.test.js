@@ -7,7 +7,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { decideAutoRebase, AUTO_REBASE_STATES } = require('../session/core/rebase-gate');
+const { decideAutoRebase, AUTO_REBASE_STATES, SPAWN_GAP_TRIGGER } = require('../session/core/rebase-gate');
 const { STATES } = require('../shared/states');
 
 // The shape of a worktree that SHOULD be rebased: enabled, quiescent, clean, behind, nothing pending.
@@ -93,4 +93,36 @@ test('the cooldown holds only while the key is unchanged and non-empty', () => {
 
 test('a call with no arguments at all is a disabled skip, never a rebase', () => {
   assert.deepEqual(decideAutoRebase(), { action: 'skip', reason: 'disabled' });
+});
+
+// The exemption and its price. A fresh restart sits in the spawn gap, where the session state reads
+// STARTING and says nothing about the tree, so it substitutes a stronger proof (no live PTY) for the
+// state guard the module header calls load-bearing. It buys nothing else: every other guard still fires.
+test('the fresh-restart trigger swaps the state guard for a live-PTY guard and keeps every other', () => {
+  const fresh = (extra) => decideAutoRebase(eligible({
+    trigger: SPAWN_GAP_TRIGGER, state: STATES.STARTING, hasLivePty: false, ...extra,
+  }));
+  assert.deepEqual(fresh(), { action: 'rebase' }, 'STARTING is not busy in the spawn gap');
+  assert.equal(fresh({ hasLivePty: true }).reason, 'live-pty');
+  assert.equal(fresh({ enabled: false }).reason, 'disabled');
+  assert.equal(fresh({ teardownPending: true }).reason, 'teardown');
+  assert.equal(fresh({ mergeStatus: 'merging' }).reason, 'merging');
+  assert.equal(fresh({ mergeStatus: 'parked' }).reason, 'parked');
+  assert.equal(fresh({ rebaseInProgress: true }).reason, 'rebase-in-progress');
+  assert.equal(fresh({ dirty: true }).reason, 'dirty');
+  assert.equal(fresh({ behind: '0' }).reason, 'current');
+  assert.equal(fresh({ lastConflictKey: 'headsha::targetsha' }).reason, 'conflict-cooldown');
+});
+
+test('guard order holds for the fresh trigger: live-pty sits exactly where busy sits', () => {
+  const fresh = (extra) => decideAutoRebase(eligible({ trigger: SPAWN_GAP_TRIGGER, state: STATES.STARTING, ...extra }));
+  assert.equal(fresh({ hasLivePty: true, mergeStatus: 'parked' }).reason, 'parked');
+  assert.equal(fresh({ hasLivePty: true, dirty: true }).reason, 'live-pty');
+});
+
+test('only the named trigger is exempt; every other caller still answers to the state guard', () => {
+  for (const trigger of [undefined, 'change', 'fresh', 'restart']) {
+    assert.equal(decideAutoRebase(eligible({ trigger, state: STATES.STARTING })).reason, 'busy', `${trigger}`);
+    assert.equal(decideAutoRebase(eligible({ trigger, hasLivePty: true })).action, 'rebase', `${trigger}`);
+  }
 });

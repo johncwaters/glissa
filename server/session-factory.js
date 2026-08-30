@@ -39,6 +39,7 @@ function createSessionFactory(dependencies) {
       gitWorkspace: dependencies.getGitWorkspace(),
       integrationBranch: config.integrationBranch || 'develop',
       autoRebase: config.worktreeAutoRebase !== false,
+      syncOnStart: config.worktreeSyncOnStart !== false,
       liveWorktreeReview: config.liveWorktreeReview !== false,
       worktreeRoot: config.worktreeRoot || path.join(path.dirname(path.resolve(project.path)), '.glissa-worktrees'),
       worktreeShare: config.worktreeShare || DEFAULT_CONFIG.worktreeShare,
