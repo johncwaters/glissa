@@ -4,7 +4,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  parseLeftRightCount, decideBranchSyncState, parseRemoteFromUpstream, decideResyncAction, firstGitErrorLine,
+  parseLeftRightCount, decideBranchSyncState, parseRemoteFromUpstream, decideResyncAction,
+  buildResyncCommand, firstGitErrorLine,
 } = require('../server/core/branch-sync-core');
 
 // --- parseLeftRightCount: "<behind><TAB><ahead>" per `git rev-list --left-right --count U...B` ---
@@ -107,6 +108,25 @@ test('decideResyncAction: in-sync, no-upstream, and unknown are all none', () =>
   assert.equal(decideResyncAction('in-sync', true), 'none');
   assert.equal(decideResyncAction('no-upstream', true), 'none');
   assert.equal(decideResyncAction('unknown', true), 'none');
+});
+
+test('buildResyncCommand shares the fast-forward and plain-push command shapes', () => {
+  const options = { upstream: 'origin/main', branch: 'main', remote: 'origin', opts: { cwd: '/repo' } };
+  assert.deepEqual(buildResyncCommand('ff-merge', options), {
+    args: ['merge', '--ff-only', 'origin/main'],
+    opts: { cwd: '/repo' },
+    successAction: 'fast-forwarded',
+  });
+  assert.deepEqual(buildResyncCommand('ff-fetch', options), {
+    args: ['fetch', '--quiet', 'origin', 'main:main'],
+    opts: { cwd: '/repo', timeout: 8000 },
+    successAction: 'fast-forwarded',
+  });
+  assert.deepEqual(buildResyncCommand('push', options), {
+    args: ['push', 'origin', 'main'],
+    opts: { cwd: '/repo', timeout: 15000 },
+    successAction: 'pushed',
+  });
 });
 
 // --- firstGitErrorLine ---

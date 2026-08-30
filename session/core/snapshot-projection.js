@@ -18,6 +18,7 @@
  * @property {Record<string, unknown> | null} pendingWakeup
  * @property {string | null} pendingPromptKind
  * @property {string} mergeStatus
+ * @property {string | null} mergeReason
  * @property {string | null} worktreeNotice
  * @property {string | null} effectiveBase
  * @property {Array<Record<string, unknown>>} auditLog
@@ -46,6 +47,7 @@ function projectSessionSnapshots(source) {
     pendingWakeup: source.pendingWakeup,
     pendingPromptKind: source.pendingPromptKind,
     mergeStatus: source.mergeStatus,
+    mergeReason: source.mergeReason,
     worktreeNotice: source.worktreeNotice,
     effectiveBase: source.effectiveBase?.replace(/^[^/]+\//, "") ?? null,
     auditLog: source.auditLog.slice(-100),

@@ -27,6 +27,7 @@ const SessionSnapshot = z.object({
   pendingWakeup: PendingWakeup.nullable(),
   pendingPromptKind: z.string().nullable(),
   mergeStatus: z.string().nullable(),
+  mergeReason: z.string().nullable(),
   worktreeNotice: z.string().nullable(),
   effectiveBase: z.string().nullable(),
   auditLog: z.array(z.unknown()),

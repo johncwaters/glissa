@@ -150,7 +150,11 @@ test('rebaseOnly (real git): a missing target branch is refused, no rebase attem
   try {
     const gw = createGitWorkspace();
     const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'notarget' });
-    const r = await gw.rebaseOnly({ projectPath: repo, workspace: ws, targetBranch: 'nope' });
+    const r = await gw.rebaseOnly({
+      projectPath: repo,
+      workspace: { ...ws, base: null },
+      targetBranch: 'nope',
+    });
     assert.deepEqual(r, { ok: false, reason: 'no-target-branch' });
     await gw.discard({ projectPath: repo, workspace: ws });
   } finally { fs.rmSync(repo, { recursive: true, force: true }); }

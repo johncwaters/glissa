@@ -7,7 +7,6 @@ const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
 const SOURCE_DIRS = ['server', 'session', 'shared', 'public'];
-const TEMPORARY_MIGRATION_DEFAULT = "integrationBranch: 'develop',";
 const HARDCODED_BRANCH = /['"]develop['"]|into develop/g;
 
 function collectSourceFiles(directory, files = []) {
@@ -23,15 +22,13 @@ function collectSourceFiles(directory, files = []) {
   return files;
 }
 
-test('runtime sources contain no hardcoded integration branch outside the migration default', () => {
+test('runtime sources contain no hardcoded integration branch', () => {
   const offenders = [];
   for (const sourceDir of SOURCE_DIRS) {
     for (const file of collectSourceFiles(path.join(ROOT, sourceDir))) {
       const source = fs.readFileSync(file, 'utf8');
       const matches = source.match(HARDCODED_BRANCH) || [];
-      const permittedMatches = file === path.join(ROOT, 'server', 'config-store.js')
-        && source.includes(TEMPORARY_MIGRATION_DEFAULT) ? 1 : 0;
-      if (matches.length > permittedMatches) offenders.push(path.relative(ROOT, file));
+      if (matches.length > 0) offenders.push(path.relative(ROOT, file));
     }
   }
   assert.deepEqual(offenders, []);

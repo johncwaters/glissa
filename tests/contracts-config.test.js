@@ -11,6 +11,8 @@ const { Config, HIDDEN_CONFIG_KEYS } = require('../shared/contracts');
 
 test('DEFAULT_CONFIG satisfies the persisted Config contract', () => {
   assert.equal(Config.safeParse(DEFAULT_CONFIG).success, true);
+  assert.equal(DEFAULT_CONFIG.integrationBranch, null);
+  assert.equal(Config.shape.integrationBranch.safeParse(null).success, true);
 });
 
 // The config contract gates the LOAD, and the load exits on error, so NOTHING under `hooks` may cost

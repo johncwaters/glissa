@@ -121,6 +121,7 @@ const SERVER_MESSAGE_TYPES = Object.freeze([
   'session-wake',
   'session-merge-status',
   'session-worktree-blocked',
+  'session-worktree-warning',
   'session-worktree-ready',
   'session-diff',
   'branch-sync-status',
@@ -264,8 +265,20 @@ const serverVariants = [
     notice: nullableString,
     timestamp,
   }),
-  // TODO(server/backend.js worktree-ready listener): type the payload when the browser consumes it.
-  loose('session-worktree-ready'),
+  loose('session-worktree-warning', {
+    id: sessionId,
+    session: z.string(),
+    branch: nullableString,
+    notice: nullableString,
+    timestamp,
+  }),
+  loose('session-worktree-ready', {
+    id: sessionId,
+    session: z.string(),
+    branch: nullableString,
+    base: nullableString,
+    timestamp,
+  }),
   loose('session-diff', {
     id: sessionId,
     committed: openObject({ stat: z.string(), diff: z.string() }),

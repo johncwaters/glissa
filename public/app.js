@@ -148,7 +148,7 @@ function handleSnapshot(sessions, packVersions) {
     // Restore the "resumed" marker on reconnect (the binding lives on the server; the badge does not).
     setSessionResume(s.id, s.resumeSessionId);
     // Hydrate the review sidebar's status/count from the snapshot (quiet: no auto-open on reconnect).
-    seedSessionMergeStatus(s.id, s.mergeStatus);
+    seedSessionMergeStatus(s.id, s.mergeStatus, s.mergeReason);
     setSessionEffectiveBase(s.id, s.effectiveBase);
     // Restore the live background sub-agent chip on reconnect (Glissa reloads on every restart).
     setSessionAgents(s.id, s.activeAgents);
@@ -333,8 +333,10 @@ const messageHandlers = {
   'session-agents':     (msg) => { setSessionAgents(msg.id, msg.activeAgents); handleDebugStateRefresh(msg.id); },
   'session-wakeup':     (msg) => setSessionWakeup(msg.id, msg.pendingWakeup),
   'session-prompt':     (msg) => setSessionPrompt(msg.id, msg.pendingPromptKind),
-  'session-merge-status': (msg) => { setSessionMergeStatus(msg.id, msg.mergeStatus); setFocusMergeStatus(msg.id, msg.mergeStatus); refreshPhoneBoard(); },
+  'session-merge-status': (msg) => { setSessionMergeStatus(msg.id, msg.mergeStatus, msg.reason); setFocusMergeStatus(msg.id, msg.mergeStatus); refreshPhoneBoard(); },
   'session-worktree-blocked': (msg) => { showErrorToast(`${msg.session}: ${msg.notice || 'integration branch not found'}`, { persist: true }); },
+  'session-worktree-warning': (msg) => { showErrorToast(`${msg.session}: ${msg.notice || 'base branch warning'}`); },
+  'session-worktree-ready': (msg) => { setSessionEffectiveBase(msg.id, msg.base); },
   'session-diff':       (msg) => { setSessionDiff(msg.id, { committed: msg.committed, uncommitted: msg.uncommitted, hasCommits: msg.hasCommits }); },
   'branch-sync-status': (msg) => setReviewBranchSync(msg.id, { branch: msg.branch, upstream: msg.upstream, state: msg.state, ahead: msg.ahead, behind: msg.behind, fetched: msg.fetched, action: msg.action, error: msg.error }),
   'session-changed':    (msg) => notifyWorktreeChanged(msg.id),

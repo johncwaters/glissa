@@ -137,7 +137,7 @@ test('mergeBack (injected): committed-only rebase + ff-only merge when target is
   assert.ok(cmds.includes('merge --ff-only glissa/session/abc'), 'ff-only merge into the checked-out target');
   assert.ok(cmds.includes('worktree remove --force /wt'));
   assert.ok(cmds.includes('branch -D glissa/session/abc'));
-  assert.ok(!cmds.some((c) => c.startsWith('fetch')), 'no ref-fetch when the target is checked out');
+  assert.ok(cmds.includes('fetch --quiet origin develop'), 'fetches the remote base before merging');
 });
 
 test('resolveProjectPath matches a custom linked worktree through the shared git common dir', async () => {

@@ -84,6 +84,7 @@ function realWorktreeDir() {
 function fakeGitWorkspace(opts = {}) {
   const calls = {
     create: [],
+    detectDefaultBranch: [],
     syncIntegrationBranch: [],
     rebaseOnly: [],
     mergeBack: [],
@@ -112,6 +113,10 @@ function fakeGitWorkspace(opts = {}) {
     },
     // Sync no-op on purpose: the adopt path must tolerate a populate that does not return a promise.
     populate(args) { calls.populate.push(args); },
+    async detectDefaultBranch(args) {
+      calls.detectDefaultBranch.push(args);
+      return opts.detectedBase || 'main';
+    },
     async syncIntegrationBranch(args) {
       calls.syncIntegrationBranch.push(args);
       calls.sequence.push('sync');
@@ -248,6 +253,54 @@ test('start() provisions a worktree off the integration branch and spawns the PT
     assert.equal(snap.isWorktree, true);
   } finally {
     s.destroy();
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test('start() provisions an auto-detected worktree when integrationBranch is null', async () => {
+  const wt = realWorktreeDir();
+  const gw = fakeGitWorkspace({
+    worktreeDir: wt,
+    createResult: { cwd: wt, isGit: true, branch: 'glissa/session/wt-sess', base: 'main', baseSha: 'basesha' },
+  });
+  const s = makeSession({
+    gitWorkspace: gw,
+    integrationBranch: null,
+    ptySpawn: () => fakePty(),
+  });
+  try {
+    await s.start();
+    assert.deepEqual(gw.calls.sequence.slice(0, 2), ['sync', 'create']);
+    assert.equal(gw.calls.create.length, 1);
+    assert.equal(gw.calls.syncIntegrationBranch[0].branch, 'main');
+    assert.equal(gw.calls.create[0].baseBranch, 'main');
+    assert.equal(s.worktreeDir, wt);
+    assert.equal(s.toSnapshot().effectiveBase, 'main');
+  } finally {
+    s.destroy();
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test('a diverged auto-detected base forks locally and emits a warning', async () => {
+  const wt = realWorktreeDir();
+  const gitWorkspace = fakeGitWorkspace({
+    worktreeDir: wt,
+    syncResult: { outcome: 'diverged', from: 'local', to: 'remote' },
+  });
+  const session = makeSession({
+    gitWorkspace,
+    integrationBranch: null,
+    ptySpawn: () => fakePty(),
+  });
+  let warning = null;
+  session.on('worktree-warning', (event) => { warning = event; });
+  try {
+    await session.start();
+    assert.equal(session.toSnapshot().effectiveBase, 'main');
+    assert.equal(warning.notice, 'base main has diverged from origin/main; forked from local');
+  } finally {
+    session.destroy();
     fs.rmSync(wt, { recursive: true, force: true });
   }
 });
@@ -1727,19 +1780,18 @@ test('behind is measured against the integration branch, not a stale upstream', 
   } finally { s.destroy(); fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
-test('two-bases edge: integration already contains the commits demotes, then mergeKeep clears to none', { skip: !GIT }, async (t) => {
+test('marker authority ignores a stale feature upstream after integration contains the commits', { skip: !GIT }, async (t) => {
   let repo;
   try { repo = initStaleUpstream({ landFeat: true }); } catch { t.skip('cannot configure an upstream in this sandbox'); return; }
-  // develop already contains feat's work (behind 0, nothing to merge) while the stale upstream keeps
-  // ahead > 0: the tolerated benign demotion. The re-enabled button's path (mergeAndContinue/mergeKeep)
-  // then self-corrects via nothing-to-commit -> 'none'.
+  // develop already contains feat's work, and the marker keeps the stale upstream from presenting it
+  // as pending review again.
   const gw = fakeGitWorkspace({ mergeKeepResult: { merged: false, reason: 'nothing-to-commit' } });
   const s = makeSession({ integrationBranch: 'develop', gitWorkspace: gw });
   try {
     attachWorktree(s, repo);
     setMergeStatus(s, 'parked');
     await s.checkWorktreeChange();
-    assert.equal(s.mergeStatus, 'pending-review', 'benign demotion fires (ahead vs stale upstream, behind 0 vs develop)');
+    assert.equal(s.mergeStatus, 'none', 'the integration marker is the comparison authority');
     s.state = STATES.IDLE; // quiescent live session, or mergeAndContinue returns not-continuable
     const r = await s.mergeAndContinue();
     assert.equal(r.reason, 'nothing-to-commit');

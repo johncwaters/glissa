@@ -47,7 +47,6 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 ### Worktree Auto-Rebase
 
-- Initial creation and fresh restart sync the integration branch fast-forward-only and never block spawn (`tests/git-workspace-integration-sync.test.js`, `tests/sessions-worktree.test.js`).
 - It rides the existing change funnel (no timer) and runs BEFORE the signature dedup, since a moved integration branch leaves the signature byte-identical. Every guard is pure in `session/core/rebase-gate.js`, and the guard ORDER is stated only by `tests/rebase-gate.test.js`.
 - WAITING is the load-bearing exclusion: it is a permission prompt PAUSING a turn, and the agent resumes into the files an unattended rebase would have rewritten under it.
 - `rebaseOnly` never stashes and merges nothing back: it runs unattended under a live agent, so a dirty tree is a hard refusal.
@@ -55,6 +54,10 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - The completeness proof is "no unmerged paths remain". `git rerere remaining` may NEVER be one: it ignores binary conflicts, so continuing on its silence silently drops the commit (`tests/git-workspace-rebase.test.js`).
 - Which paths rerere replayed is deliberately unreported: git clears `MERGE_RR` as it resolves, so any list would be a guess, and a guess in a forensic trace is worse than a silence.
 - rerere config is seeded only when UNSET, an operator who disabled it meaning it. A rebase suppresses the change funnel while it runs, or the review gate self-heals to none mid-rebase.
+
+### Worktree Base Branch
+
+- The base is the configured integration branch, or each repo's default branch when unset. Origin is the source of truth: initial creation and fresh restart sync it fast-forward-only without blocking spawn, merge-back syncs it before landing and pushes it after, and a diverged base is never touched automatically (`tests/git-workspace-integration-sync.test.js`, `tests/git-workspace-session.test.js`, `tests/sessions-worktree.test.js`).
 
 ### Remote Branch GC
 

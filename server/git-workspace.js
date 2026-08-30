@@ -6,7 +6,13 @@ const path = require('node:path');
 const { execFileAsync, execFileSync } = require('../server/child-process-safe');
 const { createSerialQueue } = require('./spawn-gate');
 const { sessionIdFromBranch } = require('./core/branch-gc-core');
-const { firstGitErrorLine } = require('./core/branch-sync-core');
+const {
+  parseLeftRightCount,
+  decideBranchSyncState,
+  decideResyncAction,
+  buildResyncCommand,
+  firstGitErrorLine,
+} = require('./core/branch-sync-core');
 const { decideIntegrationSync, classifyRefusedIntegrationSync } = require('./core/integration-sync-core');
 
 const fsp = fs.promises;
@@ -152,6 +158,65 @@ function createGitWorkspace(opts = {}) {
   }
   function sanitize(s) { return String(s || '').replace(/[^\w.-]+/g, '-').replace(/^-+|-+$/g, ''); }
 
+  async function detectDefaultBranch({ projectPath }) {
+    const remoteHead = await run(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], projectPath);
+    if (remoteHead.ok && remoteHead.out.startsWith('origin/')) return remoteHead.out.slice('origin/'.length) || null;
+    for (const branch of ['main', 'master']) {
+      const localBranch = await run(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], projectPath);
+      if (localBranch.ok) return branch;
+    }
+    return null;
+  }
+
+  async function classifyBaseAgainstOrigin(projectPath, branch) {
+    const upstream = `origin/${branch}`;
+    const remoteBranch = await run(['rev-parse', '--verify', '--quiet', `refs/remotes/${upstream}`], projectPath);
+    if (!remoteBranch.ok) return { state: 'no-upstream', upstream };
+    const counts = parseLeftRightCount((await run([
+      'rev-list', '--left-right', '--count', `${upstream}...${branch}`,
+    ], projectPath)).out);
+    return {
+      state: decideBranchSyncState({ hasUpstream: true, ahead: counts?.ahead, behind: counts?.behind }),
+      upstream,
+    };
+  }
+
+  async function fastForwardBaseFromOrigin(projectPath, branch, upstream) {
+    const checkedOut = (await run(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath)).out;
+    const decision = decideResyncAction('behind', checkedOut === branch);
+    const command = buildResyncCommand(decision, { upstream, branch, remote: 'origin', opts: {} });
+    if (!command) return false;
+    return (await run(command.args, projectPath, { timeout: command.opts.timeout })).ok;
+  }
+
+  /** @param {{ ok: boolean, out: string, err?: string } | null} [fetched] */
+  async function synchronizeBaseWithOrigin(projectPath, branch, fetched = null) {
+    const fetchResult = fetched || await fetchOriginBody({ projectPath, branch });
+    if (!fetchResult.ok) return { state: 'unknown', fetched: false, error: fetchResult.err || fetchResult.out };
+    const classified = await classifyBaseAgainstOrigin(projectPath, branch);
+    if (classified.state !== 'behind') return { ...classified, fetched: true };
+    const fastForwarded = await fastForwardBaseFromOrigin(projectPath, branch, classified.upstream);
+    if (!fastForwarded) return { ...classified, fetched: true, error: 'fast-forward failed' };
+    return { ...classified, state: 'in-sync', fetched: true };
+  }
+
+  async function pushBaseToOrigin(projectPath, branch) {
+    const command = buildResyncCommand('push', { upstream: `origin/${branch}`, branch, remote: 'origin', opts: {} });
+    if (!command) return false;
+    return (await run(command.args, projectPath, { timeout: command.opts.timeout })).ok;
+  }
+
+  function mergeSyncWarning(baseSync, branch) {
+    if (!baseSync.fetched) return `could not fetch origin/${branch}; merged with local base`;
+    if (baseSync.error) return `could not fast-forward ${branch} from origin/${branch}; merged with local base`;
+    return null;
+  }
+
+  function includeWarning(mergeResult, warning) {
+    if (!warning) return mergeResult;
+    return { ...mergeResult, warning };
+  }
+
   // Seed refs tried in order to auto-create a missing integration branch: the remote-tracking branch of
   // the same name first (it just is not checked out locally yet), then the repo's likely default
   // branches, then HEAD as a final catch-all (createBody already verified HEAD resolves earlier, so a
@@ -194,35 +259,29 @@ function createGitWorkspace(opts = {}) {
       const configured = await run(['config', '--get', 'rerere.enabled'], projectPath);
       if (!configured.ok || configured.out === '') await run(['config', 'rerere.enabled', 'true'], projectPath);
     }
-    /** @type {string|null} */
-    let baseSha = head.out;
-    let base = (await run(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath)).out || 'HEAD';
-    if (baseBranch) {
-      // Fork off the session integration branch regardless of what
-      // the operator's main checkout currently has checked out. A missing local branch is auto-created
-      // from origin/<baseBranch>, then main/master, then HEAD (ensureLocalBranch below); reason:
-      // 'no-base-branch' remains only as the fallback when that creation itself fails.
-      const ref = await run(['rev-parse', '--verify', '--quiet', `refs/heads/${baseBranch}`], projectPath);
-      baseSha = ref.ok ? ref.out : await ensureLocalBranch(projectPath, baseBranch);
-      if (!baseSha) return { cwd: projectPath, isGit: false, reason: 'no-base-branch' };
-      base = baseBranch;
-    }
     const branch = `glissa/${sanitize(teamId)}/${sanitize(label)}`;
-
-    // Prune BEFORE the branch-in-use check: a stale registration whose directory is gone must be
-    // reclaimed (the pre-existing crash-recovery behavior), not misreported as a live conflict.
     await run(['worktree', 'prune'], projectPath);
-
-    // Pre-empt both the branch -D failure below and git's raw "already checked out" error: a domain
-    // reason the caller can act on (another worktree already holds this exact branch checked out).
     const listed = await run(['worktree', 'list', '--porcelain'], projectPath);
     if (listed.ok) {
       const conflictPath = findWorktreeForBranch(listed.out, branch);
-      // `branch` rides along so a session caller can recognize the conflict as its OWN surviving
-      // worktree (the session branch embeds the session id) and re-adopt it instead of degrading.
-      if (conflictPath) return { cwd: projectPath, isGit: false, reason: 'branch-in-use', conflictPath, branch };
+      if (conflictPath) {
+        const marker = await run(['config', '--get', `branch.${branch}.glissa-integration`], projectPath);
+        return {
+          cwd: projectPath,
+          isGit: false,
+          reason: 'branch-in-use',
+          conflictPath,
+          branch,
+          base: markerFrom(marker) || baseBranch || null,
+        };
+      }
     }
-
+    let base = (await run(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath)).out || 'HEAD';
+    if (baseBranch !== undefined) base = baseBranch || await detectDefaultBranch({ projectPath });
+    if (!base) return { cwd: projectPath, isGit: false, reason: 'no-base-branch' };
+    const ref = await run(['rev-parse', '--verify', '--quiet', `refs/heads/${base}`], projectPath);
+    const baseSha = ref.ok ? ref.out : await ensureLocalBranch(projectPath, base);
+    if (!baseSha) return { cwd: projectPath, isGit: false, reason: 'no-base-branch' };
     await run(['branch', '-D', branch], projectPath); // drop a stale branch left by a crashed prior run
 
     // A SESSION worktree lives under a stable, project-associated root (worktreeBase, e.g. a
@@ -441,7 +500,7 @@ function createGitWorkspace(opts = {}) {
     if (!workspace || !workspace.isGit) return { error: { merged: false, committed: false, branch: null, reason: 'not-git' } };
     const branch = workspace.branch;
     if (!branch) return { error: { merged: false, committed: false, branch: null, reason: 'no-branch' } };
-    const target = targetBranch || workspace.base;
+    const target = workspace.base || targetBranch;
     if (!target || target === 'HEAD') return { error: { merged: false, committed: false, branch, reason: 'no-target', parked: true } };
     if (!(await run(['rev-parse', '--verify', '--quiet', `refs/heads/${target}`], projectPath)).ok) {
       return { error: { merged: false, committed: false, branch, base: target, reason: 'no-target-branch', parked: true } };
@@ -459,26 +518,41 @@ function createGitWorkspace(opts = {}) {
     if (g.error) return g.error;
     const { wt, branch, target } = g;
 
+    const baseSync = await synchronizeBaseWithOrigin(projectPath, target);
+    if (baseSync.state === 'diverged') {
+      return { merged: false, committed: false, branch, base: target, reason: 'base-diverged', parked: true };
+    }
+    const warning = mergeSyncWarning(baseSync, target);
+
     // Finishing tears the worktree down, which would DESTROY any uncommitted work. Never do that
     // silently: if the worktree is dirty, refuse and PARK (worktree + branch preserved) so the operator
     // commits or discards the uncommitted work first, then finishes. (committed-only never sweeps
     // uncommitted work into the merge, so there is nothing to gain by merging here while dirty either.)
     if ((await run(['status', '--porcelain'], wt)).out !== '') {
-      return { merged: false, committed: false, branch, base: target, reason: 'uncommitted-changes', parked: true };
+      return includeWarning({ merged: false, committed: false, branch, base: target, reason: 'uncommitted-changes', parked: true }, warning);
     }
 
     const r = await rebaseFfBranch({ projectPath, wt, branch, target });
     if (!r.committed) {
       // Clean worktree with nothing committed = a throwaway chat/research session: discard it (junction-safe).
       await tearDownWorktree(projectPath, wt, branch);
-      return { merged: false, committed: false, branch: null, base: target, reason: 'nothing-to-commit' };
+      return includeWarning({ merged: false, committed: false, branch: null, base: target, reason: 'nothing-to-commit' }, warning);
     }
     if (!r.merged) {
       // Rebase conflict / lost FF: PARK (keep worktree + branch for manual resolution).
-      return { merged: false, committed: true, branch, base: target, reason: r.reason, parked: true, conflicts: r.conflicts || [] };
+      return includeWarning({ merged: false, committed: true, branch, base: target, reason: r.reason, parked: true, conflicts: r.conflicts || [] }, warning);
     }
     await tearDownWorktree(projectPath, wt, branch);
-    return { merged: true, committed: true, branch: null, base: target, reason: null, rerereReplayed: r.rerereReplayed === true };
+    const pushed = await pushBaseToOrigin(projectPath, target);
+    return includeWarning({
+      merged: true,
+      committed: true,
+      branch: null,
+      base: target,
+      reason: null,
+      pushed,
+      rerereReplayed: r.rerereReplayed === true,
+    }, warning);
   }
 
   // Like mergeBack, but KEEPS the worktree alive on success: after the rebase-then-FF, the worktree
@@ -493,21 +567,28 @@ function createGitWorkspace(opts = {}) {
     if (g.error) return g.error;
     const { wt, branch, target } = g;
 
+    const baseSync = await synchronizeBaseWithOrigin(projectPath, target);
+    if (baseSync.state === 'diverged') {
+      return { merged: false, committed: false, branch, base: target, reason: 'base-diverged', parked: true };
+    }
+    const warning = mergeSyncWarning(baseSync, target);
+
     const r = await rebaseFfBranch({ projectPath, wt, branch, target });
     if (!r.committed) {
       // Nothing committed to merge yet - keep the worktree; the live session commits more then merges.
-      return { merged: false, committed: false, branch, base: target, reason: 'nothing-to-commit', kept: true };
+      return includeWarning({ merged: false, committed: false, branch, base: target, reason: 'nothing-to-commit', kept: true }, warning);
     }
     if (!r.merged) {
-      return { merged: false, committed: true, branch, base: target, reason: r.reason, parked: true, conflicts: r.conflicts || [] };
+      return includeWarning({ merged: false, committed: true, branch, base: target, reason: r.reason, parked: true, conflicts: r.conflicts || [] }, warning);
     }
     // Merged AND kept: record the new integration tip the worktree now sits on top of. restoreConflict
     // flags that the stashed uncommitted work reapplied with conflict markers for the operator to resolve.
     const baseSha = (await run(['rev-parse', target], projectPath)).out || workspace.baseSha || null;
-    return {
+    const pushed = await pushBaseToOrigin(projectPath, target);
+    return includeWarning({
       merged: true, committed: true, branch, base: target, baseSha, kept: true, reason: null,
-      restoreConflict: r.restoreConflict || false, rerereReplayed: r.rerereReplayed === true,
-    };
+      pushed, restoreConflict: r.restoreConflict || false, rerereReplayed: r.rerereReplayed === true,
+    }, warning);
   }
 
   // Eager conflict avoidance: replay this worktree's own commits on top of a moved integration branch
@@ -635,7 +716,9 @@ function createGitWorkspace(opts = {}) {
     return parseWorktreeBranches(listed.out);
   }
 
-  async function fetchOriginBody({ projectPath }) {
+  /** @param {{ projectPath: string, branch?: string | null }} options */
+  async function fetchOriginBody({ projectPath, branch = null }) {
+    if (branch) return run(['fetch', '--quiet', 'origin', branch], projectPath, { timeout: 8000 });
     return run(['fetch', '--prune', 'origin'], projectPath);
   }
 
@@ -660,13 +743,10 @@ function createGitWorkspace(opts = {}) {
   async function syncIntegrationBranchBody({ projectPath, branch }) {
     const localRef = `refs/heads/${branch}`;
     const remoteRef = `refs/remotes/origin/${branch}`;
-    // The ONE network call on the spawn path, and it rides the queue every session's merges share, so it
-    // gets its own short budget and a non-interactive environment: a credential prompt on the generic
-    // 20s would wedge that queue for every other session. The refspec is explicit (a branch named `-u`
-    // would parse as an option as a bare positional) and force-updates only the REMOTE-TRACKING ref,
-    // which is what git's own configured refspec does; the local branch is never touched here.
+    // The ONE network call on the spawn path refreshes the full tracking namespace so a missing target
+    // is represented by an absent tracking ref rather than a failed branch-specific fetch.
     const fetched = await run(
-      ['fetch', 'origin', `+${localRef}:${remoteRef}`],
+      ['fetch', '--prune', 'origin', '+refs/heads/*:refs/remotes/origin/*'],
       projectPath,
       { timeout: 8000, env: { GIT_TERMINAL_PROMPT: '0' } },
     );
@@ -722,7 +802,8 @@ function createGitWorkspace(opts = {}) {
   }
 
   async function listIntegrationTips({ projectPath, integrationBranch }) {
-    const branchNames = [...new Set([integrationBranch, 'main', 'master'].filter(Boolean))];
+    const detectedBranch = integrationBranch || await detectDefaultBranch({ projectPath });
+    const branchNames = [...new Set([detectedBranch, 'main', 'master'].filter(Boolean))];
     const refNames = branchNames.flatMap((branchName) => [
       `refs/remotes/origin/${branchName}`,
       `refs/heads/${branchName}`,
@@ -775,7 +856,7 @@ function createGitWorkspace(opts = {}) {
     fetchOrigin: serialized(fetchOriginBody),
     syncIntegrationBranch: serialized(syncIntegrationBranchBody),
     deleteRemoteBranch: serialized(deleteRemoteBranchBody),
-    listSessionWorktrees, listWorktreeBranches, hasUnmergedWork,
+    listSessionWorktrees, listWorktreeBranches, hasUnmergedWork, detectDefaultBranch,
     listRemoteSessionBranches, listIntegrationTips, isAncestor, resolveProjectPath,
   };
 }

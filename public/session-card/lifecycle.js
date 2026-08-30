@@ -506,21 +506,21 @@ function applyMergeDataset(card, ms) {
   delete card.dataset.merge;
 }
 
-export function setSessionMergeStatus(sessionId, mergeStatus) {
+export function setSessionMergeStatus(sessionId, mergeStatus, reason = null) {
   const ui = sessionUIs.get(sessionId);
   const ms = mergeStatus || 'none';
   if (ui) applyMergeDataset(ui.card, ms);
-  setReviewMergeStatus(sessionId, ms);
+  setReviewMergeStatus(sessionId, ms, reason);
 }
 
 // Snapshot hydration: set the card's data-merge (remove-warning) and seed the sidebar quietly (count +
 // render), WITHOUT auto-opening the panel. Used on (re)connect so a pending-review session is reflected
 // immediately instead of only after the next live broadcast.
-export function seedSessionMergeStatus(sessionId, mergeStatus) {
+export function seedSessionMergeStatus(sessionId, mergeStatus, reason = null) {
   const ui = sessionUIs.get(sessionId);
   const ms = mergeStatus || 'none';
   if (ui) applyMergeDataset(ui.card, ms);
-  seedReviewMergeStatus(sessionId, ms);
+  seedReviewMergeStatus(sessionId, ms, reason);
 }
 
 // Forward a session's diff payload ({ committed, uncommitted, hasCommits }, reply to

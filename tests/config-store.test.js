@@ -267,6 +267,12 @@ test('an explicit config value beats settingsDefaults', () => {
   }, { settingsDefaults: { debugMode: true } });
 });
 
+test('an explicit auto branch beats a launch branch default', () => {
+  withStore({ projects: [], integrationBranch: null }, (store) => {
+    assert.equal(store.getSettings().integrationBranch, null);
+  }, { settingsDefaults: { integrationBranch: 'release' } });
+});
+
 test('settingsDefaults is never persisted and leaves other keys on DEFAULT_CONFIG', () => {
   withStore({ projects: [] }, (store, p) => {
     store.getSettings();
@@ -289,6 +295,16 @@ test('applySettings coerces booleans and strings and applies timeouts', () => {
     assert.equal(store.config.debugMode, false, 'falsy boolean coerced');
     assert.equal(store.config.autoRecoverSeconds, 7, 'timeout applied');
     assert.equal(store.config.integrationBranch, '123', 'string coerced');
+  });
+});
+
+test('applySettings stores an empty or null integration branch as auto', () => {
+  withStore({ projects: [], integrationBranch: 'release' }, (store) => {
+    store.applySettings({ integrationBranch: '' });
+    assert.equal(store.config.integrationBranch, null);
+    store.config.integrationBranch = 'release';
+    store.applySettings({ integrationBranch: null });
+    assert.equal(store.config.integrationBranch, null);
   });
 });
 

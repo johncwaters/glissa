@@ -74,10 +74,8 @@ const DEFAULT_CONFIG = {
   // from prReview.enabled on purpose: PR pings and session pings are independently switchable. Off
   // by default; see notifications/channels/telegram.js for the per-delivery gate.
   telegramNotifications: false,
-  // Integration branch every worktree-backed session forks from and merges back into. If it is absent
-  // locally, git-workspace.js auto-creates it (from origin/<branch>, then main/master, then HEAD); a
-  // session only stays DORMANT with a notice if that creation itself fails (see its createBody).
-  integrationBranch: 'develop',
+  // A null integration branch selects each repository's default branch for session worktrees.
+  integrationBranch: null,
   // Where session worktrees live: a stable, project-associated root (NOT system-temp), kept outside the
   // repo working tree. Empty -> a `.glissa-worktrees` sibling of each repo (resolved in backend).
   worktreeRoot: '',
@@ -446,7 +444,7 @@ function createConfigStore({ settingsDefaults } = {}) {
       autoResume: config.autoResume ?? effectiveDefaults.autoResume,
       telegramNotifications: config.telegramNotifications ?? effectiveDefaults.telegramNotifications,
       packsAutoRebuild: config.packsAutoRebuild ?? effectiveDefaults.packsAutoRebuild,
-      integrationBranch: config.integrationBranch ?? effectiveDefaults.integrationBranch,
+      integrationBranch: config.integrationBranch === undefined ? effectiveDefaults.integrationBranch : config.integrationBranch,
       worktreeRoot: config.worktreeRoot ?? effectiveDefaults.worktreeRoot,
       worktreeShare: config.worktreeShare ?? effectiveDefaults.worktreeShare,
       repoRoots: config.repoRoots,
@@ -488,6 +486,11 @@ function createConfigStore({ settingsDefaults } = {}) {
   /** Apply settings from a new config object into the in-memory config. */
   function applySettings(newConfig) {
     for (const key of RUNTIME_CONFIG_SCALAR_KEYS) {
+      if (key === 'integrationBranch') {
+        if (newConfig[key] === undefined) continue;
+        config[key] = newConfig[key] === null || String(newConfig[key]) === '' ? null : String(newConfig[key]);
+        continue;
+      }
       if (newConfig[key] == null) continue;
       let nextValue = newConfig[key];
       if (typeof DEFAULT_CONFIG[key] === 'boolean') nextValue = !!nextValue;

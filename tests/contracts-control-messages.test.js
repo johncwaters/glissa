@@ -50,6 +50,7 @@ const SESSION = {
   pendingWakeup: null,
   pendingPromptKind: null,
   mergeStatus: 'none',
+  mergeReason: null,
   worktreeNotice: null,
   effectiveBase: 'develop',
   auditLog: [],
@@ -76,7 +77,7 @@ const REAL_SERVER_PAYLOADS = [
   { type: 'session-wake', id: 'session-1', session: 'glissa', timestamp: NOW },
   { type: 'session-merge-status', id: 'session-1', session: 'glissa', mergeStatus: 'pending-review', reason: null, parked: false, timestamp: NOW },
   { type: 'session-worktree-blocked', id: 'session-1', session: 'glissa', branch: 'develop', notice: 'missing branch', timestamp: NOW },
-  { type: 'session-worktree-ready', id: 'session-1', session: 'glissa', branch: 'glissa/session/1', timestamp: NOW },
+  { type: 'session-worktree-ready', id: 'session-1', session: 'glissa', branch: 'glissa/session/1', base: 'develop', timestamp: NOW },
   { type: 'session-diff', id: 'session-1', committed: { stat: '1 file', diff: 'patch' }, uncommitted: { stat: '', diff: '' }, hasCommits: true },
   { type: 'branch-sync-status', id: 'session-1', branch: 'develop', upstream: 'origin/develop', state: 'ahead', ahead: 1, behind: 0, fetched: true },
   { type: 'session-changed', id: 'session-1', sig: 'sha' },
@@ -124,6 +125,7 @@ const REAL_SERVER_PAYLOADS = [
   { type: 'ingest-snapshot', events: [], sources: { terminal: true }, ts: NOW },
   { type: 'client-trust', trust: 'local' },
   { type: 'sessions-reordered', order: ['session-1'] },
+  { type: 'session-worktree-warning', id: 'session-1', session: 'Session 1', branch: 'glissa/session/session-1', notice: 'offline', timestamp: NOW },
   { type: 'shutting-down' },
   { type: 'restarting' },
   {
@@ -161,7 +163,7 @@ test('session-diff pins the object payload returned by Session.getDiff', () => {
 });
 
 test('server variants read by the browser validate more than their type name', () => {
-  const intentionallyOpaque = new Set(['session-sleep', 'session-wake', 'session-worktree-ready', 'branch-gc-status', 'shutting-down', 'restarting']);
+  const intentionallyOpaque = new Set(['session-sleep', 'session-wake', 'branch-gc-status', 'shutting-down', 'restarting']);
   for (const option of ServerMessage.options) {
     const type = option.shape.type.value;
     if (intentionallyOpaque.has(type)) continue;

@@ -46,7 +46,7 @@ const { createBackendSessionRuntime } = require('./backend-session-runtime');
 
 /** @typedef {{ id: string, name: string, path: string, state: string, stateSince: number, pendingRestart?: boolean, dangerouslySkipPermissions?: boolean, isWorktree?: boolean, resumeSessionId?: string|null, _killReap?: Promise<unknown>, start: () => unknown, destroy: () => void, toSnapshot: () => Record<string, unknown>, getWorktreeCarry?: () => Record<string, unknown>|null, adoptWorktree: (worktree: Record<string, unknown>) => void, discardWorktree?: () => unknown, discardWorktreeIfClean: () => unknown }} BackendRegistrySession */
 /** @typedef {Record<string, unknown> & { id: string, name: string, path: string }} BackendRegistryProject */
-/** @typedef {Record<string, unknown> & { projects: BackendRegistryProject[], integrationBranch?: string }} BackendRegistryConfig */
+/** @typedef {Record<string, unknown> & { projects: BackendRegistryProject[], integrationBranch?: string|null }} BackendRegistryConfig */
 /** @typedef {{ snapshotMessage: () => Record<string, unknown> }} BackendSnapshotLane */
 /** @typedef {BackendSnapshotLane & { noteRepos: () => unknown, detachSessionTap: (session: BackendRegistrySession) => void, releaseSessionRoots: (session: BackendRegistrySession) => void, stop: () => unknown }} BackendIngestRuntimeLane */
 /** @typedef {BackendSnapshotLane & { handleUpgrade: (request: object, socket: object, head: Buffer) => void, stop: () => unknown }} BackendVisionsRuntimeLane */

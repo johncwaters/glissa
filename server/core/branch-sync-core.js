@@ -57,6 +57,13 @@ function decideResyncAction(state, isCheckedOut) {
   return 'none';
 }
 
+function buildResyncCommand(decision, { upstream, branch, remote, opts }) {
+  if (decision === 'ff-merge') return { args: ['merge', '--ff-only', upstream], opts, successAction: 'fast-forwarded' };
+  if (decision === 'ff-fetch') return { args: ['fetch', '--quiet', remote, `${branch}:${branch}`], opts: { ...opts, timeout: 8000 }, successAction: 'fast-forwarded' };
+  if (decision === 'push') return { args: ['push', remote, branch], opts: { ...opts, timeout: 15000 }, successAction: 'pushed' };
+  return null;
+}
+
 // A short, readable line from a failed git command. Strip command echoes, ANSI/control noise,
 // then prefer git's own fatal/error/push-rejection line over hook chatter.
 function firstGitErrorLine(err) {
@@ -75,4 +82,11 @@ function firstGitErrorLine(err) {
   return line ? line.slice(0, maxGitErrorLineLength) : 'git command failed';
 }
 
-module.exports = { parseLeftRightCount, decideBranchSyncState, parseRemoteFromUpstream, decideResyncAction, firstGitErrorLine };
+module.exports = {
+  parseLeftRightCount,
+  decideBranchSyncState,
+  parseRemoteFromUpstream,
+  decideResyncAction,
+  buildResyncCommand,
+  firstGitErrorLine,
+};

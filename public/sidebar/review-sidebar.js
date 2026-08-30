@@ -25,6 +25,7 @@ import { sessionUIs } from '../session-card/card-registry.js';
 import { openConfirmDialog } from '../session-card/modal.js';
 import { getSidebarWidth, setSidebarWidth } from '../ui-prefs.js';
 import { parseUnifiedDiff, shouldDropDiffCache, summarizeFiles } from './diff-core.mjs';
+import { baseLabel, mergeActionTitle, mergeTargetText, parkedStatusText } from './review-copy-core.mjs';
 import { getSelectedId, onSelectionChange, setSelectedId } from './selection.js';
 
 const REVIEWABLE = new Set(['pending-review', 'parked']);
@@ -33,6 +34,7 @@ const SIDEBAR_MIN = 260;    // resize bounds (px)
 const SIDEBAR_MAX = 700;
 
 const statusById = new Map(); // id -> mergeStatus ('none'|'pending-review'|'merging'|'parked'|'merged')
+const reasonById = new Map();
 const diffById = new Map();   // id -> { committed, uncommitted, hasCommits } (null until fetched)
 // id -> branch-sync payload; null while a request is in flight, undefined if never requested.
 const syncById = new Map();
@@ -187,9 +189,10 @@ function applyStatus(id, next) {
   if (id === getSelectedId()) render();
 }
 
-export function setReviewMergeStatus(id, mergeStatus) {
+export function setReviewMergeStatus(id, mergeStatus, reason = null) {
   const prev = statusById.get(id) || 'none';
   const next = mergeStatus || 'none';
+  reasonById.set(id, reason);
   applyStatus(id, next);
   // On a fresh transition INTO a reviewable state, auto-select it when nothing reviewable is selected,
   // so the always-visible panel jumps to the session that just produced changes.
@@ -203,7 +206,8 @@ export function setReviewMergeStatus(id, mergeStatus) {
 // Quiet variant for snapshot hydration (reconnect / page load): record the status without auto-opening
 // or auto-selecting. Auto-surfacing is reserved for LIVE transitions (setReviewMergeStatus), so a
 // reconnect never pops the panel open on its own.
-export function seedReviewMergeStatus(id, mergeStatus) {
+export function seedReviewMergeStatus(id, mergeStatus, reason = null) {
+  reasonById.set(id, reason);
   applyStatus(id, mergeStatus || 'none');
 }
 
@@ -280,6 +284,7 @@ export function refreshReviewSidebar(id) {
 // Drop a removed session's cached review state, so the maps never leak.
 export function forgetReviewSession(id) {
   statusById.delete(id);
+  reasonById.delete(id);
   diffById.delete(id);
   syncById.delete(id);
   resyncingIds.delete(id);
@@ -316,6 +321,7 @@ export function resolveSelectedSession() {
   const ui = sessionUIs.get(id);
   if (!ui) return false;
   if ((statusById.get(id) || 'none') !== 'parked') return false;
+  if (reasonById.get(id) === 'base-diverged') return false;
   if (!isLive(ui.currentState)) return false;
   sendControlMsg({ type: 'resolve-session-merge', id });
   return true;
@@ -473,6 +479,7 @@ function render() {
   }
 
   const status = statusById.get(id) || 'none';
+  const mergeReason = reasonById.get(id) || null;
   const state = ui.currentState;
   const reviewable = REVIEWABLE.has(status);
 
@@ -503,7 +510,7 @@ function render() {
 
   // ── Pinned control region: status note + overall totals + actions + why-disabled reason.
   // Only statuses that carry news get a note; a reviewable diff speaks for itself in the body.
-  const statusNoteText = status === 'parked' ? 'Needs manual merge'
+  const statusNoteText = status === 'parked' ? parkedStatusText(mergeReason)
     : status === 'merging' ? 'Merging...'
     : status === 'merged' ? 'Merged'
     : null;
@@ -516,9 +523,9 @@ function render() {
 
   // No combined total in the actions row: each section head right below carries its own +/- stat,
   // and a pinned grand total only repeated those numbers one scroll-line above them.
-  const effectiveBase = ui.effectiveBase || 'base';
+  const effectiveBase = baseLabel(ui.effectiveBase);
   const actions = renderActions(id, {
-    status, reviewable, mergeEnabled, live, state, sync, resyncing, effectiveBase,
+    status, reviewable, mergeEnabled, live, state, sync, resyncing, effectiveBase, mergeReason,
   });
   controlsEl.append(actions);
 
@@ -557,7 +564,7 @@ function render() {
 
   // ── Scrolling body: diff sections only. Committed section first: it is what a merge moves into the base.
   if (committedFiles.length > 0) {
-    bodyEl.append(renderSection('committed', 'Committed', `merges into ${effectiveBase}`, committedFiles));
+    bodyEl.append(renderSection('committed', 'Committed', mergeTargetText(effectiveBase), committedFiles));
   }
   if (committedFiles.length === 0 && !reasonShown) {
     // A pinned reason line ("Checking for changes...", "Session ended.") already explains an empty
@@ -731,7 +738,7 @@ function actionButton({ id, label, shortcut, title, disabled = false, danger = f
   return btn;
 }
 
-function renderActions(id, { status, reviewable, mergeEnabled, live, state, sync, resyncing, effectiveBase }) {
+function renderActions(id, { status, reviewable, mergeEnabled, live, state, sync, resyncing, effectiveBase, mergeReason }) {
   const actions = el('div', 'review-actions');
 
   // Suppress Merge when parked: Resolve is the only path forward until the conflict clears.
@@ -741,7 +748,7 @@ function renderActions(id, { status, reviewable, mergeEnabled, live, state, sync
       id: 'review-merge-btn',
       label: 'Merge',
       shortcut: 'alt+m',
-      title: `Merge into ${effectiveBase}, push it, and rebase this worktree, then keep working (alt+m)`,
+      title: mergeActionTitle(effectiveBase),
       disabled: !mergeEnabled,
       onClick: () => sendMergeContinue(id, state),
     }));
@@ -749,7 +756,7 @@ function renderActions(id, { status, reviewable, mergeEnabled, live, state, sync
 
   // Parked: the auto rebase-then-FF could not complete due to a conflict. Paste a context-rich
   // resolve prompt into the session so the agent can finish the merge; operator re-runs Merge after.
-  const resolveShown = status === 'parked' && live;
+  const resolveShown = status === 'parked' && live && mergeReason !== 'base-diverged';
   if (resolveShown) {
     actions.append(actionButton({
       label: 'Resolve',

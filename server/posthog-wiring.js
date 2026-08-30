@@ -22,6 +22,7 @@ const {
 } = require('./ephemeral-session');
 const core = require('./core/posthog-core');
 const { normalizePackNames } = require('./core/pack-core');
+const { configuredIntegrationBranch } = require('./core/integration-branch-core');
 const { createPosthogPoller } = require('./posthog-poller');
 const { createPosthogApi } = require('./posthog-api');
 const { sendPosthogPing } = require('./posthog-telegram');
@@ -80,7 +81,7 @@ const WORK_DIR = path.join(glissaHomeDir(), 'posthog-work');
 const REPORT_RETAIN_FILES = 20;
 const FORCE_TICK_DEBOUNCE_MS = 3000;
 
-/** @typedef {{ replayBufferKB?: number, worktreeRoot?: string,
+/** @typedef {{ replayBufferKB?: number, worktreeRoot?: string, integrationBranch?: string | null,
  *   posthog?: { enabled?: boolean, apiKey?: string, host?: string, autoFix?: boolean,
  *     fixTimeoutSeconds?: number, intervalMinutes?: number, investigationTimeoutSeconds?: number,
  *     maxConcurrentInvestigations?: number, minUsersToInvestigate?: number, packs?: unknown,
@@ -90,7 +91,7 @@ const FORCE_TICK_DEBOUNCE_MS = 3000;
  *     trafficSpikeMultiplier?: number, transientRecurrenceLimit?: number, userEscalationThreshold?: number } | null,
  *   telegram?: { botToken?: string, chatId?: string } | null }} PosthogWiringConfig */
 /** @typedef {{
- *   create: (options: { projectPath: string, teamId: string, label: string, worktreeBase: string }) =>
+ *   create: (options: { projectPath: string, teamId: string, label: string, worktreeBase: string, baseBranch: string | null }) =>
  *     Promise<{ isGit: boolean, cwd: string, branch: string, base: string, baseSha?: string } | null> |
  *     { isGit: boolean, cwd: string, branch: string, base: string, baseSha?: string } | null,
  *   discard: (options: { projectPath: string, workspace: {
@@ -535,6 +536,7 @@ function createPosthogWiring({
       teamId: 'radar-fix',
       label: `${safeIssueId(projectId)}-${issueId}-${newFixDiscriminator()}`,
       worktreeBase: worktreeBaseFor(repoPath),
+      baseBranch: configuredIntegrationBranch(config),
     })).catch((e) => {
       console.warn(`[posthog-poller] fix worktree create failed: ${e.message}`);
       return null;

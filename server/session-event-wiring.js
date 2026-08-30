@@ -197,12 +197,23 @@ function createSessionEventWiring(dependencies) {
         timestamp: Date.now(),
       });
     });
-    session.on('worktree-ready', ({ branch }) => {
+    session.on('worktree-warning', ({ branch, notice }) => {
+      dependencies.broadcastControl({
+        type: 'session-worktree-warning',
+        id: session.id,
+        session: session.name,
+        branch,
+        notice,
+        timestamp: Date.now(),
+      });
+    });
+    session.on('worktree-ready', ({ branch, base }) => {
       dependencies.broadcastControl({
         type: 'session-worktree-ready',
         id: session.id,
         session: session.name,
         branch,
+        base,
         timestamp: Date.now(),
       });
       dependencies.broadcastControl({ type: 'session-git', id: session.id, worktree: !!session.isWorktree });

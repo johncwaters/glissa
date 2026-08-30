@@ -24,6 +24,7 @@ test('SessionSnapshot preserves nested extension fields', () => {
     pendingWakeup: { at: 2, kind: 'cron', reason: null, extension: true },
     pendingPromptKind: null,
     mergeStatus: 'none',
+    mergeReason: null,
     worktreeNotice: null,
     effectiveBase: null,
     auditLog: [],

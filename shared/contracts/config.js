@@ -155,7 +155,7 @@ const BROWSER_CONFIG_SHAPE = {
   autoResume: optionalBoolean('autoResume'),
   telegramNotifications: optionalBoolean('telegramNotifications'),
   packsAutoRebuild: optionalBoolean('packsAutoRebuild'),
-  integrationBranch: optionalString('integrationBranch'),
+  integrationBranch: optionalString('integrationBranch').nullable(),
   worktreeRoot: optionalString('worktreeRoot'),
   worktreeShare: z.array(z.string()).optional(),
   repoRoots: z.array(z.string()).optional(),

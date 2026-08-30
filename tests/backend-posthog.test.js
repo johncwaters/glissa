@@ -270,6 +270,7 @@ test('a fix job runs in an isolated worktree on a sanitized radar-fix branch', a
     assert.equal(harness.calls.create[0].teamId, 'radar-fix');
     assert.match(harness.calls.create[0].label, /^1-iss-1-[a-z0-9]+$/);
     assert.equal(harness.calls.create[0].projectPath, harness.repoDir);
+    assert.equal(harness.calls.create[0].baseBranch, null);
     assert.equal(constructed[0].path, path.join(harness.repoDir, 'wt'), 'never the live checkout');
   } finally {
     fs.rmSync(harness.repoDir, { recursive: true, force: true });

@@ -222,9 +222,8 @@ class Session extends EventEmitter {
     // The platform this session spawns and kills for. Defaults to the real one; tests pass it explicitly
     // so both the win32 taskkill branch and the POSIX group-kill branch run on a single host.
     platform = process.platform,
-    // Worktree isolation (injected by backend). When gitWorkspace + integrationBranch are present and
-    // `path` is a git repo, the session runs in a throwaway worktree forked off integrationBranch and
-    // merges back on review. Absent (unit tests, no-git) -> runs in place at `path` exactly as before.
+    // Worktree isolation (injected by backend). A null branch asks gitWorkspace to detect the repo's
+    // default; only an absent gitWorkspace runs the session in place.
     gitWorkspace = null,
     integrationBranch = null,
     // Rebase a quiescent, clean worktree onto the integration branch as soon as that branch moves
@@ -874,6 +873,7 @@ class Session extends EventEmitter {
       pendingWakeup: this.backgroundTracking.pendingWakeup(),
       pendingPromptKind: this._pendingPromptKind,
       mergeStatus: this.mergeStatus,
+      mergeReason: this.mergeReason,
       worktreeNotice: this.worktreeNotice,
       effectiveBase: this.worktreeLifecycle.snapshot().effectiveBase,
       auditLog: this.auditLog,

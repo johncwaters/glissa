@@ -129,6 +129,24 @@ test('git helpers normalize remote refs, retain unresolved protected names, and 
   assert.ok(calls.some(([args]) => args.join(' ') === 'push origin --delete glissa/session/abc'));
 });
 
+test('integration tips include the detected default when branch config is auto', async () => {
+  const gitWorkspace = createGitWorkspace({
+    git: async (args) => {
+      if (args[0] === 'symbolic-ref') return 'origin/trunk';
+      if (args[0] === 'for-each-ref') return 'refs/remotes/origin/trunk trunk-sha';
+      return '';
+    },
+  });
+  assert.deepEqual(await gitWorkspace.listIntegrationTips({ projectPath: '/repo', integrationBranch: null }), {
+    ok: true,
+    integrationTips: [
+      { branch: 'trunk', sha: 'trunk-sha' },
+      { branch: 'main', sha: null },
+      { branch: 'master', sha: null },
+    ],
+  });
+});
+
 test('default config constructs and starts the lane poller', async () => {
   let createCount = 0;
   const wiring = createBranchGcWiring({

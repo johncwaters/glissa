@@ -18,17 +18,18 @@ const {
   decideBranchSyncState,
   parseRemoteFromUpstream,
   decideResyncAction,
+  buildResyncCommand,
   firstGitErrorLine,
 } = require("../server/core/branch-sync-core");
 
 const WORKTREE_CHECK_DEBOUNCE_MS = 400;
 
 /**
- * @typedef {{ cwd: string, isGit: boolean, branch?: string | null, base?: string | null, baseSha?: string | null, reason?: string, conflictPath?: string }} Workspace
+ * @typedef {{ cwd: string, isGit: boolean, branch?: string | null, base?: string | null, baseSha?: string | null, reason?: string, conflictPath?: string, warning?: string | null }} Workspace
  * @typedef {{ state: import('../shared/states').SessionState, isDestroyed: boolean, isTeardownPending: boolean, hasLivePty: boolean }} SessionSnapshot
- * @typedef {{ merged: boolean, parked?: boolean, refused?: boolean, reason?: string, conflicts?: string[], baseSha?: string, restoreConflict?: boolean }} MergeResult
+ * @typedef {{ merged: boolean, parked?: boolean, refused?: boolean, reason?: string, conflicts?: string[], baseSha?: string, restoreConflict?: boolean, warning?: string }} MergeResult
  * @typedef {{ branch: string | null, upstream: string | null, state: string, ahead: number, behind: number, fetched: boolean | null, action: string, error: string | null }} BranchSyncResult
- * @typedef {{ create: (...args: unknown[]) => Workspace | Promise<Workspace>, populate: (...args: unknown[]) => unknown, hasUnmergedWork: (...args: unknown[]) => boolean | Promise<boolean>, discard: (...args: unknown[]) => unknown, mergeBack: (...args: unknown[]) => MergeResult | Promise<MergeResult>, mergeKeep: (...args: unknown[]) => MergeResult | Promise<MergeResult>, rebaseOnly: (...args: unknown[]) => Promise<{ ok?: boolean, upToDate?: boolean, rebased?: boolean, baseSha?: string, headSha?: string, rerereReplayed?: boolean, reason?: string, conflicts?: string[] }>, syncIntegrationBranch?: (...args: unknown[]) => Promise<{ outcome: string, from: string | null, to: string | null, error?: string }> }} GitWorkspace
+ * @typedef {{ create: (...args: unknown[]) => Workspace | Promise<Workspace>, populate: (...args: unknown[]) => unknown, hasUnmergedWork: (...args: unknown[]) => boolean | Promise<boolean>, discard: (...args: unknown[]) => unknown, mergeBack: (...args: unknown[]) => MergeResult | Promise<MergeResult>, mergeKeep: (...args: unknown[]) => MergeResult | Promise<MergeResult>, rebaseOnly: (...args: unknown[]) => Promise<{ ok?: boolean, upToDate?: boolean, rebased?: boolean, baseSha?: string, headSha?: string, rerereReplayed?: boolean, reason?: string, conflicts?: string[] }>, syncIntegrationBranch?: (...args: unknown[]) => Promise<{ outcome: string, from: string | null, to: string | null, error?: string }>, detectDefaultBranch?: (options: { projectPath: string }) => Promise<string | null> }} GitWorkspace
  * @typedef {{ state: () => SessionSnapshot, projectPath?: () => string, emit: (event: string, detail: Record<string, unknown>) => void, recordDecision: (entry: Record<string, unknown>) => void, pasteText: (text: string) => Record<string, unknown> }} SessionPort
  * @typedef {{ id: string, projectPath: string, integrationBranch?: string | null, gitWorkspace?: GitWorkspace | null, autoRebase?: boolean, syncOnStart?: boolean, liveWorktreeReview?: boolean, worktreeRoot?: string | null, worktreeShare?: string[] | null, port: SessionPort }} WorktreeLifecycleOptions
  * @typedef {object} WorktreeLifecycleState
@@ -66,12 +67,6 @@ function gitStrict(args, opts) {
     });
   });
 }
-
-const RESYNC_COMMANDS = {
-  "ff-merge": ({ upstream, opts }) => ({ args: ["merge", "--ff-only", upstream], opts, successAction: "fast-forwarded" }),
-  "ff-fetch": ({ branch, remote, opts }) => ({ args: ["fetch", "--quiet", remote, `${branch}:${branch}`], opts: { ...opts, timeout: 8000 }, successAction: "fast-forwarded" }),
-  push: ({ branch, remote, opts }) => ({ args: ["push", remote, branch], opts: { ...opts, timeout: 15000 }, successAction: "pushed" }),
-};
 
 function stopWatcher(watcher) {
   if (!watcher) return null;
@@ -123,6 +118,10 @@ function createSessionWorktreeLifecycle({
     lastSignature: null,
   };
 
+  function effectiveIntegrationBranch() {
+    return lifecycleState.workspace?.base || lifecycleState.effectiveBase || integrationBranch || null;
+  }
+
   function snapshot() {
     return {
       worktreeDir: lifecycleState.worktreeDir,
@@ -132,7 +131,7 @@ function createSessionWorktreeLifecycle({
       mergeReason: lifecycleState.mergeReason,
       mergeConflicts: [...lifecycleState.mergeConflicts],
       worktreeNotice: lifecycleState.worktreeNotice,
-      effectiveBase: lifecycleState.effectiveBase || integrationBranch || null,
+      effectiveBase: effectiveIntegrationBranch(),
       isWorktree: lifecycleState.isWorktree,
       isAutoRebasing: lifecycleState.autoRebasing,
       hasConflictCooldown: Boolean(lifecycleState.rebaseConflictKey),
@@ -225,10 +224,11 @@ function createSessionWorktreeLifecycle({
     const onChange = () => scheduleCheck();
     lifecycleState.worktreeWatcher = createWorktreeWatcher({ worktreeDir: lifecycleState.worktreeDir, onChange });
     lifecycleState.worktreeWatcher.start();
-    if (liveWorktreeReview === false || !lifecycleState.commonGitDir || !integrationBranch) return;
+    const watchedBranch = effectiveIntegrationBranch();
+    if (liveWorktreeReview === false || !lifecycleState.commonGitDir || !watchedBranch) return;
     lifecycleState.integrationWatcher = createIntegrationRefWatcher({
       commonGitDir: lifecycleState.commonGitDir,
-      branch: integrationBranch,
+      branch: watchedBranch,
       onChange,
     });
     lifecycleState.integrationWatcher.start();
@@ -253,7 +253,9 @@ function createSessionWorktreeLifecycle({
     emit = true,
   }) {
     if (!worktreeDir) return;
-    lifecycleState.workspace = { cwd: worktreeDir, isGit: true, branch, base: base || integrationBranch, baseSha };
+    const resolvedBase = base || integrationBranch || null;
+    lifecycleState.workspace = { cwd: worktreeDir, isGit: true, branch, base: resolvedBase, baseSha };
+    lifecycleState.effectiveBase = resolvedBase;
     lifecycleState.worktreeDir = worktreeDir;
     lifecycleState.baseSha = baseSha;
     lifecycleState.commonGitDir = resolveCommonGitDir();
@@ -269,13 +271,22 @@ function createSessionWorktreeLifecycle({
     return /** @type {GitWorkspace & Required<Pick<GitWorkspace, 'syncIntegrationBranch'>>} */ (gitWorkspace);
   }
 
-  async function syncIntegrationBranchForStart(trigger) {
+  async function resolveBaseForStart() {
+    const resolvedBase = effectiveIntegrationBranch();
+    if (resolvedBase) return resolvedBase;
+    if (!gitWorkspace || typeof gitWorkspace.detectDefaultBranch !== "function") return null;
+    const detectedBase = await gitWorkspace.detectDefaultBranch({ projectPath: currentProjectPath() });
+    lifecycleState.effectiveBase = detectedBase;
+    return detectedBase;
+  }
+
+  async function syncIntegrationBranchForStart(trigger, branch) {
     const syncGitWorkspace = syncableGitWorkspace();
-    if (!syncGitWorkspace) return;
+    if (!syncGitWorkspace || !branch) return null;
     try {
       const sync = await syncGitWorkspace.syncIntegrationBranch({
         projectPath: currentProjectPath(),
-        branch: integrationBranch,
+        branch,
       });
       port.recordDecision({
         kind: "integration-sync",
@@ -289,9 +300,21 @@ function createSessionWorktreeLifecycle({
         const detail = sync.error ? `${sync.outcome}: ${sync.error}` : sync.outcome;
         console.warn(`[session ${id}] integration sync failed during ${trigger}: ${detail}`);
       }
+      return sync;
     } catch (error) {
       console.warn(`[session ${id}] integration sync failed during ${trigger}: ${error.message}`);
+      return null;
     }
+  }
+
+  function forkSyncWarning(sync, branch) {
+    if (!sync || !branch) return null;
+    if (sync.outcome === "diverged") return `base ${branch} has diverged from origin/${branch}; forked from local`;
+    if (sync.outcome === "fetch-failed") return `could not fetch origin/${branch}; forked from local`;
+    if (sync.outcome === "checked-out" || sync.outcome === "update-failed") {
+      return `could not fast-forward ${branch} from origin/${branch}; forked from local`;
+    }
+    return null;
   }
 
   async function syncFreshWorktree() {
@@ -299,7 +322,8 @@ function createSessionWorktreeLifecycle({
     // turned the feature off would otherwise still get an unattended rewrite of their worktree in the
     // spawn gap, which is the half of it they can actually feel.
     if (!syncableGitWorkspace()) return;
-    await syncIntegrationBranchForStart(SPAWN_GAP_TRIGGER);
+    const branch = await resolveBaseForStart();
+    await syncIntegrationBranchForStart(SPAWN_GAP_TRIGGER, branch);
     if (port.state().isDestroyed) return;
     if (!lifecycleState.workspace) return;
     const signature = await api.computeWorktreeSignature();
@@ -308,12 +332,13 @@ function createSessionWorktreeLifecycle({
   }
 
   async function provision({ fresh = false } = {}) {
-    if (!gitWorkspace || !integrationBranch) return true;
+    if (!gitWorkspace) return true;
     if (lifecycleState.worktreeDir && fs.existsSync(lifecycleState.worktreeDir)) {
       if (fresh) await syncFreshWorktree();
       return true;
     }
-    await syncIntegrationBranchForStart("initial-create");
+    const baseBranch = await resolveBaseForStart();
+    const initialSync = await syncIntegrationBranchForStart("initial-create", baseBranch);
     if (port.state().isDestroyed) return false;
     let workspace;
     try {
@@ -321,7 +346,7 @@ function createSessionWorktreeLifecycle({
         projectPath: currentProjectPath(),
         teamId: "session",
         label: id,
-        baseBranch: integrationBranch,
+        baseBranch,
         worktreeBase: worktreeRoot,
         shareList: worktreeShare,
       });
@@ -330,7 +355,9 @@ function createSessionWorktreeLifecycle({
       return true;
     }
     if (workspace?.reason === "no-base-branch") {
-      lifecycleState.worktreeNotice = `Integration branch "${integrationBranch}" not found. Create it, then start this session.`;
+      lifecycleState.worktreeNotice = integrationBranch
+        ? `Integration branch "${integrationBranch}" not found. Create it, then start this session.`
+        : "No default branch found. Configure integrationBranch or create main or master, then start this session.";
       port.emit("worktree-blocked", { id, branch: integrationBranch, notice: lifecycleState.worktreeNotice });
       return false;
     }
@@ -339,7 +366,7 @@ function createSessionWorktreeLifecycle({
       if (workspace.branch && workspace.conflictPath && fs.existsSync(workspace.conflictPath)
           && !isSameDirectoryPath(workspace.conflictPath, currentProjectPath())) {
         try {
-          adoptWorktree({ worktreeDir: workspace.conflictPath, branch: workspace.branch, base: integrationBranch });
+          adoptWorktree({ worktreeDir: workspace.conflictPath, branch: workspace.branch, base: workspace.base || integrationBranch });
           adopted = true;
         } catch (error) {
           console.warn(`[session ${id}] survivor adopt failed: ${error.message} - running in place`);
@@ -352,11 +379,16 @@ function createSessionWorktreeLifecycle({
           wtDir: lifecycleState.worktreeDir,
           shareList: worktreeShare,
         })).catch(() => {});
-        port.emit("worktree-ready", { id, worktreeDir: lifecycleState.worktreeDir, branch: workspace.branch });
+        port.emit("worktree-ready", {
+          id,
+          worktreeDir: lifecycleState.worktreeDir,
+          branch: workspace.branch,
+          base: effectiveIntegrationBranch(),
+        });
         return true;
       }
       lifecycleState.worktreeNotice = `session branch already checked out at ${workspace.conflictPath}; running in place`;
-      port.emit("worktree-blocked", { id, branch: integrationBranch, notice: lifecycleState.worktreeNotice });
+      port.emit("worktree-blocked", { id, branch: effectiveIntegrationBranch(), notice: lifecycleState.worktreeNotice });
     }
     if (!workspace || !workspace.isGit) {
       lifecycleState.worktreeDir = null;
@@ -364,13 +396,16 @@ function createSessionWorktreeLifecycle({
       return true;
     }
     lifecycleState.workspace = workspace;
+    lifecycleState.effectiveBase = workspace.base || null;
     lifecycleState.worktreeDir = workspace.cwd;
     lifecycleState.commonGitDir = resolveCommonGitDir();
     lifecycleState.baseSha = workspace.baseSha || null;
     lifecycleState.worktreeNotice = null;
     setMergeStatus("none", {}, { emit: false });
     lifecycleState.isWorktree = true;
-    port.emit("worktree-ready", { id, worktreeDir: workspace.cwd, branch: workspace.branch });
+    const syncWarning = forkSyncWarning(initialSync, workspace.base || baseBranch);
+    if (syncWarning) port.emit("worktree-warning", { id, branch: workspace.base || null, notice: syncWarning });
+    port.emit("worktree-ready", { id, worktreeDir: workspace.cwd, branch: workspace.branch, base: workspace.base || null });
     return true;
   }
 
@@ -378,7 +413,11 @@ function createSessionWorktreeLifecycle({
     if (!lifecycleState.worktreeDir) return false;
     if (!gitWorkspace || !lifecycleState.workspace) return true;
     try {
-      return await gitWorkspace.hasUnmergedWork({ projectPath: currentProjectPath(), workspace: lifecycleState.workspace, integrationBranch });
+      return await gitWorkspace.hasUnmergedWork({
+        projectPath: currentProjectPath(),
+        workspace: lifecycleState.workspace,
+        integrationBranch: effectiveIntegrationBranch(),
+      });
     } catch {
       return true;
     }
@@ -422,7 +461,7 @@ function createSessionWorktreeLifecycle({
     if (!session.hasLivePty) return { ok: false, reason: "no-pty" };
     return port.pasteText(buildMergePrompt({
       branch: lifecycleState.workspace?.branch || undefined,
-      target: integrationBranch || undefined,
+      target: effectiveIntegrationBranch() || undefined,
       reason: lifecycleState.mergeReason || undefined,
       conflicts: lifecycleState.mergeConflicts,
       worktreeDir: lifecycleState.worktreeDir || undefined,
@@ -430,6 +469,10 @@ function createSessionWorktreeLifecycle({
   }
 
   async function resolveEffectiveBase(opts) {
+    if (lifecycleState.workspace?.base) {
+      lifecycleState.effectiveBase = lifecycleState.workspace.base;
+      return lifecycleState.effectiveBase;
+    }
     const upstream = (await gitOut(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "HEAD@{upstream}"], opts)).trim();
     const hasUpstream = Boolean(upstream) && !upstream.includes("@{");
     const branch = hasUpstream ? (await gitOut(["rev-parse", "--abbrev-ref", "HEAD"], opts)).trim() : "";
@@ -437,7 +480,7 @@ function createSessionWorktreeLifecycle({
       lifecycleState.effectiveBase = upstream;
       return upstream;
     }
-    lifecycleState.effectiveBase = integrationBranch || null;
+    lifecycleState.effectiveBase = effectiveIntegrationBranch();
     return lifecycleState.effectiveBase;
   }
 
@@ -514,7 +557,7 @@ function createSessionWorktreeLifecycle({
   }
 
   async function getBranchSync() {
-    const branch = integrationBranch;
+    const branch = effectiveIntegrationBranch();
     if (!branch || !currentProjectPath()) return noUpstream(branch);
     const opts = { cwd: currentProjectPath(), encoding: "utf8", timeout: 10000 };
     const upstream = await branchUpstream(branch, opts);
@@ -524,7 +567,7 @@ function createSessionWorktreeLifecycle({
   }
 
   async function resyncBranchBody() {
-    const branch = integrationBranch;
+    const branch = effectiveIntegrationBranch();
     if (!branch || !currentProjectPath()) return { ...noUpstream(branch), action: "none", error: null };
     const opts = { cwd: currentProjectPath(), encoding: "utf8", timeout: 10000 };
     const upstream = await branchUpstream(branch, opts);
@@ -536,7 +579,7 @@ function createSessionWorktreeLifecycle({
     const decision = decideResyncAction(before.state, checkedOut === branch);
     let action = "none";
     let error = null;
-    const command = RESYNC_COMMANDS[decision]?.({ upstream, branch, remote, opts });
+    const command = buildResyncCommand(decision, { upstream, branch, remote, opts });
     if (command) {
       try {
         await gitStrict(command.args, command.opts);
@@ -571,7 +614,7 @@ function createSessionWorktreeLifecycle({
       const { ref: baseRef } = await resolveVerifiedBaseRef(run, opts, { swallowResolveError: true });
       if (baseRef) ahead = (await run(["rev-list", "--count", `${baseRef}..HEAD`])).trim();
       try {
-        const mergeTarget = integrationBranch || lifecycleState.workspace?.base || lifecycleState.baseSha;
+        const mergeTarget = effectiveIntegrationBranch() || lifecycleState.baseSha;
         const resolvedTarget = mergeTarget ? (await run(["rev-parse", "--verify", "--quiet", mergeTarget])).trim() : "";
         if (resolvedTarget) {
           targetSha = resolvedTarget;
@@ -620,7 +663,7 @@ function createSessionWorktreeLifecycle({
       const rebase = await gitWorkspace.rebaseOnly({
         projectPath: currentProjectPath(),
         workspace,
-        targetBranch: integrationBranch,
+        targetBranch: effectiveIntegrationBranch(),
       });
       const currentSession = port.state();
       if (trigger !== SPAWN_GAP_TRIGGER && !AUTO_REBASE_STATES.includes(currentSession.state)) {
@@ -677,11 +720,13 @@ function createSessionWorktreeLifecycle({
   async function runMergeEngine(workspaceApi, workspace, method) {
     setMergeStatus("merging");
     try {
-      return { result: await workspaceApi[method]({
+      const result = await workspaceApi[method]({
         projectPath: currentProjectPath(),
         workspace,
-        targetBranch: integrationBranch,
-      }) };
+        targetBranch: effectiveIntegrationBranch(),
+      });
+      if (result.warning) port.emit("worktree-warning", { id, branch: effectiveIntegrationBranch(), notice: result.warning });
+      return { result };
     } catch (error) {
       setMergeStatus("pending-review", { reason: error.message });
       return { failure: { merged: false, reason: error.message } };
