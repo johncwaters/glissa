@@ -26,7 +26,7 @@ export const EDIT_HOOK_TITLE = 'Edit hook';
 export const EDITOR_HINT = 'Saved to config.json.';
 export const ALL_PROJECTS_LABEL = 'All projects';
 export const NO_MATCHER_TEXT = 'This event takes no matcher.';
-export const DEFAULT_TIMEOUT_TEXT = "Blank uses Claude Code's default (60 seconds).";
+export const DEFAULT_TIMEOUT_TEXT = "Blank uses Claude Code's default for the event.";
 // The ceiling the server enforces, used only until a report states its own.
 export const DEFAULT_MAX_TIMEOUT_SEC = 600;
 

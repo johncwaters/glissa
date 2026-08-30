@@ -978,7 +978,9 @@ function registerControlHandlers(controlWss, deps) {
     /** @param {{ ok?: boolean, error?: string | null, id?: string }} payload */
     const reply = (payload) => replyTo(ws, msg, 'delete-hook-result', { ok: false, error: null, ...payload });
     const id = typeof msg.id === 'string' ? msg.id : '';
-    if (!readStoredHooks(config.hooks).some((hook) => hook.id === id)) { reply({ error: 'Unknown hook' }); return; }
+    // Checked against the RAW list: a record this build cannot read is invisible in the tab, but its id
+    // still has to be deletable or a hand edit is the only way out.
+    if (!rawStoredHooks(config.hooks).some((hook) => hook && hook.id === id)) { reply({ error: 'Unknown hook' }); return; }
     const freshConfig = configStore.save((cfg) => {
       const remaining = removeHook(rawStoredHooks(cfg.hooks), id);
       // An empty list REMOVES the key, so a config that never had hooks reads exactly as before.

@@ -561,6 +561,10 @@ export function applyHooksReport(msg) {
   if (!shouldApplyHooksReport(msg, _latestRequestId)) return;
   _report = msg;
   _busyIds.clear();
+  // A save sent while the socket was closed never gets an answer; the report that follows a reconnect
+  // (or another client's write) is the moment to let the operator submit again. The editor's requestId
+  // stays put, so a result that lands after the report still routes to the editor rather than a toast.
+  _saving = false;
   render();
 }
 

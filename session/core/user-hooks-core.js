@@ -12,6 +12,7 @@
 const MAX_NAME_LENGTH = 64;
 const MAX_MATCHER_LENGTH = 200;
 const MAX_COMMAND_LENGTH = 4000;
+const MAX_URL_LENGTH = 2000;
 const MAX_TIMEOUT_SEC = 600;
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const HTTP_URL_RE = /^https?:\/\/\S+$/i;
@@ -172,6 +173,7 @@ function normalizeHook(input, { id, knownProjectIds = null }) {
   if (type === 'http') {
     const url = trimmedString(input.url);
     if (!HTTP_URL_RE.test(url)) return fail('url must start with http:// or https://');
+    if (url.length > MAX_URL_LENGTH) return fail(`url is longer than ${MAX_URL_LENGTH} characters`);
     hook.url = url;
   }
   if (timeout.timeout) hook.timeout = timeout.timeout;

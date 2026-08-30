@@ -2734,10 +2734,6 @@ a.pr-title:hover {
   color: var(--text-muted);
 }
 
-/* ── Usage view ─────────────────────────────────────────────── */
-/* Same page rhythm and tokens as the Radar and PR views. Its own selectors because usage is the one
-   surface built out of dense numeric TABLES rather than attention rows, so it needs tabular alignment
-   and a meter the other two have no equivalent for. */
 /* ── Hooks view ──
    Same chrome as Mill (section heads, stat chips, meta lines) with one addition: an inline editor
    that reuses the Settings view's inputs, so a hook form looks like every other form in the app. */
@@ -3204,6 +3200,10 @@ html[data-layout="phone"] .hooks-editor-error { flex-basis: 100%; font-size: 12p
 html[data-layout="phone"] .hooks-editor-shortcut { display: none; }
 html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-height: 44px; font-size: 13px; }
 
+/* ── Usage view ─────────────────────────────────────────────── */
+/* Same page rhythm and tokens as the Radar and PR views. Its own selectors because usage is the one
+   surface built out of dense numeric TABLES rather than attention rows, so it needs tabular alignment
+   and a meter the other two have no equivalent for. */
 .usage-view {
   flex: 1;
   min-height: 0;

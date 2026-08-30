@@ -188,3 +188,11 @@ test('a malformed hooks request receives its typed error reply', async () => {
   await h.send({ type: 'delete-hook', requestId: 'r2' });
   assert.equal(h.sent.find((m) => m.type === 'delete-hook-result').ok, false);
 });
+
+test('delete-hook removes a stored record this build cannot read, so a hand edit is never the only way out', async () => {
+  const cfg = { projects: [], hooks: [record(), { id: 'future', name: 'f', event: 'NotYetKnown', type: 'command', command: 'x', enabled: true }] };
+  const h = harness(cfg);
+  await h.send({ type: 'delete-hook', requestId: 'r1', id: 'future' });
+  assert.equal(h.sent.find((m) => m.type === 'delete-hook-result').ok, true);
+  assert.deepEqual(cfg.hooks.map((hook) => hook.id), ['h1']);
+});

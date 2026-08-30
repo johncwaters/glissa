@@ -13,6 +13,7 @@
 //   Usage    - the real Usage panel, re-parented in as a full screen
 //   Mill     - the real Mill panel, re-parented in as a full screen
 //   Visions - the real Visions panel, re-parented in as a full screen
+//   Hooks    - the real Hooks panel, re-parented in as a full screen
 //   Settings - the real Settings panel, re-parented in as a full screen
 //
 // Nine elements are BORROWED from the desktop DOM rather than rebuilt: the review sidebar, the Radar,

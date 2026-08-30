@@ -172,3 +172,8 @@ test('the event catalog is unique and every entry says what its matcher matches 
   assert.equal(byName('PostModelSwitch').matcher, 'model name (regex)');
   assert.match(byName('PreToolUse').description, /Exit code 2 blocks the call/);
 });
+
+test('an http url is capped like every other field', () => {
+  const url = `http://x/${'a'.repeat(2000)}`;
+  assert.equal(core.normalizeHook(valid({ type: 'http', url }), { id: 'h1' }).error, 'url is longer than 2000 characters');
+});
