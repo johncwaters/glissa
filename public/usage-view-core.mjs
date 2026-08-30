@@ -273,6 +273,31 @@ export function projectionLimitLine(projection, tokenLimit) {
   return `On this burn rate the block ends at ${Math.round(pct)}% of that reference.`;
 }
 
+// ── Token composition ──
+// Where the tokens went, measured against the four parts' own sum rather than the report's token total:
+// the parts ARE that total, and a share of anything else would not add up to 100.
+
+const COMPOSITION_PARTS = Object.freeze([
+  { key: 'input', label: 'input' },
+  { key: 'output', label: 'output' },
+  { key: 'cacheCreate', label: 'cache write' },
+  { key: 'cacheRead', label: 'cache read' },
+]);
+
+export function compositionParts(totals) {
+  const parts = COMPOSITION_PARTS.map((spec) => {
+    const raw = Number(totals?.[spec.key]);
+    return { spec, tokens: Number.isFinite(raw) && raw > 0 ? raw : 0 };
+  });
+  const sum = parts.reduce((total, part) => total + part.tokens, 0);
+  if (sum <= 0) return [];
+  return parts.map((part) => {
+    const pct = percentOfTotal(part.tokens, sum) ?? 0;
+    const value = formatTokens(part.tokens);
+    return { key: part.spec.key, label: part.spec.label, value, pct, title: `${part.spec.label} ${value}, ${formatPercent(pct)}` };
+  });
+}
+
 // ── Glissa lanes ──
 // Which of Glissa's own automation lanes the spend belonged to. The join is exact (Glissa recorded spawning
 // the session), so `other` genuinely means "not spawned by Glissa" rather than "unrecognized".

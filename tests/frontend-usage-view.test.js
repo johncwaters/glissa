@@ -672,6 +672,45 @@ test('cacheSavingsTile: unpriced models turn the figure into a floor', async () 
   assert.equal(many.sub, '1.5M cache read tokens, a floor (2 unpriced models)');
 });
 
+// The four parts are measured against their own sum, not the report total, so they always add to 100.
+test('compositionParts: the four parts in bar order, each as a share of their own sum', async () => {
+  const { compositionParts } = await importCore();
+  const parts = compositionParts({ input: 250, output: 250, cacheCreate: 250, cacheRead: 250, tokens: 9_000_000 });
+  assert.deepEqual(
+    parts.map((part) => part.key),
+    ['input', 'output', 'cacheCreate', 'cacheRead'],
+  );
+  assert.deepEqual(
+    parts.map((part) => part.label),
+    ['input', 'output', 'cache write', 'cache read'],
+  );
+  assert.deepEqual(
+    parts.map((part) => part.pct),
+    [25, 25, 25, 25],
+  );
+  assert.equal(parts[2].value, '250');
+  assert.equal(parts[2].title, 'cache write 250, 25%');
+  // The usual shape: cache reads dwarf everything else, and a zero part keeps its slot in the legend.
+  const skewed = compositionParts({ input: 1000, output: 0, cacheCreate: 0, cacheRead: 999_000 });
+  assert.equal(skewed.length, 4);
+  assert.equal(skewed[0].pct, 0.1);
+  assert.equal(skewed[0].title, 'input 1k, 0.1%');
+  assert.equal(skewed[1].pct, 0);
+  assert.equal(skewed[1].title, 'output 0, 0%');
+  assert.equal(skewed[3].value, '999k');
+});
+
+test('compositionParts: nothing finite and positive means no row at all', async () => {
+  const { compositionParts } = await importCore();
+  assert.deepEqual(compositionParts({ input: 0, output: 0, cacheCreate: 0, cacheRead: 0 }), []);
+  assert.deepEqual(compositionParts({}), []);
+  assert.deepEqual(compositionParts(null), []);
+  assert.deepEqual(compositionParts(undefined), []);
+  assert.deepEqual(compositionParts({ input: Number.NaN, output: Infinity, cacheCreate: -5, cacheRead: null }), []);
+  // A single negative part cannot drag the others below the guard.
+  assert.equal(compositionParts({ input: -50, output: 100, cacheCreate: 0, cacheRead: 0 })[1].pct, 100);
+});
+
 test('no produced string contains an em dash, en dash or ellipsis character', async () => {
   const core = await importCore();
   const forbidden = [String.fromCharCode(0x2014), String.fromCharCode(0x2013), String.fromCharCode(0x2026)];
@@ -685,6 +724,9 @@ test('no produced string contains an em dash, en dash or ellipsis character', as
     produced.push(rtkTile.value, rtkTile.sub);
     const cacheTile = core.cacheSavingsTile({ cache: { savedUSD: n, cacheReadTokens: n, unpricedModels: ['a', 'b'] } });
     produced.push(cacheTile.value, cacheTile.sub);
+    for (const part of core.compositionParts({ input: n, output: 1, cacheCreate: n, cacheRead: 1250 })) {
+      produced.push(part.label, part.value, part.title);
+    }
   }
   for (const n of numbers) {
     produced.push(core.formatUsd(n), core.formatTokens(n), core.formatCount(n), core.formatMinutes(n));

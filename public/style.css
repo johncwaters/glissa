@@ -3217,18 +3217,47 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   color: var(--text-dim);
 }
 
+/* The query container for the bands below. Their split has to key off the width the page actually gets,
+   which is not the viewport: the review sidebar docks beside .app-main and is resizable to 700px, so a
+   wide window can still leave this element too narrow for two tracks. */
 .usage-content {
-  max-width: 1080px;
+  max-width: 1240px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 28px;
+  container: usage-panel / inline-size;
+}
+
+/* Three altitudes instead of one flat stack: a band pairs a main section with a column of the short
+   sections that qualify it. Single column at rest; room on the page is what buys the second track, so
+   nothing here keys off the phone layout. */
+.usage-band {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.usage-band-col {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+@container usage-panel (min-width: 1040px) {
+  /* Ceilings first: the plan and budget column leads, the burning block gets the wide track. */
+  .usage-band-now { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); }
+  .usage-band-spend,
+  .usage-band-trend { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
 }
 
 .usage-section {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
 }
 
 .usage-section-head {
@@ -3419,10 +3448,19 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   border-bottom: 1px solid var(--border-dim);
 }
 
+/* Hairline row rules plus a hover wash: at 11px a run of unruled rows smears into a block, and the
+   rule is what lets an eye track one row across five numeric columns. */
 .usage-table td {
-  padding: 3px 8px 3px 0;
+  padding: 4px 8px 4px 0;
   color: var(--text);
   vertical-align: top;
+  border-bottom: 1px solid color-mix(in oklab, var(--border-dim) 55%, transparent);
+}
+
+.usage-table tbody tr:last-child td { border-bottom: 0; }
+
+.usage-table tbody tr:hover td {
+  background: color-mix(in oklab, var(--text) 4%, transparent);
 }
 
 .usage-num {
@@ -3694,6 +3732,73 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
    than mixed into them: these re-cut the same numbers, they do not add to them. */
 .usage-vendor-tiles {
   margin-top: 2px;
+}
+
+/* Token composition: one stacked bar over four legend stats. A single-hue ramp on purpose (one voice),
+   ordered identically in bar and legend so the mapping never rides on color alone; the dominant segment
+   (usually cache read) is the quietest tint, so the bar spends almost no accent. */
+.usage-compo {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 560px;
+}
+
+.usage-compo-bar {
+  display: flex;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--border-dim);
+}
+
+.usage-compo-fill {
+  display: block;
+  height: 100%;
+}
+
+.usage-compo-fill[data-part="input"],
+.usage-compo-swatch[data-part="input"] { background: var(--accent); }
+
+.usage-compo-fill[data-part="output"],
+.usage-compo-swatch[data-part="output"] { background: color-mix(in oklab, var(--accent) 62%, var(--bg-surface)); }
+
+.usage-compo-fill[data-part="cacheCreate"],
+.usage-compo-swatch[data-part="cacheCreate"] { background: color-mix(in oklab, var(--accent) 38%, var(--bg-surface)); }
+
+.usage-compo-fill[data-part="cacheRead"],
+.usage-compo-swatch[data-part="cacheRead"] { background: color-mix(in oklab, var(--accent) 16%, var(--bg-surface)); }
+
+.usage-compo-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.usage-compo-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.usage-compo-swatch {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  align-self: center;
+}
+
+.usage-compo-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.usage-compo-value {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Which CLI a model belongs to, on the model rows, once more than one vendor is on the page. */
@@ -6372,6 +6477,8 @@ html[data-layout="phone"] .review-sidebar-body { overscroll-behavior: contain; }
    only grows the type and loosens the tiles into a wrapping grid a thumb can read. */
 html[data-layout="phone"] .usage-view { padding: 14px 12px 24px; font-size: 13px; }
 html[data-layout="phone"] .usage-content { gap: 24px; }
+html[data-layout="phone"] .usage-band,
+html[data-layout="phone"] .usage-band-col { gap: 24px; }
 html[data-layout="phone"] .usage-section-title { font-size: 12px; }
 html[data-layout="phone"] .usage-table { font-size: 12px; }
 html[data-layout="phone"] .usage-tile { flex: 1 1 calc(50% - 8px); min-width: 0; }

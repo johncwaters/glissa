@@ -41,6 +41,7 @@ import {
   budgetScopeLabel,
   burnTiles,
   cacheSavingsTile,
+  compositionParts,
   dailyRowForDay,
   dayRangeLabel,
   formatMinutes,
@@ -558,12 +559,10 @@ function buildTotalsSection() {
   const tone = blockAttentionTone(_report, _planLimits);
   const tiles = el('div', 'usage-tiles');
   tiles.append(buildTile('today', formatTokens(today?.tokens ?? 0), formatUsd(today?.costUSD ?? 0), tone).tile);
-  tiles.append(buildTile('all tokens', formatTokens(totals.tokens ?? 0), formatUsd(totals.costUSD ?? 0)).tile);
-  tiles.append(buildTile('input', formatTokens(totals.input ?? 0)).tile);
-  tiles.append(buildTile('output', formatTokens(totals.output ?? 0)).tile);
-  tiles.append(buildTile('cache write', formatTokens(totals.cacheCreate ?? 0)).tile);
-  tiles.append(buildTile('cache read', formatTokens(totals.cacheRead ?? 0)).tile);
+  tiles.append(buildTile('range total', formatTokens(totals.tokens ?? 0), formatUsd(totals.costUSD ?? 0)).tile);
   section.append(tiles);
+  const composition = buildCompositionRow(totals);
+  if (composition) section.append(composition);
   // The per-vendor split, only once a non-Claude vendor has data: on an all-Claude machine it would just
   // restate the totals above.
   const vendorRows = hasMultiVendorUsage(totals) ? vendorTotalsRows(totals) : [];
@@ -574,13 +573,44 @@ function buildTotalsSection() {
     }
     section.append(vendorTiles);
   }
-  const budget = buildBudgetMeters();
-  if (budget) section.append(budget);
   _sessionsTsEl = el('p', 'usage-meta', '');
   section.append(_sessionsTsEl);
   paintSessionsTs();
   _ticker.onTick(paintSessionsTs);
   return section;
+}
+
+/*
+ * Where the tokens went, as one stacked bar over a legend instead of four equal tiles. The usual
+ * story here is cache reads dwarfing everything else, and a bar states that at a glance where a row
+ * of same-sized tiles just adds numbers to compare. The legend order matches the bar order, so the
+ * mapping never rides on color alone.
+ */
+function buildCompositionRow(totals) {
+  const parts = compositionParts(totals);
+  if (parts.length === 0) return null;
+  const wrap = el('div', 'usage-compo');
+  // The legend carries every value, so the bar itself is presentation only.
+  const bar = el('div', 'usage-compo-bar');
+  bar.setAttribute('aria-hidden', 'true');
+  for (const part of parts) {
+    if (part.pct <= 0) continue;
+    const fill = el('span', 'usage-compo-fill');
+    fill.dataset.part = part.key;
+    fill.style.width = `${part.pct}%`;
+    fill.title = part.title;
+    bar.append(fill);
+  }
+  const legend = el('div', 'usage-compo-legend');
+  for (const part of parts) {
+    const item = el('span', 'usage-compo-item');
+    const swatch = el('span', 'usage-compo-swatch');
+    swatch.dataset.part = part.key;
+    item.append(swatch, el('span', 'usage-compo-label', part.label), el('span', 'usage-compo-value', part.value));
+    legend.append(item);
+  }
+  wrap.append(bar, legend);
+  return wrap;
 }
 
 /*
@@ -602,12 +632,15 @@ function buildSavingsSection() {
 }
 
 /*
- * The operator's own spend ceilings. Absent entirely with no budget configured: an unset budget must not
- * render as a zero one. Tones come from usage-budget-core, so the meter colour and the alert ladder agree.
+ * The operator's own spend ceilings, beside the plan limits because both are ceilings: the plan is the
+ * account's, the budget is the operator's. Absent entirely with no budget configured: an unset budget
+ * must not render as a zero one.
  */
-function buildBudgetMeters() {
+function buildBudgetsSection() {
   const rows = budgetRows(_report);
   if (rows.length === 0) return null;
+  const section = buildSection('Budgets', 'your own ceilings');
+  // Tones come from usage-budget-core, so the meter colour and the alert ladder agree.
   const wrap = el('div', 'usage-budgets');
   const settingsLink = createSettingsLink('machine-usage', 'usage-daily-budget', 'Budget settings');
   wrap.appendChild(settingsLink);
@@ -621,7 +654,8 @@ function buildBudgetMeters() {
     item.append(buildMeter(budgetRowPct(row), row.tone, budgetRowMeterLabel(row)));
     wrap.append(item);
   }
-  return wrap;
+  section.append(wrap);
+  return section;
 }
 
 // ── Over time ──
@@ -954,30 +988,58 @@ function selectorForFocusTarget(target) {
   return null;
 }
 
+/*
+ * The page reads in three altitudes rather than one flat stack: the ceilings (plan limits, budgets,
+ * the burning block), then the spend (totals, savings), then the history and breakdowns (over time,
+ * recent blocks, lanes, models, sessions). Each altitude is a band: on a wide window the short
+ * qualifying sections sit in a column beside the section they qualify instead of pushing it down.
+ */
 function buildBody() {
   if (!_root) return;
   _root.append(buildHeaderSection());
   // Plan limits come from the statusLine relay, not the transcript scan, so they are shown even when the
   // report itself is missing or unavailable.
   const plan = buildPlanLimitsSection();
-  if (plan) _root.append(plan);
   if (isUsageUnavailable(_report)) {
+    if (plan) _root.append(plan);
     _root.append(buildUnavailableSection());
     return;
   }
   if (!_report) {
+    if (plan) _root.append(plan);
     _root.append(el('p', 'usage-empty', 'Waiting for scan.'));
     return;
   }
+  const ceilings = [plan, buildBudgetsSection()].filter((section) => section !== null);
+  _root.append(bandOf('usage-band-now', buildActiveBlockSection(), ceilings, { sideFirst: true }));
+  const spendSide = [buildSavingsSection()].filter((section) => section !== null);
+  _root.append(bandOf('usage-band-spend', buildTotalsSection(), spendSide));
+  const trendSide = [buildBlockHistorySection()].filter((section) => section !== null);
+  _root.append(bandOf('usage-band-trend', buildDailySection(), trendSide));
   const lanes = buildLanesSection();
   if (lanes) _root.append(lanes);
-  _root.append(buildActiveBlockSection());
-  const history = buildBlockHistorySection();
-  if (history) _root.append(history);
-  _root.append(buildTotalsSection());
-  const savings = buildSavingsSection();
-  if (savings) _root.append(savings);
-  _root.append(buildDailySection(), buildModelsSection(), buildSessionsSection());
+  _root.append(buildModelsSection(), buildSessionsSection());
+}
+
+/**
+ * A band pairs one main section with a column of short sections beside it. With nothing for the
+ * column the main section stands alone, so the grid never draws an empty track.
+ * @param {string} className
+ * @param {HTMLElement} main
+ * @param {HTMLElement[]} sideSections
+ * @param {{ sideFirst?: boolean }} [options]
+ */
+function bandOf(className, main, sideSections, { sideFirst = false } = {}) {
+  if (sideSections.length === 0) return main;
+  const band = el('div', `usage-band ${className}`);
+  const col = el('div', 'usage-band-col');
+  for (const section of sideSections) col.append(section);
+  if (sideFirst) {
+    band.append(col, main);
+    return band;
+  }
+  band.append(main, col);
+  return band;
 }
 
 function refreshActivity() {
