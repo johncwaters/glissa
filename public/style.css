@@ -2738,6 +2738,472 @@ a.pr-title:hover {
 /* Same page rhythm and tokens as the Radar and PR views. Its own selectors because usage is the one
    surface built out of dense numeric TABLES rather than attention rows, so it needs tabular alignment
    and a meter the other two have no equivalent for. */
+/* ── Hooks view ──
+   Same chrome as Mill (section heads, stat chips, meta lines) with one addition: an inline editor
+   that reuses the Settings view's inputs, so a hook form looks like every other form in the app. */
+.hooks-view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: clamp(16px, 2.5vw, 36px) clamp(12px, 2vw, 32px) 48px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.hooks-content {
+  max-width: 1080px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.hooks-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hooks-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-dim);
+  padding-bottom: 4px;
+}
+
+.hooks-section-title {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+
+.hooks-section-hint {
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+.hooks-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+}
+
+.hooks-stat {
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.hooks-stat-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-head);
+  font-variant-numeric: tabular-nums;
+}
+
+.hooks-stat[data-tone="warn"] .hooks-stat-value { color: var(--state-waiting); }
+
+.hooks-stat-label {
+  color: var(--text-muted);
+  margin-left: 5px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.hooks-meta,
+.hooks-empty,
+.hooks-warning {
+  margin: 0;
+  max-width: 78ch;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.hooks-warning { color: var(--state-waiting); }
+
+/* Empty state: the templates ARE the instructions. */
+.hooks-empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 14px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+
+.hooks-empty-state .hooks-empty { font-size: 11px; color: var(--text-dim); }
+
+.hooks-templates {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.hooks-templates-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-right: 4px;
+}
+
+.hooks-chip {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.hooks-chip:hover { border-color: var(--accent); color: var(--text-head); }
+
+.hooks-filter { max-width: 360px; font-size: 11px; padding: 6px 10px; }
+
+.hooks-list-yours {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hooks-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hooks-group-title {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.hooks-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+}
+
+.hooks-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.hooks-row:last-child { border-bottom: none; }
+
+.hooks-row[data-state="off"] .hooks-row-main { opacity: 0.55; }
+
+.hooks-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.hooks-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.hooks-row-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-head);
+}
+
+.hooks-row-event {
+  font-size: 10px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.hooks-row-target {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text);
+}
+
+.hooks-row-meta {
+  margin: 0;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.hooks-row-meta[data-tone="warn"] { color: var(--state-waiting); }
+
+.hooks-row-builtin .hooks-row-main { flex-direction: row; align-items: baseline; gap: 10px; }
+
+.hooks-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Preview: the settings JSON this row becomes, closed by default so a list of ten stays a list. */
+.hooks-preview { margin-top: 2px; }
+
+.hooks-preview-summary {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--text-muted);
+  cursor: pointer;
+  list-style: none;
+}
+
+.hooks-preview-summary::-webkit-details-marker { display: none; }
+.hooks-preview-summary::before { content: "+ "; }
+.hooks-preview[open] > .hooks-preview-summary::before { content: "- "; }
+.hooks-preview-summary:hover { color: var(--text-head); }
+
+.hooks-preview-code {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.hooks-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.hooks-btn:hover { color: var(--text-head); border-color: var(--accent); }
+.hooks-btn:disabled { opacity: 0.5; cursor: default; }
+.hooks-btn-danger:hover { color: var(--state-failed); border-color: var(--state-failed); }
+.hooks-btn-add { margin-left: auto; color: var(--accent); border-color: var(--accent-dim); }
+
+.hooks-choice { min-height: 24px; }
+.hooks-choice-note {
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Glissa's own hooks: a disclosure, so the operator's list leads and the reference is one tap away. */
+.hooks-builtin { display: flex; flex-direction: column; gap: 10px; }
+.hooks-builtin-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-dim);
+  padding-bottom: 4px;
+  cursor: pointer;
+  list-style: none;
+}
+.hooks-builtin-summary::-webkit-details-marker { display: none; }
+.hooks-builtin-summary > .hooks-section-title::before { content: "+ "; color: var(--text-muted); }
+.hooks-builtin[open] > .hooks-builtin-summary > .hooks-section-title::before { content: "- "; }
+
+.hooks-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+}
+
+.hooks-form .hooks-templates {
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.hooks-field {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 4px 12px;
+  align-items: center;
+}
+
+.hooks-field[hidden] { display: none; }
+
+.hooks-field-label {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.hooks-field-hint {
+  grid-column: 2;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.hooks-select { cursor: pointer; }
+.hooks-form .settings-view-input:disabled { opacity: 0.45; cursor: not-allowed; }
+.hooks-timeout { max-width: 120px; }
+.hooks-command { resize: vertical; min-height: 60px; }
+
+.hooks-type-row,
+.hooks-projects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.hooks-editor-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-dim);
+}
+
+.hooks-editor-error {
+  margin: 0;
+  font-size: 10px;
+  color: var(--state-failed);
+}
+
+.hooks-editor-error[hidden] { display: none; }
+
+.hooks-editor-shortcut {
+  margin-left: auto;
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+
+/* ── Hooks on a phone ──
+   Same content, thumb-shaped: every field stacks, every control reaches 44px, inputs sit at 16px so
+   iOS does not zoom the page on focus, a row's actions become a full-width strip under it, and the
+   save bar stays on screen above the nav while the operator scrolls a long form. */
+html[data-layout="phone"] .hooks-view {
+  max-width: none;
+  padding: 12px 10px 24px;
+  overflow-x: hidden;
+  font-size: 13px;
+}
+
+html[data-layout="phone"] .hooks-content { width: 100%; max-width: none; gap: 16px; }
+
+html[data-layout="phone"] .hooks-section,
+html[data-layout="phone"] .hooks-builtin {
+  min-width: 0;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--bg) 64%, transparent);
+}
+
+html[data-layout="phone"] .hooks-section-head,
+html[data-layout="phone"] .hooks-builtin-summary { flex-wrap: wrap; align-items: center; gap: 4px 10px; padding-bottom: 6px; }
+html[data-layout="phone"] .hooks-section-title { font-size: 13px; letter-spacing: 0.05em; color: var(--text-head); }
+html[data-layout="phone"] .hooks-section-hint { flex-basis: 100%; font-size: 11px; line-height: 1.3; }
+html[data-layout="phone"] .hooks-builtin-summary { min-height: 44px; }
+
+html[data-layout="phone"] .hooks-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+html[data-layout="phone"] .hooks-stat {
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--bg-surface) 54%, transparent);
+  white-space: normal;
+}
+html[data-layout="phone"] .hooks-stat-value { display: block; font-size: 17px; line-height: 1.1; }
+html[data-layout="phone"] .hooks-stat-label { display: block; margin: 2px 0 0; font-size: 9px; }
+
+html[data-layout="phone"] .hooks-meta,
+html[data-layout="phone"] .hooks-empty,
+html[data-layout="phone"] .hooks-warning,
+html[data-layout="phone"] .hooks-row-meta,
+html[data-layout="phone"] .hooks-field-hint,
+html[data-layout="phone"] .hooks-group-title { font-size: 12px; }
+
+html[data-layout="phone"] .hooks-btn,
+html[data-layout="phone"] .hooks-chip { min-height: 44px; padding: 8px 14px; font-size: 13px; }
+html[data-layout="phone"] .hooks-btn-add { flex-basis: 100%; margin-left: 0; }
+html[data-layout="phone"] .hooks-templates { gap: 8px; }
+html[data-layout="phone"] .hooks-templates-label { flex-basis: 100%; }
+html[data-layout="phone"] .hooks-filter { max-width: none; min-height: 44px; font-size: 16px; }
+
+html[data-layout="phone"] .hooks-row { flex-direction: column; gap: 10px; padding: 12px 10px; }
+html[data-layout="phone"] .hooks-row-name { font-size: 14px; }
+html[data-layout="phone"] .hooks-row-event { font-size: 11px; padding: 2px 8px; }
+html[data-layout="phone"] .hooks-row-target { white-space: normal; overflow-wrap: anywhere; font-size: 12px; }
+html[data-layout="phone"] .hooks-row-actions {
+  display: grid;
+  grid-template-columns: auto repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  width: 100%;
+}
+html[data-layout="phone"] .hooks-row-actions .hooks-btn { padding: 8px 6px; }
+html[data-layout="phone"] .hooks-row-builtin .hooks-row-main { flex-direction: column; gap: 2px; }
+html[data-layout="phone"] .hooks-preview-summary { display: inline-flex; align-items: center; min-height: 44px; font-size: 12px; }
+html[data-layout="phone"] .hooks-preview-code { font-size: 11px; }
+
+html[data-layout="phone"] .hooks-choice { min-height: 44px; font-size: 13px; }
+html[data-layout="phone"] .hooks-choice .settings-view-checkbox { width: 20px; height: 20px; }
+html[data-layout="phone"] .hooks-form { padding: 12px 10px; gap: 14px; }
+html[data-layout="phone"] .hooks-field { grid-template-columns: 1fr; gap: 6px; }
+html[data-layout="phone"] .hooks-field-label { font-size: 12px; }
+html[data-layout="phone"] .hooks-field-hint { grid-column: 1; }
+html[data-layout="phone"] .hooks-form .settings-view-input { font-size: 16px; min-height: 44px; }
+html[data-layout="phone"] .hooks-command { min-height: 96px; }
+html[data-layout="phone"] .hooks-timeout { max-width: 160px; }
+html[data-layout="phone"] .hooks-type-row,
+html[data-layout="phone"] .hooks-projects { flex-direction: column; gap: 0; }
+html[data-layout="phone"] .hooks-editor-footer {
+  position: sticky;
+  bottom: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 -10px -12px;
+  padding: 10px 10px max(10px, env(safe-area-inset-bottom));
+  background: var(--bg-header);
+  border-top: 1px solid var(--border);
+}
+html[data-layout="phone"] .hooks-editor-error { flex-basis: 100%; font-size: 12px; }
+html[data-layout="phone"] .hooks-editor-shortcut { display: none; }
+html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-height: 44px; font-size: 13px; }
+
 .usage-view {
   flex: 1;
   min-height: 0;
@@ -5881,13 +6347,14 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-key-strip:no
 .phone-key:active { color: var(--text-head); border-color: var(--border-hover); }
 .phone-key:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* ── Review, Radar, PRs, Usage, Mill and Visions screens (adopted desktop panels) ── */
+/* ── Review, Radar, PRs, Usage, Mill, Visions and Hooks screens (adopted desktop panels) ── */
 .phone-review,
 .phone-radar,
 .phone-prs,
 .phone-usage,
 .phone-mill,
-.phone-visions { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.phone-visions,
+.phone-hooks { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 /* The docked column's fixed flex basis is meaningless as a full screen, and there is no neighbour to
    resize against or border off. */
 .phone-review > .app-sidebar { flex: 1 1 auto; border-left: none; }
@@ -5897,7 +6364,8 @@ html[data-layout="phone"] .review-sidebar-body { overscroll-behavior: contain; }
 .phone-prs > .pr-view,
 .phone-usage > .usage-view,
 .phone-mill > .mill-view,
-.phone-visions > .visions-view { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.phone-visions > .visions-view,
+.phone-hooks > .hooks-view { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 /* ── Usage on a phone ──
    The desktop page is numeric tables at 11px, which is unreadable on a phone but does not need
    restructuring the way the Radar rows did: each table already scrolls inside its own box, so the phone

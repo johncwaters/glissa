@@ -90,6 +90,7 @@ const DISMISSIBLE_STATES = new Set([STATES.WAITING, STATES.COMPLETE]);
  * @property {string | null} [packsBuiltRoot]
  * @property {string | null} [packVariantSlug]
  * @property {boolean} [planLimits]
+ * @property {(() => import('./core/user-hooks-core').UserHook[]) | null} [getUserHooks]
  * @property {((file: string, args: string[], options: import('node-pty').IPtyForkOptions | import('node-pty').IWindowsPtyForkOptions) => import('node-pty').IPty) | null} [ptySpawn]
  * @property {((args: string[], options: import('node:child_process').ExecFileOptions, callback: (error: Error | null) => void) => unknown) | null} [killProc]
  * @property {((pid: number, signal: NodeJS.Signals | 0) => void) | null} [signalProc]
@@ -205,6 +206,8 @@ class Session extends EventEmitter {
     // Glissa (config usage.planLimits; see AGENTS.md "Usage Tracking"). The relay chains whatever
     // statusLine the operator already had, because a managed one REPLACES it.
     planLimits = false,
+    // Operator hooks for this project (the Hooks tab), read at each spawn. Null for a lane session.
+    getUserHooks = null,
     // PTY spawner seam. Defaults to node-pty; tests inject a fake to assert the
     // spawn wiring (file/args) without launching a real process.
     ptySpawn = null,
@@ -369,6 +372,7 @@ class Session extends EventEmitter {
       enableProjectMcp: !!enableProjectMcp,
       rtkPath: this._rtkPath,
       planLimits: this._planLimits,
+      getUserHooks,
       bypassHookTrust: this.bypassHookTrust,
       effectiveCwd: () => this.effectiveCwd(),
       ingestSignal: (raw) => this.ingestHookSignal(raw),

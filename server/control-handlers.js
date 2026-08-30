@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -20,6 +21,9 @@ const { buildSettingsPayload: buildSettingsPayloadFrom } = require('./settings-p
 const { RESUME_ID_RE } = require('../session/core/auto-resume');
 const { execFile } = require('./child-process-safe');
 const { DEFAULT_AGENT_ID, isKnownAgentId, listAgentIds, getAdapter, commandFor } = require('../session/adapters');
+const { HOOK_EVENT_CATALOG, ID_RE: HOOK_ID_RE, MAX_TIMEOUT_SEC: HOOK_MAX_TIMEOUT_SEC, normalizeHook, rawStoredHooks, readStoredHooks, removeHook, upsertHook } = require('../session/core/user-hooks-core');
+const { describeBuiltinHooks } = require('../detection/settings-injector');
+const { getRtkPath } = require('./rtk-resolver');
 const {
   BRANCH_GC_INTERVAL_MS_RANGE,
   BRANCH_GC_STALE_DAYS_RANGE,
@@ -208,6 +212,9 @@ function requestValidationErrorReply(msg, message) {
     'request-usage-report': () => ({ type: 'usage-report', requestId, error: message }),
     'request-mill-report': () => ({ type: 'mill-report', requestId, error: message }),
     'set-project-packs': () => ({ type: 'set-project-packs-result', requestId, ok: false, error: message }),
+    'request-hooks-report': () => ({ type: 'hooks-report', requestId, error: message }),
+    'save-hook': () => ({ type: 'save-hook-result', requestId, ok: false, error: message }),
+    'delete-hook': () => ({ type: 'delete-hook-result', requestId, ok: false, error: message }),
   };
   if (Object.hasOwn(builders, msg?.type)) return builders[msg.type]();
   const genericErrorRequests = new Set([
@@ -290,6 +297,9 @@ function registerControlHandlers(controlWss, deps) {
     controlReplayLog = null,
     // Last rtk self-install outcome (optional - undefined in older callers/tests, which then report idle).
     getRtkInstallStatus = () => null,
+    // Where an rtk binary resolved, so the Hooks tab lists the rtk entry on the same condition the
+    // injector writes it on rather than on config.rtk alone.
+    resolveRtkPath = () => getRtkPath(),
     conversationFs = fs,
     conversationGit = runGitForConversationHistory,
     conversationProjectsDir = claudeProjectsDir(process.env, os.homedir()),
@@ -903,6 +913,85 @@ function registerControlHandlers(controlWss, deps) {
     }, 200);
   }
 
+  /*
+   * The Hooks tab. Operator hooks live in config.json under `hooks` and are injected into every Claude
+   * Code session's per-session settings file at spawn (detection/settings-injector.js), so a save here
+   * reaches sessions on their next start or restart, never a live one. Like set-project-packs, the
+   * write goes through configStore.save and a reload, so a hand edit and a tab edit take one path.
+   */
+  function builtinHooksReport() {
+    return describeBuiltinHooks({
+      detectScheduledWakeups: config.detectScheduledWakeups !== false,
+      rtkPath: config.rtk ? resolveRtkPath() : null,
+    });
+  }
+
+  function hooksReportProjects() {
+    return (config.projects || [])
+      .filter((project) => typeof project?.id === 'string' && typeof project?.name === 'string')
+      .map((project) => ({ id: project.id, name: project.name, agent: typeof project.agent === 'string' ? project.agent : DEFAULT_AGENT_ID }));
+  }
+
+  function handleRequestHooksReport(msg, ws) {
+    replyTo(ws, msg, 'hooks-report', {
+      ts: Date.now(),
+      hooks: readStoredHooks(config.hooks),
+      builtin: builtinHooksReport(),
+      events: HOOK_EVENT_CATALOG,
+      projects: hooksReportProjects(),
+      // The one home of the ceiling the core enforces, so the editor does not re-type it.
+      limits: { maxTimeoutSec: HOOK_MAX_TIMEOUT_SEC },
+      error: null,
+    });
+  }
+
+  function handleSaveHook(msg, ws) {
+    /** @param {{ ok?: boolean, error?: string | null, hook?: object }} payload */
+    const reply = (payload) => replyTo(ws, msg, 'save-hook-result', { ok: false, error: null, ...payload });
+    const input = msg.hook && typeof msg.hook === 'object' ? msg.hook : {};
+    const requestedId = typeof input.id === 'string' ? input.id : '';
+    if (requestedId && !HOOK_ID_RE.test(requestedId)) { reply({ error: 'hook id is invalid' }); return; }
+    const id = requestedId || crypto.randomUUID();
+    // An id the client made up for an edit must name a record we hold; a new hook always gets ours.
+    const stored = requestedId ? readStoredHooks(config.hooks).find((hook) => hook.id === requestedId) : null;
+    if (requestedId && !stored) { reply({ error: 'Unknown hook' }); return; }
+    // An edit may keep the scope the record already carries, dead project ids included, so a hook wired
+    // to a removed project can still be toggled or renamed instead of silently going global. A stale id
+    // stays inert: hooksForProject only ever matches a live one. A NEW hook must name live projects.
+    const knownProjectIds = new Set(hooksReportProjects().map((project) => project.id));
+    for (const projectId of stored?.projects || []) knownProjectIds.add(projectId);
+    const normalized = normalizeHook(input, { id, knownProjectIds });
+    if (!normalized.ok) { reply({ error: normalized.error }); return; }
+    // Upserted into the RAW stored list: a record this build cannot normalize is not ours to erase on
+    // an unrelated save, and a raw entry with this id is the one being replaced.
+    const freshConfig = configStore.save((cfg) => {
+      cfg.hooks = upsertHook(rawStoredHooks(cfg.hooks), normalized.hook);
+    });
+    if (!freshConfig) { reply({ error: 'Could not write config.json' }); return; }
+    reply({ ok: true, hook: normalized.hook });
+    applyConfigReload(freshConfig);
+    broadcastControl({ type: 'hooks-updated', count: readStoredHooks(freshConfig.hooks).length });
+    console.log(`[control] save-hook: ${normalized.hook.name} (${normalized.hook.event})`);
+  }
+
+  function handleDeleteHook(msg, ws) {
+    /** @param {{ ok?: boolean, error?: string | null, id?: string }} payload */
+    const reply = (payload) => replyTo(ws, msg, 'delete-hook-result', { ok: false, error: null, ...payload });
+    const id = typeof msg.id === 'string' ? msg.id : '';
+    if (!readStoredHooks(config.hooks).some((hook) => hook.id === id)) { reply({ error: 'Unknown hook' }); return; }
+    const freshConfig = configStore.save((cfg) => {
+      const remaining = removeHook(rawStoredHooks(cfg.hooks), id);
+      // An empty list REMOVES the key, so a config that never had hooks reads exactly as before.
+      if (remaining.length === 0) delete cfg.hooks;
+      if (remaining.length > 0) cfg.hooks = remaining;
+    });
+    if (!freshConfig) { reply({ error: 'Could not write config.json' }); return; }
+    reply({ ok: true, id });
+    applyConfigReload(freshConfig);
+    broadcastControl({ type: 'hooks-updated', count: readStoredHooks(freshConfig.hooks).length });
+    console.log(`[control] delete-hook: ${id}`);
+  }
+
   function handleRestart() {
     console.log('[control] Restart requested via UI');
     broadcastControl({ type: 'restarting' });
@@ -932,6 +1021,9 @@ function registerControlHandlers(controlWss, deps) {
     'request-usage-report': handleRequestUsageReport,
     'request-mill-report': handleRequestMillReport,
     'set-project-packs': handleSetProjectPacks,
+    'request-hooks-report': handleRequestHooksReport,
+    'save-hook': handleSaveHook,
+    'delete-hook': handleDeleteHook,
     'kill':             (msg) => { const s = findSession(msg); if (s) s.killSession(); },
     'start-session':    (msg) => {
       const s = findSession(msg);

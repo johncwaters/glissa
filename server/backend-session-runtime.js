@@ -5,6 +5,7 @@ const { sweepOrphans } = require('../detection/settings-injector');
 const { createRtkInstallWiring } = require('./rtk-install-wiring');
 const { getRtkPath } = require('./rtk-resolver');
 const { createSessionFactory } = require('./session-factory');
+const { hooksForProject } = require('../session/core/user-hooks-core');
 const { buildSettingsPayload } = require('./settings-payload');
 
 /** @type {(options: { configStore: object, rtkInstallStatus?: Record<string, unknown>|null }) => Record<string, unknown>} */
@@ -13,7 +14,7 @@ const buildRuntimeSettingsPayload = /** @type {(options: { configStore: object, 
 /**
  * @typedef {object} BackendSessionRuntimeDependencies
  * @property {import('http').Server} httpServer
- * @property {object} config
+ * @property {{ hooks?: unknown, rtk?: boolean } & object} config
  * @property {any} configStore
  * @property {() => any} getGitWorkspace
  * @property {() => import('./backend-websockets').ControlBroadcast|null} getBroadcastControl
@@ -62,6 +63,8 @@ function createBackendSessionRuntime(dependencies) {
     getHookPort,
     getGitWorkspace: dependencies.getGitWorkspace,
     rtkPathForConfig,
+    // The live config object, so a hook saved after boot is what the next spawn reads.
+    getUserHooks: (projectId) => hooksForProject(dependencies.config.hooks, projectId),
   });
 
   return { getHookPort, hookRouter, makeSession, rtkInstall };

@@ -510,6 +510,9 @@ function createConfigStore({ settingsDefaults } = {}) {
     if (newConfig.packDistiller != null) config.packDistiller = newConfig.packDistiller;
     if (newConfig.memory != null) config.memory = newConfig.memory;
     if (newConfig.ingest != null) config.ingest = newConfig.ingest;
+    // Absent means "no operator hooks", so a deletion down to none has to land as an empty list
+    // rather than leaving the last non-empty one live until restart.
+    config.hooks = Array.isArray(newConfig.hooks) ? newConfig.hooks : [];
     if (newConfig.port != null && newConfig.port !== config.port) {
       console.log(`[settings] Port changed to ${newConfig.port} - restart required to take effect`);
     }

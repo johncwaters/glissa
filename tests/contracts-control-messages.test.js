@@ -126,6 +126,18 @@ const REAL_SERVER_PAYLOADS = [
   { type: 'sessions-reordered', order: ['session-1'] },
   { type: 'shutting-down' },
   { type: 'restarting' },
+  {
+    type: 'hooks-report', requestId: 'r1', ts: NOW,
+    hooks: [{ id: 'h1', name: 'lint', event: 'PostToolUse', matcher: 'Edit', type: 'command', command: 'npm run lint', enabled: true }],
+    builtin: [{ event: 'Stop', matcher: null, purpose: 'Status detection' }],
+    events: [{ name: 'PostToolUse', matcher: 'tool name (regex)', description: 'After a tool succeeds.' }],
+    projects: [{ id: 'p1', name: 'glissa', agent: 'claude-code' }],
+    limits: { maxTimeoutSec: 600 },
+    error: null,
+  },
+  { type: 'save-hook-result', requestId: 'r2', ok: true, error: null, hook: { id: 'h1' } },
+  { type: 'delete-hook-result', requestId: 'r3', ok: false, error: 'Unknown hook' },
+  { type: 'hooks-updated', count: 1 },
 ];
 
 test('real server payloads round-trip through every server contract variant', () => {

@@ -13,6 +13,16 @@ test('DEFAULT_CONFIG satisfies the persisted Config contract', () => {
   assert.equal(Config.safeParse(DEFAULT_CONFIG).success, true);
 });
 
+// The config contract gates the LOAD, and the load exits on error, so NOTHING under `hooks` may cost
+// the boot: not a record missing a field, not a stray string in the list, not a paste of Claude Code's
+// own event-keyed object. session/core/user-hooks-core.js judges the value at read time instead.
+test('any hooks value parses, so one hand edit cannot cost the boot', () => {
+  const cases = [[{ id: 'x' }], [{ id: 'x', enabled: 'yes', timeout: 0, type: 'prompt' }], [{}], [null], ['x'], { Stop: [] }, 'nope'];
+  for (const hooks of cases) {
+    assert.equal(Config.safeParse({ ...DEFAULT_CONFIG, hooks }).success, true, JSON.stringify(hooks));
+  }
+});
+
 test('hidden persisted config keys never enter the browser settings projection', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-contract-config-'));
   const configPath = path.join(directory, 'config.json');
