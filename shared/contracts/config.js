@@ -204,6 +204,11 @@ const Config = z.object({
   worktreeAutoRebase: optionalBoolean('worktreeAutoRebase'),
   worktreeRerere: optionalBoolean('worktreeRerere'),
   postTurnChecks: z.record(z.string(), z.unknown()).optional(),
+  // Operator hooks managed by the Hooks tab. UNTYPED ON PURPOSE: this contract gates the config LOAD,
+  // which exits on error, so no hand edit here may cost the boot, not a record missing a field, not a
+  // stray string in the list, not a paste of Claude Code's own event-keyed `hooks` object.
+  // session/core/user-hooks-core.js is the one judge of the value, and reads nothing it cannot.
+  hooks: z.unknown().optional(),
   remote: z.object({
     enabled: z.boolean().optional(),
     port: z.number().int().min(1).max(65535).nullable().optional(),
@@ -227,6 +232,7 @@ const HIDDEN_CONFIG_KEYS = Object.freeze([
   'worktreeAutoRebase',
   'worktreeRerere',
   'postTurnChecks',
+  'hooks',
   'remote',
   'projects',
 ]);

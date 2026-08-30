@@ -23,6 +23,7 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 | `alert-sound.js` | Notification sounds: audio files from `audio/` + synth-beep fallback |
 | `health-monitor.js` | Footer panel rendering server memory/leak telemetry from `health-snapshot` messages |
 | `usage-panel.js` | Usage tab DOM shell fed by `usage-sessions` pushes and `request-usage-report` replies |
+| `hooks-panel.js` / `hooks-view-core.mjs` | Hooks tab: operator Claude Code hooks (`request-hooks-report`, `save-hook`, `delete-hook`) over a pure core owning every string and draft rule |
 | `usage-view-core.mjs` | Pure Usage tab formatting, sorting, caveat text, warning text, and per-card chip text |
 | `theme.js` | Theme definitions applied as CSS custom properties; terminal theme derived at runtime |
 | `ui-prefs.js` / `local-store.js` | THE localStorage home for UI state (sound, theme, active view, rail and sidebar widths), over quota-safe wrappers. Each key is declared once in `ui-prefs.js`'s `PREFS` table with its default and normalizer; the accessors are one line each. The review sidebar's width keeps its own storage key so an existing install's saved width survives |
@@ -32,7 +33,7 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 | `card-host.js` | THE session-card re-parenting seam (`borrowCard` / `releaseCard`), single borrower GLOBALLY; shared by the Focus center and the phone Terminal screen |
 | `project-registry.js` | Project grouping registry shared by the desktop roster and phone Board |
 | `session-actions.js` | Shared session action entry points for dashboard surfaces |
-| `dom-helpers.js` | `el()` / `escapeHtml()` DOM utilities, `adoptElement()` / `releaseElement()` (move a live element and put it back), and the chrome the four tab panels share: `buildPanelSection()` / `buildStatChip()` (class prefix parameterized, so the per-panel CSS is unchanged), `projectsOf()` and `isPanelHidden()` |
+| `dom-helpers.js` | `el()` / `escapeHtml()` DOM utilities, `adoptElement()` / `releaseElement()` (move a live element and put it back), and the chrome the five tab panels share: `buildPanelSection()` / `buildStatChip()` (class prefix parameterized, so the per-panel CSS is unchanged), `projectsOf()` and `isPanelHidden()` |
 | `style.css` | Component styles, `[data-state]` rules, animations, `::before` pseudo-elements |
 | `tailwind.css` | Tailwind v4 entry: `@theme` block mapping colors, fonts, radii |
 | `perf.html` / `perf-harness.js` / `perf-corpus.mjs` | Dev-only manual perf harness (K xterm terminals under dense ANSI load); never bundled into production |
@@ -43,7 +44,7 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 |-----------|---------|
 | `session-card/` | Session card modules: terminal, lifecycle, DOM, naming, WebGL pool (see `session-card/AGENTS.md`) |
 | `focus-view/` | Focus view: roster rail + centered card, attention queue (see `focus-view/AGENTS.md`) |
-| `phone/` | Phone layout: nine screens + bottom nav, rendered only under `[data-layout="phone"]` (see `phone/AGENTS.md`) |
+| `phone/` | Phone layout: ten screens + bottom nav, rendered only under `[data-layout="phone"]` (see `phone/AGENTS.md`) |
 | `sidebar/` | Review sidebar: diff rendering, selection, merge actions (see `sidebar/AGENTS.md`) |
 | `components/` | Static HTML fragments imported `?raw` (see `components/AGENTS.md`) |
 | `audio/` | Notification sound files (OGG) |

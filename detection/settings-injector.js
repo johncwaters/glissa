@@ -12,6 +12,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const { buildRtkHookEntry } = require('../session/core/rtk-command');
+const { appendUserHooks } = require('../session/core/user-hooks-core');
 const { safePathSegment } = require('../shared/paths');
 
 const DEFAULT_BASE_DIR = path.join(os.tmpdir(), 'glissa-hooks');
@@ -117,9 +118,9 @@ function buildStatuslineCommand({ relayPath = RELAY_PATH, postUrl, userCommand =
 // lanes (server/core/lane-permissions-core.js). A lane passing neither leaves the file as it was, so
 // ordinary user sessions stay byte-identical to before.
 /**
- * @param {{ port: number, glissaId: string, token: string, timeoutSec?: number, permissions?: { deny?: string[], defaultMode?: string } | null, detectScheduledWakeups?: boolean, enableProjectMcp?: boolean, rtkPath?: string | null, planLimits?: boolean, userSettingsPath?: string | null, relayPath?: string }} options
+ * @param {{ port: number, glissaId: string, token: string, timeoutSec?: number, permissions?: { deny?: string[], defaultMode?: string } | null, detectScheduledWakeups?: boolean, enableProjectMcp?: boolean, rtkPath?: string | null, planLimits?: boolean, userSettingsPath?: string | null, relayPath?: string, userHooks?: import('../session/core/user-hooks-core').UserHook[] }} options
  */
-function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, enableProjectMcp = false, rtkPath = null, planLimits = false, userSettingsPath = null, relayPath = RELAY_PATH }) {
+function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, enableProjectMcp = false, rtkPath = null, planLimits = false, userSettingsPath = null, relayPath = RELAY_PATH, userHooks = [] }) {
   if (!port || !glissaId || !token) {
     throw new Error('buildHookSettings requires port, glissaId, token');
   }
@@ -138,6 +139,9 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
   if (rtkPath) {
     hooks.PreToolUse = [buildRtkHookEntry(rtkPath)];
   }
+  // Operator hooks (the Hooks tab) go LAST under their event, so nothing above can be displaced and a
+  // session with none configured writes a file byte-identical to before.
+  appendUserHooks(hooks, Array.isArray(userHooks) ? userHooks : []);
   /** @type {{ hooks: Record<string, unknown>, permissions?: { deny?: string[], defaultMode?: string }, enableAllProjectMcpServers?: boolean, statusLine?: { type: string, command: string } }} */
   const settings = { hooks };
   const denyRules = permissions && Array.isArray(permissions.deny) ? permissions.deny.slice() : [];
@@ -173,13 +177,30 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
   return settings;
 }
 
+/*
+ * What buildHookSettings above writes, as rows the Hooks tab lists under "Glissa's own hooks". Derived
+ * from the same two switches (and the same rtk entry builder) rather than restated, because a
+ * hand-written copy of this list drifts the moment either switch changes what the file gets.
+ */
+/**
+ * @param {{ detectScheduledWakeups?: boolean, rtkPath?: string | null }} [options]
+ * @returns {Array<{ event: string, matcher: string | null, purpose: string }>}
+ */
+function describeBuiltinHooks({ detectScheduledWakeups = true, rtkPath = null } = {}) {
+  const rows = HOOK_EVENTS.map((event) => ({ event, matcher: /** @type {string | null} */ (null), purpose: 'Status detection: POST to the Glissa hook router' }));
+  if (detectScheduledWakeups) rows.push({ event: 'PostToolUse', matcher: WAKEUP_TOOL_MATCHER, purpose: 'Scheduled wakeup tracking' });
+  if (rtkPath) rows.push({ event: 'PreToolUse', matcher: buildRtkHookEntry(rtkPath).matcher, purpose: 'rtk command rewriting' });
+  return rows;
+}
+
 // Write the per-session settings file. Returns { settingsPath, dir, token, cleanup }.
 // Everything this does not use itself is forwarded to buildHookSettings, which owns those defaults.
 /**
  * @param {{ port: number, glissaId: string, token?: string, baseDir?: string,
  *   timeoutSec?: number, permissions?: { deny?: string[], defaultMode?: string } | null,
  *   detectScheduledWakeups?: boolean, enableProjectMcp?: boolean, rtkPath?: string | null,
- *   planLimits?: boolean, userSettingsPath?: string | null, relayPath?: string }} options
+ *   planLimits?: boolean, userSettingsPath?: string | null, relayPath?: string,
+ *   userHooks?: import('../session/core/user-hooks-core').UserHook[] }} options
  */
 function writeSessionSettings({ glissaId, token, baseDir = DEFAULT_BASE_DIR, ...rest }) {
   const tok = token || generateToken();
@@ -248,6 +269,7 @@ function sweepOrphans(baseDir = DEFAULT_BASE_DIR, maxAgeMs = 24 * 60 * 60 * 1000
 
 module.exports = {
   buildHookSettings,
+  describeBuiltinHooks,
   writeSessionSettings,
   sweepOrphans,
   generateToken,

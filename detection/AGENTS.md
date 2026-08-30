@@ -57,6 +57,11 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - A held ready releases on live evidence, never the count, sequence-ordered, its quiet window starting at the first evaluation that OBSERVES the drain (false COMPLETEs, 2026-08-14).
 - Declared entries are TTL-bounded per kind: `shell`/`monitor` get no completion hook and an idle teammate is declared running forever, which pinned cards WORKING. Kill switch `detectBackgroundAgents`.
 
+### Operator Hooks
+
+- The Hooks tab's records (`config.hooks`) are appended to the per-session settings file AFTER Glissa's own entries for the same event, never merged into `~/.claude/settings.json`: a session with none configured writes a byte-identical file, and no operator hook can displace a status callback (`tests/settings-injector-user-hooks.test.js`).
+- The core (`session/core/user-hooks-core.js`) is the one validator; the control handler, the spawn path and a hand edit of config.json all pass through it, and an unreadable record is dropped there rather than failing the spawn.
+
 ### Session Recording
 
 - Signal-level recording is ON by default: the detection design is only debuggable after the fact, and an incident with it off costs a reconstruction, not one grep.

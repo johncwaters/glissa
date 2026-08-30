@@ -15,6 +15,7 @@ import { initFormFactor, isPhoneLayout, onLayoutChange } from './form-factor.js'
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.js';
 import { applyIngestActivity, applyIngestSnapshot, applyVisionsComments, applyVisionsFindings, applyVisionsFix, applyVisionsHand, applyVisionsIntent, applyVisionsSettings, applyVisionsSnapshot, mountVisionsView, refreshVisionsView, setVisionsActivityCallback, setVisionsProjectNames } from './visions-panel.js';
 import { acknowledgeMillAttention, applyMillReport, mountMillView, refreshMillView, requestMillReport, setMillActivityCallback, setMillRequestSender } from './mill-panel.js';
+import { applyDeleteHookResult, applyHooksReport, applySaveHookResult, mountHooksView, refreshHooksView, requestHooksReport, setHooksRequestSender } from './hooks-panel.js';
 import { initNotifications, showDesktopNotification } from './notifications.js';
 import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, isPhoneScreenActive, isPhoneShellActive, mountPhoneShell, refreshPhoneBoard, setPhoneScreenAttention, showPhoneScreen } from './phone/phone-shell.js';
 import { noteKnownProjectPath } from './project-registry.js';
@@ -88,9 +89,11 @@ setConnectionStateCallback((state, label) => {
     }
     revealApp();
     sendFocusState();
-    // A reload straight into the Usage tab (or a reconnect while it is open) has to ask for its own
-    // report: the connect-time replay only carries one if the server already had a cached report.
+    // A reload straight into the Usage or Hooks tab (or a reconnect while one is open) has to ask for
+    // its own report: both are pull surfaces, and a request sent before the control WS opened was
+    // dropped on the floor.
     requestUsageReportIfVisible();
+    requestHooksReportIfVisible();
     // Fetch terminal settings on initial connect to apply cursorBlink/debugMode
     sendControlRequest('get-settings', {})
       .then((msg) => {
@@ -251,6 +254,19 @@ function restoreUsageChip(sessionId) {
 
 setUsageRequestSender(sendControlMsg);
 setMillRequestSender(sendControlMsg);
+setHooksRequestSender(sendControlMsg);
+
+// The Hooks tab is a pull surface like Mill: a broadcast only says the list moved, and the report is
+// fetched when the surface is the one being looked at.
+function isHooksSurfaceVisible() {
+  if (isPhoneShellActive()) return isPhoneScreenActive('hooks');
+  return getActiveView() === 'hooks';
+}
+
+function requestHooksReportIfVisible() {
+  if (!isHooksSurfaceVisible()) return;
+  requestHooksReport();
+}
 
 function isUsageSurfaceVisible() {
   if (isPhoneShellActive()) return isPhoneScreenActive('usage');
@@ -297,6 +313,12 @@ const messageHandlers = {
   // The refusal path for that write. A rejected assignment left the checkbox disabled mid-round-trip, so
   // the pull is what restores it to what the server actually holds.
   'set-project-packs-result': (msg) => { if (!msg.ok) { showErrorToast(msg.error || 'Could not change pack delivery', { persist: true }); requestMillReport(); } },
+  // The Hooks tab: the report answers a pull, the two results answer a write, and the broadcast says
+  // another client wrote, so a visible tab fetches again.
+  'hooks-report':       (msg) => applyHooksReport(msg),
+  'save-hook-result':   (msg) => applySaveHookResult(msg),
+  'delete-hook-result': (msg) => applyDeleteHookResult(msg),
+  'hooks-updated':      () => requestHooksReportIfVisible(),
   // The versions a spawn actually delivered, pushed as the session starts.
   'session-packs':      (msg) => setSessionPacks(msg.id, msg.packs),
   'state-change':       (msg) => handleStateChange(msg),
@@ -489,7 +511,7 @@ queryTag(document, '#btn-help', 'button').addEventListener('click', () => {
   openSettings('browser-shortcuts');
 });
 
-// ── Primary view tabs (Focus / Radar / PRs / Usage / Mill / Visions) ────────
+// ── Primary view tabs (Focus / Radar / PRs / Usage / Mill / Visions / Hooks) ────────
 
 const viewFocusEl = queryTag(document, '#view-focus', 'section');
 const viewRadarEl = queryTag(document, '#view-radar', 'section');
@@ -497,6 +519,7 @@ const viewPrsEl = queryTag(document, '#view-prs', 'section');
 const viewUsageEl = queryTag(document, '#view-usage', 'section');
 const viewMillEl = queryTag(document, '#view-mill', 'section');
 const viewVisionsEl = queryTag(document, '#view-visions', 'section');
+const viewHooksEl = queryTag(document, '#view-hooks', 'section');
 const viewSettingsEl = queryTag(document, '#view-settings', 'section');
 const tabFocus = queryTag(document, '#tab-focus', 'button');
 const tabRadar = queryTag(document, '#tab-radar', 'button');
@@ -504,6 +527,7 @@ const tabPrs = queryTag(document, '#tab-prs', 'button');
 const tabUsage = queryTag(document, '#tab-usage', 'button');
 const tabMill = queryTag(document, '#tab-mill', 'button');
 const tabVisions = queryTag(document, '#tab-visions', 'button');
+const tabHooks = queryTag(document, '#tab-hooks', 'button');
 const tabSettings = queryTag(document, '#tab-settings', 'button');
 const tabRadarActivityEl = queryTag(document, '#tab-radar-activity', 'span');
 const tabPrsActivityEl = queryTag(document, '#tab-prs-activity', 'span');
@@ -571,6 +595,8 @@ mountMillView(viewMillEl);
 // while another tab is active, and the dot has to say so from wherever the operator is.
 mountVisionsView(viewVisionsEl);
 
+mountHooksView(viewHooksEl);
+
 mountSettingsView(viewSettingsEl);
 
 // Primary views in tab-strip order. Adding a view = adding an entry here (N-way, not a boolean).
@@ -583,6 +609,7 @@ const VIEW_TABS = [
   { view: 'usage', tab: tabUsage, el: viewUsageEl },
   { view: 'mill', tab: tabMill, el: viewMillEl },
   { view: 'visions', tab: tabVisions, el: viewVisionsEl },
+  { view: 'hooks', tab: tabHooks, el: viewHooksEl },
   { view: 'settings', tab: tabSettings, el: viewSettingsEl },
 ];
 
@@ -639,6 +666,10 @@ function activateView(view, { section, setting, persist = true } = {}) {
     refreshMillView();
     requestMillReport();
   }
+  if (view === 'hooks') {
+    refreshHooksView();
+    requestHooksReport();
+  }
   if (prev === 'settings' && view !== 'settings') clearSettingsHash();
   if (view === 'settings' && section) activateSettingsSection(section, setting ?? null);
   acknowledgeViewAttention(view);
@@ -685,12 +716,14 @@ mountPhoneShell({
   usagePanelEl: viewUsageEl,
   millPanelEl: viewMillEl,
   visionsPanelEl: viewVisionsEl,
+  hooksPanelEl: viewHooksEl,
   settingsPanelEl: viewSettingsEl,
   // Usage and Mill are the two screens that PULL rather than being pushed to, so each asks for a fresh
   // report the moment it becomes visible; every other screen ignores this.
   onScreenShown: (screenId) => {
     if (screenId === 'usage') { refreshUsageView(); requestUsageReport(); }
     if (screenId === 'mill') { refreshMillView(); requestMillReport(); }
+    if (screenId === 'hooks') { refreshHooksView(); requestHooksReport(); }
     if (screenId !== 'settings') clearSettingsHash();
     if (screenId === 'settings' && !location.hash.startsWith('#settings/')) activateSettingsSection();
     acknowledgeViewAttention(screenId);

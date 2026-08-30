@@ -1,4 +1,4 @@
-// The phone layout's shell: nine screens, one visible at a time, behind a bottom nav.
+// The phone layout's shell: ten screens, one visible at a time, behind a bottom nav.
 //
 // This is a first-class layout, not a narrowed desktop. The desktop DOM (header, focus view, docked
 // sidebar) is not rendered at all under [data-layout="phone"]; the shell is only built the first time
@@ -15,8 +15,8 @@
 //   Visions - the real Visions panel, re-parented in as a full screen
 //   Settings - the real Settings panel, re-parented in as a full screen
 //
-// Eight elements are BORROWED from the desktop DOM rather than rebuilt: the review sidebar, the Radar,
-// PRs, Usage, Mill, Visions and Settings panels, and the header controls the Board top bar adopts. Rebuilding any
+// Nine elements are BORROWED from the desktop DOM rather than rebuilt: the review sidebar, the Radar,
+// PRs, Usage, Mill, Visions, Hooks and Settings panels, and the header controls the Board top bar adopts. Rebuilding any
 // of them would mean a second state pipeline for the same facts.
 
 import { STATES } from '/shared/states.mjs';
@@ -46,6 +46,7 @@ const SCREENS = Object.freeze([
   { id: 'usage', label: 'Usage', glyph: '◔', nested: true }, // part-filled circle: a consumption gauge
   { id: 'mill', label: 'Mill', glyph: '▦', nested: true }, // square with quadrants: assembled parts
   { id: 'visions', label: 'Visions', glyph: '◇', nested: true },
+  { id: 'hooks', label: 'Hooks', glyph: '◈', nested: true }, // lozenge with a core: an event with a handler inside
   { id: 'settings', label: 'Settings', glyph: '@', nested: true },
 ]);
 /** @type {HTMLDivElement|null} */
@@ -78,8 +79,12 @@ let millMountEl = null;
 let millPanelEl = null;
 /** @type {HTMLDivElement|null} */
 let visionsMountEl = null;
+/** @type {HTMLDivElement|null} */
+let hooksMountEl = null;
 /** @type {(HTMLElement & { _adoptHome?: { parent: HTMLElement|null, next: Element|null } })|null} */
 let visionsPanelEl = null;
+/** @type {HTMLElement|null} */
+let hooksPanelEl = null;
 /** @type {HTMLDivElement|null} */
 let settingsMountEl = null;
 /** @type {(HTMLElement & { _adoptHome?: { parent: HTMLElement|null, next: Element|null } })|null} */
@@ -265,6 +270,7 @@ function build() {
   usageMountEl = el('div', 'phone-usage');
   millMountEl = el('div', 'phone-mill');
   visionsMountEl = el('div', 'phone-visions');
+  hooksMountEl = el('div', 'phone-hooks');
   settingsMountEl = el('div', 'phone-settings');
 
   const screens = el('div', 'phone-screens');
@@ -277,6 +283,7 @@ function build() {
     usage: usageMountEl,
     mill: millMountEl,
     visions: visionsMountEl,
+    hooks: hooksMountEl,
     settings: settingsMountEl,
   };
   for (const screen of SCREENS) {
@@ -444,6 +451,7 @@ export function mountPhoneShell(options) {
   usagePanelEl = hooks.usagePanelEl || null;
   millPanelEl = hooks.millPanelEl || null;
   visionsPanelEl = hooks.visionsPanelEl || null;
+  hooksPanelEl = hooks.hooksPanelEl || null;
   settingsPanelEl = hooks.settingsPanelEl || null;
 }
 
@@ -472,6 +480,8 @@ export function activatePhoneShell({ sessionId } = {}) {
   if (millPanelEl) millPanelEl.hidden = false;
   adoptElement(visionsPanelEl, visionsMountEl);
   if (visionsPanelEl) visionsPanelEl.hidden = false;
+  adoptElement(hooksPanelEl, hooksMountEl);
+  if (hooksPanelEl) hooksPanelEl.hidden = false;
   adoptElement(settingsPanelEl, settingsMountEl);
   if (settingsPanelEl) settingsPanelEl.hidden = false;
   syncVisualViewport();
@@ -496,6 +506,7 @@ export function deactivatePhoneShell() {
   if (usagePanelEl) releaseElement(usagePanelEl);
   if (millPanelEl) releaseElement(millPanelEl);
   if (visionsPanelEl) releaseElement(visionsPanelEl);
+  if (hooksPanelEl) releaseElement(hooksPanelEl);
   if (settingsPanelEl) releaseElement(settingsPanelEl);
   for (const control of (hooks.headerControls || [])) releaseElement(control);
   setMoreMenuOpen(false);
