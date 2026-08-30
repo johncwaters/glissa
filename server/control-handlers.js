@@ -1042,7 +1042,7 @@ function registerControlHandlers(controlWss, deps) {
     // status and broadcasts nothing, so reportMergeRefusal replies to the requesting client instead;
     // without it a refused merge click does nothing with zero feedback.
     'merge-session':              async (msg, ws) => { const s = findSession(msg); if (s) reportMergeRefusal(ws, s, await s.mergeWorktree()); },
-    // One-click close-out: merge the worktree into the integration branch (develop) and return the
+    // One-click close-out: merge the worktree into the integration branch and return the
     // session to DORMANT. A live but quiescent session (COMPLETE/IDLE) is ended first, then merged once
     // it settles; a parked/failed merge keeps its worktree (no data loss). All of that is decided in
     // Session.finishAndMerge (which self-guards the state), so the handler just delegates.
@@ -1065,7 +1065,7 @@ function registerControlHandlers(controlWss, deps) {
       const { committed, uncommitted, hasCommits } = await s.getDiff();
       ws.send(JSON.stringify({ type: 'session-diff', id: s.id, committed, uncommitted, hasCommits }));
     },
-    // Branch sync: whether this session's project base branch (e.g. develop) is ahead/behind its
+    // Branch sync: whether this session's project base branch is ahead/behind its
     // remote upstream. Sent only in reply to an explicit sidebar open/refresh (see review-sidebar.js
     // requestBranchSync) - never polled. getBranchSync includes a bounded `git fetch` for freshness.
     'request-branch-sync':        async (msg, ws) => {

@@ -4930,7 +4930,7 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   min-width: 0;
 }
 
-/* Local base branch (e.g. develop) vs its remote upstream tracking branch. A project-level fact, not
+/* Local base branch vs its remote upstream tracking branch. A project-level fact, not
    tied to the merge/review gate below it, so it gets its own row rather than folding into
    .review-controls; it stays visible across every merge status, including 'none'. Collapses to
    nothing when no session is selected or nothing has been requested yet for it (mirrors

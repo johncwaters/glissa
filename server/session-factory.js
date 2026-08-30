@@ -4,6 +4,7 @@ const path = require('node:path');
 const { Session } = require('../session/sessions');
 const { createRecorder } = require('../session/session-recorder');
 const { DEFAULT_CONFIG } = require('./config-store');
+const { configuredIntegrationBranch } = require('./core/integration-branch-core');
 const { projectVariantSlug } = require('./core/pack-core');
 const { projectSkipsPermissions } = require('./core/session-registry-core');
 const { resolveUsageConfig } = require('./usage-wiring');
@@ -38,7 +39,7 @@ function createSessionFactory(dependencies) {
       hookRouter: dependencies.hookRouter,
       getHookPort: dependencies.getHookPort,
       gitWorkspace: dependencies.getGitWorkspace(),
-      integrationBranch: config.integrationBranch || 'develop',
+      integrationBranch: configuredIntegrationBranch(config),
       autoRebase: config.worktreeAutoRebase !== false,
       syncOnStart: config.worktreeSyncOnStart !== false,
       liveWorktreeReview: config.liveWorktreeReview !== false,

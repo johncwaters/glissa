@@ -198,7 +198,7 @@ function createGitWorkspace(opts = {}) {
     let baseSha = head.out;
     let base = (await run(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath)).out || 'HEAD';
     if (baseBranch) {
-      // Fork off a SPECIFIC branch (the session integration branch, e.g. develop) regardless of what
+      // Fork off the session integration branch regardless of what
       // the operator's main checkout currently has checked out. A missing local branch is auto-created
       // from origin/<baseBranch>, then main/master, then HEAD (ensureLocalBranch below); reason:
       // 'no-base-branch' remains only as the fallback when that creation itself fails.
@@ -449,7 +449,7 @@ function createGitWorkspace(opts = {}) {
     return { wt: workspace.cwd, branch, target };
   }
 
-  // Session worktree merge-back into the integration branch (e.g. `develop`) that ENDS the session:
+  // Session worktree merge-back into the integration branch that ENDS the session:
   // committed-only rebase-then-FF via rebaseFfBranch, then tear the worktree down junction-safely. A
   // rebase conflict / lost FF PARKS the branch (worktree + branch preserved) for a manual merge. Returns
   // { merged, committed, branch, base, reason, parked? }; `branch` is null once merged (deleted) or

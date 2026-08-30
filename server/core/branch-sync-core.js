@@ -1,7 +1,7 @@
 'use strict';
 
 // Pure parsing/decision logic for the review sidebar's branch-sync indicator: whether a project's
-// LOCAL base branch (e.g. develop) is ahead of and/or behind its remote upstream tracking branch. No
+// LOCAL base branch is ahead of and/or behind its remote upstream tracking branch. No
 // IO here; the caller (session/sessions.js getBranchSync) runs the git commands and hands the raw
 // text to parseLeftRightCount, then decideBranchSyncState.
 
@@ -36,7 +36,7 @@ function decideBranchSyncState({ hasUpstream, ahead, behind }) {
   return 'in-sync';
 }
 
-// Remote name from an upstream ref like "origin/develop" -> "origin". Defensive fallback of 'origin'
+// Remote name from an upstream ref like "origin/main" -> "origin". Defensive fallback of 'origin'
 // for a slash-less value (should not happen for a real @{upstream} result, but a resync must never be
 // pointed at an empty remote name).
 function parseRemoteFromUpstream(upstream) {

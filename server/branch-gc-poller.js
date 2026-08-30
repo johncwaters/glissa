@@ -1,6 +1,7 @@
 'use strict';
 
 const { planBranchGc } = require('./core/branch-gc-core');
+const { configuredIntegrationBranch } = require('./core/integration-branch-core');
 const { createTickLoop } = require('./lane-runner');
 
 const DEFAULT_STALE_DAYS = 14;
@@ -78,7 +79,7 @@ function createBranchGcPoller(deps) {
 
     const tipsResult = await callGit(gitWorkspace.listIntegrationTips, {
       projectPath,
-      integrationBranch: config.integrationBranch || 'develop',
+      integrationBranch: configuredIntegrationBranch(config),
     });
     if (!tipsResult.ok) {
       for (const remoteBranch of listed.branches) {

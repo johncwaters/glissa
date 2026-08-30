@@ -1,6 +1,6 @@
 // Right-docked review sidebar: the single home for the worktree review gate of the SELECTED session.
 // Shows a changed-files summary over a collapsible per-file diff (each file minimized until clicked),
-// plus the actions (Merge; Discard only for a settled worktree). "Merge" merges into develop
+// plus the actions (Merge; Discard only for a settled worktree). "Merge" merges into the base branch
 // and rebases the worktree onto it WITHOUT ending the session, so the operator commits as they go (the
 // PTY effectively never dies, so there is no separate finish/close-out step). It REPLACES the old inline
 // card review bar; the card now only carries data-merge for the remove-warning. The sidebar is app-level
@@ -12,7 +12,7 @@
 // `session-changed` push via notifyWorktreeChanged). Session name/state are read live from the shared
 // card registry. Pure parsing lives in diff-core.mjs.
 //
-// A separate, unrelated fact - whether the project's LOCAL base branch (e.g. develop) has drifted from
+// A separate, unrelated fact - whether the project's LOCAL base branch has drifted from
 // its remote upstream - arrives via setReviewBranchSync (reply to request-branch-sync, asked on
 // selection, or resync-branch, asked on a Resync click/Alt+R). Both requests reply with the same
 // branch-sync-status message; a resync-branch reply additionally carries action/error, which is what
@@ -82,7 +82,7 @@ export function mountReviewSidebar({ panel }) {
   sessionNameEl = el('span', 'review-sidebar-session');
   head.append(title, sessionNameEl);
 
-  // Local-base-branch-vs-remote-upstream indicator (e.g. "develop: 2 ahead, 1 behind origin/develop").
+  // Local-base-branch-vs-remote-upstream indicator.
   // A project-level fact, not tied to the merge/review gate below it, so it is its own row (collapses
   // via :empty when nothing is selected/requested yet) rather than folded into review-controls.
   branchSyncEl = el('div', 'review-branch-sync');
@@ -487,7 +487,7 @@ function render() {
   // One merge action, never a "finish". A session's PTY effectively never dies (Claude's built-in restart
   // keeps it alive; only an explicit /exit ends it, which never happens), so there is no settled/close-out
   // state to merge from. "Merge" on a quiescent live session (WAITING/IDLE/COMPLETE) with COMMITTED changes
-  // merges into develop and rebases this worktree onto develop, KEEPING the session running. With nothing
+  // merges into the base and rebases this worktree onto it, KEEPING the session running. With nothing
   // committed there is nothing to merge, so the button is disabled (with a reason) rather than withheld.
   const live = isLive(state);
   const mergeableLive = isMergeableLive(state, hasCommits);
@@ -516,7 +516,10 @@ function render() {
 
   // No combined total in the actions row: each section head right below carries its own +/- stat,
   // and a pinned grand total only repeated those numbers one scroll-line above them.
-  const actions = renderActions(id, { status, reviewable, mergeEnabled, live, state, sync, resyncing });
+  const effectiveBase = ui.effectiveBase || 'base';
+  const actions = renderActions(id, {
+    status, reviewable, mergeEnabled, live, state, sync, resyncing, effectiveBase,
+  });
   controlsEl.append(actions);
 
   // Resync status line: spinner while in flight, else the latest outcome (persists on error), else the
@@ -554,8 +557,7 @@ function render() {
 
   // ── Scrolling body: diff sections only. Committed section first: it is what a merge moves into the base.
   if (committedFiles.length > 0) {
-    const mergeTarget = ui?.effectiveBase || 'develop';
-    bodyEl.append(renderSection('committed', 'Committed', `merges into ${mergeTarget}`, committedFiles));
+    bodyEl.append(renderSection('committed', 'Committed', `merges into ${effectiveBase}`, committedFiles));
   }
   if (committedFiles.length === 0 && !reasonShown) {
     // A pinned reason line ("Checking for changes...", "Session ended.") already explains an empty
@@ -729,7 +731,7 @@ function actionButton({ id, label, shortcut, title, disabled = false, danger = f
   return btn;
 }
 
-function renderActions(id, { status, reviewable, mergeEnabled, live, state, sync, resyncing }) {
+function renderActions(id, { status, reviewable, mergeEnabled, live, state, sync, resyncing, effectiveBase }) {
   const actions = el('div', 'review-actions');
 
   // Suppress Merge when parked: Resolve is the only path forward until the conflict clears.
@@ -739,7 +741,7 @@ function renderActions(id, { status, reviewable, mergeEnabled, live, state, sync
       id: 'review-merge-btn',
       label: 'Merge',
       shortcut: 'alt+m',
-      title: 'Merge into develop and rebase this worktree, then keep working (alt+m)',
+      title: `Merge into ${effectiveBase}, push it, and rebase this worktree, then keep working (alt+m)`,
       disabled: !mergeEnabled,
       onClick: () => sendMergeContinue(id, state),
     }));

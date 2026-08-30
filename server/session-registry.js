@@ -5,12 +5,13 @@ const { STATES } = require('../shared/states');
 const { isSameDirectoryPath } = require('../shared/paths');
 const { pickAutoResume } = require('../session/core/auto-resume');
 const { diffProjects, shouldStartAfterModify } = require('./core/session-registry-core');
+const { configuredIntegrationBranch } = require('./core/integration-branch-core');
 
 /** @typedef {import('./core/session-registry-core').RegistryProject & Record<string, unknown>} RegistryProject */
-/** @typedef {Record<string, unknown> & { projects: RegistryProject[], integrationBranch?: string }} RegistryConfig */
+/** @typedef {Record<string, unknown> & { projects: RegistryProject[], integrationBranch?: string|null }} RegistryConfig */
 /** @typedef {{ id: string, cwd: string, branch: string, integrationBranch?: string, hasWork: boolean }} RegistryWorktree */
 /** @typedef {{ id: string, name: string, path: string, state: string, stateSince: number, pendingRestart?: boolean, dangerouslySkipPermissions?: boolean, isWorktree?: boolean, resumeSessionId?: string|null, _killReap?: Promise<unknown>|null, start: () => unknown, destroy: () => void, toSnapshot: () => Record<string, unknown>, getWorktreeCarry?: () => Record<string, unknown>|null, adoptWorktree: (worktree: Record<string, unknown>) => void, discardWorktree?: () => unknown, discardWorktreeIfClean: () => unknown }} RegistrySession */
-/** @typedef {{ listSessionWorktrees: (input: { projectPath: string, integrationBranch: string }) => RegistryWorktree[], removeWorktreeByPath: (input: { projectPath: string, cwd: string, branch: string }) => void }} RegistryGitWorkspace */
+/** @typedef {{ listSessionWorktrees: (input: { projectPath: string, integrationBranch: string|null }) => RegistryWorktree[], removeWorktreeByPath: (input: { projectPath: string, cwd: string, branch: string }) => void }} RegistryGitWorkspace */
 
 /**
  * @typedef {object} SessionRegistryDependencies
@@ -27,7 +28,7 @@ const { diffProjects, shouldStartAfterModify } = require('./core/session-registr
  * @property {(config: RegistryConfig) => void} applySettingsReload
  * @property {{ run: (callback: () => unknown) => Promise<unknown> }} spawnGate
  * @property {RegistryGitWorkspace} gitWorkspaceSync
- * @property {(input: { projects: RegistryProject[], sessions: Map<string, RegistrySession>, gitWorkspaceSync: RegistryGitWorkspace, integrationBranch: string }) => void} reconcileSessionWorktrees
+ * @property {(input: { projects: RegistryProject[], sessions: Map<string, RegistrySession>, gitWorkspaceSync: RegistryGitWorkspace, integrationBranch: string|null }) => void} reconcileSessionWorktrees
  * @property {(oldSession: RegistrySession, newSession: RegistrySession) => unknown} carryWorktreeAcrossRecreate
  * @property {(projects: RegistryProject[]) => boolean} ensureProjectIds
  * @property {(agent: import('./core/session-registry-core').AgentId) => string} resolveAgentId
@@ -84,7 +85,7 @@ function carryWorktreeAcrossRecreate(oldSession, newSession) {
  * @param {RegistryProject[]} dependencies.projects
  * @param {Map<string, RegistrySession>} dependencies.sessions
  * @param {RegistryGitWorkspace} dependencies.gitWorkspaceSync
- * @param {string} dependencies.integrationBranch
+ * @param {string|null} dependencies.integrationBranch
  * @param {(session: RegistrySession, worktree: RegistryWorktree) => void} [dependencies.onAdopt]
  * @param {(path: string) => boolean} [dependencies.worktreeDirExists]
  * @param {(message: string) => void} [dependencies.log]
@@ -170,7 +171,7 @@ function createSessionRegistry(dependencies) {
         projects: config.projects,
         sessions,
         gitWorkspaceSync: dependencies.gitWorkspaceSync,
-        integrationBranch: config.integrationBranch || 'develop',
+        integrationBranch: configuredIntegrationBranch(config),
       });
     } catch (error) {
       dependencies.logger.warn(`[worktree] worktree reconcile failed: ${error.message}`);
