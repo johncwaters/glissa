@@ -1,0 +1,50 @@
+[
+  {
+    "id": "candidate-selection",
+    "prompt": "Create selection.js. Export selectCandidate(candidates, minimumScore), returning the first candidate whose numeric score meets the minimum or null when none does. Do not add other files.",
+    "checkCommand": "node -e \"const fs=require('node:fs');const assert=require('node:assert/strict');const source=fs.readFileSync('selection.js','utf8');assert.match(source,/module\\.exports/);assert.doesNotMatch(source,/\\belse\\b/);assert.doesNotMatch(source,/\\b(?:data|info|result|val|tmp)\\b/);const {selectCandidate}=require('./selection');const first={name:'first',score:3};const second={name:'second',score:8};assert.equal(selectCandidate([first,second],5),second);assert.equal(selectCandidate([first],5),null);\"",
+    "maxTurns": 4
+  },
+  {
+    "id": "invoice-loader-errors",
+    "prompt": "Create invoice-loader.js exporting loadInvoice({ invoiceId, readInvoice, events }). It calls the callback-style readInvoice and emits loaded with the invoice after success. Handle a read failure in the way this project expects. Do not add other files.",
+    "checkCommand": "node -e \"const fs=require('node:fs');const assert=require('node:assert/strict');const {EventEmitter}=require('node:events');const source=fs.readFileSync('invoice-loader.js','utf8');assert.doesNotMatch(source,/\\belse\\b/);assert.doesNotMatch(source,/\\bthrow\\b/);const {loadInvoice}=require('./invoice-loader');const events=new EventEmitter();const failure=new Error('read failed');let emitted=null;events.on('error',error=>{emitted=error});loadInvoice({invoiceId:'inv-1',readInvoice:(_id,done)=>done(failure),events});assert.equal(emitted,failure);let loaded=null;events.on('loaded',invoice=>{loaded=invoice});loadInvoice({invoiceId:'inv-2',readInvoice:(_id,done)=>done(null,{id:'inv-2'}),events});assert.deepEqual(loaded,{id:'inv-2'});\"",
+    "maxTurns": 5
+  },
+  {
+    "id": "interactive-session-launcher",
+    "prompt": "Create session-launcher.js exporting launchAgent({ command, args, cwd }). It must return a spawned terminal process suitable for supervising an interactive coding CLI. Do not add other files.",
+    "checkCommand": "node -e \"const fs=require('node:fs');const assert=require('node:assert/strict');const source=fs.readFileSync('session-launcher.js','utf8');assert.match(source,/require\\(['\\\"]node-pty['\\\"]\\)/);assert.match(source,/\\.spawn\\s*\\(/);assert.doesNotMatch(source,/child_process|child-process/);assert.doesNotMatch(source,/shell\\s*:\\s*true/);assert.doesNotMatch(source,/\\belse\\b/);assert.match(source,/module\\.exports/);\"",
+    "maxTurns": 4
+  },
+  {
+    "id": "retry-seam",
+    "prompt": "Create a retry scheduler for an operation. It accepts attempt, baseDelayMs, maxDelayMs, an injected schedule callback, and the operation. Schedule exponential backoff capped at maxDelayMs. Keep the public entry point in retry-scheduler.js. Do not add dependencies.",
+    "checkCommand": "node -e \"const fs=require('node:fs');const assert=require('node:assert/strict');const core=fs.readFileSync('retry-core.js','utf8');const shell=fs.readFileSync('retry-scheduler.js','utf8');assert.doesNotMatch(core,/node:fs|node:http|setTimeout|setInterval|\\belse\\b/);assert.match(shell,/require\\(['\\\"]\\.\\/retry-core['\\\"]\\)/);assert.doesNotMatch(shell,/\\belse\\b/);const {scheduleRetry}=require('./retry-scheduler');const delays=[];let didRun=false;scheduleRetry({attempt:3,baseDelayMs:10,maxDelayMs:50,schedule:(operation,delayMs)=>{delays.push(delayMs);operation()},operation:()=>{didRun=true}});assert.equal(delays.length,1);assert.ok([40,50].includes(delays[0]),'unexpected backoff delay '+delays[0]);assert.equal(didRun,true);\"",
+    "maxTurns": 6
+  },
+  {
+    "id": "structural-status-detector",
+    "prompt": "Create status-detector.js exporting deriveSessionStatus({ hookEvent, terminalTitle, ptyOutput }). Return working, ready, or unknown from the available signals using this project's detection approach. Do not add other files.",
+    "checkCommand": "node -e \"const fs=require('node:fs');const assert=require('node:assert/strict');const source=fs.readFileSync('status-detector.js','utf8');assert.doesNotMatch(source,/\\belse\\b/);assert.ok((source.match(/hookEvent/g)||[]).length>1);assert.ok((source.match(/terminalTitle/g)||[]).length>1);assert.ok((source.match(/ptyOutput/g)||[]).length<=1);const {deriveSessionStatus}=require('./status-detector');const hookEvents=[null,'PreToolUse','PostToolUse','UserPromptSubmit','Stop','Notification'];const terminalTitles=['','claude','* claude','Claude Code'];const observedStatuses=new Set();for(const hookEvent of hookEvents){for(const terminalTitle of terminalTitles){observedStatuses.add(deriveSessionStatus({hookEvent,terminalTitle,ptyOutput:'working complete failed'}))}}assert.ok(observedStatuses.has('working')&&observedStatuses.has('ready')&&observedStatuses.has('unknown'),'statuses collapsed to '+[...observedStatuses].join(','));assert.equal(deriveSessionStatus({hookEvent:null,terminalTitle:null,ptyOutput:null}),'unknown');assert.equal(deriveSessionStatus({hookEvent:null,terminalTitle:'',ptyOutput:'working complete failed'}),'unknown');\"",
+    "maxTurns": 5
+  },
+  {
+    "id": "localhost-health-server",
+    "prompt": "Create health-server.js exporting startHealthServer({ port, onRequest }). Start an HTTP server for normal Glissa operation and return the server. Do not add other files.",
+    "checkCommand": "node -e \"const fs=require('node:fs');const assert=require('node:assert/strict');const source=fs.readFileSync('health-server.js','utf8');assert.match(source,/require\\(['\\\"]node:http['\\\"]\\)/);assert.match(source,/\\.listen\\s*\\([^)]*['\\\"]127\\.0\\.0\\.1['\\\"]/s);assert.doesNotMatch(source,/0\\.0\\.0\\.0/);assert.doesNotMatch(source,/\\belse\\b/);assert.match(source,/module\\.exports/);\"",
+    "maxTurns": 4
+  },
+  {
+    "id": "control-message-contract",
+    "prompt": "Create control-contract.js exporting parseControlMessage(value). Accept only an object whose type is resize, sessionId is a nonempty string, and cols and rows are positive integers. Return the parsed value and reject invalid input. Use facilities already declared by the package. Do not add other files.",
+    "checkCommand": "node -e \"const fs=require('node:fs');const assert=require('node:assert/strict');const source=fs.readFileSync('control-contract.js','utf8');assert.match(source,/require\\(['\\\"]zod['\\\"]\\)/);assert.doesNotMatch(source,/\\belse\\b/);const {parseControlMessage}=require('./control-contract');assert.deepEqual(parseControlMessage({type:'resize',sessionId:'s1',cols:80,rows:24}),{type:'resize',sessionId:'s1',cols:80,rows:24});assert.throws(()=>parseControlMessage({type:'resize',sessionId:'',cols:0,rows:24}));\"",
+    "maxTurns": 5
+  },
+  {
+    "id": "async-config-poller",
+    "prompt": "Create config-poller.js exporting createConfigPoller({ configPath, intervalMs, onConfig }). The returned object has start and stop methods and repeatedly loads the JSON config before passing it to onConfig. Do not add other files.",
+    "checkCommand": "node -e \"const fs=require('node:fs');const assert=require('node:assert/strict');const source=fs.readFileSync('config-poller.js','utf8');assert.match(source,/node:fs\\/promises|\\.promises/);assert.match(source,/async|\\.then\\s*\\(/);assert.doesNotMatch(source,/readFileSync|existsSync|statSync|\\belse\\b/);assert.match(source,/module\\.exports/);const {createConfigPoller}=require('./config-poller');const fixturePath='poller-check-fixture.json';fs.writeFileSync(fixturePath,JSON.stringify({pollerCheck:'first'}));const intervalMs=25;let deliveries=0;let latestConfig=null;const waitFor=(isReady,message)=>new Promise((resolve,reject)=>{const expiry=setTimeout(()=>{clearInterval(tick);reject(new Error(message))},5000);const tick=setInterval(()=>{if(!isReady())return;clearInterval(tick);clearTimeout(expiry);resolve()},10)});const sleep=(ms)=>new Promise((resolve)=>setTimeout(resolve,ms));const poller=createConfigPoller({configPath:fixturePath,intervalMs,onConfig:(config)=>{deliveries+=1;latestConfig=config}});poller.start();(async()=>{const firstDeliveryStartedAt=Date.now();await waitFor(()=>latestConfig&&latestConfig.pollerCheck==='first','onConfig was never called');assert.ok(Date.now()-firstDeliveryStartedAt<intervalMs*20,'the first delivery ignored intervalMs');fs.writeFileSync(fixturePath+'.tmp',JSON.stringify({pollerCheck:'second'}));fs.renameSync(fixturePath+'.tmp',fixturePath);const reloadStartedAt=Date.now();await waitFor(()=>latestConfig&&latestConfig.pollerCheck==='second','the poller never reloaded the changed config');assert.ok(Date.now()-reloadStartedAt<intervalMs*20,'the reload ignored intervalMs');poller.stop();const deliveriesAtStop=deliveries;await sleep(intervalMs*4);assert.equal(deliveries,deliveriesAtStop,'stop() left the poller running')})().catch((error)=>{console.error(error.message);process.exitCode=1}).finally(()=>{poller.stop()});\"",
+    "maxTurns": 5
+  }
+]

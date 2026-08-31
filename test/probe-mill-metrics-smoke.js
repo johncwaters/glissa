@@ -4,10 +4,18 @@ const fs = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
-const { stripVTControlCharacters } = require('node:util');
 
-const WebSocket = require('ws');
 const { buildScorecards } = require('../server/core/mill-metrics-core.ts');
+const {
+  awaitBackendShutdown,
+  closeServer,
+  connectControl,
+  findFreeHighPort,
+  listen,
+  makeClaudeConfig,
+  removeHarnessTempDirectory,
+  safeTextTail,
+} = require('./support/backend-harness');
 
 // Live verification of mill metrics, run by hand against a REAL billed claude binary and the
 // operator's own credentials: node test/probe-mill-metrics-smoke.js
@@ -35,38 +43,6 @@ function check(label, condition) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function listen(server, port) {
-  await new Promise((resolve, reject) => {
-    const onError = (error) => {
-      server.off('listening', onListening);
-      reject(error);
-    };
-    const onListening = () => {
-      server.off('error', onError);
-      resolve();
-    };
-    server.once('error', onError);
-    server.once('listening', onListening);
-    server.listen(port, '127.0.0.1');
-  });
-}
-
-async function closeServer(server) {
-  if (!server?.listening) return;
-  server.closeAllConnections();
-  await new Promise((resolve) => server.close(resolve));
-}
-
-async function findFreeHighPort() {
-  const reservationServer = http.createServer();
-  await listen(reservationServer, 0);
-  const address = reservationServer.address();
-  const port = typeof address === 'object' && address ? address.port : null;
-  await closeServer(reservationServer);
-  if (!Number.isInteger(port) || port < 1024) throw new Error('could not reserve a free high port');
-  return port;
 }
 
 function writeProbeConfig(configPath, projectDirectory, port) {
@@ -110,39 +86,6 @@ function makeProbePack(tempDirectory) {
   return { builtRoot, packFile: path.join(currentDirectory, PACK_REL_PATH) };
 }
 
-function makeProbeClaudeConfig(tempDirectory, projectDirectory) {
-  const claudeConfigDirectory = path.join(tempDirectory, 'claude-config');
-  const realCredentialsPath = path.join(os.homedir(), '.claude', '.credentials.json');
-  const realStatePath = path.join(os.homedir(), '.claude.json');
-  if (!fs.existsSync(realCredentialsPath)) throw new Error('Claude credentials are unavailable');
-  if (!fs.existsSync(realStatePath)) throw new Error('Claude account state is unavailable');
-  const realState = JSON.parse(fs.readFileSync(realStatePath, 'utf8'));
-  fs.mkdirSync(claudeConfigDirectory);
-  fs.copyFileSync(realCredentialsPath, path.join(claudeConfigDirectory, '.credentials.json'));
-  fs.chmodSync(path.join(claudeConfigDirectory, '.credentials.json'), 0o600);
-  fs.writeFileSync(
-    path.join(claudeConfigDirectory, '.claude.json'),
-    `${JSON.stringify({
-      firstStartTime: realState.firstStartTime,
-      hasCompletedOnboarding: true,
-      lastOnboardingVersion: realState.lastOnboardingVersion,
-      oauthAccount: realState.oauthAccount,
-      projects: {
-        [projectDirectory]: { hasTrustDialogAccepted: true },
-      },
-      userID: realState.userID,
-    }, null, 2)}\n`,
-    { encoding: 'utf8', mode: 0o600 },
-  );
-  return claudeConfigDirectory;
-}
-
-function safePtyOutputTail(output) {
-  return stripVTControlCharacters(output)
-    .replace(/https?:\/\/\S+/g, '<redacted-url>')
-    .slice(-4096);
-}
-
 function readMetricEvents(eventsDirectory) {
   if (!fs.existsSync(eventsDirectory)) return [];
   const events = [];
@@ -167,21 +110,6 @@ async function waitForValue(readValue, label, timeoutMs = STEP_TIMEOUT_MS) {
     await delay(100);
   }
   throw new Error(`timed out waiting for ${label}`);
-}
-
-async function connectControl(port) {
-  const tokenResponse = await fetch(`http://127.0.0.1:${port}/control-token`);
-  if (!tokenResponse.ok) throw new Error(`control token request failed with ${tokenResponse.status}`);
-  const { token } = await tokenResponse.json();
-  const socket = new WebSocket(
-    `ws://127.0.0.1:${port}/control?token=${encodeURIComponent(token)}`,
-    { origin: `http://127.0.0.1:${port}` },
-  );
-  await new Promise((resolve, reject) => {
-    socket.once('open', resolve);
-    socket.once('error', reject);
-  });
-  return socket;
 }
 
 function observeReadHookRequests(request, readHookPayloads) {
@@ -214,16 +142,6 @@ function promptEventCount(events) {
   return events.filter((event) => event.kind === 'prompt' && event.sessionId === SESSION_ID).length;
 }
 
-async function awaitBackendShutdown(backend) {
-  if (!backend) return;
-  const shutdown = backend.shutdown();
-  const reaps = Array.isArray(shutdown?.reaps) ? shutdown.reaps : [];
-  const stoppers = Array.isArray(shutdown?.stoppers)
-    ? shutdown.stoppers.map((entry) => entry.promise)
-    : [];
-  await Promise.allSettled([...reaps, ...stoppers]);
-}
-
 async function main() {
   const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-mill-metrics-smoke-'));
   const projectDirectory = path.join(tempDirectory, 'project');
@@ -237,7 +155,7 @@ async function main() {
   process.env.GLISSA_PORT = String(port);
   writeProbeConfig(configPath, projectDirectory, port);
   const { builtRoot, packFile } = makeProbePack(tempDirectory);
-  const claudeConfigDirectory = makeProbeClaudeConfig(tempDirectory, projectDirectory);
+  const claudeConfigDirectory = makeClaudeConfig(tempDirectory, [projectDirectory]);
   const { createBackend } = require('../server/backend');
 
   let backend = null;
@@ -251,9 +169,38 @@ async function main() {
     try { backend?.shutdown(); } catch {}
     try { server?.closeAllConnections(); } catch {}
     try { server?.close(); } catch {}
-    try { fs.rmSync(tempDirectory, { recursive: true, force: true }); } catch {}
+    removeHarnessTempDirectory(tempDirectory);
     process.exit(2);
   }, HARD_TIMEOUT_MS);
+
+  let cleanupRun = null;
+  const cleanUp = () => {
+    if (cleanupRun) return cleanupRun;
+    cleanupRun = (async () => {
+      clearTimeout(hardTimeout);
+      try { session?.kill(); } catch {}
+      try { controlSocket?.terminate(); } catch {}
+      try { await awaitBackendShutdown(backend); } catch (error) {
+        console.error(`  NOTE  backend cleanup failed: ${error.message}`);
+      }
+      try { await closeServer(server); } catch (error) {
+        console.error(`  NOTE  server cleanup failed: ${error.message}`);
+      }
+      removeHarnessTempDirectory(tempDirectory);
+    })();
+    return cleanupRun;
+  };
+  const cleanUpAndExit = async (signalName) => {
+    console.error(`\nreceived ${signalName}, killing the session and removing ${tempDirectory}`);
+    try { await cleanUp(); } catch (error) {
+      console.error(`signal cleanup failed: ${error.message}`);
+    }
+    process.exit(130);
+  };
+  const onSigint = () => { void cleanUpAndExit('SIGINT'); };
+  const onSigterm = () => { void cleanUpAndExit('SIGTERM'); };
+  process.on('SIGINT', onSigint);
+  process.on('SIGTERM', onSigterm);
 
   const readHookPayloads = [];
   const hookSignals = [];
@@ -404,22 +351,15 @@ async function main() {
   } catch (error) {
     failed += 1;
     console.error(`\nFAIL ${error.stack || error.message}`);
-    if (ptyOutputTail) console.error(`PTY output tail: ${JSON.stringify(safePtyOutputTail(ptyOutputTail))}`);
+    if (ptyOutputTail) console.error(`PTY output tail: ${JSON.stringify(safeTextTail(ptyOutputTail, 4096))}`);
   } finally {
-    clearTimeout(hardTimeout);
-    try { session?.kill(); } catch {}
-    try { controlSocket?.terminate(); } catch {}
-    try { await awaitBackendShutdown(backend); } catch (error) {
-      console.error(`  NOTE  backend cleanup failed: ${error.message}`);
-    }
-    try { await closeServer(server); } catch (error) {
-      console.error(`  NOTE  server cleanup failed: ${error.message}`);
-    }
-    fs.rmSync(tempDirectory, { recursive: true, force: true });
+    await cleanUp();
+    process.off('SIGINT', onSigint);
+    process.off('SIGTERM', onSigterm);
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);
-  process.exitCode = failed === 0 ? 0 : 1;
+  if (failed > 0) process.exitCode = 1;
 }
 
 main().catch((error) => {

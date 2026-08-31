@@ -34,6 +34,8 @@ uploads/
 .glissa/teams/release-notes/
 # Local scratch repo used for integration testing; not part of the package.
 ita-test/
+# Ablation run output (session tails from a real billed run). Runtime output, not a deliverable.
+test/ablation/results/
 
 # compiled-commit runner scratch
 .compiled-commit-tmp/
