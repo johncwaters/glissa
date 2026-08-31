@@ -65,7 +65,7 @@ function worstStale(current, next) {
 }
 
 // Stale needs BOTH versions known: an unreadable manifest is unknown, and unknown must not warn.
-function deliveriesFor(name, sessionRows, builtVersion, labelByPath = new Map()) {
+function deliveriesFor(name, sessionRows, builtVersion, labelByPath = new Map(), consumerTargets = []) {
   const deliveries = [];
   const deliveryByKey = new Map();
   for (const [index, row] of asArray(sessionRows).entries()) {
@@ -93,10 +93,28 @@ function deliveriesFor(name, sessionRows, builtVersion, labelByPath = new Map())
         version,
         stale,
         staleSessions: stale === true ? 1 : 0,
+        pending: false,
       };
       deliveryByKey.set(key, delivery);
       deliveries.push(delivery);
     }
+  }
+  for (const target of asArray(consumerTargets)) {
+    const targetPath = stringOrNull(target?.path);
+    if (targetPath === null || deliveryByKey.has(`path:${targetPath}`)) continue;
+    const cards = asArray(sessionRows).filter((row) => row?.ephemeral !== true && stringOrNull(row?.path) === targetPath);
+    const cardStates = new Set(cards.map((card) => stringOrNull(card.state)));
+    const delivery = {
+      project: stringOrNull(target?.label) || 'project',
+      sessionCount: cards.length,
+      state: cardStates.size === 1 ? [...cardStates][0] : null,
+      version: null,
+      stale: null,
+      staleSessions: 0,
+      pending: true,
+    };
+    deliveryByKey.set(`path:${targetPath}`, delivery);
+    deliveries.push(delivery);
   }
   return deliveries;
 }
@@ -124,7 +142,9 @@ function distillRowsFrom(entries) {
  */
 function resolveConsumers(sources) {
   const projectsByPack = new Map();
+  const targetsByPack = new Map();
   const labelByPath = new Map();
+  const pathById = new Map();
   const projects = [];
   const lanes = [];
   const warnings = [];
@@ -144,12 +164,20 @@ function resolveConsumers(sources) {
     projects.push({ id: stringOrNull(source?.id), name: label, packs: names });
     const projectPath = stringOrNull(source?.path);
     if (projectPath !== null && !labelByPath.has(projectPath)) labelByPath.set(projectPath, label);
+    if (projectPath !== null) {
+      for (const recordId of [stringOrNull(source?.id), ...asArray(source?.recordIds)]) {
+        if (typeof recordId === 'string' && recordId) pathById.set(recordId, projectPath);
+      }
+    }
     for (const name of names) {
       if (!projectsByPack.has(name)) projectsByPack.set(name, []);
       projectsByPack.get(name).push(label);
+      if (projectPath === null) continue;
+      if (!targetsByPack.has(name)) targetsByPack.set(name, []);
+      targetsByPack.get(name).push({ path: projectPath, label });
     }
   }
-  return { projectsByPack, labelByPath, projects, lanes, warnings };
+  return { projectsByPack, targetsByPack, labelByPath, pathById, projects, lanes, warnings };
 }
 
 /** Packs a consumer names that no spec defines: a delivery that will silently be skipped at spawn. */
@@ -200,13 +228,52 @@ function specErrorsFor(entry) {
   return { valid: errors.length === 0, errors };
 }
 
-function buildPackRow(entry, { consumers, sessionRows, measurementByPack }) {
+function builtVariantPathsByGroup(specs, consumers) {
+  const pathsByGroup = new Map();
+  for (const entry of specs) {
+    const group = stringOrNull(entry?.group);
+    if (group === null || !isPlainObject(entry?.manifest)) continue;
+    const path = consumers.pathById.get(stringOrNull(entry?.variantProject?.id));
+    if (!path) continue;
+    const paths = pathsByGroup.get(group) || new Set();
+    paths.add(path);
+    pathsByGroup.set(group, paths);
+  }
+  return pathsByGroup;
+}
+
+function deliveryTargetsFor(name, entry, consumers, builtVariantPaths) {
+  const group = stringOrNull(entry?.group);
+  if (group !== null) {
+    const variantProject = entry?.variantProject || null;
+    const path = consumers.pathById.get(stringOrNull(variantProject?.id));
+    if (!path) return [];
+    return [{ path, label: stringOrNull(variantProject?.label) || 'project' }];
+  }
+  const targets = consumers.targetsByPack.get(name) || [];
+  if (!isPlainObject(entry?.spec) || entry.spec.perProjectVariants !== true) return targets;
+  // A consumer covered by a BUILT variant pends on that variant's row; every other one falls back to
+  // this base pack at spawn (resolveVariant in session/session-pack-delivery.js), so it pends here.
+  const covered = builtVariantPaths.get(name);
+  if (!covered) return targets;
+  return targets.filter((target) => !covered.has(target.path));
+}
+
+// The SAME verdict the spawn reaches, so a pending row never promises a delivery the gate would refuse.
+function pendingTargetsFor(name, entry, consumers, { specValid, built, manifest, packsDir, builtVariantPaths }) {
+  if (!specValid || built === null || built.empty === true) return [];
+  return deliveryTargetsFor(name, entry, consumers, builtVariantPaths)
+    .filter((target) => decidePackDelivery({ manifest, projectPath: target.path, packsDir }).deliver);
+}
+
+function buildPackRow(entry, { consumers, sessionRows, measurementByPack, packsDir, builtVariantPaths }) {
   const name = String(entry?.name ?? '');
   const spec = isPlainObject(entry?.spec) ? entry.spec : null;
   const manifest = isPlainObject(entry?.manifest) ? entry.manifest : null;
   const { valid, errors } = specErrorsFor(entry || {});
   const built = builtFrom(manifest);
-  const deliveredTo = deliveriesFor(name, sessionRows, built ? built.version : null, consumers.labelByPath);
+  const pendingTargets = pendingTargetsFor(name, entry, consumers, { specValid: valid, built, manifest, packsDir, builtVariantPaths });
+  const deliveredTo = deliveriesFor(name, sessionRows, built ? built.version : null, consumers.labelByPath, pendingTargets);
   const group = stringOrNull(entry?.group);
   // A variant's consumer is exactly the project it was derived for; nothing else may ever be handed it.
   const variantProject = group === null ? null : (entry?.variantProject || null);
@@ -266,7 +333,9 @@ function buildMillReport(input) {
   const specs = asArray(input?.specs);
   const sessionRows = asArray(input?.sessionRows);
   const measurementByPack = isPlainObject(input?.measurementByPack) ? input.measurementByPack : {};
-  const packs = specs.map((entry) => buildPackRow(entry, { consumers, sessionRows, measurementByPack }));
+  const packsDir = stringOrNull(input?.packsDir);
+  const builtVariantPaths = builtVariantPathsByGroup(specs, consumers);
+  const packs = specs.map((entry) => buildPackRow(entry, { consumers, sessionRows, measurementByPack, packsDir, builtVariantPaths }));
   // A group name is what a project assigns, so a variant name never counts as a known consumer target.
   const knownNames = new Set(packs.filter((pack) => pack.group === null).map((pack) => pack.name));
   return {

@@ -243,6 +243,109 @@ test('sibling cards are one assignable project, with the packs either of them na
   assert.deepEqual(report.packs[0].consumers.projects, ['glissa'], 'and it names the project once');
 });
 
+test('a consuming project whose card has not spawned yet gets a pending delivery row', () => {
+  const report = buildMillReport(baseInput({
+    consumers: { projects: [{ id: 'p1', name: 'glissa', path: 'C:/repo', packs: ['house-rules'] }] },
+    sessionRows: [
+      { sessionId: 's1', sessionName: 'glissa', path: 'C:/repo', state: 'DORMANT', packs: [] },
+    ],
+  }));
+  const pending = report.packs[0].deliveredTo[0];
+  assert.deepEqual(pending, {
+    project: 'glissa',
+    sessionCount: 1,
+    state: 'DORMANT',
+    version: null,
+    stale: null,
+    staleSessions: 0,
+    pending: true,
+  });
+  assert.equal(report.totals.staleDeliveries, 0);
+});
+
+test('a delivered row is not pending, and a delivered project earns no second row', () => {
+  const report = buildMillReport(baseInput({
+    consumers: { projects: [{ id: 'p1', name: 'glissa', path: 'C:/repo', packs: ['house-rules'] }] },
+    sessionRows: [
+      { sessionId: 's1', sessionName: 'glissa', path: 'C:/repo', state: 'running', packs: [{ name: 'house-rules', version: VERSION }] },
+    ],
+  }));
+  const rows = report.packs[0].deliveredTo;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].pending, false);
+});
+
+test('an ephemeral session neither counts toward nor states a pending row', () => {
+  const report = buildMillReport(baseInput({
+    consumers: { projects: [{ id: 'p1', name: 'glissa', path: 'C:/repo', packs: ['house-rules'] }] },
+    sessionRows: [
+      { sessionId: 's1', sessionName: 'glissa', path: 'C:/repo', state: 'DORMANT', packs: [] },
+      { sessionId: 'e1', sessionName: 'pr lane', path: 'C:/repo', state: 'running', ephemeral: true, packs: [] },
+    ],
+  }));
+  const pending = report.packs[0].deliveredTo[0];
+  assert.equal(pending.sessionCount, 1);
+  assert.equal(pending.state, 'DORMANT');
+});
+
+test('a pending row never carries the project path onto the wire', () => {
+  const report = buildMillReport(baseInput({
+    consumers: { projects: [{ id: 'p1', name: 'glissa', path: '/home/x/repo', packs: ['house-rules'] }] },
+    sessionRows: [],
+  }));
+  assert.equal(report.packs[0].deliveredTo[0].pending, true);
+  assert.ok(!JSON.stringify(report).includes('/home/x/'), 'no server path survives into the wire shape');
+});
+
+test('an empty build promises no pending delivery: the spawn would skip it', () => {
+  const report = buildMillReport(baseInput({
+    specs: [{ name: 'house-rules', spec: validSpec(), manifest: manifest({ sources: [], rules: [], skills: [] }), builtReason: null, distill: [] }],
+    consumers: { projects: [{ id: 'p1', name: 'glissa', path: 'C:/repo', packs: ['house-rules'] }] },
+    sessionRows: [{ sessionId: 's1', sessionName: 'glissa', path: 'C:/repo', state: 'DORMANT', packs: [] }],
+  }));
+  assert.equal(report.packs[0].built.empty, true);
+  assert.deepEqual(report.packs[0].deliveredTo, []);
+});
+
+test('a pack that has never been built promises no pending delivery', () => {
+  const report = buildMillReport(baseInput({
+    specs: [{ name: 'house-rules', spec: validSpec(), manifest: null, builtReason: 'not built', distill: [] }],
+    consumers: { projects: [{ id: 'p1', name: 'glissa', path: 'C:/repo', packs: ['house-rules'] }] },
+    sessionRows: [{ sessionId: 's1', sessionName: 'glissa', path: 'C:/repo', state: 'DORMANT', packs: [] }],
+  }));
+  assert.equal(report.packs[0].built, null);
+  assert.deepEqual(report.packs[0].deliveredTo, []);
+});
+
+test('an invalid spec promises no pending delivery', () => {
+  const report = buildMillReport(baseInput({
+    specs: [{ name: 'house-rules', spec: validSpec({ sources: [] }), manifest: manifest(), builtReason: null, distill: [] }],
+    consumers: { projects: [{ id: 'p1', name: 'glissa', path: 'C:/repo', packs: ['house-rules'] }] },
+    sessionRows: [{ sessionId: 's1', sessionName: 'glissa', path: 'C:/repo', state: 'DORMANT', packs: [] }],
+  }));
+  assert.equal(report.packs[0].specValid, false);
+  assert.deepEqual(report.packs[0].deliveredTo, []);
+});
+
+test('a pack assembled from inside the consuming checkout promises no pending delivery', () => {
+  const selfReferential = buildMillReport(baseInput({
+    specs: [{ name: 'house-rules', spec: validSpec(), manifest: manifest({ sourceRoots: ['sources/house-rules'] }), builtReason: null, distill: [] }],
+    consumers: { projects: [{ id: 'p1', name: 'glissa', path: 'C:/repo', packs: ['house-rules'] }] },
+    sessionRows: [{ sessionId: 's1', sessionName: 'glissa', path: 'C:/repo', state: 'DORMANT', packs: [] }],
+    packsDir: 'C:/repo/packs',
+  }));
+  assert.deepEqual(selfReferential.packs[0].deliveredTo, []);
+
+  const elsewhere = buildMillReport(baseInput({
+    specs: [{ name: 'house-rules', spec: validSpec(), manifest: manifest({ sourceRoots: ['sources/house-rules'] }), builtReason: null, distill: [] }],
+    consumers: { projects: [{ id: 'p1', name: 'glissa', path: 'C:/repo', packs: ['house-rules'] }] },
+    sessionRows: [{ sessionId: 's1', sessionName: 'glissa', path: 'C:/repo', state: 'DORMANT', packs: [] }],
+    packsDir: 'C:/glissa/packs',
+  }));
+  assert.equal(elsewhere.packs[0].deliveredTo.length, 1);
+  assert.equal(elsewhere.packs[0].deliveredTo[0].pending, true);
+});
+
 test('an unbuilt pack judges no delivery stale: an unknown version is not a mismatch', () => {
   const report = buildMillReport(baseInput({
     specs: [{ name: 'house-rules', spec: validSpec(), manifest: null, builtReason: 'not built', distill: [] }],
@@ -402,14 +505,31 @@ test('a manifest with no token estimate reports null rather than a confident zer
 
 // ---- Per-project variants: one row per derived pack, grouped under the spec it came from ----
 
+const GROUP_SPEC = validSpec({ name: 'memory', perProjectVariants: true, sources: [{ path: '{{glissaHome}}/m/{{projectSlug}}.md', data: true }] });
+
+function groupEntry(manifestOverrides = {}) {
+  return { name: 'memory', spec: GROUP_SPEC, manifest: manifest({ name: 'memory', ...manifestOverrides }), builtReason: null, distill: [] };
+}
+
+function unbuiltVariantEntry() {
+  return {
+    name: 'memory-glissa-12345678',
+    spec: GROUP_SPEC,
+    group: 'memory',
+    variantProject: { id: 'p1', label: 'glissa' },
+    manifest: null,
+    builtReason: 'not built',
+    distill: [],
+  };
+}
+
 function variantInput(overrides = {}) {
-  const groupSpec = validSpec({ name: 'memory', perProjectVariants: true, sources: [{ path: '{{glissaHome}}/m/{{projectSlug}}.md', data: true }] });
   return baseInput({
     specs: [
-      { name: 'memory', spec: groupSpec, manifest: manifest({ name: 'memory' }), builtReason: null, distill: [] },
+      groupEntry(),
       {
         name: 'memory-glissa-12345678',
-        spec: groupSpec,
+        spec: GROUP_SPEC,
         group: 'memory',
         variantProject: { id: 'p1', label: 'glissa' },
         manifest: manifest({ name: 'memory-glissa-12345678', version: OLD_VERSION }),
@@ -471,6 +591,53 @@ test('a delivery of a variant is joined onto the variant row, not its group', ()
   assert.deepEqual(group.deliveredTo, []);
   assert.equal(variant.deliveredTo.length, 1);
   assert.equal(variant.deliveredTo[0].stale, true, 'the delivered version is compared against the VARIANT build');
+});
+
+test('an undelivered variant pends on the variant row, and its group row stays empty', () => {
+  const report = buildMillReport(variantInput({
+    consumers: { projects: [{ id: 'p1', name: 'glissa', path: 'C:/repo', packs: ['memory'] }] },
+    sessionRows: [{ sessionId: 's1', sessionName: 'glissa', path: 'C:/repo', state: 'DORMANT', packs: [] }],
+  }));
+  const [group, variant] = report.packs;
+  assert.deepEqual(group.deliveredTo, []);
+  assert.equal(variant.deliveredTo.length, 1);
+  assert.equal(variant.deliveredTo[0].pending, true);
+  assert.equal(variant.deliveredTo[0].project, 'glissa');
+});
+
+test('a project whose variant is unbuilt pends on the group row: the spawn hands it the base pack', () => {
+  const report = buildMillReport(variantInput({
+    specs: [groupEntry(), unbuiltVariantEntry()],
+    consumers: { projects: [{ id: 'p1', name: 'glissa', path: 'C:/repo', packs: ['memory'] }] },
+    sessionRows: [{ sessionId: 's1', sessionName: 'glissa', path: 'C:/repo', state: 'DORMANT', packs: [] }],
+  }));
+  const [group, variant] = report.packs;
+  assert.equal(group.deliveredTo.length, 1);
+  assert.equal(group.deliveredTo[0].pending, true);
+  assert.equal(group.deliveredTo[0].project, 'glissa');
+  assert.deepEqual(variant.deliveredTo, []);
+});
+
+test('a project with no variant row at all pends on the group row', () => {
+  const report = buildMillReport(variantInput({
+    specs: [groupEntry()],
+    consumers: { projects: [{ id: 'p1', name: 'glissa', path: 'C:/repo', packs: ['memory'] }] },
+    sessionRows: [{ sessionId: 's1', sessionName: 'glissa', path: 'C:/repo', state: 'DORMANT', packs: [] }],
+  }));
+  assert.equal(report.packs[0].deliveredTo.length, 1);
+  assert.equal(report.packs[0].deliveredTo[0].pending, true);
+});
+
+test('an empty base build promises no pending delivery, even where the variant is unbuilt', () => {
+  const report = buildMillReport(variantInput({
+    specs: [groupEntry({ sources: [], rules: [], skills: [] }), unbuiltVariantEntry()],
+    consumers: { projects: [{ id: 'p1', name: 'glissa', path: 'C:/repo', packs: ['memory'] }] },
+    sessionRows: [{ sessionId: 's1', sessionName: 'glissa', path: 'C:/repo', state: 'DORMANT', packs: [] }],
+  }));
+  const [group, variant] = report.packs;
+  assert.equal(group.built.empty, true);
+  assert.deepEqual(group.deliveredTo, []);
+  assert.deepEqual(variant.deliveredTo, []);
 });
 
 test('a build carrying only its own index reads as empty, and the totals count it', () => {

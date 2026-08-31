@@ -6452,14 +6452,15 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-key-strip:no
 .phone-key:active { color: var(--text-head); border-color: var(--border-hover); }
 .phone-key:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* ── Review, Radar, PRs, Usage, Mill, Visions and Hooks screens (adopted desktop panels) ── */
+/* ── Review, Radar, PRs, Usage, Mill, Visions, Hooks and Settings screens (adopted desktop panels) ── */
 .phone-review,
 .phone-radar,
 .phone-prs,
 .phone-usage,
 .phone-mill,
 .phone-visions,
-.phone-hooks { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.phone-hooks,
+.phone-settings { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 /* The docked column's fixed flex basis is meaningless as a full screen, and there is no neighbour to
    resize against or border off. */
 .phone-review > .app-sidebar { flex: 1 1 auto; border-left: none; }
@@ -6471,6 +6472,9 @@ html[data-layout="phone"] .review-sidebar-body { overscroll-behavior: contain; }
 .phone-mill > .mill-view,
 .phone-visions > .visions-view,
 .phone-hooks > .hooks-view { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+/* No overflow-y here: settings scrolls inside .settings-view-content, which needs a definite height. */
+.phone-settings > .settings-view { flex: 1 1 auto; min-height: 0; }
+.phone-settings .settings-view-content { overscroll-behavior: contain; }
 /* ── Usage on a phone ──
    The desktop page is numeric tables at 11px, which is unreadable on a phone but does not need
    restructuring the way the Radar rows did: each table already scrolls inside its own box, so the phone

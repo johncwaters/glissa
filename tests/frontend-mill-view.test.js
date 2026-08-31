@@ -245,6 +245,12 @@ test('a delivery row names one project and its cards', async () => {
   const mixed = { project: 'glissa', sessionCount: 2, state: null, version: null, stale: true, staleSessions: 2 };
   assert.equal(deliveryLabel(mixed), 'glissa (2 sessions)', 'no state is claimed while the sessions disagree');
   assert.equal(deliveryStaleText(mixed), 'stale', 'every session behind is plainly stale');
+
+  const pending = { project: 'glissa', sessionCount: 1, state: 'DORMANT', version: null, stale: null, staleSessions: 0, pending: true };
+  assert.equal(deliveryLabel(pending), 'glissa (dormant)');
+  assert.equal(deliveryDetail(pending), 'delivers on next spawn');
+  assert.equal(deliveryStaleText(pending), '');
+  assert.equal(deliveryTone(pending), 'ok');
 });
 
 test('a toggle sends a delta, not a list, so two dashboards cannot clobber each other', async () => {

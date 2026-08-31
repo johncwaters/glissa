@@ -157,6 +157,7 @@ export function deliveryLabel(delivery) {
 }
 
 export function deliveryDetail(delivery) {
+  if (delivery?.pending === true) return 'delivers on next spawn';
   return `version ${shortVersion(delivery?.version)}`;
 }
 

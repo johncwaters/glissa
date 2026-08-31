@@ -118,7 +118,6 @@ function createMillWiring(deps = {}) {
   function sessionRows() {
     const rows = [];
     for (const snapshot of listSessions()) {
-      if (!Array.isArray(snapshot?.packs) || snapshot.packs.length === 0) continue;
       rows.push({
         sessionId: snapshot.id,
         sessionName: snapshot.name,
@@ -126,7 +125,8 @@ function createMillWiring(deps = {}) {
         // checkout are one delivery target, and the operator's directory layout is not the tab's.
         path: snapshot.path,
         state: snapshot.state,
-        packs: snapshot.packs,
+        ephemeral: snapshot.ephemeral === true,
+        packs: Array.isArray(snapshot?.packs) ? snapshot.packs : [],
       });
     }
     return rows;
@@ -184,6 +184,7 @@ function createMillWiring(deps = {}) {
       specs,
       sessionRows: sessionRows(),
       measurementByPack: measurement(),
+      packsDir: baseDir,
       // The SAME enumeration the build gate reads, so the tab and the mill can never disagree about
       // what counts as a consumer, addressed per project rather than per card.
       consumerSources: packConsumerGroups(config),
