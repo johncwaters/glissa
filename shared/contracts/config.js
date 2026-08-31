@@ -137,6 +137,10 @@ const MillSettings = z.object({
   enabled: optionalBoolean('mill.enabled'),
 }, { error: 'mill must be an object' }).passthrough().optional();
 
+const MillMetricsSettings = z.object({
+  retainDays: optionalInteger('millMetrics.retainDays', ranges.MILL_METRICS_RETAIN_DAY_RANGE),
+}, { error: 'millMetrics must be an object' }).optional();
+
 const BROWSER_CONFIG_SHAPE = {
   port: z.number().int().min(0).max(65535).optional(),
   autoRecoverSeconds: z.number().finite().nonnegative().optional(),
@@ -166,7 +170,7 @@ const BROWSER_CONFIG_SHAPE = {
   usage: UsageSettings,
   telegram: TelegramSettings,
   packDistiller: MillSettings,
-  millMetrics: MillSettings,
+  millMetrics: MillMetricsSettings,
   memory: MillSettings,
   ingest: MillSettings,
 };

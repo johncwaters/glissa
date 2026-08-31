@@ -39,7 +39,7 @@ function harness(cfg, { saveFails = false, rtkPath = '/usr/bin/rtk' } = {}) {
 const record = (overrides = {}) => ({ id: 'h1', name: 'Lint', event: 'PostToolUse', matcher: 'Edit', type: 'command', command: 'npm run lint', enabled: true, ...overrides });
 
 test('request-hooks-report answers the stored records, the catalog, the built-in hooks and the projects', async () => {
-  const cfg = { projects: [{ id: 'p1', name: 'glissa', path: '/r' }, { id: 'p2', name: 'codex', path: '/c', agent: 'codex' }], hooks: [record(), { id: 'broken' }], rtk: true, millMetrics: { enabled: true } };
+  const cfg = { projects: [{ id: 'p1', name: 'glissa', path: '/r' }, { id: 'p2', name: 'codex', path: '/c', agent: 'codex' }], hooks: [record(), { id: 'broken' }], rtk: true };
   const h = harness(cfg);
   await h.send({ type: 'request-hooks-report', requestId: 'r1' });
   const report = h.sent.find((m) => m.type === 'hooks-report');

@@ -86,7 +86,7 @@ test('the wire bounds match the clamps each resolver would silently apply', () =
 });
 
 test('mill measurement accepts its settings and rejects out-of-range or unknown keys', () => {
-  assert.equal(validateMillBlock({ enabled: true, retainDays: 90 }, MILL_METRICS_SPEC), null);
+  assert.equal(validateMillBlock({ retainDays: 90 }, MILL_METRICS_SPEC), null);
   assert.equal(
     validateMillBlock({ retainDays: 6 }, MILL_METRICS_SPEC),
     'millMetrics.retainDays must be an integer between 7 and 3650',

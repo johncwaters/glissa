@@ -349,16 +349,11 @@ test('a pack delivered only while reads were blind stays unmeasurable after the 
 });
 
 test('a retention the wire would refuse falls back rather than reaching the lane', () => {
-  assert.deepEqual(resolveMillMetricsConfig({ enabled: true, retainDays: 180 }), {
-    enabled: true,
-    retainDays: 180,
-  });
+  assert.deepEqual(resolveMillMetricsConfig({ retainDays: 180 }), { retainDays: 180 });
   assert.equal(resolveMillMetricsConfig({ retainDays: 6 }).retainDays, DEFAULT_MILL_METRICS_RETAIN_DAYS);
   assert.equal(resolveMillMetricsConfig({ retainDays: 3651 }).retainDays, DEFAULT_MILL_METRICS_RETAIN_DAYS);
   assert.equal(resolveMillMetricsConfig({ retainDays: 90.5 }).retainDays, DEFAULT_MILL_METRICS_RETAIN_DAYS);
   assert.equal(resolveMillMetricsConfig(null).retainDays, DEFAULT_MILL_METRICS_RETAIN_DAYS);
-  assert.equal(resolveMillMetricsConfig(undefined).enabled, false);
-  assert.equal(resolveMillMetricsConfig({ enabled: 'yes' }).enabled, false);
 });
 
 test('distinct files are unioned across measurable sessions', () => {

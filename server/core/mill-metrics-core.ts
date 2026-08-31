@@ -109,7 +109,6 @@ function integerWithin(value: unknown, { min, max }: IntegerRange, fallback: num
 
 function resolveMillMetricsConfig(raw: MillMetricsRawConfig): MillMetricsConfig {
   return {
-    enabled: raw?.enabled === true,
     retainDays: integerWithin(raw?.retainDays, MILL_METRICS_RETAIN_DAY_RANGE, DEFAULT_MILL_METRICS_RETAIN_DAYS),
   };
 }
@@ -469,8 +468,8 @@ declare global {
   type MillMetricEndIntent = EndIntent;
   type MillMetricPackAccumulator = AccumulatorPack;
   type MillMetricAccumulatorShape = MillMetricAccumulator;
-  type MillMetricsConfig = { enabled: boolean; retainDays: number };
-  type MillMetricsRawConfig = { enabled?: unknown; retainDays?: unknown } | null | undefined;
+  type MillMetricsConfig = { retainDays: number };
+  type MillMetricsRawConfig = { retainDays?: unknown } | null | undefined;
 
   // One declared signature per JS helper these modules require, annotated at every binding, so two
   // hand-written copies of the same shape cannot drift apart in silence.

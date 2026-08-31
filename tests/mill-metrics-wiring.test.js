@@ -44,7 +44,7 @@ function delivered(overrides = {}) {
 
 test('a delivered pack read is recorded once per relative file', () => {
   const store = fakeStore();
-  const wiring = createMillMetricsWiring({ store, enabled: () => true, nowFn: () => NOW });
+  const wiring = createMillMetricsWiring({ store, nowFn: () => NOW });
   wiring.port.onPacksDelivered('s1', delivered());
   const payload = { tool_name: 'Read', tool_input: { file_path: path.join(PACK_DIR, 'rules.md') } };
   wiring.port.onHookEvent('s1', 'PostToolUse', payload);
@@ -55,7 +55,7 @@ test('a delivered pack read is recorded once per relative file', () => {
 
 test('reads outside delivered directories and non-Read events are ignored', () => {
   const store = fakeStore();
-  const wiring = createMillMetricsWiring({ store, enabled: () => true, nowFn: () => NOW });
+  const wiring = createMillMetricsWiring({ store, nowFn: () => NOW });
   wiring.port.onPacksDelivered('s1', delivered());
   wiring.port.onHookEvent('s1', 'PostToolUse', {
     tool_name: 'Read', tool_input: { file_path: path.join(path.dirname(PACK_DIR), 'outside.md') },
@@ -71,7 +71,7 @@ test('reads outside delivered directories and non-Read events are ignored', () =
 
 test('prompt classes are accumulated only for measured sessions', () => {
   const store = fakeStore();
-  const wiring = createMillMetricsWiring({ store, enabled: () => true, nowFn: () => NOW });
+  const wiring = createMillMetricsWiring({ store, nowFn: () => NOW });
   wiring.port.onPromptSubmitted('missing', { state: 'RUNNING', stateSince: 0, ts: NOW });
   wiring.port.onPacksDelivered('s1', delivered());
   wiring.port.onPromptSubmitted('s1', { state: 'RUNNING', stateSince: NOW - 5000, ts: NOW });
@@ -84,24 +84,10 @@ test('prompt classes are accumulated only for measured sessions', () => {
 
 test('a session with no delivered packs creates no closed record', () => {
   const store = fakeStore();
-  const wiring = createMillMetricsWiring({ store, enabled: () => true, nowFn: () => NOW });
+  const wiring = createMillMetricsWiring({ store, nowFn: () => NOW });
   wiring.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'operator-abort', finalState: 'DONE' });
   assert.deepEqual(store.closed, []);
   assert.deepEqual(store.events, []);
-});
-
-test('disabled measurement makes every handler and report inert', () => {
-  const store = fakeStore();
-  const wiring = createMillMetricsWiring({ store, enabled: () => false, nowFn: () => NOW });
-  wiring.port.onPacksDelivered('s1', delivered());
-  wiring.port.onPromptSubmitted('s1', { state: 'RUNNING', stateSince: 0, ts: NOW });
-  wiring.port.onHookEvent('s1', 'PostToolUse', {
-    tool_name: 'Read', tool_input: { file_path: path.join(PACK_DIR, 'rules.md') },
-  });
-  wiring.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'operator-abort', finalState: 'DONE' });
-  assert.deepEqual(store.events, []);
-  assert.deepEqual(store.closed, []);
-  assert.deepEqual(wiring.scorecards(), {});
 });
 
 test('session end persists disposition and the tokens this run added', () => {
@@ -109,7 +95,6 @@ test('session end persists disposition and the tokens this run added', () => {
   let vendorTotals = { tokens: 200, costUSD: 0.5 };
   const wiring = createMillMetricsWiring({
     store,
-    enabled: () => true,
     nowFn: () => NOW + 1000,
     tokensForSession: () => vendorTotals,
   });
@@ -126,7 +111,7 @@ test('session end persists disposition and the tokens this run added', () => {
 
 test('a close-out and a sleep-kill reach the same transition without scoring as aborts', () => {
   const store = fakeStore();
-  const wiring = createMillMetricsWiring({ store, enabled: () => true, nowFn: () => NOW });
+  const wiring = createMillMetricsWiring({ store, nowFn: () => NOW });
   wiring.port.onPacksDelivered('s1', delivered());
   wiring.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'close-out', finalState: 'DONE' });
   wiring.port.onPacksDelivered('s2', delivered());
@@ -136,7 +121,7 @@ test('a close-out and a sleep-kill reach the same transition without scoring as 
 
 test('a session torn down while live closes with no disposition instead of staying live', () => {
   const store = fakeStore();
-  const wiring = createMillMetricsWiring({ store, enabled: () => true, nowFn: () => NOW });
+  const wiring = createMillMetricsWiring({ store, nowFn: () => NOW });
   wiring.port.onPacksDelivered('s1', delivered());
   wiring.port.onSessionTeardown('s1');
   assert.equal(store.closed.length, 1);
@@ -145,21 +130,9 @@ test('a session torn down while live closes with no disposition instead of stayi
   assert.equal(wiring.scorecards().alpha.liveSessions, 0);
 });
 
-test('a session live when measurement is switched off does not come back as live', () => {
-  const store = fakeStore();
-  let measuring = true;
-  const wiring = createMillMetricsWiring({ store, enabled: () => measuring, nowFn: () => NOW });
-  wiring.port.onPacksDelivered('s1', delivered());
-  measuring = false;
-  wiring.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'operator-abort', finalState: 'DONE' });
-  measuring = true;
-  assert.deepEqual(store.closed, []);
-  assert.deepEqual(wiring.scorecards(), {});
-});
-
 test('recorded pack files are capped per session and the overflow is counted', () => {
   const store = fakeStore();
-  const wiring = createMillMetricsWiring({ store, enabled: () => true, nowFn: () => NOW });
+  const wiring = createMillMetricsWiring({ store, nowFn: () => NOW });
   wiring.port.onPacksDelivered('s1', delivered());
   for (let index = 0; index < MAX_PACK_FILES_PER_SESSION + 5; index += 1) {
     wiring.port.onHookEvent('s1', 'PostToolUse', {
@@ -180,7 +153,6 @@ test('live scorecards report the tokens the run has added so far', () => {
   let vendorTotals = { tokens: 500, costUSD: 1 };
   const wiring = createMillMetricsWiring({
     store,
-    enabled: () => true,
     nowFn: () => NOW,
     tokensForSession: () => vendorTotals,
   });
@@ -197,7 +169,6 @@ test('a run whose usage is unscanned when it starts waits for a real baseline in
   let vendorTotals = null;
   const wiring = createMillMetricsWiring({
     store,
-    enabled: () => true,
     nowFn: () => NOW,
     tokensForSession: () => vendorTotals,
   });
@@ -216,7 +187,6 @@ test('a conversation created mid-run is billed to this run in full, on top of wh
   let vendorTotals = { tokens: 100, costUSD: 1, identity: 'conv-a' };
   const wiring = createMillMetricsWiring({
     store,
-    enabled: () => true,
     nowFn: () => NOW,
     tokensForSession: () => vendorTotals,
   });
@@ -237,7 +207,6 @@ test('a total that moves backward banks the delta already earned instead of eras
   let vendorTotals = { tokens: 100, costUSD: 1, identity: 'conv-a' };
   const wiring = createMillMetricsWiring({
     store,
-    enabled: () => true,
     nowFn: () => NOW,
     tokensForSession: () => vendorTotals,
   });
@@ -257,7 +226,6 @@ test('an identity that only arrives after the baseline is not treated as a new c
   let vendorTotals = { tokens: 9000, costUSD: 20, identity: null };
   const wiring = createMillMetricsWiring({
     store,
-    enabled: () => true,
     nowFn: () => NOW,
     tokensForSession: () => vendorTotals,
   });
@@ -268,10 +236,10 @@ test('an identity that only arrives after the baseline is not treated as a new c
   assert.equal(store.closed[0].resumeSessionId, 'conv-a');
 });
 
-test('flipping measurement on serves the lane live, and a retention change swaps the store behind it', async () => {
+test('measurement starts live and a retention change swaps the store behind it', async () => {
   const order = [];
   const stores = [];
-  let millMetricsConfig = { enabled: false, retainDays: 90 };
+  let millMetricsConfig = { retainDays: 90 };
   const lane = createMillMetricsLane({
     resolveConfig: () => millMetricsConfig,
     createStore: ({ retainDays }) => {
@@ -282,17 +250,10 @@ test('flipping measurement on serves the lane live, and a retention change swaps
     },
     nowFn: () => NOW,
   });
-  assert.equal(lane.port.enabled(), false);
-  lane.port.onPacksDelivered('ignored', delivered());
-  assert.deepEqual(lane.scorecards(), {});
-
-  millMetricsConfig = { enabled: true, retainDays: 90 };
-  await lane.restartIfConfigChanged();
-  assert.equal(lane.port.enabled(), true);
   lane.port.onPacksDelivered('s1', delivered());
   assert.equal(lane.scorecards().alpha.liveSessions, 1);
 
-  millMetricsConfig = { enabled: true, retainDays: 30 };
+  millMetricsConfig = { retainDays: 30 };
   await lane.restartIfConfigChanged();
   assert.deepEqual(order, ['open:90', 'drain', 'open:30']);
   assert.equal(lane.currentStore(), stores[1]);
@@ -301,10 +262,6 @@ test('flipping measurement on serves the lane live, and a retention change swaps
   assert.equal(stores[0].closed.length, 0);
   assert.equal(stores[1].closed.length, 1);
 
-  millMetricsConfig = { enabled: false, retainDays: 30 };
-  await lane.restartIfConfigChanged();
-  assert.equal(lane.port.enabled(), false);
-  assert.equal(lane.currentStore(), null);
   assert.equal(stores.length, 2);
 });
 
@@ -343,13 +300,12 @@ test('a session closing while the store is swapping is replayed into the replace
   const order = [];
   const stores = [];
   const gate = openGate();
-  const { lane, setConfig } = gatedLane(order, stores, gate, { enabled: true, retainDays: 90 });
+  const { lane, setConfig } = gatedLane(order, stores, gate, { retainDays: 90 });
   lane.port.onPacksDelivered('s1', delivered());
-  setConfig({ enabled: true, retainDays: 30 });
+  setConfig({ retainDays: 30 });
   const swap = lane.restartIfConfigChanged();
   await tick();
   assert.equal(lane.currentStore(), null);
-  assert.equal(lane.port.enabled(), true);
   lane.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'natural', finalState: 'DONE' });
   gate.open();
   await swap;
@@ -363,12 +319,12 @@ test('two settings changes during one drain end on a single open store', async (
   const order = [];
   const stores = [];
   const gate = openGate();
-  const { lane, setConfig } = gatedLane(order, stores, gate, { enabled: true, retainDays: 90 });
+  const { lane, setConfig } = gatedLane(order, stores, gate, { retainDays: 90 });
   lane.port.onPacksDelivered('s1', delivered());
-  setConfig({ enabled: true, retainDays: 30 });
+  setConfig({ retainDays: 30 });
   const first = lane.restartIfConfigChanged();
   await tick();
-  setConfig({ enabled: true, retainDays: 60 });
+  setConfig({ retainDays: 60 });
   const second = lane.restartIfConfigChanged();
   lane.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'natural', finalState: 'DONE' });
   gate.open();
@@ -383,9 +339,9 @@ test('shutdown during a store swap drains the replacement as well', async () => 
   const order = [];
   const stores = [];
   const gate = openGate();
-  const { lane, setConfig } = gatedLane(order, stores, gate, { enabled: true, retainDays: 90 });
+  const { lane, setConfig } = gatedLane(order, stores, gate, { retainDays: 90 });
   lane.port.onPacksDelivered('s1', delivered());
-  setConfig({ enabled: true, retainDays: 30 });
+  setConfig({ retainDays: 30 });
   void lane.restartIfConfigChanged();
   await tick();
   lane.port.onSessionTeardown('s1');
@@ -396,37 +352,16 @@ test('shutdown during a store swap drains the replacement as well', async () => 
   assert.equal(stores[1].closed.length, 1);
 });
 
-test('a close buffered across a swap that ends with measurement off lands in the outgoing store', async () => {
-  const order = [];
-  const stores = [];
-  const gate = openGate();
-  const { lane, setConfig } = gatedLane(order, stores, gate, { enabled: true, retainDays: 90 });
-  lane.port.onPacksDelivered('s1', delivered());
-  setConfig({ enabled: true, retainDays: 30 });
-  const swap = lane.restartIfConfigChanged();
-  await tick();
-  lane.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'natural', finalState: 'DONE' });
-  setConfig({ enabled: false, retainDays: 30 });
-  const off = lane.restartIfConfigChanged();
-  gate.open();
-  await Promise.all([swap, off]);
-  assert.equal(stores.length, 1);
-  assert.equal(lane.currentStore(), null);
-  assert.equal(stores[0].closed.length, 1);
-  assert.equal(stores[0].events.filter((event) => event.kind === 'session-end').length, 1);
-  assert.deepEqual(order, ['open:90', 'drain:90', 'drain:90']);
-});
-
 test('a swap buffer filled with events gives ground to a close instead of dropping it', async () => {
   const order = [];
   const stores = [];
   const gate = openGate();
   const warnings = [];
-  const { lane, setConfig } = gatedLane(order, stores, gate, { enabled: true, retainDays: 90 }, {
+  const { lane, setConfig } = gatedLane(order, stores, gate, { retainDays: 90 }, {
     warn: (message) => warnings.push(message),
   });
   lane.port.onPacksDelivered('s1', delivered());
-  setConfig({ enabled: true, retainDays: 30 });
+  setConfig({ retainDays: 30 });
   const swap = lane.restartIfConfigChanged();
   await tick();
   for (let index = 0; index < 600; index += 1) {
@@ -445,7 +380,6 @@ test('a conversation first identified after the packs land is billed to this run
   let vendorTotals = null;
   const wiring = createMillMetricsWiring({
     store,
-    enabled: () => true,
     nowFn: () => NOW,
     tokensForSession: () => vendorTotals,
   });
@@ -461,7 +395,6 @@ test('a conversation known at delivery but scanned later still bills only what t
   let vendorTotals = { tokens: null, costUSD: null, identity: 'conv-a' };
   const wiring = createMillMetricsWiring({
     store,
-    enabled: () => true,
     nowFn: () => NOW,
     tokensForSession: () => vendorTotals,
   });
@@ -478,7 +411,6 @@ test('a tokens rewind keeps the cost that the same sample added', () => {
   let vendorTotals = { tokens: 100, costUSD: 1, identity: 'conv-a' };
   const wiring = createMillMetricsWiring({
     store,
-    enabled: () => true,
     nowFn: () => NOW,
     tokensForSession: () => vendorTotals,
   });
@@ -496,7 +428,6 @@ test('a resumed card reports its own run, not the whole conversation', () => {
   let vendorTotals = { tokens: 900, costUSD: 2, identity: 'conv-a' };
   const wiring = createMillMetricsWiring({
     store,
-    enabled: () => true,
     nowFn: () => NOW,
     tokensForSession: () => vendorTotals,
   });
@@ -508,7 +439,6 @@ test('a resumed card reports its own run, not the whole conversation', () => {
 function laneFedByUsage(store, sessions, readTotals) {
   return createMillMetricsWiring({
     store,
-    enabled: () => true,
     nowFn: () => NOW,
     tokensForSession: (sessionId) => tokensFromUsage({ sessionTotals: readTotals }, sessions, sessionId),
   });
@@ -548,7 +478,7 @@ test('a store replaced while holding unpersisted closes hands them to its replac
   const recordsPath = path.join(root, 'mill-metrics.json');
   const eventsDir = path.join(root, 'mill-metrics');
   let readable = false;
-  let millMetricsConfig = { enabled: true, retainDays: 90 };
+  let millMetricsConfig = { retainDays: 90 };
   const lane = createMillMetricsLane({
     resolveConfig: () => millMetricsConfig,
     nowFn: () => NOW,
@@ -576,7 +506,7 @@ test('a store replaced while holding unpersisted closes hands them to its replac
   assert.equal(fs.existsSync(recordsPath), false);
 
   readable = true;
-  millMetricsConfig = { enabled: true, retainDays: 30 };
+  millMetricsConfig = { retainDays: 30 };
   await lane.restartIfConfigChanged();
   await lane.whenIdle();
   const persisted = JSON.parse(await fsp.readFile(recordsPath, 'utf8'));

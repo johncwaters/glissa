@@ -370,7 +370,7 @@ class Session extends EventEmitter {
       hooksBaseDir,
       settingsPermissions,
       detectScheduledWakeups,
-      detectPackReads: () => millMetricsPort?.enabled() === true
+      detectPackReads: () => millMetricsPort != null
         && this._can("packReads")
         && this._packDelivery.deliveredWithDirs().length > 0,
       enableProjectMcp: !!enableProjectMcp,

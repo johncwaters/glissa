@@ -44,7 +44,6 @@ type TokenLedger = {
 
 type MillMetricsWiringOptions = {
   store: MillMetricsRecordSink;
-  enabled: () => boolean;
   nowFn?: () => number;
   tokensForSession?: (sessionId: string) => (TokenTotals & { identity?: string | null }) | null;
   logger?: Pick<Console, 'warn'> | null;
@@ -53,17 +52,12 @@ type MillMetricsWiringOptions = {
 
 function createMillMetricsWiring({
   store,
-  enabled,
   nowFn = Date.now,
   tokensForSession = () => null,
   logger = null,
   caseInsensitive = process.platform === 'win32',
 }: MillMetricsWiringOptions) {
   const accumulators = new Map<string, Accumulator>();
-
-  function isEnabled(): boolean {
-    return enabled() === true;
-  }
 
   function warn(message: string): void {
     if (!logger || typeof logger.warn !== 'function') return;
@@ -185,7 +179,6 @@ function createMillMetricsWiring({
     readDetection?: MillMetricReadDetection;
     ts?: number;
   }): void {
-    if (!isEnabled()) return;
     if (typeof sessionId !== 'string' || !sessionId) return;
     if (!Array.isArray(payload?.packs) || payload.packs.length === 0) return;
     const agent = typeof payload.agent === 'string' && payload.agent ? payload.agent : null;
@@ -236,7 +229,6 @@ function createMillMetricsWiring({
     stateSince?: number;
     ts?: number;
   }): void {
-    if (!isEnabled()) return;
     const accumulator = accumulators.get(sessionId);
     if (!accumulator) return;
     const state = typeof payload?.state === 'string' ? payload.state : '';
@@ -258,7 +250,6 @@ function createMillMetricsWiring({
   }
 
   function onHookEvent(sessionId: string, event: unknown, payload: unknown): void {
-    if (!isEnabled()) return;
     if (typeof event !== 'string' || event.toLowerCase() !== 'posttooluse') return;
     if (!payload || typeof payload !== 'object') return;
     const hookPayload = payload as { tool_name?: unknown; tool_input?: { file_path?: unknown } };
@@ -297,10 +288,8 @@ function createMillMetricsWiring({
     transition: string;
   }): void {
     const accumulator = accumulators.get(sessionId);
-    // Deleted whether or not measurement is on: an accumulator stranded by a flip to disabled would
-    // come back as a phantom live delivery the moment measurement was switched on again.
     accumulators.delete(sessionId);
-    if (!accumulator || !isEnabled()) return;
+    if (!accumulator) return;
     const endedAt = nowFn();
     const totals = observeTokens(accumulator);
     const record = recordFromAccumulator(accumulator, {
@@ -347,7 +336,6 @@ function createMillMetricsWiring({
   }
 
   function scorecards(): Record<string, unknown> {
-    if (!isEnabled()) return {};
     const liveRecords: MillMetricSession[] = [];
     for (const accumulator of accumulators.values()) {
       const totals = observeTokens(accumulator);
@@ -362,7 +350,6 @@ function createMillMetricsWiring({
   }
 
   const port: MillMetricsPort = {
-    enabled: isEnabled,
     onHookEvent,
     onPacksDelivered,
     onPromptSubmitted,
@@ -373,7 +360,7 @@ function createMillMetricsWiring({
   return { port, scorecards };
 }
 
-type MillMetricsLaneOptions = Omit<MillMetricsWiringOptions, 'store' | 'enabled'> & {
+type MillMetricsLaneOptions = Omit<MillMetricsWiringOptions, 'store'> & {
   resolveConfig: () => MillMetricsConfig;
   createStore: (options: { retainDays: number }) => MillMetricsStoreInstance;
 };
@@ -410,22 +397,17 @@ function createMillMetricsLane({ resolveConfig, createStore, ...wiringOptions }:
     logger.warn(`[mill-metrics] ${message}`);
   }
 
-  function openStore(): void {
-    if (!config.enabled) {
-      store = null;
-      openedRetainDays = null;
-      return;
-    }
+  function openStore(): MillMetricsStoreInstance {
     const opened = createStore({ retainDays: config.retainDays });
     void opened.load();
     store = opened;
     openedRetainDays = config.retainDays;
+    return opened;
   }
 
   // A swap queued behind another finds the config already served by the store the earlier one opened,
   // so a burst of settings changes ends on one store instead of opening every intermediate.
   function storeMatchesConfig(): boolean {
-    if (!config.enabled) return store === null;
     return store !== null && openedRetainDays === config.retainDays;
   }
 
@@ -473,7 +455,6 @@ function createMillMetricsLane({ resolveConfig, createStore, ...wiringOptions }:
   const { port, scorecards } = createMillMetricsWiring({
     ...wiringOptions,
     store: sink,
-    enabled: () => config.enabled && (store !== null || pendingRestarts > 0),
   });
 
   async function drainStore(target: MillMetricsStoreInstance): Promise<void> {
@@ -497,21 +478,14 @@ function createMillMetricsLane({ resolveConfig, createStore, ...wiringOptions }:
     store = null;
     openedRetainDays = null;
     if (outgoing) await drainStore(outgoing);
-    openStore();
-    if (store) {
-      if (outgoing) handOverQueuedRecords(outgoing, store);
-      flushBufferedWrites(store);
-      return;
-    }
-    // Measurement went off mid-swap, so its writes land in the store going away rather than nowhere.
-    if (!outgoing || bufferedWrites.length === 0) return;
-    flushBufferedWrites(outgoing);
-    await drainStore(outgoing);
+    const incoming = openStore();
+    if (outgoing) handOverQueuedRecords(outgoing, incoming);
+    flushBufferedWrites(incoming);
   }
 
   function restartIfConfigChanged(): Promise<void> {
     const next = resolveConfig();
-    if (next.enabled === config.enabled && next.retainDays === config.retainDays) return restart;
+    if (next.retainDays === config.retainDays) return restart;
     config = next;
     pendingRestarts += 1;
     restart = restart
@@ -540,7 +514,6 @@ function createMillMetricsLane({ resolveConfig, createStore, ...wiringOptions }:
 
 declare global {
   type MillMetricsPort = {
-    enabled: () => boolean;
     onHookEvent: (sessionId: string, event: unknown, payload: unknown) => void;
     onPacksDelivered: (sessionId: string, payload: {
       packs?: Array<{ name: string, version: string, dir: string, tokenEstimate?: number | null }>,

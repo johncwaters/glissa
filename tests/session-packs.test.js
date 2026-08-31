@@ -106,7 +106,7 @@ test('a measurable packed session injects Read tracking after pack resolution', 
     hookRouter: new HookRouter(),
     getHookPort: () => 4321,
     hooksBaseDir,
-    millMetricsPort: { enabled: () => true, onHookEvent: () => {} },
+    millMetricsPort: { onHookEvent: () => {} },
     spawnCommand: { path: process.execPath, kind: 'exe' },
     ptySpawn: () => fakePty(),
   });
@@ -137,7 +137,7 @@ test('a delivery whose Read matcher never reached the settings file is reported 
     path: process.cwd(),
     packs: ['house-rules'],
     packsBuiltRoot: builtRoot,
-    millMetricsPort: { enabled: () => true, onHookEvent: () => {} },
+    millMetricsPort: { onHookEvent: () => {} },
     spawnCommand: { path: process.execPath, kind: 'exe' },
     ptySpawn: () => fakePty(),
   });
@@ -161,7 +161,7 @@ test('a spawn that never starts delivers no measurable pack', async () => {
     path: process.cwd(),
     packs: ['house-rules'],
     packsBuiltRoot: builtRoot,
-    millMetricsPort: { enabled: () => true, onHookEvent: () => {} },
+    millMetricsPort: { onHookEvent: () => {} },
     spawnCommand: { path: process.execPath, kind: 'exe' },
     ptySpawn: () => { throw new Error('spawn refused'); },
   });
@@ -185,7 +185,7 @@ test('measurement leaves a session without delivered packs on the existing match
     hookRouter: new HookRouter(),
     getHookPort: () => 4321,
     hooksBaseDir,
-    millMetricsPort: { enabled: () => true, onHookEvent: () => {} },
+    millMetricsPort: { onHookEvent: () => {} },
     spawnCommand: { path: process.execPath, kind: 'exe' },
     ptySpawn: () => fakePty(),
   });

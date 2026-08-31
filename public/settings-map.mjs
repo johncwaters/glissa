@@ -331,16 +331,6 @@ export const SETTINGS_MAP = Object.freeze([
         control: 'toggle', keywords: ['context', 'watcher'], defaultValue: true,
       },
       {
-        id: 'mill-metrics-enabled', path: 'millMetrics.enabled', title: 'Measure pack outcomes',
-        description: 'Record whether delivered context packs are opened, and what happens in those sessions.',
-        control: 'toggle', keywords: ['context', 'outcomes'], defaultValue: false,
-      },
-      {
-        id: 'mill-metrics-retain-days', path: 'millMetrics.retainDays', title: 'Retain measurements (days)',
-        description: 'Retention window for pack outcome measurements.',
-        control: 'number', range: 'MILL_METRICS_RETAIN_DAY_RANGE', keywords: ['history', 'expiry'], defaultValue: 90,
-      },
-      {
         id: 'pack-distiller-enabled', path: 'packDistiller.enabled', title: 'Enable the pack distiller',
         description: 'Run bounded sessions that refresh derived pack sources.',
         control: 'toggle', keywords: ['derived', 'context'], defaultValue: false,

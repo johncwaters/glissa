@@ -255,9 +255,9 @@ test('getSettings falls back to DEFAULT_CONFIG for absent keys', () => {
 test('getSettings projects only dashboard-settable mill measurement fields', () => {
   withStore({
     projects: [],
-    millMetrics: { enabled: true, retainDays: 180, recordsPath: '/operator-only' },
+    millMetrics: { retainDays: 180, recordsPath: '/operator-only' },
   }, (store) => {
-    assert.deepEqual(store.getSettings().millMetrics, { enabled: true, retainDays: 180 });
+    assert.deepEqual(store.getSettings().millMetrics, { retainDays: 180 });
   });
 });
 

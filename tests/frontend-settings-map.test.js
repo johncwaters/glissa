@@ -73,11 +73,10 @@ test('the map has unique ids, known paths, range-backed numbers and searchable k
   }
 });
 
-test('the map exposes both mill measurement controls', async () => {
+test('the map exposes no mill measurement controls', async () => {
   const { SETTINGS_MAP } = await loadMap();
   const paths = SETTINGS_MAP.flatMap((section) => section.settings).map((setting) => setting.path);
-  assert.equal(paths.includes('millMetrics.enabled'), true);
-  assert.equal(paths.includes('millMetrics.retainDays'), true);
+  assert.equal(paths.some((path) => path.startsWith('millMetrics.')), false);
 });
 test('the map never exposes remote and memory keys stay inside the dashboard allow-list', async () => {
   const { SETTINGS_MAP } = await loadMap();

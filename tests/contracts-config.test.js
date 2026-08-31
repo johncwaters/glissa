@@ -17,17 +17,17 @@ test('DEFAULT_CONFIG satisfies the persisted Config contract', () => {
   assert.equal(Config.shape.integrationBranch.safeParse(null).success, true);
 });
 
-test('mill measurement settings cross file, browser, and update boundaries', () => {
-  const millMetrics = { enabled: true, retainDays: 90 };
+test('mill measurement retention crosses file, browser, and update boundaries', () => {
+  const millMetrics = { retainDays: 90 };
   assert.equal(Config.safeParse({ ...DEFAULT_CONFIG, millMetrics }).success, true);
   assert.equal(BrowserConfig.safeParse({ millMetrics }).success, true);
   assert.equal(ConfigUpdate.safeParse({ millMetrics }).success, true);
   assert.equal(CONFIG_BLOCK_KEYS.includes('millMetrics'), true);
 });
 
-test('the persisted mill measurement block remains forward compatible', () => {
-  const config = { ...DEFAULT_CONFIG, millMetrics: { enabled: true, retainDays: 90, futureSetting: 'kept' } };
-  assert.equal(Config.safeParse(config).success, true);
+test('the persisted mill measurement block keeps its retention setting', () => {
+  const config = { ...DEFAULT_CONFIG, millMetrics: { retainDays: 90 } };
+  assert.deepEqual(Config.parse(config).millMetrics, { retainDays: 90 });
 });
 
 // The config contract gates the LOAD, and the load exits on error, so NOTHING under `hooks` may cost

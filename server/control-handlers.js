@@ -922,7 +922,7 @@ function registerControlHandlers(controlWss, deps) {
   function builtinHooksReport() {
     return describeBuiltinHooks({
       detectScheduledWakeups: config.detectScheduledWakeups !== false,
-      detectPackReads: config.millMetrics?.enabled === true,
+      detectPackReads: true,
       rtkPath: config.rtk ? resolveRtkPath() : null,
     });
   }

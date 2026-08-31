@@ -60,7 +60,7 @@ const PACK_DISTILLER_SPEC = Object.freeze({
 
 const MILL_METRICS_SPEC = Object.freeze({
   name: 'millMetrics',
-  booleans: Object.freeze(['enabled']),
+  booleans: Object.freeze([]),
   integerRanges: Object.freeze({ retainDays: MILL_METRICS_RETAIN_DAY_RANGE }),
   blocks: NO_BLOCKS,
 });
