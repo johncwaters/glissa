@@ -36,6 +36,7 @@ function createMillWiring(deps = {}) {
     builtRoot = null,
     listSessions = () => [],
     getWatcherCount = () => null,
+    measurement = () => ({}),
     now = Date.now,
     log = console,
   } = deps;
@@ -182,6 +183,7 @@ function createMillWiring(deps = {}) {
       watcherCount: getWatcherCount(),
       specs,
       sessionRows: sessionRows(),
+      measurementByPack: measurement(),
       // The SAME enumeration the build gate reads, so the tab and the mill can never disagree about
       // what counts as a consumer, addressed per project rather than per card.
       consumerSources: packConsumerGroups(config),

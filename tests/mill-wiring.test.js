@@ -238,6 +238,18 @@ test('the report carries the project ids the assignment control addresses', asyn
   assert.equal(replies[0].packs[0].hasConsumers, true);
 });
 
+test('the report carries the injected measurement for its named pack', async (t) => {
+  const fixture = writeFixture();
+  t.after(() => fs.rmSync(fixture.tmpDir, { recursive: true, force: true }));
+  const measurement = { deliveries: 2, measurableDeliveries: 1, openRate: 1 };
+  const { wiring } = makeWiring(fixture, { measurement: () => ({ good: measurement }) });
+
+  const { replies, done } = pull(wiring, 'r1');
+  await done;
+
+  assert.strictEqual(replies[0].packs.find((pack) => pack.name === 'good').measurement, measurement);
+});
+
 test('two cards on one checkout are offered once, and deliver as one project', async (t) => {
   const fixture = writeFixture();
   t.after(() => fs.rmSync(fixture.tmpDir, { recursive: true, force: true }));

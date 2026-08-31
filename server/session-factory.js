@@ -16,6 +16,7 @@ const { resolveUsageConfig } = require('./usage-wiring');
  * @property {Pick<InstanceType<typeof import('../detection/hook-source').HookRouter>, 'register' | 'unregister'>|null} hookRouter
  * @property {() => number|null} getHookPort
  * @property {() => import('../session/session-worktree-lifecycle').GitWorkspace|null} getGitWorkspace
+ * @property {() => MillMetricsPort|null} getMillMetricsPort
  * @property {(config: object) => string|null} rtkPathForConfig
  * @property {(projectId: string) => import('../session/core/user-hooks-core').UserHook[]} getUserHooks
  */
@@ -52,6 +53,7 @@ function createSessionFactory(dependencies) {
       resumeSessionId: project.resumeSessionId || null,
       packs: project.packs,
       packVariantSlug: projectVariantSlug(project.path),
+      millMetricsPort: dependencies.getMillMetricsPort(),
       planLimits: planLimitsEnabled(config),
       getUserHooks: () => dependencies.getUserHooks(project.id),
     });

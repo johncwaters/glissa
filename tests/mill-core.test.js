@@ -95,6 +95,16 @@ test('a built valid pack reports its version, budget share and content counts', 
   assert.equal(pack.built.outputs.length, 2);
   assert.equal(pack.built.moreOutputs, 0);
   assert.equal(pack.builtReason, null);
+  assert.equal(pack.measurement, null);
+});
+
+test('a named measurement joins its pack row without changing an unmeasured row', () => {
+  const measurement = { deliveries: 4, measurableDeliveries: 3, openRate: 2 / 3 };
+  const measured = buildMillReport(baseInput({ measurementByPack: { 'house-rules': measurement } }));
+  assert.strictEqual(measured.packs[0].measurement, measurement);
+
+  const unmeasured = buildMillReport(baseInput({ measurementByPack: { elsewhere: measurement } }));
+  assert.equal(unmeasured.packs[0].measurement, null);
 });
 
 test('budgetPercent needs both sides, and a zero budget is not a division', () => {

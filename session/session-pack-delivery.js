@@ -5,7 +5,7 @@ const { DEFAULT_PACKS_DIR, defaultBuiltRoot, resolveBuiltPack } = require("../se
 const { buildPackNotice, listStalePacks } = require("./core/pack-notice");
 
 /**
- * @typedef {{ name: string, version: string, dir?: string }} DeliveredPack
+ * @typedef {{ name: string, version: string, dir?: string, tokenEstimate?: number | null }} DeliveredPack
  * @typedef {{ name?: string, version?: string, dir?: string, reason?: string, manifest?: Record<string, unknown>, perProjectVariants?: boolean }} PackResolution
  * @typedef {object} SessionPackDeliveryOptions
  * @property {unknown} configuredPacks
@@ -111,7 +111,15 @@ function createSessionPackDelivery(options) {
         options.recordDecision({ kind: "pack", ts, name, decision: "skipped", reason: verdict.reason, detail: verdict.detail });
         continue;
       }
-      nextDelivered.push({ name: resolved.name, version: resolved.version, dir: resolved.dir });
+      nextDelivered.push({
+        name: resolved.name,
+        version: resolved.version,
+        dir: resolved.dir,
+        tokenEstimate: typeof resolved.manifest?.tokenEstimate === "number"
+          && Number.isFinite(resolved.manifest.tokenEstimate)
+          ? resolved.manifest.tokenEstimate
+          : null,
+      });
     }
     const args = options.renderArgs(nextDelivered, builtRoot);
     if (!args) {
@@ -133,6 +141,9 @@ function createSessionPackDelivery(options) {
   return {
     names: () => [...names],
     delivered: () => delivered.map(({ name, version }) => ({ name, version })),
+    deliveredWithDirs: () => delivered.map(({ name, version, dir, tokenEstimate }) => ({
+      name, version, dir, tokenEstimate: tokenEstimate ?? null,
+    })),
     replaceDelivered,
     clearNotice,
     hasPendingNotice: () => isNoticePending,

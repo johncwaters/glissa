@@ -206,6 +206,65 @@ export function deliveryEmptyText(pack) {
   return 'no live sessions';
 }
 
+export function openRateText(measurement) {
+  const openRate = measurement?.openRate;
+  if (typeof openRate !== 'number' || !Number.isFinite(openRate)) return NO_VALUE;
+  return formatPercent(openRate * 100);
+}
+
+export function measurementEmptyText(pack) {
+  if (!pack?.measurement) return 'not yet measured';
+  return '';
+}
+
+export function measurementLines(pack) {
+  const measurement = pack?.measurement;
+  if (!measurement) return [];
+  const lines = [
+    { label: 'deliveries', value: formatCount(measurement.deliveries), tone: 'ok' },
+    { label: 'measurable deliveries', value: formatCount(measurement.measurableDeliveries), tone: 'ok' },
+    { label: 'opened sessions', value: `${formatCount(measurement.openedSessions)} (${openRateText(measurement)})`, tone: 'ok' },
+    { label: 'distinct files read', value: formatCount(measurement.distinctFilesRead), tone: 'ok' },
+    { label: 'median files read', value: measured(measurement.medianFilesRead) ? formatCount(measurement.medianFilesRead) : NO_VALUE, tone: 'ok' },
+  ];
+  if (Number(measurement.liveSessions) > 0) {
+    lines.push({ label: 'live sessions', value: formatCount(measurement.liveSessions), tone: 'ok' });
+  }
+  if (Number(measurement.ambiguousPrompts) > 0) {
+    lines.push({ label: 'ambiguous prompts', value: formatCount(measurement.ambiguousPrompts), tone: 'warn' });
+  }
+  if (Number(measurement.unmeasurableDeliveries) > 0) {
+    lines.push({
+      label: 'unmeasurable deliveries',
+      value: `${formatCount(measurement.unmeasurableDeliveries)} (read hooks unavailable)`,
+      tone: 'warn',
+    });
+  }
+  return lines;
+}
+
+function meanCountText(value) {
+  if (!measured(value)) return NO_VALUE;
+  return Number.isInteger(value) ? formatCount(value) : String(Number(value.toFixed(2)));
+}
+
+function outcomeValue(bucket) {
+  return [
+    `${formatCount(bucket?.sessions)} sessions`,
+    `${meanCountText(bucket?.meanInterruptions)} mean interruptions`,
+    `${measured(bucket?.abortRate) ? formatPercent(bucket.abortRate * 100) : NO_VALUE} abort rate`,
+    `${measured(bucket?.meanTokens) ? formatTokens(bucket.meanTokens) : NO_VALUE} mean tokens`,
+  ].join(', ');
+}
+
+export function outcomeSplitLines(measurement) {
+  if (!measurement) return [];
+  return [
+    { label: 'opened outcomes', value: outcomeValue(measurement.opened), tone: 'ok' },
+    { label: 'unopened outcomes', value: outcomeValue(measurement.unopened), tone: 'ok' },
+  ];
+}
+
 // ── Assignment (the "Deliver to" control) ──
 // Which packs a project's sessions are spawned against is a field on the project record, edited here and
 // persisted by `set-project-packs`. The ephemeral lanes' lists stay config-file only, so they render as

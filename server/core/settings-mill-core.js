@@ -9,6 +9,7 @@ const {
   MAX_RECORD_CHARS_RANGE,
   MAX_RECORDS_PER_KIND_RANGE,
   MEMORY_RETAIN_DAY_RANGE,
+  MILL_METRICS_RETAIN_DAY_RANGE,
   PACK_DISTILLER_INTERVAL_RANGE,
   PACK_DISTILLER_TIMEOUT_RANGE,
   QUIET_MS_RANGE,
@@ -54,6 +55,13 @@ const PACK_DISTILLER_SPEC = Object.freeze({
     intervalHours: PACK_DISTILLER_INTERVAL_RANGE,
     timeoutSeconds: PACK_DISTILLER_TIMEOUT_RANGE,
   }),
+  blocks: NO_BLOCKS,
+});
+
+const MILL_METRICS_SPEC = Object.freeze({
+  name: 'millMetrics',
+  booleans: Object.freeze(['enabled']),
+  integerRanges: Object.freeze({ retainDays: MILL_METRICS_RETAIN_DAY_RANGE }),
   blocks: NO_BLOCKS,
 });
 
@@ -137,6 +145,7 @@ function mergeMillBlock(stored, incoming, spec) {
 module.exports = {
   INGEST_SPEC,
   MEMORY_SPEC,
+  MILL_METRICS_SPEC,
   PACK_DISTILLER_SPEC,
   mergeMillBlock,
   pickMillBlock,

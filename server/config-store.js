@@ -10,7 +10,7 @@ const { decideConfigPath, glissaHomeDir: resolveGlissaHomeDir } = require('./cor
 const { Config, RUNTIME_CONFIG_SCALAR_KEYS } = require('../shared/contracts');
 const { isPlainObject } = require('./core/usage-number-core');
 const {
-  INGEST_SPEC, MEMORY_SPEC, PACK_DISTILLER_SPEC, pickMillBlock,
+  INGEST_SPEC, MEMORY_SPEC, MILL_METRICS_SPEC, PACK_DISTILLER_SPEC, pickMillBlock,
 } = require('./core/settings-mill-core');
 const { writeJsonAtomicSync, writeTextAtomicSync } = require('./json-file');
 
@@ -463,6 +463,7 @@ function createConfigStore({ settingsDefaults } = {}) {
       // Projected through their allow-lists in BOTH directions: a file-only key (a watched root, a
       // shell list) is no more echoable than it is settable.
       packDistiller: pickMillBlock(config.packDistiller, PACK_DISTILLER_SPEC),
+      millMetrics: pickMillBlock(config.millMetrics, MILL_METRICS_SPEC),
       memory: pickMillBlock(config.memory, MEMORY_SPEC),
       ingest: pickMillBlock(config.ingest, INGEST_SPEC),
       // Read-only helper for the PR Review tab's project picker; derived, never persisted back.
@@ -511,6 +512,7 @@ function createConfigStore({ settingsDefaults } = {}) {
     if (newConfig.usage != null) config.usage = newConfig.usage;
     if (newConfig.telegram != null) config.telegram = newConfig.telegram;
     if (newConfig.packDistiller != null) config.packDistiller = newConfig.packDistiller;
+    if (newConfig.millMetrics != null) config.millMetrics = newConfig.millMetrics;
     if (newConfig.memory != null) config.memory = newConfig.memory;
     if (newConfig.ingest != null) config.ingest = newConfig.ingest;
     // Absent means "no operator hooks", so a deletion down to none has to land as an empty list

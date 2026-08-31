@@ -53,8 +53,11 @@ const ALLOWED = new Set([
 // in comments/docs describing worktrees, since none of those close the string right after
 // the word "worktree".
 const WORKTREE_GIT_ARG = /\[\s*['"]worktree['"]/;
+const SOURCE_EXTENSIONS = /\.(?:js|mjs|cjs|ts|mts|cts)$/;
 
-function collectJsFiles(dir, acc) {
+// .ts as well as .js: the Mill measurement lane runs as TypeScript through Node type stripping, and a
+// scanner that only reads .js would let the next .ts module out of the invariant entirely.
+function collectSourceFiles(dir, acc) {
   let entries;
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -65,16 +68,16 @@ function collectJsFiles(dir, acc) {
     if (SKIP_DIRS.has(entry.name)) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      collectJsFiles(full, acc);
+      collectSourceFiles(full, acc);
       continue;
     }
-    if (entry.isFile() && entry.name.endsWith(".js")) acc.push(full);
+    if (entry.isFile() && SOURCE_EXTENSIONS.test(entry.name)) acc.push(full);
   }
   return acc;
 }
 
 test("only git-workspace.js (plus the documented read-only exception) issues `git worktree` directly", () => {
-  const files = collectJsFiles(ROOT, []);
+  const files = collectSourceFiles(ROOT, []);
   // Sanity: the walk actually found the runtime tree (guards against an over-broad skip).
   assert.ok(files.length > 20, `expected to scan the runtime tree, only found ${files.length} files`);
 

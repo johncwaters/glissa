@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.mill-metrics.json",
+  "include": [
+    "server/**/*.ts",
+    "shared/**/*.ts",
+    "tests/fixtures/mill-metrics-typecheck-probe.ts"
+  ],
+  "exclude": [
+    ".claude/**",
+    "dist/**",
+    "node_modules/**",
+    "public/**"
+  ]
+}

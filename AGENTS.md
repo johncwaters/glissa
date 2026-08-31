@@ -31,8 +31,8 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 
 ### Working In This Directory
 
-- Server code is CommonJS only (`require` / `module.exports`); frontend is ESM bundled by Vite.
-- Node >=22.16.0 (the `node:sqlite` FTS5 floor the memory store needs). Windows 11 and Linux, developed on v24.
+- Server `.js` stays CommonJS; the Mill measurement lane is `.ts` run by Node type stripping as the migration beachhead. Frontend is ESM bundled by Vite.
+- Node >=22.18.0 makes native type stripping unflagged and exceeds the `node:sqlite` FTS5 floor. Windows 11 and Linux, developed on v24.
 - Do NOT add dependencies without explicit instruction.
 - Status detection is structural (hooks plus OSC-0 title). Never reintroduce PTY body or content scraping.
 - Spawn sessions with `pty.spawn`, never `child_process.spawn`, and never `shell: true`. Scrub env via `session/core/spawn-env.js`.
@@ -69,13 +69,13 @@ Each subsystem states its own rules beside its code, so a rule is loaded when th
 | Agent Adapters | `session/adapters/AGENTS.md` |
 | Session Spawning, Auto-Resume and Shutdown | `session/AGENTS.md` |
 | Notifications | `notifications/AGENTS.md` |
-| Worktree Auto-Rebase, Remote Branch GC, GitHub PR Auto-Review, Radar / PostHog Auto-Fix, Usage Tracking, Long-Term Memory, Ephemeral Lane Write Boundaries, Security: Trust Boundary, Transport and Session Identity | `server/AGENTS.md` |
+| Worktree Auto-Rebase, Remote Branch GC, GitHub PR Auto-Review, Radar / PostHog Auto-Fix, Usage Tracking, Mill Measurement, Long-Term Memory, Ephemeral Lane Write Boundaries, Security: Trust Boundary, Transport and Session Identity | `server/AGENTS.md` |
 | Context Packs | `packs/AGENTS.md` |
 | Dashboard Layouts | `public/AGENTS.md` |
 
 ## Coding Style
 
-- CommonJS only on the server: `const x = require('x')`, `module.exports = { ... }`.
+- Server `.js` is CommonJS: `const x = require('x')`, `module.exports = { ... }`.
 - No classes unless the pattern genuinely requires instance state.
 - Propagate errors via EventEmitter `error` events or callbacks, not thrown exceptions in async paths.
 - Comments are a last resort and carry only the why.

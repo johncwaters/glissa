@@ -18,6 +18,7 @@ const { runPostTurnChecks, resolveCheckConfig } = require('./post-turn-checker')
  * @property {() => any|null} getIngestLane
  * @property {(session: any) => void} tapIngestForSession
  * @property {(id: string) => void} closeSessionDataClients
+ * @property {MillMetricsPort | null} [millMetricsPort]
  * @property {Pick<Console, 'error'|'log'|'warn'>} logger
  */
 
@@ -103,6 +104,13 @@ function createSessionEventWiring(dependencies) {
         event,
         timestamp: Date.now(),
       });
+      if (dependencies.millMetricsPort && (to === STATES.DONE || to === STATES.FAILED)) {
+        dependencies.millMetricsPort.onSessionEnd(session.id, {
+          transitionEvent: event,
+          intent: detail?.endIntent,
+          finalState: to,
+        });
+      }
       if (event === 'spawn_success' || event === 'spawn_fail') {
         dependencies.broadcastControl({ type: 'session-packs', id: session.id, packs: session.toSnapshot().packs });
       }
@@ -149,7 +157,13 @@ function createSessionEventWiring(dependencies) {
         if (ingestLane?.fsEnabled) ingestLane.noteSessionRoots(session);
       });
     }
-    session.on('user-prompt', () => notifyGate.reset());
+    session.on('packs-delivered', (payload) => {
+      if (dependencies.millMetricsPort) dependencies.millMetricsPort.onPacksDelivered(session.id, payload);
+    });
+    session.on('user-prompt', (payload) => {
+      notifyGate.reset();
+      if (dependencies.millMetricsPort) dependencies.millMetricsPort.onPromptSubmitted(session.id, payload);
+    });
     const relay = (event, type) => session.on(event, (payload) => dependencies.broadcastControl({
       ...payload,
       type,

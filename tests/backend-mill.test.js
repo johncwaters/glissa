@@ -89,7 +89,9 @@ function fakePackService() {
  * needs the service live (nothing here may walk or rebuild the operator's real packs/ tree, and no test
  * may spawn a Claude session).
  */
-function withBackend(fn, { packs = ['good', 'ghost'], packsAutoRebuild = false, packServiceOptions } = {}) {
+function withBackend(fn, {
+  packs = ['good', 'ghost'], packsAutoRebuild = false, packServiceOptions, measurement,
+} = {}) {
   return async (t) => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-mill-'));
     const projectDir = path.join(tmpDir, 'project');
@@ -115,7 +117,12 @@ function withBackend(fn, { packs = ['good', 'ghost'], packsAutoRebuild = false, 
     const server = http.createServer();
     const backend = createBackend(server, {
       staticDir: null,
-      millWiringOptions: { specsDir: fixture.specsDir, builtRoot: fixture.builtRoot, baseDir: fixture.baseDir },
+      millWiringOptions: {
+        specsDir: fixture.specsDir,
+        builtRoot: fixture.builtRoot,
+        baseDir: fixture.baseDir,
+        ...(measurement ? { measurement } : {}),
+      },
       ...(packServiceOptions ? { packServiceOptions } : {}),
     });
     server.on('request', backend.app);
@@ -204,6 +211,22 @@ test('request-mill-report replies to the requesting socket only, with both specs
 
   await closeSocket(asker.ws);
   await closeSocket(bystander.ws);
+}));
+
+test('the backend report carries the measurement lane scorecard', withBackend(async (_t, { dash }) => {
+  const asker = await openRecordingSocket(dash, '/control');
+  asker.ws.send(JSON.stringify({ type: 'request-mill-report', requestId: 'measured' }));
+  const report = await waitForMessage(asker.received, isMillReport, 'mill-report');
+  assert.deepEqual(report.packs.find((pack) => pack.name === 'good').measurement, {
+    deliveries: 3,
+    measurableDeliveries: 2,
+    openRate: 0.5,
+  });
+  await closeSocket(asker.ws);
+}, {
+  measurement: () => ({
+    good: { deliveries: 3, measurableDeliveries: 2, openRate: 0.5 },
+  }),
 }));
 
 test('the last report is replayed to a client that connects after it was built', withBackend(async (_t, { dash }) => {

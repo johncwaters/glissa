@@ -13,7 +13,7 @@ const {
   VISIONS_DISPATCH_NUMERIC_RANGES,
   VISIONS_INTENT_NUMERIC_RANGES,
 } = require('../server/control-handlers');
-const { MEMORY_SPEC, PACK_DISTILLER_SPEC } = require('../server/core/settings-mill-core');
+const { MEMORY_SPEC, MILL_METRICS_SPEC, PACK_DISTILLER_SPEC } = require('../server/core/settings-mill-core');
 const { USAGE_INTEGER_RANGES } = require('../server/usage-wiring');
 
 test('server resolvers and wire specs reuse the shared range objects', () => {
@@ -25,6 +25,7 @@ test('server resolvers and wire specs reuse the shared range objects', () => {
   assert.strictEqual(memoryDistillCore.MAX_NEW_CLAIMS_RANGE, ranges.MAX_NEW_CLAIMS_RANGE);
   assert.strictEqual(memoryDistillCore.QUIET_MS_RANGE, ranges.QUIET_MS_RANGE);
   assert.strictEqual(MEMORY_SPEC.integerRanges.retainDays, ranges.MEMORY_RETAIN_DAY_RANGE);
+  assert.strictEqual(MILL_METRICS_SPEC.integerRanges.retainDays, ranges.MILL_METRICS_RETAIN_DAY_RANGE);
   assert.strictEqual(PACK_DISTILLER_SPEC.integerRanges.intervalHours, ranges.PACK_DISTILLER_INTERVAL_RANGE);
   assert.strictEqual(PACK_DISTILLER_SPEC.integerRanges.timeoutSeconds, ranges.PACK_DISTILLER_TIMEOUT_RANGE);
   assert.strictEqual(USAGE_INTEGER_RANGES, ranges.USAGE_INTEGER_RANGES);

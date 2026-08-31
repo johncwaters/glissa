@@ -401,6 +401,22 @@ function createUsageWiring({
     return { type: 'usage-sessions', ts: nowFn(), pricingSource: pricing?.source || null, sessions: rows };
   }
 
+  /**
+   * One card's totals, for a lane that wants a single row rather than the whole wire message. null is
+   * "nothing is attributed to this card" (no scanner, no captured vendor id, no entries yet), which a
+   * caller must not confuse with a measured zero.
+   * @param {string} sessionId
+   * @returns {{ tokens: number, costUSD: number, lastTs: number|null }|null}
+   */
+  function sessionTotals(sessionId) {
+    if (!scanner) return null;
+    const resumeId = sessions.get(sessionId)?.resumeSessionId;
+    if (!resumeId) return null;
+    const bucket = scanner.sessionTotals().get(resumeId);
+    if (!bucket) return null;
+    return { tokens: bucket.tokens, costUSD: bucket.costUSD, lastTs: bucket.lastTs ?? null };
+  }
+
   // Every hook callback can re-emit the same claude-session-id map, and a pass that changed only
   // unattributed entries changes no row, so an identical payload is dropped rather than broadcast.
   function pushSessions() {
@@ -711,6 +727,7 @@ function createUsageWiring({
     refreshSessions,
     restartIfConfigChanged,
     getSessionsMessage,
+    sessionTotals,
     getCachedReport: () => lastReportMessage,
     requestReport,
     ingestStatusline,

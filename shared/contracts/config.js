@@ -166,6 +166,7 @@ const BROWSER_CONFIG_SHAPE = {
   usage: UsageSettings,
   telegram: TelegramSettings,
   packDistiller: MillSettings,
+  millMetrics: MillSettings,
   memory: MillSettings,
   ingest: MillSettings,
 };
@@ -199,6 +200,7 @@ const FILE_CONFIG_SHAPE = {
   usage: optionalLooseObject('usage'),
   telegram: optionalLooseObject('telegram'),
   packDistiller: optionalLooseObject('packDistiller'),
+  millMetrics: optionalLooseObject('millMetrics'),
   memory: optionalLooseObject('memory'),
   ingest: optionalLooseObject('ingest'),
 };
@@ -225,7 +227,7 @@ const Config = z.object({
 
 const BROWSER_CONFIG_KEYS = Object.freeze(Object.keys(BROWSER_CONFIG_SHAPE));
 const CONFIG_BLOCK_KEYS = Object.freeze([
-  'prReview', 'branchGc', 'visions', 'posthog', 'usage', 'telegram', 'packDistiller', 'memory', 'ingest',
+  'prReview', 'branchGc', 'visions', 'posthog', 'usage', 'telegram', 'packDistiller', 'millMetrics', 'memory', 'ingest',
 ]);
 const CONFIG_SCALAR_KEYS = Object.freeze(Object.keys(BROWSER_CONFIG_SHAPE).filter((key) => {
   if (CONFIG_BLOCK_KEYS.includes(key)) return false;

@@ -4,7 +4,12 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  INGEST_SPEC, MEMORY_SPEC, PACK_DISTILLER_SPEC, mergeMillBlock, validateMillBlock,
+  INGEST_SPEC,
+  MEMORY_SPEC,
+  MILL_METRICS_SPEC,
+  PACK_DISTILLER_SPEC,
+  mergeMillBlock,
+  validateMillBlock,
 } = require('../server/core/settings-mill-core');
 const { resolveMemoryConfig } = require('../server/core/memory-core');
 const { resolveDistillConfig } = require('../server/core/memory-distill-core');
@@ -12,7 +17,7 @@ const { resolveIngestConfig } = require('../server/core/ingest-core');
 const settingsRanges = require('../shared/settings-ranges');
 
 test('an absent block is valid, so an untouched tab writes nothing', () => {
-  for (const spec of [MEMORY_SPEC, PACK_DISTILLER_SPEC, INGEST_SPEC]) {
+  for (const spec of [MEMORY_SPEC, MILL_METRICS_SPEC, PACK_DISTILLER_SPEC, INGEST_SPEC]) {
     assert.equal(validateMillBlock(null, spec), null);
     assert.equal(validateMillBlock(undefined, spec), null);
   }
@@ -64,6 +69,7 @@ test('the wire bounds match the clamps each resolver would silently apply', () =
   assert.strictEqual(MEMORY_SPEC.integerRanges.retainDays, settingsRanges.MEMORY_RETAIN_DAY_RANGE);
   assert.strictEqual(MEMORY_SPEC.blocks.distill.integerRanges.maxNewClaims, settingsRanges.MAX_NEW_CLAIMS_RANGE);
   assert.strictEqual(PACK_DISTILLER_SPEC.integerRanges.intervalHours, settingsRanges.PACK_DISTILLER_INTERVAL_RANGE);
+  assert.strictEqual(MILL_METRICS_SPEC.integerRanges.retainDays, settingsRanges.MILL_METRICS_RETAIN_DAY_RANGE);
   assert.equal(
     validateMillBlock({ retainDays: 29 }, MEMORY_SPEC),
     'memory.retainDays must be an integer between 30 and 3650',
@@ -76,6 +82,18 @@ test('the wire bounds match the clamps each resolver would silently apply', () =
   assert.equal(
     resolveDistillConfig({ maxNewClaims: 501 }, { memoryEnabled: true }).maxNewClaims,
     resolveDistillConfig(null, { memoryEnabled: true }).maxNewClaims,
+  );
+});
+
+test('mill measurement accepts its settings and rejects out-of-range or unknown keys', () => {
+  assert.equal(validateMillBlock({ enabled: true, retainDays: 90 }, MILL_METRICS_SPEC), null);
+  assert.equal(
+    validateMillBlock({ retainDays: 6 }, MILL_METRICS_SPEC),
+    'millMetrics.retainDays must be an integer between 7 and 3650',
+  );
+  assert.equal(
+    validateMillBlock({ recordsPath: '/tmp/mill.json' }, MILL_METRICS_SPEC),
+    'millMetrics.recordsPath is not settable from the dashboard',
   );
 });
 

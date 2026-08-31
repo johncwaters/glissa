@@ -45,7 +45,14 @@ test('a user hook on an event Glissa does not subscribe to creates that key', ()
 // The Hooks tab lists what this file writes. Hand-derived, that list drifted (it named the rtk entry on
 // config.rtk while the file carries it only for a resolved binary), so the rows are derived here.
 test('describeBuiltinHooks rows are exactly the entries buildHookSettings writes', () => {
-  for (const options of [{}, { detectScheduledWakeups: false }, { rtkPath: '/usr/bin/rtk' }, { detectScheduledWakeups: false, rtkPath: '/usr/bin/rtk' }]) {
+  for (const options of [
+    {},
+    { detectScheduledWakeups: false },
+    { detectPackReads: true },
+    { detectScheduledWakeups: false, detectPackReads: true },
+    { rtkPath: '/usr/bin/rtk' },
+    { detectScheduledWakeups: false, detectPackReads: true, rtkPath: '/usr/bin/rtk' },
+  ]) {
     const settings = buildHookSettings({ ...base, ...options });
     const written = [];
     for (const [event, entries] of Object.entries(settings.hooks)) {
@@ -54,6 +61,17 @@ test('describeBuiltinHooks rows are exactly the entries buildHookSettings writes
     const described = describeBuiltinHooks(options).map((row) => ({ event: row.event, matcher: row.matcher }));
     assert.deepEqual(described.slice().sort(byRow), written.slice().sort(byRow), JSON.stringify(options));
   }
+});
+
+test('an operator PostToolUse hook stays after both built-in matchers', () => {
+  const settings = buildHookSettings({
+    ...base,
+    detectPackReads: true,
+    userHooks: [{
+      id: 'read-audit', name: 'read audit', event: 'PostToolUse', matcher: 'Read', type: 'command', command: 'echo', enabled: true,
+    }],
+  });
+  assert.deepEqual(settings.hooks.PostToolUse.map((entry) => entry.hooks[0].type), ['http', 'http', 'command']);
 });
 
 function byRow(a, b) {

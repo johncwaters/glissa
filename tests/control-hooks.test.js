@@ -39,7 +39,7 @@ function harness(cfg, { saveFails = false, rtkPath = '/usr/bin/rtk' } = {}) {
 const record = (overrides = {}) => ({ id: 'h1', name: 'Lint', event: 'PostToolUse', matcher: 'Edit', type: 'command', command: 'npm run lint', enabled: true, ...overrides });
 
 test('request-hooks-report answers the stored records, the catalog, the built-in hooks and the projects', async () => {
-  const cfg = { projects: [{ id: 'p1', name: 'glissa', path: '/r' }, { id: 'p2', name: 'codex', path: '/c', agent: 'codex' }], hooks: [record(), { id: 'broken' }], rtk: true };
+  const cfg = { projects: [{ id: 'p1', name: 'glissa', path: '/r' }, { id: 'p2', name: 'codex', path: '/c', agent: 'codex' }], hooks: [record(), { id: 'broken' }], rtk: true, millMetrics: { enabled: true } };
   const h = harness(cfg);
   await h.send({ type: 'request-hooks-report', requestId: 'r1' });
   const report = h.sent.find((m) => m.type === 'hooks-report');
@@ -51,6 +51,7 @@ test('request-hooks-report answers the stored records, the catalog, the built-in
   for (const event of HOOK_EVENTS) assert.ok(builtinEvents.includes(event), event);
   assert.ok(report.builtin.some((row) => row.event === 'PreToolUse' && row.matcher === 'Bash'), 'rtk entry when config.rtk');
   assert.ok(report.builtin.some((row) => row.event === 'PostToolUse'), 'wakeup tracking entry');
+  assert.ok(report.builtin.some((row) => row.event === 'PostToolUse' && row.matcher === 'Read' && row.purpose === 'Pack read tracking'));
   assert.deepEqual(report.limits, { maxTimeoutSec: MAX_TIMEOUT_SEC });
 });
 

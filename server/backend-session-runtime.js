@@ -17,6 +17,7 @@ const buildRuntimeSettingsPayload = /** @type {(options: { configStore: object, 
  * @property {{ hooks?: unknown, rtk?: boolean } & object} config
  * @property {any} configStore
  * @property {() => any} getGitWorkspace
+ * @property {() => MillMetricsPort|null} [getMillMetricsPort]
  * @property {() => import('./backend-websockets').ControlBroadcast|null} getBroadcastControl
  * @property {Pick<Console, 'warn'>} logger
  */
@@ -62,6 +63,7 @@ function createBackendSessionRuntime(dependencies) {
     hookRouter,
     getHookPort,
     getGitWorkspace: dependencies.getGitWorkspace,
+    getMillMetricsPort: dependencies.getMillMetricsPort || (() => null),
     rtkPathForConfig,
     // The live config object, so a hook saved after boot is what the next spawn reads.
     getUserHooks: (projectId) => hooksForProject(dependencies.config.hooks, projectId),

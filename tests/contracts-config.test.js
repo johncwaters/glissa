@@ -7,12 +7,27 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { createConfigStore, DEFAULT_CONFIG } = require('../server/config-store');
-const { Config, HIDDEN_CONFIG_KEYS } = require('../shared/contracts');
+const {
+  BrowserConfig, Config, CONFIG_BLOCK_KEYS, ConfigUpdate, HIDDEN_CONFIG_KEYS,
+} = require('../shared/contracts');
 
 test('DEFAULT_CONFIG satisfies the persisted Config contract', () => {
   assert.equal(Config.safeParse(DEFAULT_CONFIG).success, true);
   assert.equal(DEFAULT_CONFIG.integrationBranch, null);
   assert.equal(Config.shape.integrationBranch.safeParse(null).success, true);
+});
+
+test('mill measurement settings cross file, browser, and update boundaries', () => {
+  const millMetrics = { enabled: true, retainDays: 90 };
+  assert.equal(Config.safeParse({ ...DEFAULT_CONFIG, millMetrics }).success, true);
+  assert.equal(BrowserConfig.safeParse({ millMetrics }).success, true);
+  assert.equal(ConfigUpdate.safeParse({ millMetrics }).success, true);
+  assert.equal(CONFIG_BLOCK_KEYS.includes('millMetrics'), true);
+});
+
+test('the persisted mill measurement block remains forward compatible', () => {
+  const config = { ...DEFAULT_CONFIG, millMetrics: { enabled: true, retainDays: 90, futureSetting: 'kept' } };
+  assert.equal(Config.safeParse(config).success, true);
 });
 
 // The config contract gates the LOAD, and the load exits on error, so NOTHING under `hooks` may cost

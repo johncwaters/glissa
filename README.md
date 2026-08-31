@@ -186,7 +186,7 @@ This is a minimal starting example. The full key list (`integrationBranch`, `aut
 
 ## Requirements
 
-- **Node.js** >= 22.16.0 to run Glissa (clone path), which is the `node:sqlite` FTS5 floor the long-term memory store needs. The standalone CLI install needs **Node.js >= 22.22.2**, because it goes through npm 12 and that is npm 12's own engine floor (`npx npm@12` fails the same check on an older Node). Distro-packaged Node is usually far older than either floor; use nodesource or nvm.
+- **Node.js** >= 22.18.0 to run Glissa. Native TypeScript type stripping is unflagged at this floor, which also exceeds the `node:sqlite` FTS5 requirement. Distro-packaged Node is often older; use nodesource or nvm.
 - **Windows 11 or Linux**
 - **Claude Code CLI** installed and available on PATH
 - **Linux build tools for node-pty:** `sudo apt install build-essential python3`

@@ -61,6 +61,7 @@ test('capabilities claim only what a live probe verified', () => {
     resume: true,
     packs: true,
     packNotice: true,
+    packReads: false,
     statusLine: false,
     rtk: true,
     antiSlop: false,

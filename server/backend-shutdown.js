@@ -28,11 +28,21 @@ const { createStopperCollector } = require('./core/shutdown-core');
  * @property {{ stop: () => unknown }|null} memoryIngest
  * @property {{ stop: () => unknown }|null} memoryDistiller
  * @property {{ stop: () => unknown }|null} memoryStore
+ * @property {(() => Promise<void>)|null} [millMetricsIdle]
+ * @property {MillMetricsPort|null} [millMetricsPort]
  * @property {{ idle: () => unknown }} telegramOutbox
  * @property {{ stop: () => void }} heartbeat
  * @property {{ close: () => void }} controlWss
  * @property {{ close: () => void }} dataWss
  */
+
+// A destroyed session never transitions, so its accumulator would be dropped mid-run and the delivery
+// it was measuring would come back as live on the next boot. Closing here is what puts the record in
+// the write queue the mill-metrics stopper then drains.
+function closeMeasuredSessions(millMetricsPort, sessions) {
+  if (!millMetricsPort) return;
+  for (const id of sessions.keys()) millMetricsPort.onSessionTeardown(id);
+}
 
 function destroySessions(sessionMaps, pendingReaps) {
   for (const sessions of sessionMaps) {
@@ -61,6 +71,7 @@ function createBackendShutdown(dependencies) {
     dependencies.notificationManager.destroy();
     dependencies.telegramChannel.destroy();
     const pendingReaps = [];
+    closeMeasuredSessions(dependencies.millMetricsPort, dependencies.sessions);
     destroySessions([dependencies.sessions], pendingReaps);
     stoppers.add('branch-gc', () => dependencies.branchGc.stop());
     stoppers.add('pr-review', () => dependencies.prReview.stopPoller());
@@ -78,6 +89,10 @@ function createBackendShutdown(dependencies) {
     if (memoryDistiller) stoppers.add('memory-distill', () => memoryDistiller.stop());
     const memoryStore = dependencies.memoryStore;
     if (memoryStore) stoppers.add('memory-store', () => memoryStore.stop());
+    // The lane's own idle, never a snapshot of its store: a store swap in flight has no store to
+    // snapshot, and that window is exactly when writes are queued.
+    const millMetricsIdle = dependencies.millMetricsIdle;
+    if (millMetricsIdle) stoppers.add('mill-metrics', () => millMetricsIdle());
     stoppers.add('telegram-outbox', () => dependencies.telegramOutbox.idle());
     destroySessions([dependencies.visionsSessions, dependencies.memoryDistillSessions], pendingReaps);
     dependencies.heartbeat.stop();

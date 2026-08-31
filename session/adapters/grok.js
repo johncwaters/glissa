@@ -264,6 +264,7 @@ module.exports = {
   PACK_DIRECTIVE,
   capabilities: {
     hooks: true,
+    packReads: false,
     awaitingInput: true,
     backgroundAgents: true,
     resume: true,

@@ -38,7 +38,7 @@ Backend runtime: the Express + WebSocket server factory and its control plane, p
 
 ## For AI Agents
 - These modules live one level below the repo root: filesystem assets (`dist/`, `public/`, `config.json`, `node_modules/`) resolve via `path.join(__dirname, '..', ...)`. Keep that offset when adding paths.
-- CommonJS only; no new dependencies without explicit instruction; avoid `else` (guard clauses).
+- CommonJS for `.js`; Mill measurement `.ts` keeps the same runtime module shape through native type stripping. No new dependencies without explicit instruction; avoid `else` (guard clauses).
 - See root `AGENTS.md` for architecture and conventions.
 
 ## Invariants
@@ -87,6 +87,12 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - Wire-unit traps, normalized once in `public/usage-view-core.mjs`: `tokenLimit.pct` is a RATIO, not a percentage, and `scan.dirs` an ARRAY, not a count; face-value reads fail silently. Today is the SERVER's day, or a viewer in another zone reads the wrong bucket.
 - Official plan limits OUTRANK the largest-block heuristic, and provenance is never implied: the heuristic is labelled estimated, and a stale snapshot shows its age rather than being swapped.
 - The statusLine relay MUST chain the operator's own, since a per-session settings file REPLACES the global one and would delete their HUD; its POST is abandoned quickly to add no latency. The reply stays plain `{ ok, reason }`: `additionalContext` is confined to the adapter-declared pack-notice hook, and telemetry must never become a second injection point.
+
+### Mill Measurement
+
+- Pack reads arrive through the hook-router observer, never as status signals, so measurement cannot move a card.
+- Open rate includes only adapters that expose pack-read hooks; other deliveries remain visible without depressing the denominator.
+- A prompt inside `TITLE_RACE_MS` of entering RUNNING is ambiguous because the title spinner can win the prompt race.
 
 ### Long-Term Memory (plan: `docs/plan-visions-3.md`)
 

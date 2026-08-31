@@ -20,6 +20,7 @@ const MAX_PROJECT_CONFIG_DEPTH = 12;
  * @property {string | undefined} hooksBaseDir
  * @property {Record<string, unknown> | null} settingsPermissions
  * @property {boolean} detectScheduledWakeups
+ * @property {(() => boolean) | null} detectPackReads
  * @property {boolean} enableProjectMcp
  * @property {string | null} rtkPath
  * @property {boolean} planLimits
@@ -27,6 +28,7 @@ const MAX_PROJECT_CONFIG_DEPTH = 12;
  * @property {boolean} bypassHookTrust
  * @property {() => string} effectiveCwd
  * @property {(signal: Record<string, any>) => void} ingestSignal
+ * @property {((event: string, payload: Record<string, any>) => void) | null} observeHook
  * @property {(entry: Record<string, unknown>) => void} recordDecision
  */
 
@@ -98,6 +100,7 @@ function createSessionHookLifecycle(options) {
       options.hookRouter.register(options.id, {
         token,
         onSignal: options.ingestSignal,
+        onEvent: options.observeHook,
         hooks: options.adapter.hooks,
       });
       return { args, env: { [HOOK_URL_ENV]: hookUrl, ...(relayEnv || {}) } };
@@ -180,6 +183,7 @@ function createSessionHookLifecycle(options) {
         baseDir: options.hooksBaseDir,
         permissions: options.settingsPermissions,
         detectScheduledWakeups: options.detectScheduledWakeups,
+        detectPackReads: typeof options.detectPackReads === "function" ? options.detectPackReads() : false,
         enableProjectMcp: options.enableProjectMcp,
         rtkPath: options.rtkPath,
         planLimits: options.planLimits,
@@ -192,6 +196,7 @@ function createSessionHookLifecycle(options) {
       options.hookRouter.register(options.id, {
         token,
         onSignal: options.ingestSignal,
+        onEvent: options.observeHook,
         hooks: options.adapter.hooks,
       });
       return { args: options.adapter.settingsArgs(nextSettingsHandle.settingsPath), env: {} };
@@ -208,6 +213,7 @@ function createSessionHookLifecycle(options) {
     token: () => token,
     hasInjection: () => token !== null,
     hasSettings: () => settingsHandle !== null,
+    detectsPackReads: () => settingsHandle?.packReadHook === true,
   };
 }
 

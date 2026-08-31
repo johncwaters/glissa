@@ -21,14 +21,14 @@ const { mapHookToSignal, mapHookConfidence, mapHookPromptKind } = claudeCode;
 
 class HookRouter {
   constructor() {
-    this._sessions = new Map(); // glissaId -> { token, onSignal, hooks }
+    this._sessions = new Map(); // glissaId -> { token, onSignal, onEvent, hooks }
   }
 
-  register(glissaId, { token, onSignal, hooks = claudeCode.hooks }) {
+  register(glissaId, { token, onSignal, onEvent = null, hooks = claudeCode.hooks }) {
     if (!glissaId || !token || typeof onSignal !== 'function') {
       throw new Error('HookRouter.register requires glissaId, token, onSignal');
     }
-    this._sessions.set(glissaId, { token, onSignal, hooks });
+    this._sessions.set(glissaId, { token, onSignal, onEvent, hooks });
   }
 
   unregister(glissaId) {
@@ -56,6 +56,13 @@ class HookRouter {
       ? hooks.mapPayload(event, payload)
       : payload;
     const signal = hooks.mapSignal(event, mappedPayload);
+    if (typeof entry.onEvent === 'function') {
+      try {
+        entry.onEvent(event, mappedPayload);
+      } catch (err) {
+        console.warn(`[hook-source] onEvent threw for ${glissaId}: ${err.message}`);
+      }
+    }
     if (!signal) {
       return { status: 200, signal: null, reason: 'ignored-event' };
     }

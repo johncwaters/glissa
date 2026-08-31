@@ -8,6 +8,8 @@ const { dbPathForConfig } = require('./glissa-db');
 const { createMemoryDistillSpawn, createMemoryDistiller } = require('./memory-distill');
 const { createMemoryIngest, earliestLaneEntryMs } = require('./memory-ingest-wiring');
 const { createMemoryStore } = require('./memory-store');
+const { createMillMetricsStore } = /** @type {MillMetricsStoreModule} */ (require('./mill-metrics-store.ts'));
+const { createMillMetricsLane } = /** @type {MillMetricsWiringModule} */ (require('./mill-metrics-wiring.ts'));
 const { createMillWiring } = require('./mill-wiring');
 const { createPackService } = require('./pack-service');
 const {
@@ -28,13 +30,15 @@ const { resolveIngestConfig } = require('./core/ingest-core');
 const { resolveMemoryConfig } = require('./core/memory-core');
 const { resolveDistillConfig: resolveMemoryDistillConfig } = require('./core/memory-distill-core');
 const { consumedPackNames, packVariantProjects } = require('./core/pack-core');
+const { resolveMillMetricsConfig } = /** @type {MillMetricsCore} */ (require('./core/mill-metrics-core.ts'));
+const { numberOrNull } = require('./core/usage-number-core');
 const { resolveVisionsConfig } = require('./core/visions-dispatch-core');
 const { normalizeShapePath } = require('./core/visions-scope-core');
 
 /** @typedef {Record<string, unknown> & { id: string, name: string, path: string, packs?: string[] }} BackendLaneProject */
-/** @typedef {Record<string, unknown> & { projects: BackendLaneProject[], worktreeRerere?: boolean, usage?: Record<string, unknown>, ingest?: Record<string, unknown>, visions?: Record<string, unknown>, memory?: Record<string, unknown>, replayBufferKB?: number, packDistiller?: { enabled?: boolean, intervalHours?: number, timeoutSeconds?: number }, packsAutoRebuild?: boolean }} BackendLaneConfig */
-/** @typedef {{ path?: string, worktreeDir?: string, toSnapshot: () => Record<string, unknown>, notePackUpdate: (name: string, version: string) => void }} BackendLaneSession */
-/** @typedef {{ branchGcWiringOptions?: Record<string, unknown>, ingestLaneOptions?: Record<string, unknown>, packServiceOptions?: Record<string, unknown>, millWiringOptions?: Record<string, unknown>, usageWiringOptions?: Record<string, unknown> }} BackendLaneOptions */
+/** @typedef {Record<string, unknown> & { projects: BackendLaneProject[], worktreeRerere?: boolean, usage?: Record<string, unknown>, ingest?: Record<string, unknown>, visions?: Record<string, unknown>, memory?: Record<string, unknown>, millMetrics?: { enabled?: boolean, retainDays?: number }, replayBufferKB?: number, packDistiller?: { enabled?: boolean, intervalHours?: number, timeoutSeconds?: number }, packsAutoRebuild?: boolean }} BackendLaneConfig */
+/** @typedef {{ path?: string, worktreeDir?: string, resumeSessionId?: string|null, toSnapshot: () => Record<string, unknown>, notePackUpdate: (name: string, version: string) => void }} BackendLaneSession */
+/** @typedef {{ branchGcWiringOptions?: Record<string, unknown>, ingestLaneOptions?: Record<string, unknown>, packServiceOptions?: Record<string, unknown>, millMetricsStoreOptions?: Record<string, unknown>, millMetricsWiringOptions?: Record<string, unknown>, millWiringOptions?: Record<string, unknown>, usageWiringOptions?: Record<string, unknown> }} BackendLaneOptions */
 /** @typedef {InstanceType<typeof import('../detection/hook-source')['HookRouter']>} BackendHookRouter */
 /** @typedef {{ startPoller: () => void, restartIfConfigChanged: () => void, stopPoller: () => unknown, getStatus: () => Record<string, unknown>|null }} BackendPollingLane */
 /** @typedef {BackendPollingLane & { setIssueStatus: (args: { projectId: string, issueId: string, action: string }) => Promise<Record<string, unknown>>, archiveInvestigation: (args: { id: string }) => Promise<Record<string, unknown>> }} BackendPosthogLane */
@@ -81,6 +85,23 @@ function resolveVisionsScopeProjects(projectIds, projects, warn) {
     scopeProjects.push({ id: projectId, path: normalizedPath });
   }
   return scopeProjects.length === 0 ? null : scopeProjects;
+}
+
+// The vendor conversation the totals were read under travels with them: a card that starts a new
+// conversation mid-run gets a counter of its own, and the measurement lane can only tell that apart
+// from a rewind if it knows which identity a figure belongs to. A resumed card reports its identity
+// even before the scanner has read a total, or the lane would baseline the first sample at zero and
+// bill the whole prior conversation to this run.
+function tokensFromUsage(usage, sessions, sessionId) {
+  const resumed = sessions.get(sessionId)?.resumeSessionId;
+  const identity = typeof resumed === 'string' && resumed ? resumed : null;
+  const totals = usage.sessionTotals(sessionId);
+  if (!totals) return identity ? { tokens: null, costUSD: null, identity } : null;
+  return {
+    tokens: numberOrNull(totals.tokens),
+    costUSD: numberOrNull(totals.costUSD),
+    identity,
+  };
 }
 
 /** @param {BackendLaneDependencies} dependencies */
@@ -324,12 +345,6 @@ function createBackendLanes(dependencies) {
     broadcastControl({ type: 'pack-updated', name, version });
     for (const session of sessions.values()) session.notePackUpdate(name, version);
   });
-  const mill = createMillWiring({
-    config,
-    listSessions: () => [...sessions.values()].map((session) => session.toSnapshot()),
-    getWatcherCount: () => packService._watcherCount(),
-    ...(options.millWiringOptions || {}),
-  });
   const usage = createUsageWiring({
     config,
     sessions,
@@ -339,6 +354,26 @@ function createBackendLanes(dependencies) {
     laneMap: () => laneLedger.laneMap(),
     budgetStatePath: configSiblingPath(configStore.configPath, 'usage-budget-state.json'),
     ...(options.usageWiringOptions || {}),
+  });
+  const millMetrics = createMillMetricsLane({
+    resolveConfig: () => resolveMillMetricsConfig(config.millMetrics),
+    createStore: ({ retainDays }) => createMillMetricsStore({
+      recordsPath: configSiblingPath(configStore.configPath, 'mill-metrics.json'),
+      eventsDir: configSiblingPath(configStore.configPath, 'mill-metrics'),
+      retainDays,
+      logger,
+      ...(options.millMetricsStoreOptions || {}),
+    }),
+    tokensForSession: (sessionId) => tokensFromUsage(usage, sessions, sessionId),
+    logger,
+    ...(options.millMetricsWiringOptions || {}),
+  });
+  const mill = createMillWiring({
+    config,
+    listSessions: () => [...sessions.values()].map((session) => session.toSnapshot()),
+    getWatcherCount: () => packService._watcherCount(),
+    measurement: () => millMetrics.scorecards(),
+    ...(options.millWiringOptions || {}),
   });
   controlWss.on('connection', () => {
     void usage.start();
@@ -414,6 +449,7 @@ function createBackendLanes(dependencies) {
       () => prReview.restartIfConfigChanged(),
       () => posthog.restartIfConfigChanged(),
       () => usage.restartIfConfigChanged(),
+      () => void millMetrics.restartIfConfigChanged(),
       () => {
         if (packsAutoRebuildEnabled) packService.restartIfConsumersChanged();
       },
@@ -435,6 +471,7 @@ function createBackendLanes(dependencies) {
     memoryIngest,
     memoryStore,
     mill,
+    millMetrics,
     packDistiller,
     packService,
     packsAutoRebuildEnabled,
@@ -454,4 +491,4 @@ function createBackendLanes(dependencies) {
   };
 }
 
-module.exports = { createBackendLanes, resolveVisionsScopeProjects };
+module.exports = { createBackendLanes, resolveVisionsScopeProjects, tokensFromUsage };

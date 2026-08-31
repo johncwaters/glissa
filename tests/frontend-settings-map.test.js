@@ -5,7 +5,9 @@ const assert = require('node:assert/strict');
 
 const { DEFAULT_CONFIG } = require('../server/config-store');
 const { DASHBOARD_SETTING_PATHS } = require('../server/control-handlers');
-const { MEMORY_SPEC, PACK_DISTILLER_SPEC, INGEST_SPEC } = require('../server/core/settings-mill-core');
+const {
+  INGEST_SPEC, MEMORY_SPEC, MILL_METRICS_SPEC, PACK_DISTILLER_SPEC,
+} = require('../server/core/settings-mill-core');
 const settingsRanges = require('../shared/settings-ranges');
 
 const loadMap = () => import('../public/settings-map.mjs');
@@ -35,7 +37,12 @@ function pathIsKnown(path) {
     return true;
   }
   if (DASHBOARD_SETTING_PATH_SET.has(path)) return true;
-  const millSpec = { memory: MEMORY_SPEC, packDistiller: PACK_DISTILLER_SPEC, ingest: INGEST_SPEC }[topLevel];
+  const millSpec = {
+    ingest: INGEST_SPEC,
+    memory: MEMORY_SPEC,
+    millMetrics: MILL_METRICS_SPEC,
+    packDistiller: PACK_DISTILLER_SPEC,
+  }[topLevel];
   return !!millSpec && specAllows(millSpec, remaining);
 }
 
@@ -64,6 +71,13 @@ test('the map has unique ids, known paths, range-backed numbers and searchable k
       if (setting.optionsFrom) assert.equal(OPTION_CATALOGS.has(setting.optionsFrom), true, `${setting.id} needs a known option catalog`);
     }
   }
+});
+
+test('the map exposes both mill measurement controls', async () => {
+  const { SETTINGS_MAP } = await loadMap();
+  const paths = SETTINGS_MAP.flatMap((section) => section.settings).map((setting) => setting.path);
+  assert.equal(paths.includes('millMetrics.enabled'), true);
+  assert.equal(paths.includes('millMetrics.retainDays'), true);
 });
 test('the map never exposes remote and memory keys stay inside the dashboard allow-list', async () => {
   const { SETTINGS_MAP } = await loadMap();

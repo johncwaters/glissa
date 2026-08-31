@@ -51,7 +51,7 @@
   },
   "overrides": [
     {
-      "includes": ["server/core/**/*.js", "session/core/**/*.js"],
+      "includes": ["server/core/**/*.js", "server/core/**/*.ts", "session/core/**/*.js"],
       "linter": {
         "rules": {
           "style": {

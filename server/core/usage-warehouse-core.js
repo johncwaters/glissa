@@ -134,6 +134,7 @@ function compareRecords(a, b) {
 }
 
 module.exports = {
+  cutoffDayKey,
   mergeWarehouse,
   pruneWarehouse,
   rollupFromReport,

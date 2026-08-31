@@ -43,7 +43,10 @@ import {
   isMillUnavailable,
   millAttentionSignature,
   millErrorLine,
+  measurementEmptyText,
+  measurementLines,
   moreOutputsLine,
+  outcomeSplitLines,
   outputTokenLine,
   packDeltaFor,
   shouldApplyMillReport,
@@ -149,6 +152,19 @@ function buildDeliveriesBlock(pack) {
   return wrap;
 }
 
+function buildMeasurementBlock(pack) {
+  const wrap = el('div', 'mill-measurement');
+  const emptyText = measurementEmptyText(pack);
+  if (emptyText) {
+    wrap.append(buildLine('mill-empty', emptyText));
+    return wrap;
+  }
+  for (const line of [...measurementLines(pack), ...outcomeSplitLines(pack.measurement)]) {
+    wrap.append(buildLine('mill-meta', `${line.label}: ${line.value}`, line.tone));
+  }
+  return wrap;
+}
+
 /*
  * The one WRITE on this tab: which projects a pack is delivered to. A toggle sends one delta
  * (`set-project-packs`), and the server's broadcast pulls a fresh report, which is what re-renders the
@@ -226,6 +242,7 @@ function buildPackSection(pack) {
   if (pack.built) section.append(buildBudgetBlock(pack));
   if (pack.built) section.append(buildLine('mill-meta', contentLine(pack.built)));
   section.append(buildDeliveriesBlock(pack));
+  section.append(buildMeasurementBlock(pack));
   const distills = buildDistillBlock(pack);
   if (distills) section.append(distills);
   const outputs = buildOutputsBlock(pack.built);

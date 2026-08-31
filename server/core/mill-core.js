@@ -5,8 +5,8 @@
 // keys name it. No IO and no clock; the shell (server/mill-wiring.js) reads the specs, the manifests
 // and the session snapshots, and passes `ts` in the way the other cores take time.
 //
-// Everything here is derived on demand. The mill keeps no durable state of its own, so a report is
-// only ever as true as the moment it was built, and nothing in it is worth persisting.
+// Everything except measurement is derived on demand. The shell injects that durable state, while the
+// rest of the report is only ever as true as the moment it was built.
 
 const { DELIVERY_SKIP_EMPTY, MAX_INDEX_TOKENS, MAX_PACKS_PER_SESSION, decidePackDelivery, normalizePackNames, validatePackSpec } = require('./pack-core');
 const { isPlainObject, numberOrNull, safeNumber, stringOrNull } = require('./usage-number-core');
@@ -200,7 +200,7 @@ function specErrorsFor(entry) {
   return { valid: errors.length === 0, errors };
 }
 
-function buildPackRow(entry, { consumers, sessionRows }) {
+function buildPackRow(entry, { consumers, sessionRows, measurementByPack }) {
   const name = String(entry?.name ?? '');
   const spec = isPlainObject(entry?.spec) ? entry.spec : null;
   const manifest = isPlainObject(entry?.manifest) ? entry.manifest : null;
@@ -240,6 +240,7 @@ function buildPackRow(entry, { consumers, sessionRows }) {
     // never an unbuilt-pack warning.
     hasConsumers: namedBy.projects.length > 0 || namedBy.lanes.length > 0,
     distill: distillRowsFrom(entry?.distill),
+    measurement: measurementByPack?.[name] ?? null,
   };
 }
 
@@ -264,7 +265,8 @@ function buildMillReport(input) {
   const consumers = resolveConsumers(input?.consumerSources);
   const specs = asArray(input?.specs);
   const sessionRows = asArray(input?.sessionRows);
-  const packs = specs.map((entry) => buildPackRow(entry, { consumers, sessionRows }));
+  const measurementByPack = isPlainObject(input?.measurementByPack) ? input.measurementByPack : {};
+  const packs = specs.map((entry) => buildPackRow(entry, { consumers, sessionRows, measurementByPack }));
   // A group name is what a project assigns, so a variant name never counts as a known consumer target.
   const knownNames = new Set(packs.filter((pack) => pack.group === null).map((pack) => pack.name));
   return {

@@ -41,6 +41,7 @@ test('row text: event chip, target, type, timeout and scope', async () => {
   assert.equal(core.scopeLabel(hook({ projects: ['p1', 'gone'] }), PROJECTS), 'glissa, gone');
   assert.deepEqual(core.missingProjectIds(hook({ projects: ['p1', 'gone'] }), PROJECTS), ['gone']);
   assert.equal(core.builtinLine({ event: 'PostToolUse', matcher: 'ScheduleWakeup' }), 'PostToolUse / ScheduleWakeup');
+  assert.equal(core.builtinLine({ event: 'PostToolUse', matcher: 'Read' }), 'PostToolUse / Read');
 });
 
 test('matcherHint says what the matcher matches or that the event takes none', async () => {

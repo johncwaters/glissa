@@ -245,6 +245,7 @@ module.exports = {
   // implementation, so every one is true; a second adapter is what makes them load-bearing.
   capabilities: {
     hooks: true,
+    packReads: true,
     awaitingInput: true,
     backgroundAgents: true,
     resume: true,

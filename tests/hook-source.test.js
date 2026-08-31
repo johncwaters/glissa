@@ -124,6 +124,56 @@ test('HookRouter ignores unmapped events with 200', () => {
   assert.equal(res.signal, null);
 });
 
+test('HookRouter observes mapped and ignored events after authentication', () => {
+  const router = new HookRouter();
+  const events = [];
+  router.register('s1', {
+    token: 'good',
+    onSignal: () => {},
+    onEvent: (event, payload) => events.push({ event, payload }),
+  });
+  const ignored = router.handle({
+    glissaId: 's1', event: 'PostToolUse', token: 'good', payload: { tool_name: 'Read' },
+  });
+  router.handle({ glissaId: 's1', event: 'Stop', token: 'good', payload: { reason: 'done' } });
+  assert.equal(ignored.reason, 'ignored-event');
+  assert.deepEqual(events, [
+    { event: 'PostToolUse', payload: { tool_name: 'Read' } },
+    { event: 'Stop', payload: { reason: 'done' } },
+  ]);
+});
+
+test('a throwing observer cannot cost the mapped status signal', () => {
+  const router = new HookRouter();
+  const signals = [];
+  const realWarn = console.warn;
+  const warnings = [];
+  console.warn = (message) => warnings.push(String(message));
+  try {
+    router.register('s1', {
+      token: 'good',
+      onSignal: (signal) => signals.push(signal),
+      onEvent: () => { throw new Error('observer failed'); },
+    });
+    const response = router.handle({ glissaId: 's1', event: 'Stop', token: 'good', payload: {} });
+    assert.equal(response.signal, 'ready');
+    assert.equal(signals.length, 1);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /observer failed/);
+  } finally {
+    console.warn = realWarn;
+  }
+});
+
+test('HookRouter never observes an unknown session or a bad token', () => {
+  const router = new HookRouter();
+  const events = [];
+  router.register('s1', { token: 'good', onSignal: () => {}, onEvent: (...args) => events.push(args) });
+  router.handle({ glissaId: 'missing', event: 'Stop', token: 'good', payload: {} });
+  router.handle({ glissaId: 's1', event: 'Stop', token: 'bad', payload: {} });
+  assert.deepEqual(events, []);
+});
+
 test('unregister stops dispatch', () => {
   const r = new HookRouter();
   const got = [];

@@ -16,15 +16,18 @@
     "alwaysStrict": true,
     "strictPropertyInitialization": true,
     "noImplicitReturns": true,
+    "erasableSyntaxOnly": true,
     "target": "ES2023",
     "types": ["node"]
   },
   "include": [
     "server/**/*.js",
+    "server/**/*.ts",
     "session/**/*.js",
     "detection/**/*.js",
     "notifications/**/*.js",
     "shared/**/*.js",
+    "shared/**/*.ts",
     "shared/**/*.d.ts"
   ],
   "exclude": [

@@ -61,6 +61,7 @@ const HOOK_EVENTS = ['SessionStart', 'SessionEnd', 'UserPromptSubmit', 'Stop', '
 // essential: a matcher-less PostToolUse hook would POST on EVERY tool call. hook-source
 // re-filters by tool_name server-side as defense in depth.
 const WAKEUP_TOOL_MATCHER = 'ScheduleWakeup|CronCreate|CronDelete';
+const PACK_READ_TOOL_MATCHER = 'Read';
 
 // The managed statusLine relay, and the marker meaning "the operator had no statusLine of their own".
 const RELAY_PATH = path.resolve(__dirname, '..', 'session', 'statusline-relay.js');
@@ -118,9 +119,9 @@ function buildStatuslineCommand({ relayPath = RELAY_PATH, postUrl, userCommand =
 // lanes (server/core/lane-permissions-core.js). A lane passing neither leaves the file as it was, so
 // ordinary user sessions stay byte-identical to before.
 /**
- * @param {{ port: number, glissaId: string, token: string, timeoutSec?: number, permissions?: { deny?: string[], defaultMode?: string } | null, detectScheduledWakeups?: boolean, enableProjectMcp?: boolean, rtkPath?: string | null, planLimits?: boolean, userSettingsPath?: string | null, relayPath?: string, userHooks?: import('../session/core/user-hooks-core').UserHook[] }} options
+ * @param {{ port: number, glissaId: string, token: string, timeoutSec?: number, permissions?: { deny?: string[], defaultMode?: string } | null, detectScheduledWakeups?: boolean, detectPackReads?: boolean, enableProjectMcp?: boolean, rtkPath?: string | null, planLimits?: boolean, userSettingsPath?: string | null, relayPath?: string, userHooks?: import('../session/core/user-hooks-core').UserHook[] }} options
  */
-function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, enableProjectMcp = false, rtkPath = null, planLimits = false, userSettingsPath = null, relayPath = RELAY_PATH, userHooks = [] }) {
+function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, detectPackReads = false, enableProjectMcp = false, rtkPath = null, planLimits = false, userSettingsPath = null, relayPath = RELAY_PATH, userHooks = [] }) {
   if (!port || !glissaId || !token) {
     throw new Error('buildHookSettings requires port, glissaId, token');
   }
@@ -132,6 +133,7 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
   }
   const postToolUse = [];
   if (detectScheduledWakeups) postToolUse.push(WAKEUP_TOOL_MATCHER);
+  if (detectPackReads) postToolUse.push(PACK_READ_TOOL_MATCHER);
   if (postToolUse.length > 0) {
     const url = `${base}/posttooluse?t=${encodeURIComponent(token)}`;
     hooks.PostToolUse = postToolUse.map((matcher) => ({ matcher, hooks: [{ type: 'http', url, timeout: timeoutSec }] }));
@@ -183,22 +185,30 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
  * hand-written copy of this list drifts the moment either switch changes what the file gets.
  */
 /**
- * @param {{ detectScheduledWakeups?: boolean, rtkPath?: string | null }} [options]
+ * @param {{ detectScheduledWakeups?: boolean, detectPackReads?: boolean, rtkPath?: string | null }} [options]
  * @returns {Array<{ event: string, matcher: string | null, purpose: string }>}
  */
-function describeBuiltinHooks({ detectScheduledWakeups = true, rtkPath = null } = {}) {
+function describeBuiltinHooks({ detectScheduledWakeups = true, detectPackReads = false, rtkPath = null } = {}) {
   const rows = HOOK_EVENTS.map((event) => ({ event, matcher: /** @type {string | null} */ (null), purpose: 'Status detection: POST to the Glissa hook router' }));
   if (detectScheduledWakeups) rows.push({ event: 'PostToolUse', matcher: WAKEUP_TOOL_MATCHER, purpose: 'Scheduled wakeup tracking' });
+  if (detectPackReads) rows.push({ event: 'PostToolUse', matcher: PACK_READ_TOOL_MATCHER, purpose: 'Pack read tracking' });
   if (rtkPath) rows.push({ event: 'PreToolUse', matcher: buildRtkHookEntry(rtkPath).matcher, purpose: 'rtk command rewriting' });
   return rows;
 }
 
 // Write the per-session settings file. Returns { settingsPath, dir, token, cleanup }.
+/** @param {{ hooks?: Record<string, unknown> }} settings */
+function settingsDetectPackReads(settings) {
+  const postToolUse = settings?.hooks?.PostToolUse;
+  if (!Array.isArray(postToolUse)) return false;
+  return postToolUse.some((entry) => entry?.matcher === PACK_READ_TOOL_MATCHER);
+}
+
 // Everything this does not use itself is forwarded to buildHookSettings, which owns those defaults.
 /**
  * @param {{ port: number, glissaId: string, token?: string, baseDir?: string,
  *   timeoutSec?: number, permissions?: { deny?: string[], defaultMode?: string } | null,
- *   detectScheduledWakeups?: boolean, enableProjectMcp?: boolean, rtkPath?: string | null,
+ *   detectScheduledWakeups?: boolean, detectPackReads?: boolean, enableProjectMcp?: boolean, rtkPath?: string | null,
  *   planLimits?: boolean, userSettingsPath?: string | null, relayPath?: string,
  *   userHooks?: import('../session/core/user-hooks-core').UserHook[] }} options
  */
@@ -221,6 +231,9 @@ function writeSessionSettings({ glissaId, token, baseDir = DEFAULT_BASE_DIR, ...
     settingsPath,
     dir,
     token: tok,
+    // What the file actually got, not what was asked for: the measurement lane reports a pack delivery
+    // as unmeasurable unless the Read matcher really reached this settings file.
+    packReadHook: settingsDetectPackReads(settings),
     cleanup() {
       try {
         fs.rmSync(dir, { recursive: true, force: true });
@@ -277,7 +290,9 @@ module.exports = {
   buildStatuslineCommand,
   readUserStatuslineCommand,
   HOOK_EVENTS,
+  PACK_READ_TOOL_MATCHER,
   WAKEUP_TOOL_MATCHER,
+  settingsDetectPackReads,
   DEFAULT_BASE_DIR,
   DEFAULT_TIMEOUT_SEC,
   DIR_MODE,

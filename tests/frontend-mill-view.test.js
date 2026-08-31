@@ -315,3 +315,53 @@ test('an empty build says so on its built line and in place of its deliveries', 
   assert.equal(deliveryEmptyText(hollow), 'empty build, not delivered');
   assert.equal(deliveryEmptyText(pack({ hasConsumers: true })), 'no live sessions');
 });
+
+test('measurement formatting keeps unknown rates distinct from zero', async () => {
+  const { measurementEmptyText, measurementLines, openRateText } = await importCore();
+  assert.equal(measurementEmptyText(pack()), 'not yet measured');
+  assert.equal(openRateText({ openRate: null }), '-');
+  assert.equal(openRateText({ openRate: 0 }), '0%');
+
+  const rows = measurementLines(pack({
+    measurement: {
+      deliveries: 4,
+      measurableDeliveries: 3,
+      unmeasurableDeliveries: 1,
+      openedSessions: 2,
+      openRate: 2 / 3,
+      distinctFilesRead: 5,
+      medianFilesRead: null,
+      liveSessions: 1,
+      ambiguousPrompts: 2,
+    },
+  }));
+  assert.deepEqual(rows, [
+    { label: 'deliveries', value: '4', tone: 'ok' },
+    { label: 'measurable deliveries', value: '3', tone: 'ok' },
+    { label: 'opened sessions', value: '2 (66.7%)', tone: 'ok' },
+    { label: 'distinct files read', value: '5', tone: 'ok' },
+    { label: 'median files read', value: '-', tone: 'ok' },
+    { label: 'live sessions', value: '1', tone: 'ok' },
+    { label: 'ambiguous prompts', value: '2', tone: 'warn' },
+    { label: 'unmeasurable deliveries', value: '1 (read hooks unavailable)', tone: 'warn' },
+  ]);
+});
+
+test('opened and unopened outcomes render null denominators as no value', async () => {
+  const { outcomeSplitLines } = await importCore();
+  assert.deepEqual(outcomeSplitLines({
+    opened: { sessions: 2, meanInterruptions: 1.5, abortRate: 0.5, meanTokens: 1200 },
+    unopened: { sessions: 0, meanInterruptions: null, abortRate: null, meanTokens: null },
+  }), [
+    {
+      label: 'opened outcomes',
+      value: '2 sessions, 1.5 mean interruptions, 50% abort rate, 1.2k mean tokens',
+      tone: 'ok',
+    },
+    {
+      label: 'unopened outcomes',
+      value: '0 sessions, - mean interruptions, - abort rate, - mean tokens',
+      tone: 'ok',
+    },
+  ]);
+});

@@ -11,7 +11,14 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { writeSessionSettings, DIR_MODE, FILE_MODE } = require('../detection/settings-injector');
+const {
+  buildHookSettings,
+  writeSessionSettings,
+  DIR_MODE,
+  FILE_MODE,
+  PACK_READ_TOOL_MATCHER,
+  WAKEUP_TOOL_MATCHER,
+} = require('../detection/settings-injector');
 
 const POSIX = process.platform !== 'win32';
 
@@ -82,4 +89,18 @@ test('the written settings still contain the hooks the session needs', () => {
   } finally {
     written.cleanup();
   }
+});
+
+test('pack read detection adds one PostToolUse matcher and defaults byte-identically off', () => {
+  const base = { port: 3000, glissaId: 'metrics', token: 'tok' };
+  const baseline = buildHookSettings(base);
+  const explicitlyOff = buildHookSettings({ ...base, detectPackReads: false });
+  assert.equal(JSON.stringify(explicitlyOff), JSON.stringify(baseline));
+
+  const enabled = buildHookSettings({ ...base, detectPackReads: true });
+  assert.deepEqual(enabled.hooks.PostToolUse.map((entry) => entry.matcher), [
+    WAKEUP_TOOL_MATCHER,
+    PACK_READ_TOOL_MATCHER,
+  ]);
+  assert.equal(enabled.hooks.PostToolUse[0].hooks[0].url, enabled.hooks.PostToolUse[1].hooks[0].url);
 });

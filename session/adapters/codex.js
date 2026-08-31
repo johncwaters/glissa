@@ -334,6 +334,7 @@ module.exports = {
   PACK_DIRECTIVE,
   capabilities: {
     hooks: true,
+    packReads: false,
     awaitingInput: true,
     // OFF: 0.149.0 spawned a real child but emitted only main Stop, with no background-work field.
     backgroundAgents: false,

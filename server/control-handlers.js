@@ -13,7 +13,7 @@ const { claudeProjectsDir, listRepoConversations } = require('../session/core/co
 const { normalizeClientTrust } = require('./core/request-trust');
 const { PACK_NAME_RE, applyPackDelta, isSelfReferentialPack, sameProjectRecords } = require('./core/pack-core');
 const {
-  INGEST_SPEC, MEMORY_SPEC, PACK_DISTILLER_SPEC, mergeMillBlock, validateMillBlock,
+  INGEST_SPEC, MEMORY_SPEC, MILL_METRICS_SPEC, PACK_DISTILLER_SPEC, mergeMillBlock, validateMillBlock,
 } = require('./core/settings-mill-core');
 const { readPosthogReport } = require('./posthog-report');
 const posthogCore = require('./core/posthog-core');
@@ -228,7 +228,7 @@ function requestValidationErrorReply(msg, message) {
   return null;
 }
 
-const MILL_SPECS = [MEMORY_SPEC, PACK_DISTILLER_SPEC, INGEST_SPEC];
+const MILL_SPECS = [MEMORY_SPEC, MILL_METRICS_SPEC, PACK_DISTILLER_SPEC, INGEST_SPEC];
 
 // Reads `since` from a `/control?since=<n>` upgrade URL. Returns null for a missing/malformed
 // value (no query string, no param, non-numeric) so the caller treats it as "no replay wanted".
@@ -922,6 +922,7 @@ function registerControlHandlers(controlWss, deps) {
   function builtinHooksReport() {
     return describeBuiltinHooks({
       detectScheduledWakeups: config.detectScheduledWakeups !== false,
+      detectPackReads: config.millMetrics?.enabled === true,
       rtkPath: config.rtk ? resolveRtkPath() : null,
     });
   }

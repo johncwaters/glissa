@@ -89,6 +89,7 @@ const DISMISSIBLE_STATES = new Set([STATES.WAITING, STATES.COMPLETE]);
  * @property {unknown} [packs]
  * @property {string | null} [packsBuiltRoot]
  * @property {string | null} [packVariantSlug]
+ * @property {MillMetricsPort | null} [millMetricsPort]
  * @property {boolean} [planLimits]
  * @property {(() => import('./core/user-hooks-core').UserHook[]) | null} [getUserHooks]
  * @property {((file: string, args: string[], options: import('node-pty').IPtyForkOptions | import('node-pty').IWindowsPtyForkOptions) => import('node-pty').IPty) | null} [ptySpawn]
@@ -202,6 +203,7 @@ class Session extends EventEmitter {
     // The per-project variant slug this project resolves first (server/core/pack-core.js
     // projectVariantSlug). Null for a lane session, which is delivered the base pack.
     packVariantSlug = null,
+    millMetricsPort = null,
     // Inject the managed statusLine relay so Claude Code publishes its OFFICIAL plan rate limits to
     // Glissa (config usage.planLimits; see AGENTS.md "Usage Tracking"). The relay chains whatever
     // statusLine the operator already had, because a managed one REPLACES it.
@@ -368,6 +370,9 @@ class Session extends EventEmitter {
       hooksBaseDir,
       settingsPermissions,
       detectScheduledWakeups,
+      detectPackReads: () => millMetricsPort?.enabled() === true
+        && this._can("packReads")
+        && this._packDelivery.deliveredWithDirs().length > 0,
       enableProjectMcp: !!enableProjectMcp,
       rtkPath: this._rtkPath,
       planLimits: this._planLimits,
@@ -375,6 +380,7 @@ class Session extends EventEmitter {
       bypassHookTrust: this.bypassHookTrust,
       effectiveCwd: () => this.effectiveCwd(),
       ingestSignal: (raw) => this.ingestHookSignal(raw),
+      observeHook: (event, payload) => millMetricsPort?.onHookEvent(this.id, event, payload),
       recordDecision: (entry) => this._recordDecision(entry),
     });
     this._ptySpawn = ptySpawn || ((file, args, opts) => pty.spawn(file, args, opts));
@@ -524,7 +530,7 @@ class Session extends EventEmitter {
       // transition first, carrying signal "working" instead of "resume" in its detail. The
       // notify-cycle reset must not depend on winning that race, so the backend resets on this
       // event directly instead of only reading the transition detail.
-      this.emit("user-prompt");
+      this.emit("user-prompt", { state: this.state, stateSince: this.stateSince, ts: Date.now() });
     }
     // A main-agent Stop carries the authoritative background-work count (v2.1.145+).
     if (raw && raw.signal === "ready" && raw.source === "hook") {
@@ -1131,6 +1137,19 @@ class Session extends EventEmitter {
       return;
     }
 
+    // Emitted only once the agent is actually running with these packs on disk, and carrying whether
+    // the Read hook REACHED the settings file rather than whether the adapter could in principle carry
+    // it: a refused injection or a failed spawn would otherwise be recorded as a measurable delivery
+    // nobody could ever have opened.
+    if (packDelivery.packs.length > 0) {
+      this.emit("packs-delivered", {
+        packs: this._packDelivery.deliveredWithDirs(),
+        agent: this.agentId,
+        readDetection: this._hooks.detectsPackReads() ? "available" : "unavailable",
+        ts: Date.now(),
+      });
+    }
+
     // Redact a positional initialPrompt (headless lanes) from the spawn log - it can be a multi-KB
     // context block that does not belong in the console.
     const argsForLog = this._initialPrompt
@@ -1571,7 +1590,7 @@ class Session extends EventEmitter {
     this._armTimer("_sleepKillTimer", SLEEP_KILL_TIMEOUT_MS, () => {
       if (!this._sleeping) return;
       const wasActive = KILLABLE_STATES.includes(this.state);
-      this.killSession();
+      this.killSession("natural");
       if (wasActive && RESTARTABLE_STATES.includes(this.state)) {
         this._autoKilled = true;
       }
@@ -1582,10 +1601,14 @@ class Session extends EventEmitter {
     this._clearTimer("_sleepKillTimer");
   }
 
-  killSession() {
+  // Every close-out reaches the SAME user_kill transition, so what ended the run travels with it: the
+  // measurement lane counts only an operator abandoning live work as an abort, and inferring that from
+  // the transition name scored a finish, a sleep-kill and a restart as aborts too.
+  /** @param {MillMetricEndIntent} [endIntent] */
+  killSession(endIntent = "operator-abort") {
     if (!KILLABLE_STATES.includes(this.state)) return false;
     this.kill();
-    return this.transition("user_kill");
+    return this.transition("user_kill", { endIntent });
   }
 
   restart(options = {}) {
@@ -1639,7 +1662,7 @@ class Session extends EventEmitter {
         try { if (!this._destroyed) await this._mergeAndReset(); }
         finally { this._finishing = false; }
       });
-      this.killSession(); // -> DONE now; the real PTY exit settles the worktree, then the handler merges
+      this.killSession("close-out"); // -> DONE now; the real PTY exit settles the worktree, then the handler merges
       return { ok: true, pending: true };
     }
     return { ok: false, reason: "not-finishable" };
@@ -1669,7 +1692,7 @@ class Session extends EventEmitter {
         this.start({ fresh });
       });
       this.kill();
-      this.transition("user_kill");
+      this.transition("user_kill", { endIntent: "natural" });
       return true;
     }
     if (!RESTARTABLE_STATES.includes(this.state)) return false;

@@ -23,6 +23,7 @@ const { configuredIntegrationBranch } = require('./core/integration-branch-core'
  * @property {(session: RegistrySession) => void} wireSessionEvents
  * @property {(id: string) => void} closeSessionDataClients
  * @property {{ acknowledge: (id: string) => void }} notificationManager
+ * @property {MillMetricsPort|null} [millMetricsPort]
  * @property {() => { noteRepos: () => unknown, detachSessionTap: (session: RegistrySession) => void, releaseSessionRoots: (session: RegistrySession) => void }|null} getIngestLane
  * @property {(message: Record<string, unknown>) => void} broadcastControl
  * @property {(config: RegistryConfig) => void} applySettingsReload
@@ -206,6 +207,9 @@ function createSessionRegistry(dependencies) {
     dependencies.closeSessionDataClients(id);
     // Acknowledge before destroy because destroy removes the listeners that complete notification cleanup.
     dependencies.notificationManager.acknowledge(id);
+    // Same reason: a removed session never transitions to DONE, so the measurement lane is told here or
+    // its accumulator is stranded and the pack scorecard keeps counting a delivery that is long gone.
+    if (dependencies.millMetricsPort) dependencies.millMetricsPort.onSessionTeardown(id);
     const ingestLane = dependencies.getIngestLane();
     if (ingestLane) ingestLane.detachSessionTap(session);
     if (ingestLane) ingestLane.releaseSessionRoots(session);
@@ -249,6 +253,9 @@ function createSessionRegistry(dependencies) {
       const wasDormant = !shouldStartAfterModify(oldSession.state);
       dependencies.closeSessionDataClients(project.id);
       dependencies.notificationManager.acknowledge(project.id);
+      // Same reason as teardownSession: the replaced session never transitions, so its accumulator is
+      // closed here or the measurement lane keeps counting a delivery that no longer exists.
+      if (dependencies.millMetricsPort) dependencies.millMetricsPort.onSessionTeardown(project.id);
       oldSession.destroy();
       const newSession = dependencies.makeSession(project, { ...config, ...newConfig });
       sessions.set(project.id, newSession);

@@ -252,6 +252,15 @@ test('getSettings falls back to DEFAULT_CONFIG for absent keys', () => {
   });
 });
 
+test('getSettings projects only dashboard-settable mill measurement fields', () => {
+  withStore({
+    projects: [],
+    millMetrics: { enabled: true, retainDays: 180, recordsPath: '/operator-only' },
+  }, (store) => {
+    assert.deepEqual(store.getSettings().millMetrics, { enabled: true, retainDays: 180 });
+  });
+});
+
 // The dev server (vite.config.js) turns debugMode on this way: a fallback for a key config.json
 // omits, never a persisted value, and never a win over an explicit setting.
 test('settingsDefaults overlays a key the config file omits', () => {

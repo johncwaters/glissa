@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "allowJs": false,
+    "checkJs": false,
+    "strict": true
+  },
+  "include": [
+    "server/**/*.ts",
+    "shared/**/*.ts"
+  ]
+}
