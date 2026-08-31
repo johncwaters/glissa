@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-08-31
+
+### Added
+
+- **Mill pack measurement**: an always-on funnel records, per pack and per session, delivery, whether the agent actually opened the pack (via a PostToolUse Read hook), and the session outcome (interruptions, disposition, tokens), folded into durable per-session records and rendered as scorecards on the Mill tab. Codex and Grok sessions are recorded but never counted in open-rate denominators. The lane is the repo's first TypeScript module, run by Node native type stripping as the migration beachhead, which raises the Node floor to 22.18.0.
+- **Pack ablation harness**: a hand-run driver pairs ON/OFF sessions per task through an isolated in-process backend, grades each arm with an objective check command, joins the funnel record, and reports an exact McNemar verdict over discordant pairs; infrastructure failures are excluded as invalid pairs rather than scored.
+- **Settings view**: the 11-tab settings dialog is replaced by a primary Settings view with search, deep links, an unattended-actions grouping, and a phone section sheet.
+- **Hooks tab**: operator Claude Code hooks are visible in the dashboard alongside the built-in ones Glissa injects.
+- **Visions editor integration**: an extension install CLI ships a packed vsix, editors publish open/save/close activity into ingest, and the lane focuses on the edit with intent threads and buffer-anchored comments surfaced as editor diagnostics.
+- **Wire contracts**: Zod schemas in `shared/contracts/` now define the wire and persisted shapes, parsed fail-closed at boundaries and pinned by a typecheck gate.
+- **Worktree base sync**: session worktrees sync their base branch with origin on initial create and fresh restart, with integration-branch resolution centralized.
+- The Usage tab is banded by altitude, the phone board groups sessions by project, and the tab favicon reflects waiting and complete states.
+
+### Changed
+
+- Express upgraded from 4.22 to 5.2 with trust-boundary guards reverified.
+- The typecheck gate now covers `server/`, `session/`, `detection/`, `notifications/`, `shared/`, and `public/` at zero errors under the strict family, with no ignore or unknown-laundering escapes.
+- The Session god class and the backend module are decomposed; lanes are reached through one accessor and browser virtual modules through one manifest.
+- Packs publish under `versions/<hash>` with `current` as a pointer file, and memory distillation walks a durable sequence cursor with per-project projection byte caps.
+
+### Fixed
+
+- Memory ingest no longer records tool-call transcripts, skips stale records to cut distill backlog, and the distill prompt travels by file instead of argv.
+- Session completion is held while a subagent stop is orphaned, and pack builds skip self-referential and empty packs.
+
 ## [0.23.1] - 2026-08-25
 
 ### Added
