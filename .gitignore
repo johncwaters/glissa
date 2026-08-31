@@ -8,7 +8,7 @@ dist/
 .vscode/
 .claude/*
 !.claude/omc.jsonc
-!.claude/release-profile.yml
+!.claude/release-profile.json
 config.json
 # Remote-mode device pairings (hashes only, but machine-local state). Sits next to config.json, so a
 # dev run with the in-repo config.json lands them here.

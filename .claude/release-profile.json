@@ -1,0 +1,51 @@
+{
+  "type": "other",
+  "versioning": {
+    "scheme": "semver",
+    "version_file": "package.json",
+    "tag_format": "vX.Y.Z",
+    "notes": "package.json hand-edited, lockfile synced in same commit. Historical anomalies: first tag 0.1.0 unprefixed; v0.11.0 gap exists."
+  },
+  "changelog": {
+    "path": "CHANGELOG.md",
+    "format": "keep_a_changelog"
+  },
+  "git": {
+    "release_from": "main",
+    "release_commit_pattern": "chore(release): vX.Y.Z",
+    "require": ["clean_tree"]
+  },
+  "gates": {
+    "pre_tag": [
+      "node scripts/check-package-files.js",
+      "npm run build"
+    ],
+    "post_release": [
+      "git ls-remote --tags origin vX.Y.Z",
+      "gh release view vX.Y.Z",
+      "git ls-remote --tags origin vX.Y.Z^{}"
+    ],
+    "evidence": ["git_tag", "github_release_url", "remote_release_tag"]
+  },
+  "publish": {
+    "trigger": "local_script",
+    "detail": {
+      "command": "npm run release",
+      "script_does": "dirty-tree check, tag-exists check, files check, build, git push, annotated tag plus push tag, gh release create from changelog section",
+      "no_registry": "package is private; nothing is published to npm. Distribution is the GitHub repo plus claude-setup provisioning (docs/distribution.md)",
+      "partial_failure_note": "script is not atomic; on mid-flight failure check what landed (pushed commits vs tag vs release) before any rerun"
+    },
+    "auth": "gh_cli_local"
+  },
+  "rollback": {
+    "steps": [
+      "git push origin :refs/tags/vX.Y.Z && git tag -d vX.Y.Z",
+      "gh release delete vX.Y.Z",
+      "Revert the release commit on main, or forward-fix with a new patch version"
+    ],
+    "never": ["reuse_version", "force_push_main"]
+  },
+  "approval": {
+    "human_before": ["npm_run_release"]
+  }
+}

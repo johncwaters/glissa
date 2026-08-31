@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-08-31
+
+### Fixed
+
+- The Mill tab now shows a pending delivery row for each consuming project whose card has not spawned a session yet, gated through the same deliverability predicate the spawn applies, so dormant cards no longer vanish behind "no live sessions" and the tab never promises a delivery the spawn would refuse.
+- The phone layout's settings screen scrolls again; its panel mount was missing from the phone flex rules, leaving the settings content without a definite height to scroll inside.
+
 ## [0.24.0] - 2026-08-31
 
 ### Added
