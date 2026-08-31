@@ -93,6 +93,30 @@ test('a built pack spawns as --add-dir, sets the CLAUDE.md env flag, and rides t
   }
 });
 
+test('the runtime built-pack root override is resolved when the session starts', async () => {
+  const builtRoot = await makeBuiltRoot({ 'house-rules': 'v-abc' });
+  const calls = [];
+  const session = new Session({
+    id: 'runtime-pack-root',
+    name: 'runtime-pack-root',
+    path: process.cwd(),
+    packs: ['house-rules'],
+    spawnCommand: { path: process.execPath, kind: 'exe' },
+    ptySpawn: spawnCapture(calls),
+  });
+  session._packsBuiltRoot = builtRoot;
+  try {
+    await session.start();
+    assert.deepEqual(calls[0].args, [
+      '--add-dir',
+      fixtureVersionDir(builtRoot, 'house-rules', 'v-abc'),
+    ]);
+  } finally {
+    session.destroy();
+    await fsp.rm(builtRoot, { recursive: true, force: true });
+  }
+});
+
 test('a measurable packed session injects Read tracking after pack resolution', async () => {
   const builtRoot = await makeBuiltRoot({ 'house-rules': 'v-abc' });
   const hooksBaseDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glissa-pack-hooks-'));

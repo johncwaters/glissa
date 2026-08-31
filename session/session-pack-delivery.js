@@ -9,7 +9,7 @@ const { buildPackNotice, listStalePacks } = require("./core/pack-notice");
  * @typedef {{ name?: string, version?: string, dir?: string, reason?: string, manifest?: Record<string, unknown>, perProjectVariants?: boolean }} PackResolution
  * @typedef {object} SessionPackDeliveryOptions
  * @property {unknown} configuredPacks
- * @property {string | null} builtRoot
+ * @property {string | null | (() => string | null)} builtRoot
  * @property {string | null} variantSlug
  * @property {string} projectPath
  * @property {string} sessionName
@@ -95,7 +95,10 @@ function createSessionPackDelivery(options) {
       delivered = [];
       return { args: [], packs: [] };
     }
-    const builtRoot = options.builtRoot || defaultBuiltRoot();
+    const configuredBuiltRoot = typeof options.builtRoot === "function"
+      ? options.builtRoot()
+      : options.builtRoot;
+    const builtRoot = configuredBuiltRoot || defaultBuiltRoot();
     const nextDelivered = [];
     for (const name of names) {
       const resolved = await resolveVariant(name, builtRoot);

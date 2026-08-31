@@ -341,6 +341,7 @@ class Session extends EventEmitter {
     this._initialPrompt = initialPrompt;
     /** @type {string[]} */
     this._extraClaudeArgs = Array.isArray(extraClaudeArgs) ? extraClaudeArgs : [];
+    this._packsBuiltRoot = packsBuiltRoot;
     this._resumeSessionId = resumeSessionId || null;
     this._suppressResumeCapture = false;
     this._antiSlopPrompt = !!antiSlopPrompt && this._can("antiSlop");
@@ -349,7 +350,7 @@ class Session extends EventEmitter {
     this._rtkPath = (this._can("rtk") && rtkPath) || null;
     this._packDelivery = createSessionPackDelivery({
       configuredPacks: packs,
-      builtRoot: packsBuiltRoot,
+      builtRoot: () => this._packsBuiltRoot,
       variantSlug: typeof packVariantSlug === "string" && packVariantSlug ? packVariantSlug : null,
       projectPath: this.path,
       sessionName: this.name,
