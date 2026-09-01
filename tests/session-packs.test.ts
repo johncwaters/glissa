@@ -558,8 +558,9 @@ test('a pack built out of the project\'s own files is skipped as self-referentia
 test('the same pack still reaches a project it was not built out of', async () => {
   const builtRoot = await makeBuiltRoot({ mirror: { version: 'v1', sourceRoots: [`${toPosix(process.cwd())}/docs`], sources: [{ pattern: 'docs/*.md', files: [{ relPath: 'a.md' }] }] } });
   const calls: SpawnCall[] = [];
+  const elsewhereDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glissa-elsewhere-'));
   const s = new Session({
-    id: 'elsewhere', name: 'elsewhere', path: os.tmpdir(),
+    id: 'elsewhere', name: 'elsewhere', path: elsewhereDir,
     packs: ['mirror'], packsBuiltRoot: builtRoot,
     spawnCommand: { path: process.execPath, kind: 'exe' },
     ptySpawn: spawnCapture(calls),
@@ -570,6 +571,7 @@ test('the same pack still reaches a project it was not built out of', async () =
   } finally {
     s.destroy();
     await fsp.rm(builtRoot, { recursive: true, force: true });
+    await fsp.rm(elsewhereDir, { recursive: true, force: true });
   }
 });
 
