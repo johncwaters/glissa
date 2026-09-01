@@ -24,6 +24,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
+      - run: npm run typecheck
       - run: npm test
       # npm ci blocks node-pty's install scripts (npm 11.17+ default), so only this leg tests the documented global install where they run and the native module compiles.
       - name: packaged global install

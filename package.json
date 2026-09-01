@@ -3,8 +3,10 @@
   "version": "0.24.1",
   "private": true,
   "description": "Spawn and manage Claude Code sessions on Windows and Linux with a browser dashboard and real-time xterm.js streaming",
-  "type": "commonjs",
   "main": "server.js",
+  "imports": {
+    "#shared/*": "./shared/*"
+  },
   "bin": {
     "glissa": "bin/glissa.js"
   },
@@ -60,7 +62,7 @@
   "scripts": {
     "start": "node server.js",
     "lint": "biome check .",
-    "test": "node --test \"tests/**/*.test.js\"",
+    "test": "node --test \"tests/**/*.test.js\" \"tests/**/*.test.ts\"",
     "typecheck": "tsc --project tsconfig.json && tsc --project tsconfig.mill-metrics.json && tsc --project tsconfig.public.json",
     "test:container": "docker build -f test/container/Dockerfile -t glissa-remote-test . && docker run --rm glissa-remote-test",
     "dev": "vite",
