@@ -78,7 +78,8 @@ async function awaitSessionExit(sess: Session, { signal = null, spawnGate = null
  * verdict; `onEmpty()` covers a start that resolved nothing at all.
  */
 async function raceWithAbort<T>({
-  start, timeoutMs, onTimeout, onEmpty, setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout,
+  start, timeoutMs, onTimeout, onEmpty,
+  setTimeoutFn = (fn, ms) => setTimeout(fn, ms), clearTimeoutFn = clearTimeout,
   onPending = null,
 }: {
   // A start that resolves nothing (an aborted spawn) falls through to onEmpty, so the outcome type is
@@ -87,8 +88,10 @@ async function raceWithAbort<T>({
   timeoutMs: number;
   onTimeout: () => T;
   onEmpty: () => T;
-  setTimeoutFn?: typeof setTimeout;
-  clearTimeoutFn?: typeof clearTimeout;
+  // The narrow call shape rather than `typeof setTimeout`, so a test can hand this deadline a timer it
+  // fires by hand (the global's `__promisify__` member makes that type unimplementable).
+  setTimeoutFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearTimeoutFn?: (handle: NodeJS.Timeout) => void;
   onPending?: ((promise: Promise<unknown>) => void) | null;
 }): Promise<T> {
   const controller = new AbortController();
@@ -236,10 +239,19 @@ type RecordLane = (sessionId: string, lane: string, vendor?: string) => void;
 // removal + data-client close on 'exit', and a wrapped destroy() because callers'
 // removeAllListeners can pre-empt the 'exit' cleanup (every orchestrator/poller finish path
 // calls destroy()). logPrefix names the lane in error logs (e.g. 'pr-review', 'posthog').
+// The members registration touches, stated structurally rather than as a slice of Session: every lane
+// hands a real Session, while a suite pinning the registration itself owes only this much.
+interface RegisterableSession {
+  on(event: 'claude-session-id', listener: (payload: { id: string; vendor?: string }) => void): unknown;
+  on(event: 'error', listener: (error: Error) => void): unknown;
+  on(event: 'exit', listener: () => void): unknown;
+  destroy: () => void;
+}
+
 function registerEphemeralSession({ map, id, sess, closeSessionDataClients, logPrefix, name, recordLane = null }: {
   map: Map<string, unknown>;
   id: string;
-  sess: Session;
+  sess: RegisterableSession;
   closeSessionDataClients: (id: string) => void;
   logPrefix: string;
   name: string;
@@ -273,4 +285,6 @@ export {
   awaitSessionExit, createJobResultFile, drainPending, firstLine, raceWithAbort, readResultFile,
   registerEphemeralSession, JOB_RESULT_FILENAME,
 };
-export type { JobResultFile, RecordLane, ResultDecorator, ResultFileOutcome, ResultValidator, SpawnGate };
+export type {
+  JobResultFile, RecordLane, RegisterableSession, ResultDecorator, ResultFileOutcome, ResultValidator, SpawnGate,
+};

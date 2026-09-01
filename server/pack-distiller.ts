@@ -86,13 +86,15 @@ interface PackDistillerDependencies {
   writePrompt?: (promptPath: string, content: string) => Promise<void>;
   spawnDistill?: DistillSpawn;
   createResultFile?: (packName: string, index: number) => Promise<JobResultFile> | JobResultFile;
-  readResult?: (resultPath: string) => DistillResultVerdict;
+  readResult?: (resultPath: string) => DistillResultVerdict | Promise<DistillResultVerdict>;
   intervalHours?: number;
   timeoutSeconds?: number;
   setIntervalFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
   clearIntervalFn?: (handle: NodeJS.Timeout) => void;
-  setTimeoutFn?: typeof setTimeout;
-  clearTimeoutFn?: typeof clearTimeout;
+  // The narrow call shapes rather than the globals' types, so a test can drive this lane's deadline by
+  // hand (`typeof setTimeout` carries a `__promisify__` member no stand-in can implement).
+  setTimeoutFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearTimeoutFn?: (handle: NodeJS.Timeout) => void;
   log?: Pick<Console, 'log' | 'warn'>;
 }
 
@@ -244,7 +246,7 @@ function createPackDistiller(deps: PackDistillerDependencies = {}): PackDistille
     timeoutSeconds = DEFAULT_TIMEOUT_SECONDS,
     setIntervalFn = (fn: () => void, ms: number) => setInterval(fn, ms),
     clearIntervalFn = clearInterval,
-    setTimeoutFn = setTimeout,
+    setTimeoutFn = (fn: () => void, ms: number) => setTimeout(fn, ms),
     clearTimeoutFn = clearTimeout,
     log = console,
   } = deps;

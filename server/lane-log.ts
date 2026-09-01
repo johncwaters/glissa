@@ -8,7 +8,8 @@
  * neither, so a summary logged once outlives every bound the lane put on it.
  */
 
-type LaneLogger = Pick<Console, 'log' | 'warn'>;
+// Partial by type as well as by guard: a caller wiring only one channel is supported, not a mistake.
+type LaneLogger = Partial<Pick<Console, 'log' | 'warn'>>;
 
 interface LaneLogOptions {
   prefix?: string;

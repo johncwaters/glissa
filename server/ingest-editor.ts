@@ -3,11 +3,12 @@
 import { applyEditorNotification, createEditorState } from './core/ingest-editor-core.ts';
 import type { EditorEvent } from './core/ingest-editor-core.ts';
 import { createLaneLog } from './lane-log.ts';
+import type { LaneLogger } from './lane-log.ts';
 
 interface EditorIngestOptions {
   publish: (event: EditorEvent) => unknown;
   roots?: (() => string[]) | string[];
-  logger?: Console;
+  logger?: LaneLogger | null;
   nowFn?: () => number;
   debug?: boolean | (() => boolean);
 }

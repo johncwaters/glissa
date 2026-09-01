@@ -24,9 +24,13 @@ const USAGE = [
 ].join('\n');
 
 type MemoryStore = NonNullable<ReturnType<typeof createMemoryStore>>;
+// The seams answer only the members these commands report from, so a stand-in owes the CLI what the
+// CLI reads rather than a whole lane.
+type MemoryCliIngest = Pick<ReturnType<typeof createMemoryIngest>, 'backfill' | 'statePath' | 'stats' | 'stop'>;
+type MemoryCliDistiller = Pick<ReturnType<typeof createMemoryDistiller>, 'runOnce' | 'stop'>;
 type MakeStore = () => MemoryStore | null;
-type MakeIngest = (store: MemoryStore) => Promise<ReturnType<typeof createMemoryIngest>>;
-type MakeDistiller = (store: MemoryStore) => ReturnType<typeof createMemoryDistiller>;
+type MakeIngest = (store: MemoryStore) => Promise<MemoryCliIngest>;
+type MakeDistiller = (store: MemoryStore) => MemoryCliDistiller;
 
 function defaultMakeStore(): MemoryStore | null {
   const configPath = resolveConfigPath();

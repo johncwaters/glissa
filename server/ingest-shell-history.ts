@@ -35,6 +35,7 @@ import {
 import type { HistoryLocation, HistoryParseState, ShellIngestEvent } from './core/ingest-shell-core.ts';
 import { positiveInt } from './core/ingest-number-core.ts';
 import { createLaneLog } from './lane-log.ts';
+import type { LaneLogger } from './lane-log.ts';
 
 const DEFAULT_POLL_MS = 2000;
 const DEFAULT_DISCOVER_MS = 30000;
@@ -56,20 +57,32 @@ interface ShellHistoryContext {
   previous: string | null;
 }
 
+// What this source needs off a directory watcher: closing it, and hearing that it failed.
+interface DirectoryWatcher {
+  close: () => void;
+  on?: (event: string, listener: () => void) => unknown;
+}
+
 interface ShellHistoryOptions {
   publish?: (event: ShellIngestEvent) => unknown;
   sourceConfig?: { pollMs?: number; shells?: string[] };
-  logger?: Console;
+  logger?: LaneLogger | null;
   env?: NodeJS.ProcessEnv;
   homeDir?: string;
   platform?: NodeJS.Platform;
   fsPromises?: typeof fsNode.promises;
-  watchFn?: typeof fsNode.watch;
+  // The one call shape this source makes, and the two members it reads off the handle, so a test can
+  // inject a watcher without implementing FSWatcher.
+  watchFn?: (
+    dir: string,
+    options: { persistent: boolean },
+    handler: (eventType: string, fileName: string | null) => void,
+  ) => DirectoryWatcher;
   nowFn?: () => number;
-  setIntervalFn?: typeof setInterval;
-  clearIntervalFn?: typeof clearInterval;
-  setTimeoutFn?: typeof setTimeout;
-  clearTimeoutFn?: typeof clearTimeout;
+  setIntervalFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearIntervalFn?: (handle: NodeJS.Timeout) => void;
+  setTimeoutFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearTimeoutFn?: (handle: NodeJS.Timeout) => void;
   discoverIntervalMs?: number;
   maxTrackedFiles?: number;
   maxCommandsPerDrain?: number;
@@ -95,9 +108,9 @@ function createShellHistoryIngest({
   fsPromises = fsNode.promises,
   watchFn = fsNode.watch,
   nowFn = Date.now,
-  setIntervalFn = setInterval,
+  setIntervalFn = (fn: () => void, ms: number) => setInterval(fn, ms),
   clearIntervalFn = clearInterval,
-  setTimeoutFn = setTimeout,
+  setTimeoutFn = (fn: () => void, ms: number) => setTimeout(fn, ms),
   clearTimeoutFn = clearTimeout,
   discoverIntervalMs = DEFAULT_DISCOVER_MS,
   maxTrackedFiles = DEFAULT_MAX_TRACKED,
@@ -126,7 +139,7 @@ function createShellHistoryIngest({
 
   const tails = new Map<string, TailState>();
   const contexts = new Map<string, ShellHistoryContext>();
-  const watchers = new Map<string, fsNode.FSWatcher>();
+  const watchers = new Map<string, DirectoryWatcher>();
   // The location directories that actually existed on the last sweep, which is exactly the set worth
   // watching: watching a directory fish never created would fail on every reconcile.
   let reachableDirs: string[] = [];
@@ -148,7 +161,7 @@ function createShellHistoryIngest({
     return running && !disabled;
   }
 
-  function closeWatcher(watcher: fsNode.FSWatcher): void {
+  function closeWatcher(watcher: DirectoryWatcher): void {
     try {
       watcher.close();
     } catch {
@@ -293,7 +306,7 @@ function createShellHistoryIngest({
 
   // --- Watching ------------------------------------------------------------
 
-  function installWatch(dir: string): fsNode.FSWatcher | null {
+  function installWatch(dir: string): DirectoryWatcher | null {
     try {
       // Watched spelling only: an 8.3 short path aborts node in native code (shared/paths.js); `dir` keeps keying reachableDirs and tails.
       const watcher = watchFn(canonicalizePath(dir), { persistent: false }, (eventType) => {

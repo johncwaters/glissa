@@ -485,9 +485,10 @@ export {
   PROJECT_TAG_SCHEMA_VERSION,
   SCHEMA,
   SEQ_HIGH_KEY,
+  asMemoryRow,
   createMemoryDb,
   ftsMatchExpression,
   recordToRow,
   rowToRecord,
 };
-export type { MemoryDb, MemoryRow, TailEntry };
+export type { MemoryDb, MemoryRow, ResultRow, TailEntry };

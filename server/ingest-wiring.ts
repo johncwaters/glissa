@@ -26,6 +26,7 @@ import type { ShellHistoryOptions } from './ingest-shell-history.ts';
 import { createTerminalIngest } from './ingest-terminal.ts';
 import type { SessionTap, TappableSession } from './ingest-terminal.ts';
 import { createLaneLog } from './lane-log.ts';
+import type { LaneLogger } from './lane-log.ts';
 
 const BATCH_INTERVAL_MS = 1000;
 const MAX_EVENTS_PER_FRAME = 50;
@@ -34,7 +35,7 @@ const SNAPSHOT_EVENT_LIMIT = 100;
 interface IngestLaneOptions {
   config?: IngestConfig | null;
   broadcast?: ((message: Record<string, unknown>) => void) | null;
-  logger?: Console;
+  logger?: LaneLogger | null;
   laneMap?: (() => Map<string, string>) | null;
   agentLogConsumers?: AgentLogConsumer[];
   agentLogOptions?: AgentLogIngestOptions | null;
@@ -45,10 +46,10 @@ interface IngestLaneOptions {
   editorRoots?: (() => string[]) | string[];
   onActivity?: (() => void) | null;
   nowFn?: () => number;
-  setIntervalFn?: typeof setInterval;
-  clearIntervalFn?: typeof clearInterval;
-  setTimeoutFn?: typeof setTimeout;
-  clearTimeoutFn?: typeof clearTimeout;
+  setIntervalFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearIntervalFn?: (handle: NodeJS.Timeout) => void;
+  setTimeoutFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearTimeoutFn?: (handle: NodeJS.Timeout) => void;
   batchIntervalMs?: number;
   maxEventsPerFrame?: number;
   snapshotEventLimit?: number;
@@ -88,9 +89,9 @@ function createIngestLane({
   // (docs/plan-ingestion.md, M7.5). Absent by default, and then nothing is ever called.
   onActivity = null,
   nowFn = Date.now,
-  setIntervalFn = setInterval,
+  setIntervalFn = (fn: () => void, ms: number) => setInterval(fn, ms),
   clearIntervalFn = clearInterval,
-  setTimeoutFn = setTimeout,
+  setTimeoutFn = (fn: () => void, ms: number) => setTimeout(fn, ms),
   clearTimeoutFn = clearTimeout,
   batchIntervalMs = BATCH_INTERVAL_MS,
   maxEventsPerFrame = MAX_EVENTS_PER_FRAME,

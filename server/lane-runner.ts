@@ -22,8 +22,8 @@ interface TickLoopOptions {
   intervalMs: number;
   tick: () => Promise<TickOutcome | undefined | null>;
   writeState?: () => Promise<void> | void;
-  setIntervalFn?: typeof setInterval;
-  clearIntervalFn?: typeof clearInterval;
+  setIntervalFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearIntervalFn?: (handle: NodeJS.Timeout) => void;
   backoffBaseMs?: number;
   backoffMaxMs?: number;
   now?: () => number;
@@ -56,7 +56,7 @@ function createTickLoop({
   intervalMs,
   tick: tickBody,
   writeState = async () => {},
-  setIntervalFn = setInterval,
+  setIntervalFn = (fn: () => void, ms: number) => setInterval(fn, ms),
   clearIntervalFn = clearInterval,
   backoffBaseMs = Math.max(intervalMs, DEFAULT_BASE_MS),
   backoffMaxMs = DEFAULT_MAX_MS,

@@ -22,9 +22,9 @@ Backend runtime: the Express + WebSocket server factory and its control plane, p
 | `usage-pricing.ts` | Claude model pricing loader |
 | `data/claude-pricing.json` | Bundled LiteLLM pricing snapshot |
 | `spawn-gate.ts` | Process-wide async serialization of `pty.spawn` initiation (ConPTY wedge avoidance) |
-| `git-workspace.js` | THE ONLY module allowed to run `git worktree` (`tests/no-direct-git-worktree.test.js`) |
+| `git-workspace.js` | THE ONLY module allowed to run `git worktree` (`tests/no-direct-git-worktree.test.ts`) |
 | `config-store.js` | Runtime config load/save/defaults |
-| `child-process-safe.js` | THE ONLY importer of `node:child_process` (`tests/no-direct-child-process.test.js`) |
+| `child-process-safe.js` | THE ONLY importer of `node:child_process` (`tests/no-direct-child-process.test.ts`) |
 | `update-check.ts` | Startup release-tag check, advisory only |
 | `pr-review-wiring.ts` | PR auto-review IO shell |
 | `ephemeral-session.js` | Shared ephemeral-Session registration and cleanup |
@@ -47,12 +47,12 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 ### Worktree Auto-Rebase
 
-- Initial creation and fresh restart sync the integration branch fast-forward-only and never block spawn (`tests/git-workspace-integration-sync.test.js`, `tests/sessions-worktree.test.ts`).
+- Initial creation and fresh restart sync the integration branch fast-forward-only and never block spawn (`tests/git-workspace-integration-sync.test.ts`, `tests/sessions-worktree.test.ts`).
 - It rides the existing change funnel (no timer) and runs BEFORE the signature dedup, since a moved integration branch leaves the signature byte-identical. Every guard is pure in `session/core/rebase-gate.ts`, and the guard ORDER is stated only by `tests/rebase-gate.test.ts`.
 - WAITING is the load-bearing exclusion: it is a permission prompt PAUSING a turn, and the agent resumes into the files an unattended rebase would have rewritten under it.
 - `rebaseOnly` never stashes and merges nothing back: it runs unattended under a live agent, so a dirty tree is a hard refusal.
 - A conflict is never escalated: the worktree is left byte-identical for the operator's own Merge. A cooldown key of both shas stops the retry loop; a sibling's resolution retriggers it.
-- The completeness proof is "no unmerged paths remain". `git rerere remaining` may NEVER be one: it ignores binary conflicts, so continuing on its silence silently drops the commit (`tests/git-workspace-rebase.test.js`).
+- The completeness proof is "no unmerged paths remain". `git rerere remaining` may NEVER be one: it ignores binary conflicts, so continuing on its silence silently drops the commit (`tests/git-workspace-rebase.test.ts`).
 - Which paths rerere replayed is deliberately unreported: git clears `MERGE_RR` as it resolves, so any list would be a guess, and a guess in a forensic trace is worse than a silence.
 - rerere config is seeded only when UNSET, an operator who disabled it meaning it. A rebase suppresses the change funnel while it runs, or the review gate self-heals to none mid-rebase.
 
@@ -69,7 +69,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - Inert unless both `config.prReview.enabled` and `config.telegram` are set. A clean PR is reviewed IN PLACE (diff only) so it coexists with a live session in the repo; a conflicting one gets a worktree, discarded on every exit path.
 - Only the POLLER merges; the agent never does. The verdict travels via a result file, since `gh pr review` 422s on your own PR, and a missing one reads as ERROR, never a false clean.
 - Every merge gate fails CLOSED: reviewed head must equal current head, checks must be green (no checks is never green), and a `gh` error on the workflow-files query defers a tick (`server/core/pr-review-core.ts`).
-- All `gh` and `git` go through `child-process-safe` and `git-workspace` (`tests/no-direct-child-process.test.js`, `tests/no-direct-git-worktree.test.js`).
+- All `gh` and `git` go through `child-process-safe` and `git-workspace` (`tests/no-direct-child-process.test.ts`, `tests/no-direct-git-worktree.test.ts`).
 
 ### Radar / PostHog Auto-Fix (opt-in)
 
@@ -100,7 +100,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - Trust is stamped by the WRITE PATH, never read off the event; ranks fall but never rise along a lineage (`server/core/memory-core.ts`).
 - A user prompt becomes a `prompt` record, never projected and refused as knowledge, its kind absent from the ingest ring's table, so operator text reaches neither `dist/` nor the control WS.
 - Memory alone never widens what leaves the machine: with the ingest lane off it builds its own source, and no ring, frame or digest sees those events.
-- Expunging is THREE writes, all needed: `secure_delete` (a DELETE leaves plaintext greppable), an FTS5 rebuild (a delete only tombstones terms), and a WAL truncate checkpoint. Canary in `tests/memory-store.test.js`.
+- Expunging is THREE writes, all needed: `secure_delete` (a DELETE leaves plaintext greppable), an FTS5 rebuild (a delete only tombstones terms), and a WAL truncate checkpoint. Canary in `tests/memory-store.test.ts`.
 - A transcript-supplied timestamp is untrusted and clamped: a future-dated record lands in a segment retention can never prune and heads every recency ranking forever.
 - A verdict is never trusted alone: the session answers with structured CLAIMS and Glissa renders the bytes, so no remembered byte reaches a file except through the renderer; a bad result is refused as ONE.
 - Implied-rank rule: a rank may never exceed the highest among its cited records, and anything above `model` must cite one record and copy it verbatim, which makes verbatim locked facts mechanical.
@@ -108,7 +108,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - Echo suppression closes the loop: delivered line hashes are registered and matching transcript lines dropped, so a session quoting its memory back is not re-ingested as fresh fact.
 - A tool call is activity, not a fact: `agent-tool` left the ingest kind table at 53% of the canon, `Bash` lines a run paid to read.
 - One `contentMarker` PER untrusted corpus, so one fence cannot close another, and it is a sha256 digest rather than a cheap hash an attacker's text could fix-point.
-- Only memory TOGGLES cross the control WS: settings are an allow-list of booleans and clamped ints, so no `memory-*` type, path, record or lane log line rides one, a knob being tunable where a filename would be a leak (`tests/memory-delivery-negative.test.js`).
+- Only memory TOGGLES cross the control WS: settings are an allow-list of booleans and clamped ints, so no `memory-*` type, path, record or lane log line rides one, a knob being tunable where a filename would be a leak (`tests/memory-delivery-negative.test.ts`).
 - The ceiling on a delivered projection is BYTES per project, not claims: a count bounds nothing an operator feels, so a project over `maxProjectChars` is compacted by a model first and evicted down to fit if that declines, never dropping a locked claim and never emptying a project (`server/core/memory-distill-core.ts`).
 - `deadend` is a projected kind of its own because retiring a failed attempt forgets it and the next session proposes it again; it stands until a record shows the approach working.
 - The direct-read pointer line in a repo's own `AGENTS.md` stays operator-authored: it is the one instruction-tier link in the chain, which keeps the store agent-agnostic.

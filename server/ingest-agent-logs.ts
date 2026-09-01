@@ -38,6 +38,7 @@ import { PROMPT_KIND, isDispatchWorkdir, mapAgentLine } from './core/ingest-agen
 import type { AgentIngestEvent } from './core/ingest-agent-core.ts';
 import { positiveInt } from './core/ingest-number-core.ts';
 import { createLaneLog } from './lane-log.ts';
+import type { LaneLogger } from './lane-log.ts';
 
 const DEFAULT_POLL_MS = 2000;
 const DEFAULT_DISCOVER_MS = 30000;
@@ -95,7 +96,8 @@ interface TailSnapshot {
 
 interface AgentLogConsumer {
   name?: string;
-  publish: (event: AgentIngestEvent, tail: TailSnapshot) => unknown;
+  // A tail-less publish is a real case: the memory consumer is also driven directly, with no file behind it.
+  publish: (event: AgentIngestEvent, tail: TailSnapshot | null) => unknown;
   noteTail?: (entry: TailSnapshot) => void;
   userPrompts?: boolean;
 }
@@ -107,21 +109,41 @@ interface AgentLogTarget {
   userPrompts: boolean;
 }
 
+// The three fs calls this source makes, stated as the shapes it makes them in: a test wrapping one of
+// them owes those, not the whole overloaded fs.promises surface.
+interface TranscriptFileSystem {
+  open(filePath: string, flags: 'r'): Promise<fsNode.promises.FileHandle>;
+  stat(target: string): Promise<fsNode.Stats>;
+  readdir(dir: string, options: { withFileTypes: true }): Promise<fsNode.Dirent[]>;
+}
+
+// What this source needs off a directory watcher: closing it, and hearing that it failed.
+interface DirectoryWatcher {
+  close: () => void;
+  on?: (event: string, listener: () => void) => unknown;
+}
+
 interface AgentLogIngestOptions {
   publish?: ((event: AgentIngestEvent, tail: TailSnapshot) => unknown) | null;
   consumers?: AgentLogConsumer[];
   sourceConfig?: { pollMs?: number };
   laneMap?: (() => Map<string, string>) | null;
-  logger?: Console;
+  logger?: LaneLogger | null;
   env?: NodeJS.ProcessEnv;
   homeDir?: string;
-  fsPromises?: typeof fsNode.promises;
-  watchFn?: typeof fsNode.watch;
+  fsPromises?: TranscriptFileSystem;
+  // The one call shape this source makes, and the two members it reads off the handle, so a test can
+  // inject a watcher without implementing FSWatcher.
+  watchFn?: (
+    dir: string,
+    options: { persistent: boolean },
+    handler: (eventType: string, fileName: string | null) => void,
+  ) => DirectoryWatcher;
   nowFn?: () => number;
-  setIntervalFn?: typeof setInterval;
-  clearIntervalFn?: typeof clearInterval;
-  setTimeoutFn?: typeof setTimeout;
-  clearTimeoutFn?: typeof clearTimeout;
+  setIntervalFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearIntervalFn?: (handle: NodeJS.Timeout) => void;
+  setTimeoutFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearTimeoutFn?: (handle: NodeJS.Timeout) => void;
   pollIntervalMs?: number;
   discoverIntervalMs?: number;
   activeWithinMs?: number;
@@ -169,7 +191,7 @@ function rootFromPath(vendor: string, dir: string): string | null {
 
 // Codex nests its rollouts under date directories that name no project, so the cwd is read once from
 // the head of the file. Without it every event of a session joined mid-file would be machine scope.
-async function readCodexRoot(filePath: string, fsPromises: typeof fsNode.promises = fsNode.promises): Promise<string | null> {
+async function readCodexRoot(filePath: string, fsPromises: TranscriptFileSystem = fsNode.promises): Promise<string | null> {
   let handle: FileHandle | null = null;
   try {
     handle = await fsPromises.open(filePath, 'r');
@@ -242,9 +264,9 @@ function createAgentLogIngest({
   fsPromises = fsNode.promises,
   watchFn = fsNode.watch,
   nowFn = Date.now,
-  setIntervalFn = setInterval,
+  setIntervalFn = (fn: () => void, ms: number) => setInterval(fn, ms),
   clearIntervalFn = clearInterval,
-  setTimeoutFn = setTimeout,
+  setTimeoutFn = (fn: () => void, ms: number) => setTimeout(fn, ms),
   clearTimeoutFn = clearTimeout,
   pollIntervalMs = DEFAULT_POLL_MS,
   discoverIntervalMs = DEFAULT_DISCOVER_MS,
@@ -284,7 +306,7 @@ function createAgentLogIngest({
   // already quiet when its directory was last listed, since an append moves no directory mtime.
   const probes = new Set<string>();
   const dirCache = new Map<string, CachedDir>();
-  const watchers = new Map<string, fsNode.FSWatcher>();
+  const watchers = new Map<string, DirectoryWatcher>();
   let pollTimer: NodeJS.Timeout | null = null;
   let discoverTimer: NodeJS.Timeout | null = null;
   let pokeTimer: NodeJS.Timeout | null = null;
@@ -305,7 +327,7 @@ function createAgentLogIngest({
 
   const { warn } = createLaneLog({ prefix: '[ingest]', logger });
 
-  function closeWatcher(watcher: fsNode.FSWatcher): void {
+  function closeWatcher(watcher: DirectoryWatcher): void {
     try {
       watcher.close();
     } catch {
@@ -550,7 +572,7 @@ function createAgentLogIngest({
     return budget;
   }
 
-  function installWatch(dir: string): fsNode.FSWatcher | null {
+  function installWatch(dir: string): DirectoryWatcher | null {
     try {
       // Watched spelling only: an 8.3 short path aborts node in native code (shared/paths.js); `dir` keeps keying tails and listings.
       const watcher = watchFn(canonicalizePath(dir), { persistent: false }, (eventType, filename) => {
@@ -935,6 +957,7 @@ export {
 export type {
   AgentLogConsumer,
   AgentLogIngestOptions,
+  TranscriptFileSystem,
   CachedDir,
   TailSnapshot,
   TranscriptContext,

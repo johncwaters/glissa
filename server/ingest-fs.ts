@@ -27,6 +27,7 @@ import {
 import type { FsBatch, FsIngestEvent } from './core/ingest-fs-core.ts';
 import { positiveInt } from './core/ingest-number-core.ts';
 import { createLaneLog } from './lane-log.ts';
+import type { LaneLogger } from './lane-log.ts';
 
 const DEFAULT_MAX_ROOTS = 8;
 // The holder every `fs.roots` entry is registered under. A string no session id can collide with, since
@@ -34,6 +35,9 @@ const DEFAULT_MAX_ROOTS = 8;
 const CONFIG_HOLDER = 'config:fs.roots';
 
 type ParcelWatcherModule = typeof import('@parcel/watcher');
+// This source calls exactly one member of the module, so that is what a caller has to supply: an
+// injected stand-in owes it `subscribe` and nothing else.
+type WatcherModule = Pick<ParcelWatcherModule, 'subscribe'>;
 type WatcherSubscription = Awaited<ReturnType<ParcelWatcherModule['subscribe']>>;
 type WatchEvent = { path?: string; type?: string };
 
@@ -48,12 +52,14 @@ interface FsIngestOptions {
   publish?: (event: FsIngestEvent) => unknown;
   sourceConfig?: { batchMs?: number; roots?: string[] };
   configPath?: string | null;
-  logger?: Console;
-  loadWatcher?: () => ParcelWatcherModule;
+  logger?: LaneLogger | null;
+  // A require of a native module can hand back anything, including a broken build with no exports,
+  // which is exactly the failure this source has to degrade on rather than throw.
+  loadWatcher?: () => unknown;
   canonicalize?: (path: string) => string;
   nowFn?: () => number;
-  setTimeoutFn?: typeof setTimeout;
-  clearTimeoutFn?: typeof clearTimeout;
+  setTimeoutFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearTimeoutFn?: (handle: NodeJS.Timeout) => void;
   maxRoots?: number;
 }
 
@@ -70,8 +76,13 @@ function unrefTimer(timer: NodeJS.Timeout): NodeJS.Timeout {
 // whole contract is that such a throw costs the source rather than the daemon. A synchronous require is
 // what makes that throw catchable here; a dynamic import would defer it past every caller.
 const requireFromHere = createRequire(import.meta.url);
-function defaultLoadWatcher(): ParcelWatcherModule {
+function defaultLoadWatcher(): unknown {
   return requireFromHere('@parcel/watcher');
+}
+
+function isWatcherModule(value: unknown): value is WatcherModule {
+  if (typeof value !== 'object' || value === null) return false;
+  return 'subscribe' in value && typeof value.subscribe === 'function';
 }
 
 function createFsIngest({
@@ -85,7 +96,7 @@ function createFsIngest({
   loadWatcher = defaultLoadWatcher,
   canonicalize = canonicalizePath,
   nowFn = Date.now,
-  setTimeoutFn = setTimeout,
+  setTimeoutFn = (fn: () => void, ms: number) => setTimeout(fn, ms),
   clearTimeoutFn = clearTimeout,
   maxRoots = DEFAULT_MAX_ROOTS,
 }: FsIngestOptions = {}) {
@@ -112,7 +123,7 @@ function createFsIngest({
   const failedRoots = new Set<string>();
   const warnedOverflow = new Set<string>();
 
-  let watcherModule: ParcelWatcherModule | null = null;
+  let watcherModule: WatcherModule | null = null;
   let running = false;
   let disabled = false;
   let stopped = false;
@@ -135,11 +146,11 @@ function createFsIngest({
     warn(`fs source disabled: ${reason}`);
   }
 
-  function loadWatcherModule(): ParcelWatcherModule | null {
+  function loadWatcherModule(): WatcherModule | null {
     if (watcherModule) return watcherModule;
     try {
       const loaded = loadWatcher();
-      if (!loaded || typeof loaded.subscribe !== 'function') throw new Error('no subscribe export');
+      if (!isWatcherModule(loaded)) throw new Error('no subscribe export');
       watcherModule = loaded;
       return watcherModule;
     } catch (error) {
@@ -452,4 +463,4 @@ export {
   DEFAULT_MAX_ROOTS,
   createFsIngest,
 };
-export type { FsIngestOptions, RootSubscription };
+export type { FsIngestOptions, RootSubscription, WatcherModule };

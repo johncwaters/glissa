@@ -75,8 +75,19 @@ interface MillWiringDependencies {
   log?: Pick<Console, 'warn'>;
 }
 
+// A pass that threw answers the requestId with its reason instead of a report, so the payload a caller
+// receives is one of two shapes discriminated by `error`.
+interface MillReportFailure {
+  type: string;
+  requestId: string | null;
+  ts: number;
+  error: string;
+}
+
+type MillReportPayload = MillReport | MillReportFailure;
+
 interface MillWiring {
-  requestReport(msg: { requestId?: unknown } | null | undefined, send: (payload: unknown) => void): Promise<void>;
+  requestReport(msg: { requestId?: unknown } | null | undefined, send: (payload: MillReportPayload) => void): Promise<void>;
   listPackNames(): Promise<string[]>;
   resolvePackSourceRoots(name: string): Promise<string[]>;
   getCachedReport(): MillReport | null;
@@ -268,7 +279,7 @@ function createMillWiring(deps: MillWiringDependencies = {}): MillWiring {
    */
   async function requestReport(
     msg: { requestId?: unknown } | null | undefined,
-    send: (payload: unknown) => void,
+    send: (payload: MillReportPayload) => void,
   ): Promise<void> {
     const requestId = typeof msg?.requestId === 'string' ? msg.requestId : null;
     if (inFlight) dirty = true;
@@ -318,4 +329,4 @@ function createMillWiring(deps: MillWiringDependencies = {}): MillWiring {
 }
 
 export { createMillWiring };
-export type { MillSpecEntry, MillWiring, MillWiringDependencies };
+export type { MillReportFailure, MillReportPayload, MillSpecEntry, MillWiring, MillWiringDependencies };

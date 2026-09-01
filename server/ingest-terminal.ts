@@ -15,6 +15,7 @@ import {
 } from './core/ingest-terminal-core.ts';
 import type { TerminalIngestEvent } from './core/ingest-terminal-core.ts';
 import { createLaneLog } from './lane-log.ts';
+import type { LaneLogger } from './lane-log.ts';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -38,10 +39,10 @@ interface SessionTap {
 interface TerminalIngestOptions {
   publish?: (event: TerminalIngestEvent) => unknown;
   sourceConfig?: { flushMs?: number };
-  logger?: Console;
+  logger?: LaneLogger | null;
   nowFn?: () => number;
-  setTimeoutFn?: typeof setTimeout;
-  clearTimeoutFn?: typeof clearTimeout;
+  setTimeoutFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearTimeoutFn?: (handle: NodeJS.Timeout) => void;
 }
 
 function createTerminalIngest({
@@ -49,7 +50,7 @@ function createTerminalIngest({
   sourceConfig = {},
   logger = console,
   nowFn = Date.now,
-  setTimeoutFn = setTimeout,
+  setTimeoutFn = (fn: () => void, ms: number) => setTimeout(fn, ms),
   clearTimeoutFn = clearTimeout,
 }: TerminalIngestOptions = {}) {
   if (typeof publish !== 'function') throw new Error('createTerminalIngest requires publish');

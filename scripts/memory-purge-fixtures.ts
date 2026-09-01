@@ -14,7 +14,7 @@ interface PurgeOptions {
   memoryDir?: string | null;
   dryRun?: boolean;
   now?: () => number;
-  out?: Console;
+  out?: Pick<Console, 'log' | 'error'>;
 }
 
 interface PurgeResult {
@@ -64,7 +64,10 @@ function isExistingDirectory(target: string): boolean {
   }
 }
 
-function fixtureReason(record: MemoryRecord): string | null {
+// The three fields the rule reads, so a caller can judge a record shape that is not a whole one.
+type FixtureCandidate = Pick<MemoryRecord, 'kind' | 'project'> & { source?: { sessionId: string | null } | null };
+
+function fixtureReason(record: FixtureCandidate): string | null {
   if (record.kind === 'tombstone') return null;
   const sessionId = record.source ? record.source.sessionId : null;
   if (typeof sessionId === 'string' && FIXTURE_SESSION_ID.test(sessionId)) return 'session';
@@ -160,3 +163,4 @@ if (process.argv[1] === import.meta.filename) {
 }
 
 export { fixtureReason, purgeFixtures };
+export type { FixtureCandidate, PurgeOptions, PurgeResult };

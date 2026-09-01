@@ -28,6 +28,7 @@ import {
 } from './ingest-agent-logs.ts';
 import type { AgentLogConsumer, TailSnapshot, TranscriptRoot } from './ingest-agent-logs.ts';
 import { createLaneLog } from './lane-log.ts';
+import type { LaneLogger } from './lane-log.ts';
 import type { createMemoryStore } from './memory-store.ts';
 
 // The usage scanner's budget shape: one pass reads at most this, and what it did not reach is resumable.
@@ -37,6 +38,13 @@ const DEFAULT_MAX_BACKFILL_DIRS = 4000;
 const DEFAULT_MAX_BACKFILL_FILES = 2000;
 
 type MemoryStore = NonNullable<ReturnType<typeof createMemoryStore>>;
+
+// The consumer touches six members of the store, so that is what it asks for: a lane test's stand-in
+// owes it those and nothing else, while a real store satisfies this by being a superset.
+type MemoryIngestStore = Pick<
+  MemoryStore,
+  'append' | 'appendMany' | 'dbPath' | 'deliveredHashes' | 'forgetTails' | 'saveTailOffset' | 'tailState'
+>;
 
 interface LaneLedgerView {
   snapshot?: () => { ts?: unknown }[];
@@ -54,8 +62,8 @@ interface QueuedInput {
 }
 
 interface MemoryIngestOptions {
-  store?: MemoryStore;
-  logger?: Console;
+  store?: MemoryIngestStore;
+  logger?: LaneLogger | null;
   debug?: boolean | (() => boolean);
   env?: NodeJS.ProcessEnv;
   fsPromises?: typeof nodeFs.promises;
@@ -542,4 +550,4 @@ export {
   createMemoryIngest,
   earliestLaneEntryMs,
 };
-export type { MemoryIngestOptions };
+export type { MemoryIngestOptions, MemoryIngestStore };

@@ -14,8 +14,9 @@ import {
 } from './core/editor-wire-core.ts';
 import type { JsonSettingsTarget, WireInvocation } from './core/editor-wire-core.ts';
 import { resolvePathCommandMatches } from '../session/core/spawn-command.ts';
+import type { PathLookupExec } from '../session/core/spawn-command.ts';
 
-type CommandExec = typeof execSync;
+type CommandExec = PathLookupExec;
 
 interface EditorDetection {
   homeDir?: string;

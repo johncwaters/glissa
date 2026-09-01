@@ -34,6 +34,7 @@ import {
 import type { GitCommit, GitIngestEvent, GitLayout, GitRepoState } from './core/ingest-git-core.ts';
 import { positiveInt } from './core/ingest-number-core.ts';
 import { createLaneLog } from './lane-log.ts';
+import type { LaneLogger } from './lane-log.ts';
 
 const DEFAULT_MAX_REPOS = 16;
 const DEFAULT_GIT_TIMEOUT_MS = 15000;
@@ -60,15 +61,21 @@ interface GitIngestOptions {
   publish?: (event: GitIngestEvent) => unknown;
   sourceConfig?: { debounceMs?: number; pollMs?: number };
   reposProvider?: (() => string[]) | null;
-  logger?: Console;
-  execFileFn?: typeof execFileAsync;
+  logger?: LaneLogger | null;
+  // The one call shape this source makes, so a test can inject a recording git without implementing
+  // execFile's whole promisified surface.
+  execFileFn?: (
+    file: string,
+    args: readonly string[],
+    options: { cwd: string; encoding: 'utf8'; timeout: number; maxBuffer: number },
+  ) => Promise<{ stdout: string | Buffer }>;
   createWatch?: typeof createWatchDebounce;
   canonicalize?: (path: string) => string;
   nowFn?: () => number;
-  setIntervalFn?: typeof setInterval;
-  clearIntervalFn?: typeof clearInterval;
-  setTimeoutFn?: typeof setTimeout;
-  clearTimeoutFn?: typeof clearTimeout;
+  setIntervalFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearIntervalFn?: (handle: NodeJS.Timeout) => void;
+  setTimeoutFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearTimeoutFn?: (handle: NodeJS.Timeout) => void;
   maxRepos?: number;
   gitTimeoutMs?: number;
   gitPath?: string;
@@ -95,9 +102,9 @@ function createGitIngest({
   createWatch = createWatchDebounce,
   canonicalize = canonicalizePath,
   nowFn = Date.now,
-  setIntervalFn = setInterval,
+  setIntervalFn = (fn: () => void, ms: number) => setInterval(fn, ms),
   clearIntervalFn = clearInterval,
-  setTimeoutFn = setTimeout,
+  setTimeoutFn = (fn: () => void, ms: number) => setTimeout(fn, ms),
   clearTimeoutFn = clearTimeout,
   maxRepos = DEFAULT_MAX_REPOS,
   gitTimeoutMs = DEFAULT_GIT_TIMEOUT_MS,

@@ -51,7 +51,7 @@ A source may set `data: true`. Its files are published under `data/<slug>/` as p
 - A spec whose sources reach OUTSIDE `packs/` is repo-development context and must be excluded from the tarball, or a global install fails its build on every watch fire and every sweep. The packaged-install job in `.github/workflows/test.yml` is what catches it: a shipped spec whose non-optional sources are not in the whitelist fails that install.
 
 ### Testing Requirements
-- `node --test tests/pack-core.test.ts tests/pack-builder.test.js` covers the format and the builder; `glissa pack build` is the end-to-end check.
+- `node --test tests/pack-core.test.ts tests/pack-builder.test.ts` covers the format and the builder; `glissa pack build` is the end-to-end check.
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->
 

@@ -20,6 +20,7 @@ import {
 import type { RecordLane, SpawnGate } from './ephemeral-session.ts';
 import { isBusyError } from './glissa-db.ts';
 import { createLaneLog } from './lane-log.ts';
+import type { LaneLogger } from './lane-log.ts';
 import { createTickLoop } from './lane-runner.ts';
 import type { createMemoryStore } from './memory-store.ts';
 
@@ -107,12 +108,12 @@ interface MemoryDistillerOptions {
   removeWorkDir?: (dir: string) => Promise<void>;
   writePrompt?: (promptPath: string, content: string) => Promise<void>;
   now?: () => number;
-  logger?: Console;
+  logger?: LaneLogger | null;
   debug?: boolean | (() => boolean);
-  setTimeoutFn?: typeof setTimeout;
-  clearTimeoutFn?: typeof clearTimeout;
-  setIntervalFn?: typeof setInterval;
-  clearIntervalFn?: typeof clearInterval;
+  setTimeoutFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearTimeoutFn?: (handle: NodeJS.Timeout) => void;
+  setIntervalFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearIntervalFn?: (handle: NodeJS.Timeout) => void;
   checkIntervalMs?: number;
   idFor?: () => string;
 }
@@ -204,9 +205,9 @@ function createMemoryDistiller(deps: MemoryDistillerOptions = {}) {
     now = () => Date.now(),
     logger = console,
     debug = false,
-    setTimeoutFn = setTimeout,
+    setTimeoutFn = (fn: () => void, ms: number) => setTimeout(fn, ms),
     clearTimeoutFn = clearTimeout,
-    setIntervalFn = setInterval,
+    setIntervalFn = (fn: () => void, ms: number) => setInterval(fn, ms),
     clearIntervalFn = clearInterval,
     checkIntervalMs = distillCore.CHECK_INTERVAL_MS,
     idFor = () => `${LANE_NAME}:${Date.now()}`,
@@ -633,7 +634,7 @@ function createMemoryDistiller(deps: MemoryDistillerOptions = {}) {
     },
     setIntervalFn,
     clearIntervalFn,
-    log: logger,
+    log,
   });
 
   async function start(): Promise<void> {
