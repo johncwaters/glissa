@@ -1,6 +1,6 @@
 'use strict';
 
-const { execFileAsync } = require('./child-process-safe');
+const { execFileAsync } = require('./child-process-safe.ts');
 
 // The gh/git shell-outs the PR-review poller needs, all through child-process-safe (windowsHide).
 // No `git worktree` here (that stays in server/git-workspace.js behind the worktree guard); this module

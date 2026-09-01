@@ -27,6 +27,6 @@ Notification delivery adapters consumed by `notification-manager.ts`. Channels a
 
 ### Internal
 - `notifications/notification-manager.ts` - the only consumer
-- `server/backend.js` - control-WS broadcast used by `web-notification.ts`
+- `server/backend.ts` - control-WS broadcast used by `web-notification.ts`
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

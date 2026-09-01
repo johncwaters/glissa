@@ -15,12 +15,12 @@ const USAGE = [
 ].join('\n');
 
 function defaultMakeStore() {
-  const { resolveConfigPath, loadConfigFile } = require('./config-store');
+  const { resolveConfigPath, loadConfigFile } = require('./config-store.ts');
   const { createMemoryStore } = require('./memory-store');
   const { configSiblingPath } = require('./pairings-store');
-  const { dbPathForConfig } = require('./glissa-db');
+  const { dbPathForConfig } = require('./glissa-db.ts');
   const { resolveMemoryConfig } = require('./core/memory-core.ts');
-  const { createGitWorkspace, createGitWorkspaceSync } = require('./git-workspace');
+  const { createGitWorkspace, createGitWorkspaceSync } = require('./git-workspace.ts');
   const configPath = resolveConfigPath();
   const loaded = loadConfigFile(configPath, { exitOnError: false });
   const resolved = resolveMemoryConfig(loaded?.config ? loaded.config.memory : null);
@@ -79,7 +79,7 @@ async function runForget(needle, makeStore) {
 async function defaultMakeIngest(store) {
   const { createMemoryIngest, earliestLaneEntryMs } = require('./memory-ingest-wiring');
   const { createLaneLedger } = require('./usage-lane-ledger');
-  const { loadConfigFile, resolveConfigPath } = require('./config-store');
+  const { loadConfigFile, resolveConfigPath } = require('./config-store.ts');
   const { configSiblingPath } = require('./pairings-store');
   const configPath = resolveConfigPath();
   const loaded = loadConfigFile(configPath, { exitOnError: false });
@@ -122,7 +122,7 @@ async function runBackfill(makeStore, makeIngest) {
 // An operator running this command IS the authorization, so the lane's own enabled flag is bypassed
 // exactly the way `glissa pack distill` bypasses config.packDistiller.
 function defaultMakeDistiller(store) {
-  const { loadConfigFile, resolveConfigPath } = require('./config-store');
+  const { loadConfigFile, resolveConfigPath } = require('./config-store.ts');
   const { createMemoryDistiller } = require('./memory-distill');
   const { resolveDistillConfig } = require('./core/memory-distill-core.ts');
   const loaded = loadConfigFile(resolveConfigPath(), { exitOnError: false });

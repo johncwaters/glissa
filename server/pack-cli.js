@@ -8,7 +8,7 @@
 
 const path = require('node:path');
 
-const { loadConfigFile, resolveConfigPath } = require('./config-store');
+const { loadConfigFile, resolveConfigPath } = require('./config-store.ts');
 const { packVariantProjects } = require('./core/pack-core.ts');
 const { buildPacks, defaultBuiltRoot, defaultSpecsDir, describePackSpec, listPackSpecs, readBuiltManifest } = require('./pack-builder');
 const { formatTimestamp, shortVersion } = require('./text-format');

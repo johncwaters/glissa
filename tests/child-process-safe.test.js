@@ -13,7 +13,7 @@ const { test } = require("node:test");
 const assert = require("node:assert");
 const cp = require("node:child_process");
 const { promisify } = require("node:util");
-const safe = require("../server/child-process-safe");
+const safe = require("../server/child-process-safe.ts");
 
 function withSpy(name, impl, fn) {
   const orig = cp[name];

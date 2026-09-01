@@ -11,7 +11,7 @@
 
 const fs = require('node:fs');
 
-const { resolveConfigPath } = require('./config-store');
+const { resolveConfigPath } = require('./config-store.ts');
 const { formatTimestamp } = require('./text-format');
 const { normalizeRemoteConfig } = require('./core/remote-config.ts');
 const {

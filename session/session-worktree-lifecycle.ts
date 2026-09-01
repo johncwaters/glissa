@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { execFileSync, execFile } from "../server/child-process-safe.js";
+import { execFileSync, execFile } from "../server/child-process-safe.ts";
 import { isSameDirectoryPath } from "../shared/paths.ts";
 import { STATES, MERGEABLE_LIVE_STATES, RESTARTABLE_STATES } from "../shared/states.ts";
 import type { SessionState } from "../shared/states.ts";
@@ -23,6 +23,7 @@ import {
   buildResyncCommand,
   firstGitErrorLine,
 } from "../server/core/branch-sync-core.ts";
+import type { WorktreeArgs } from "../server/git-workspace.ts";
 
 const WORKTREE_CHECK_DEBOUNCE_MS = 400;
 
@@ -48,9 +49,9 @@ interface MergeResult {
   merged: boolean;
   parked?: boolean;
   refused?: boolean;
-  reason?: string;
+  reason?: string | null;
   conflicts?: string[];
-  baseSha?: string;
+  baseSha?: string | null;
   restoreConflict?: boolean;
   warning?: string;
   // Reported by the engine for the caller's logs; the lifecycle itself reads neither.
@@ -74,16 +75,16 @@ interface RebaseResult {
   ok?: boolean;
   upToDate?: boolean;
   rebased?: boolean;
-  baseSha?: string;
-  headSha?: string;
+  baseSha?: string | null;
+  headSha?: string | null;
   rerereReplayed?: boolean;
   reason?: string;
   conflicts?: string[];
 }
 
 // Every engine verb takes one option bag; its keys differ per verb and the engine reads them itself,
-// so the seam names the bag rather than restating each shape.
-type WorkspaceArgs = Record<string, unknown>;
+// so the seam names the engine's own bag rather than restating each shape.
+type WorkspaceArgs = WorktreeArgs;
 
 interface IntegrationSyncResult {
   outcome: string;

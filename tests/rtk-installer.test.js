@@ -8,7 +8,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 
-const { execFileAsync } = require('../server/child-process-safe');
+const { execFileAsync } = require('../server/child-process-safe.ts');
 const { installRtk, MAX_DOWNLOAD_BYTES } = require('../server/rtk-installer');
 
 const IS_WINDOWS = process.platform === 'win32';

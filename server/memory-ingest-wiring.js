@@ -19,12 +19,12 @@ const path = require('node:path');
 
 const {
   createAgentLogIngest, readCodexRoot, rootFromPath, sessionIdFromPath, transcriptRootCandidates,
-} = require('./ingest-agent-logs');
+} = require('./ingest-agent-logs.ts');
 const { INTERACTIVE_LANE } = require('./core/usage-lane-core.ts');
-const { isBusyError } = require('./glissa-db');
+const { isBusyError } = require('./glissa-db.ts');
 const { isDispatchWorkdir, mapAgentLine } = require('./core/ingest-agent-core.ts');
 const { isUsageFile } = require('./core/usage-scan-core.ts');
-const { createLaneLog } = require('./lane-log');
+const { createLaneLog } = require('./lane-log.ts');
 const { readKnownProjects } = require('./core/memory-core.ts');
 const core = require('./core/memory-ingest-core.ts');
 

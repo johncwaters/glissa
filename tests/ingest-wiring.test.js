@@ -13,7 +13,7 @@ const { EventEmitter } = require('node:events');
 
 const {
   BATCH_INTERVAL_MS, MAX_EVENTS_PER_FRAME, SNAPSHOT_EVENT_LIMIT, createIngestLane,
-} = require('../server/ingest-wiring');
+} = require('../server/ingest-wiring.ts');
 const { resolveIngestConfig } = require('../server/core/ingest-core.ts');
 const { TRUNCATION_NOTE } = require('../server/core/ingest-terminal-core.ts');
 

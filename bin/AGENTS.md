@@ -25,7 +25,7 @@ The globally-installed CLI entry point for Glissa (`npm i -g github:johncwaters/
 ## Dependencies
 
 ### Internal
-- `../server.js` / `../server/backend.js` - the server it boots
-- `../server/config-store.js` - config resolution
+- `../server.js` / `../server/backend.ts` - the server it boots
+- `../server/config-store.ts` - config resolution
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

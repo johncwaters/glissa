@@ -5,7 +5,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 
-const { execFileAsync } = require('./child-process-safe');
+const { execFileAsync } = require('./child-process-safe.ts');
 const {
   assetForPlatform,
   installTargetPath,

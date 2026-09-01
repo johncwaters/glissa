@@ -20,8 +20,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { createFsIngest } = require('../server/ingest-fs');
-const { createIngestLane } = require('../server/ingest-wiring');
+const { createFsIngest } = require('../server/ingest-fs.ts');
+const { createIngestLane } = require('../server/ingest-wiring.ts');
 const { MAX_FILES_PER_BATCH } = require('../server/core/ingest-fs-core.ts');
 const { resolveIngestConfig } = require('../server/core/ingest-core.ts');
 

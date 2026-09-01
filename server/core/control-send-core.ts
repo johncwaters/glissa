@@ -23,7 +23,7 @@
  * reconnect and repair itself from a snapshot, and what stops an unbounded buffer.
  */
 
-import { isReplayable } from '../control-replay-core.js';
+import { isReplayable } from '../control-replay-core.ts';
 
 export type ControlMessageClass = 'critical' | 'refreshable' | 'normal';
 export type ControlSendAction = 'send' | 'drop' | 'close';

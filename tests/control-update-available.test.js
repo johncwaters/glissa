@@ -14,9 +14,9 @@ const os = require('node:os');
 const path = require('node:path');
 const WebSocket = require('ws');
 
-const { createBackend } = require('../server/backend');
+const { createBackend } = require('../server/backend.ts');
 const { dashboardClient } = require('./helpers/dashboard-ws');
-const { registerControlHandlers } = require('../server/control-handlers');
+const { registerControlHandlers } = require('../server/control-handlers.ts');
 
 function connect(deps) {
   const controlWss = new EventEmitter();

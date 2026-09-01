@@ -17,7 +17,7 @@ const path = require('node:path');
 const {
   awaitSessionExit, createJobResultFile, drainPending, firstLine, raceWithAbort, readResultFile,
   registerEphemeralSession,
-} = require('./ephemeral-session');
+} = require('./ephemeral-session.ts');
 const { createSerialQueue } = require('./spawn-gate');
 const { needsDistill } = require('./core/distill-core.ts');
 const { buildLanePermissions } = require('./core/lane-permissions-core.ts');
@@ -107,8 +107,8 @@ function writeStandaloneLaneSettings(permissions) {
 
 /**
  * @param {{ sessions?: Map<string, unknown>, closeSessionDataClients?: (id: string) => void,
- *   hookRouter?: Pick<InstanceType<typeof import('../detection/hook-source.ts').HookRouter>, 'register' | 'unregister'>|null, getHookPort?: (() => number | null) | null, spawnGate?: unknown,
- *   replayBufferKB?: number, recordLane?: import('./ephemeral-session').RecordLane | null,
+ *   hookRouter?: Pick<InstanceType<typeof import('../detection/hook-source.ts').HookRouter>, 'register' | 'unregister'>|null, getHookPort?: (() => number | null) | null, spawnGate?: { run: (task: () => unknown) => Promise<unknown> } | null,
+ *   replayBufferKB?: number, recordLane?: import('./ephemeral-session.ts').RecordLane | null,
  *   makeSession?: ((options: ConstructorParameters<typeof import('../session/sessions.ts').Session>[0]) => InstanceType<typeof import('../session/sessions.ts').Session>) | null }} [options]
  * @returns {DistillSpawn}
  */

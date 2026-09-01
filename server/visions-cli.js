@@ -8,7 +8,7 @@ const fs = require('node:fs');
 const { buildSetupGuide, commandLine, recipeIds } = require('./core/editor-setup-core.ts');
 const { extensionIdOf } = require('./core/vsix-core.ts');
 const { isExtensionInstalled } = require('./core/editor-extension-core.ts');
-const { editorTargets } = require('./editor-wire');
+const { editorTargets } = require('./editor-wire.ts');
 const {
   RELAY_PATH, editorExtensions, packVsix, relayInvocationOptions, resolveRelayInvocation, resolvedEditorPaths,
   unwireEverything, wireEverything,

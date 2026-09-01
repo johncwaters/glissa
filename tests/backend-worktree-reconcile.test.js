@@ -15,8 +15,8 @@ const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 
-const { reconcileSessionWorktrees, createBackend } = require('../server/backend');
-const { createGitWorkspace } = require('../server/git-workspace');
+const { reconcileSessionWorktrees, createBackend } = require('../server/backend.ts');
+const { createGitWorkspace } = require('../server/git-workspace.ts');
 const { hasGit, git } = require('./helpers/git-fixture');
 
 const GIT = hasGit();

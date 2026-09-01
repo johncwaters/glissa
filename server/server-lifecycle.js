@@ -72,7 +72,7 @@ function closeExtraServers(extraServers) {
 /**
  * @param {{ shutdown: () => unknown, httpServer: { close: (callback: () => void) => void },
  *   extraServers?: Array<{ close: () => void, closeAllConnections?: () => void }>,
- *   onRestart?: (() => void) | null, spawn: typeof import('./child-process-safe').spawn,
+ *   onRestart?: (() => void) | null, spawn: typeof import('./child-process-safe.ts').spawn,
  *   exit?: (code?: number) => unknown, getArgv?: () => string[], cwd?: () => string,
  *   env?: NodeJS.ProcessEnv, log?: (message: string) => void, capMs?: number,
  *   closeTimeoutMs?: number }} options

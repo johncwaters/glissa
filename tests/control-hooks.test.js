@@ -9,7 +9,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 
-const { registerControlHandlers } = require('../server/control-handlers');
+const { registerControlHandlers } = require('../server/control-handlers.ts');
 const { HOOK_EVENTS } = require('../detection/settings-injector.ts');
 const { MAX_TIMEOUT_SEC } = require('../session/core/user-hooks-core.ts');
 

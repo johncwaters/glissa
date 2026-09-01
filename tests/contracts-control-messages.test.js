@@ -8,7 +8,7 @@ const path = require('node:path');
 
 const { ClientMessage, ServerMessage } = require('../shared/contracts/index.ts');
 const { STATES } = require('../shared/states.ts');
-const { registerControlHandlers } = require('../server/control-handlers');
+const { registerControlHandlers } = require('../server/control-handlers.ts');
 
 function dispatchTypes(file, startMarker, endMarker) {
   const source = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
@@ -24,7 +24,7 @@ function schemaTypes(schema) {
 }
 
 test('control dispatch tables contain only contract message types', () => {
-  const clientTypes = dispatchTypes('server/control-handlers.js', 'const handlers = {', "controlWss.on('connection'");
+  const clientTypes = dispatchTypes('server/control-handlers.ts', 'const handlers = {', "controlWss.on('connection'");
   const serverTypes = dispatchTypes('public/app.js', 'const messageHandlers = {', 'onControlMessage((msg)');
   const clientSchemaTypes = schemaTypes(ClientMessage);
   const serverSchemaTypes = schemaTypes(ServerMessage);

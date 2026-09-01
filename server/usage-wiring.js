@@ -19,8 +19,8 @@ const { USAGE_INTEGER_RANGES } = require('../shared/settings-ranges.ts');
 const { USAGE_COST_MODES, USAGE_VENDOR_KEYS, USAGE_BUDGET_KEYS } = require('../shared/usage-config.ts');
 const { createUsageScanner } = require('./usage-scanner');
 const { loadPricing } = require('./usage-pricing');
-const { execFileAsync: defaultExecFileAsync } = require('./child-process-safe');
-const { createJsonStateWriter } = require('./json-file');
+const { execFileAsync: defaultExecFileAsync } = require('./child-process-safe.ts');
+const { createJsonStateWriter } = require('./json-file.ts');
 const { evaluateBudget, normalizeBudgetConfig } = require('./core/usage-budget-core.ts');
 const { computeCacheSavings, normalizeRtkGain } = require('./core/usage-savings-core.ts');
 const { decideTelegramNotification } = require('../notifications/channels/telegram.ts');
@@ -169,8 +169,8 @@ function formatBudgetUsd(value) {
 }
 
 /**
- * @param {{ config: { usage?: unknown, telegramNotifications?: boolean, telegram?: { botToken?: string, chatId?: string } },
- *   sessions?: Map<string, Record<string, unknown>>, broadcast?: (message: Record<string, unknown>) => void,
+ * @param {{ config: { usage?: unknown, telegramNotifications?: boolean, telegram?: { botToken?: string, chatId?: string } | null },
+ *   sessions?: Map<string, { ephemeral?: boolean, resumeSessionId?: string | null }>, broadcast?: (message: Record<string, unknown>) => void,
  *   controlClientCount?: () => number, warehousePath?: string | null, budgetStatePath?: string | null,
  *   laneMap?: (() => Map<string, string>) | null, sendTelegram?: typeof sendTelegramMessage,
  *   fsPromises?: typeof import('node:fs/promises'), createScanner?: typeof createUsageScanner,

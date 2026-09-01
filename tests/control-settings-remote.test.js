@@ -15,8 +15,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { registerControlHandlers } = require('../server/control-handlers');
-const { createConfigStore } = require('../server/config-store');
+const { registerControlHandlers } = require('../server/control-handlers.ts');
+const { createConfigStore } = require('../server/config-store.ts');
 const { ConfigUpdate, HIDDEN_CONFIG_KEYS } = require('../shared/contracts/index.ts');
 
 function harness(cfg, store) {

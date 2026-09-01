@@ -3,8 +3,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { DEFAULT_CONFIG } = require('../server/config-store');
-const { DASHBOARD_SETTING_PATHS } = require('../server/control-handlers');
+const { DEFAULT_CONFIG } = require('../server/config-store.ts');
+const { DASHBOARD_SETTING_PATHS } = require('../server/control-handlers.ts');
 const {
   INGEST_SPEC, MEMORY_SPEC, MILL_METRICS_SPEC, PACK_DISTILLER_SPEC,
 } = require('../server/core/settings-mill-core.ts');

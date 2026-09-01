@@ -10,7 +10,7 @@
  * except by the one sanctioned expunge. `validTo` is derived at read time from the supersession chain.
  */
 
-const { applySchema, dataVersion, openDatabase } = require('./glissa-db');
+const { applySchema, dataVersion, openDatabase } = require('./glissa-db.ts');
 const core = require('./core/memory-core.ts');
 
 const SCHEMA = Object.freeze([

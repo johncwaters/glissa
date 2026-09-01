@@ -12,7 +12,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const ephemeralSession = require('../server/ephemeral-session');
+const ephemeralSession = require('../server/ephemeral-session.ts');
 
 const { createJobResultFile, JOB_RESULT_FILENAME, readResultFile } = ephemeralSession;
 

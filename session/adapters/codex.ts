@@ -7,7 +7,7 @@
 
 import path from "node:path";
 
-import { execSync } from "../../server/child-process-safe.js";
+import { execSync } from "../../server/child-process-safe.ts";
 import { PACK_NAME_RE } from "../../server/core/pack-core.ts";
 import { resolveAgentCommand, buildAgentSpawnCommand } from "../core/spawn-command.ts";
 import type { PathLookupExec, ResolvedCommand } from "../core/spawn-command.ts";

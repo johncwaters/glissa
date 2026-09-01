@@ -10,9 +10,9 @@
 // watching, on every screen there is.
 
 export interface ClientPresence {
-  connect: (key: string) => void;
-  disconnect: (key: string) => void;
-  setFocus: (key: string, focused: boolean) => void;
+  connect: (key: unknown) => void;
+  disconnect: (key: unknown) => void;
+  setFocus: (key: unknown, focused: boolean) => void;
   connectionCount: () => number;
   shouldSuppress: () => boolean;
 }
@@ -42,24 +42,24 @@ function decideOffDashboardDelivery(connectionCount: number): boolean {
 }
 
 function createClientPresence(): ClientPresence {
-  const focusedByConnection = new Map<string, boolean>(); // connection key -> its last reported focus
+  const focusedByConnection = new Map<unknown, boolean>(); // connection key -> its last reported focus
 
   // A fresh connection counts as UNFOCUSED until it reports otherwise. The client reports its focus
   // state on connect and on every focus/blur, and defaulting the other way would let one connection
   // that never reports suppress every notification for every device.
-  function connect(key: string): void {
+  function connect(key: unknown): void {
     if (focusedByConnection.has(key)) return;
     focusedByConnection.set(key, false);
   }
 
-  function disconnect(key: string): void {
+  function disconnect(key: unknown): void {
     focusedByConnection.delete(key);
   }
 
   // Tolerates a report from a connection that was never registered: two separate 'connection'
   // listeners are wired on the control server and their order is not guaranteed, so a focus report
   // must never be dropped for arriving first.
-  function setFocus(key: string, focused: boolean): void {
+  function setFocus(key: unknown, focused: boolean): void {
     focusedByConnection.set(key, !!focused);
   }
 

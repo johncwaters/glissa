@@ -10,7 +10,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 
-const { registerControlHandlers } = require('../server/control-handlers');
+const { registerControlHandlers } = require('../server/control-handlers.ts');
 
 function harness(sessions, cfg) {
   const controlWss = new EventEmitter();

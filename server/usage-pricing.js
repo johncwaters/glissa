@@ -1,7 +1,7 @@
 'use strict';
 
 const path = require('node:path');
-const { glissaHomeDir } = require('./config-store');
+const { glissaHomeDir } = require('./config-store.ts');
 const { normalizePricingTable } = require('./core/usage-pricing-core.ts');
 const pricingSnapshot = require('./data/claude-pricing.json');
 

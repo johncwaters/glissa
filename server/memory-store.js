@@ -17,11 +17,11 @@ const nodeCrypto = require('node:crypto');
 const nodeFs = require('node:fs');
 const path = require('node:path');
 
-const { isBusyError } = require('./glissa-db');
+const { isBusyError } = require('./glissa-db.ts');
 const { HOME_DB_REFUSED_CODE } = require('./core/db-path-guard.ts');
 const { createMemoryDb } = require('./memory-db');
-const { writeTextAtomic, writeTextAtomicSync } = require('./json-file');
-const { createLaneLog } = require('./lane-log');
+const { writeTextAtomic, writeTextAtomicSync } = require('./json-file.ts');
+const { createLaneLog } = require('./lane-log.ts');
 const core = require('./core/memory-core.ts');
 const distillCore = require('./core/memory-distill-core.ts');
 

@@ -1,7 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 
-import { execFile, execFileSync } from '../../server/child-process-safe.js';
+import { execFile, execFileSync } from '../../server/child-process-safe.ts';
 
 let burntToastModulePath: string | false | null = null;
 

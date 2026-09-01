@@ -25,8 +25,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { canonicalizePath, equalsIgnoringCaseOnWindows } = require('../shared/paths.ts');
-const { glissaHomeDir } = require('./config-store');
-const { writeJsonAtomic, writeJsonAtomicSync } = require('./json-file');
+const { glissaHomeDir } = require('./config-store.ts');
+const { writeJsonAtomic, writeJsonAtomicSync } = require('./json-file.ts');
 const {
   hashSecret, mintPairingToken, decideRedemption, mintDeviceCredential,
 } = require('./core/pairing-token.ts');

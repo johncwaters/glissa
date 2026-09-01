@@ -77,7 +77,7 @@ export type ShellIngestEvent = {
   ts: number;
   scope: { root: string | null; sessionId: string | null };
   summary: string;
-  detail: { shell: string; lines?: number };
+  detail: { shell: string; lines?: number; droppedCommands?: number };
 }
 
 // --- Config ---------------------------------------------------------------

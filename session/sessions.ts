@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import pty from "node-pty";
 import { EventEmitter } from "node:events";
-import { execFile } from "../server/child-process-safe.js";
+import { execFile } from "../server/child-process-safe.ts";
 import { STATES, KILLABLE_STATES, RESTARTABLE_STATES } from "../shared/states.ts";
 import type { SessionState } from "../shared/states.ts";
 import { createOscTitleSource } from "../detection/osc-title-source.ts";

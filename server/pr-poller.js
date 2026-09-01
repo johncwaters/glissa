@@ -1,8 +1,8 @@
 'use strict';
 
 const core = require('./core/pr-review-core.ts');
-const { drainPending, firstLine, raceWithAbort } = require('./ephemeral-session');
-const { createTickLoop } = require('./lane-runner');
+const { drainPending, firstLine, raceWithAbort } = require('./ephemeral-session.ts');
+const { createTickLoop } = require('./lane-runner.ts');
 
 // The GitHub PR auto-review poller. IO-FREE by construction: every side effect (gh/git calls,
 // worktree ops, session spawn, telegram, state persistence, timers) is injected, so the tick logic

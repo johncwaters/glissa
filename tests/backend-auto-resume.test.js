@@ -20,8 +20,8 @@ const os = require('node:os');
 const path = require('node:path');
 const pty = require('node-pty');
 
-const { createBackend, runAutoResume, persistSessionField, decideWasActiveFlip } = require('../server/backend');
-const { createConfigStore } = require('../server/config-store');
+const { createBackend, runAutoResume, persistSessionField, decideWasActiveFlip } = require('../server/backend.ts');
+const { createConfigStore } = require('../server/config-store.ts');
 const { createSpawnGate } = require('../server/spawn-gate');
 const { Session } = require('../session/sessions.ts');
 const { STATES } = require('../shared/states.ts');

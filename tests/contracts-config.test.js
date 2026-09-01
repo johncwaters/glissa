@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { createConfigStore, DEFAULT_CONFIG } = require('../server/config-store');
+const { createConfigStore, DEFAULT_CONFIG } = require('../server/config-store.ts');
 const {
   BrowserConfig, Config, CONFIG_BLOCK_KEYS, ConfigUpdate, HIDDEN_CONFIG_KEYS,
 } = require('../shared/contracts/index.ts');

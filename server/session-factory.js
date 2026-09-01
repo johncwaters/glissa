@@ -3,7 +3,7 @@
 const path = require('node:path');
 const { Session } = require('../session/sessions.ts');
 const { createRecorder } = require('../session/session-recorder.ts');
-const { DEFAULT_CONFIG } = require('./config-store');
+const { DEFAULT_CONFIG } = require('./config-store.ts');
 const { configuredIntegrationBranch } = require('./core/integration-branch-core.js');
 const { projectVariantSlug } = require('./core/pack-core.ts');
 const { projectSkipsPermissions } = require('./core/session-registry-core.ts');

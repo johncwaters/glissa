@@ -13,7 +13,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 
-import { writeJsonAtomic } from '../server/json-file.js';
+import { writeJsonAtomic } from '../server/json-file.ts';
 import {
   normalizeOutbox, planEnqueue, planReplay, recordFailure, removeEntry,
   DEFAULT_MAX_AGE_MS, DEFAULT_MAX_ATTEMPTS, DEFAULT_MAX_ENTRIES,

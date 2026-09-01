@@ -1,7 +1,7 @@
 'use strict';
 
 const http = require('node:http');
-const { createBackend } = require('./server/backend');
+const { createBackend } = require('./server/backend.ts');
 const { createLifecycle } = require('./server/server-lifecycle');
 const { decideBindHost } = require('./server/core/remote-config.ts');
 const { buildTitleSequence, buildTitleClearSequence } = require('./server/core/terminal-title.ts');

@@ -20,8 +20,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { createGitIngest } = require('../server/ingest-git');
-const { createIngestLane } = require('../server/ingest-wiring');
+const { createGitIngest } = require('../server/ingest-git.ts');
+const { createIngestLane } = require('../server/ingest-wiring.ts');
 const { resolveIngestConfig } = require('../server/core/ingest-core.ts');
 const { LOG_FIELD_SEPARATOR } = require('../server/core/ingest-git-core.ts');
 const { hasGit, git } = require('./helpers/git-fixture');

@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import {
   nextBackoffMs, parseRetryAfterMs, shouldSkipTick, DEFAULT_MAX_MS,
 } from '../server/core/lane-backoff.ts';
-import { createTickLoop } from '../server/lane-runner.js';
+import { createTickLoop } from '../server/lane-runner.ts';
 
 test('full jitter picks a point inside the exponential ceiling, never the ceiling itself', () => {
   const baseMs = 1000;

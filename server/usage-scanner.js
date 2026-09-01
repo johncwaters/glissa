@@ -37,7 +37,7 @@ const {
   resolveProjectsDirs,
   splitLines,
 } = require('./core/usage-scan-core.ts');
-const { createJsonStateWriter } = require('./json-file');
+const { createJsonStateWriter } = require('./json-file.ts');
 const { codexDedupIdentity, createCodexUsageState, parseCodexUsageLine } = require('./core/usage-codex-core.ts');
 const { grokDedupIdentity, parseGrokUsageLine } = require('./core/usage-grok-core.ts');
 

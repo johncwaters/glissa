@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createReplayLog } = require('../server/control-replay-core');
+const { createReplayLog } = require('../server/control-replay-core.ts');
 
 test('stamp assigns a monotonic seq to every broadcast, replayable or not', () => {
   const log = createReplayLog();

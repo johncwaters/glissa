@@ -32,9 +32,9 @@ function isApplicableViewerSize(cols: unknown, rows: unknown): boolean {
 // Entries with no recorded size have never declared themselves a viewer and are skipped, as is
 // `departingKey` whether or not the caller has already dropped it. Returns the surviving viewer size
 // to re-apply, or null when nobody is left to speak for the PTY (leave it as it is).
-function pickSizeAfterDeparture(
-  viewers: Iterable<[string, ViewerSizeRecord | null | undefined]>,
-  departingKey?: string,
+function pickSizeAfterDeparture<Key>(
+  viewers: Iterable<[Key, ViewerSizeRecord | null | undefined]>,
+  departingKey?: Key,
 ): { cols: number; rows: number } | null {
   let winner: ViewerSizeRecord | null = null;
   for (const [key, record] of viewers) {

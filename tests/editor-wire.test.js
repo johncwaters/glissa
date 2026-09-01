@@ -9,7 +9,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { editorTargets, unwireEditors, wireEditors } = require('../server/editor-wire');
+const { editorTargets, unwireEditors, wireEditors } = require('../server/editor-wire.ts');
 
 const INVOCATION = { command: 'glissa', args: ['visions', 'relay'] };
 

@@ -55,9 +55,9 @@ test('RESUME_ID_RE is THE session-id shape, imported by control-handlers rather 
   assert.ok(!RESUME_ID_RE.test('has spaces in it 1234'));
   // One definition or none: a validator patched in one of two copies is still a hole.
   const controlHandlersSource = fs.readFileSync(
-    path.join(import.meta.dirname, '..', 'server', 'control-handlers.js'), 'utf8');
+    path.join(import.meta.dirname, '..', 'server', 'control-handlers.ts'), 'utf8');
   assert.equal(/const RESUME_ID_RE\s*=\s*\//.test(controlHandlersSource), false,
-    'control-handlers.js must import RESUME_ID_RE, not restate it');
+    'control-handlers.ts must import RESUME_ID_RE, not restate it');
 });
 
 test('a captured id can never be a FLAG: the leading character must be alphanumeric', () => {

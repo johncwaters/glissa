@@ -12,8 +12,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { registerControlHandlers } = require('../server/control-handlers');
-const { createConfigStore } = require('../server/config-store');
+const { registerControlHandlers } = require('../server/control-handlers.ts');
+const { createConfigStore } = require('../server/config-store.ts');
 
 function fakeConfigStore(cfg) {
   return {

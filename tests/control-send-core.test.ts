@@ -9,7 +9,7 @@ import {
   classifyControlMessage, decideControlSend, REFRESHABLE_TYPES,
   DEFAULT_HIGH_WATER_MARK, DEFAULT_HARD_CEILING,
 } from '../server/core/control-send-core.ts';
-import { REPLAYABLE_EXACT } from '../server/control-replay-core.js';
+import { REPLAYABLE_EXACT } from '../server/control-replay-core.ts';
 
 test('a healthy socket sends everything', () => {
   for (const type of ['notify', 'health-snapshot', 'session-state', 'usage-sessions']) {

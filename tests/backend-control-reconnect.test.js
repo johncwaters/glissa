@@ -21,7 +21,7 @@ const os = require('node:os');
 const path = require('node:path');
 const WebSocket = require('ws');
 
-const { createBackend } = require('../server/backend');
+const { createBackend } = require('../server/backend.ts');
 const { dashboardClient } = require('./helpers/dashboard-ws');
 
 const SESSION_ID = 'reconnect-test-session';

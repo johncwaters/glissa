@@ -18,15 +18,15 @@ const path = require('node:path');
 const { Session } = require('../session/sessions.ts');
 const {
   awaitSessionExit, createJobResultFile, readResultFile, registerEphemeralSession,
-} = require('./ephemeral-session');
+} = require('./ephemeral-session.ts');
 const { normalizePackNames } = require('./core/pack-core.ts');
 const { createPrPoller } = require('./pr-poller');
 const { createPrGh } = require('./pr-gh');
 const { sendPrPing } = require('./pr-telegram');
-const { emptyLaneStatus } = require('./lane-status');
-const { createLaneRunner } = require('./lane-runner');
-const { writeJsonAtomic } = require('./json-file');
-const { glissaHomeDir } = require('./config-store');
+const { emptyLaneStatus } = require('./lane-status.ts');
+const { createLaneRunner } = require('./lane-runner.ts');
+const { writeJsonAtomic } = require('./json-file.ts');
+const { glissaHomeDir } = require('./config-store.ts');
 
 // Belt-and-suspenders deny-list for the headless PR-review sessions (they run under
 // --dangerously-skip-permissions, so this is a guard, not the guard). Blocks the destructive/
@@ -137,7 +137,7 @@ function prReviewPackNames(cfg) {
  *   gitWorkspace: object, getProjectPathById: (projectId: string) => string | null,
  *   getProjectNameById?: (projectId: string) => string | null,
  *   broadcast?: (message: Record<string, unknown>) => void,
- *   recordLane?: import('./ephemeral-session').RecordLane | null,
+ *   recordLane?: import('./ephemeral-session.ts').RecordLane | null,
  *   makeSession?: (options: ConstructorParameters<typeof Session>[0]) => InstanceType<typeof Session> }} options
  */
 function createPrReviewWiring({

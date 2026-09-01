@@ -68,7 +68,7 @@ function formatTelegramText(sessionName: string, category: string | null, messag
 
 export interface TelegramChannelDeps {
   /** live config object (read per delivery, never captured) */
-  getConfig: () => { telegramNotifications?: boolean; telegram?: { botToken?: string; chatId?: string } } | null;
+  getConfig: () => { telegramNotifications?: boolean; telegram?: { botToken?: string; chatId?: string } | null } | null;
   /** open control-WS connection count */
   getConnectionCount: () => number;
   getActiveAgentCount?: (sessionId: string) => number;

@@ -10,8 +10,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 
-const { registerControlHandlers } = require('../server/control-handlers');
-const { createReplayLog } = require('../server/control-replay-core');
+const { registerControlHandlers } = require('../server/control-handlers.ts');
+const { createReplayLog } = require('../server/control-replay-core.ts');
 
 function harness() {
   const controlWss = new EventEmitter();

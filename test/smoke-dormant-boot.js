@@ -5,7 +5,7 @@
 
 const http = require('node:http');
 const WebSocket = require('ws');
-const { createBackend } = require('../server/backend');
+const { createBackend } = require('../server/backend.ts');
 const { claudeCommand } = require('../session/sessions.ts');
 
 const PORT = 3098;

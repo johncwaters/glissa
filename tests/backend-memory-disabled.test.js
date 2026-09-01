@@ -14,7 +14,7 @@ const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 
-const { createBackend } = require('../server/backend');
+const { createBackend } = require('../server/backend.ts');
 const { isolateTranscriptHomes } = require('./helpers/transcript-homes');
 const { CONFIG_SCALAR_KEYS } = require('../shared/contracts/index.ts');
 

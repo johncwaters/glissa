@@ -15,7 +15,7 @@ import { HookRouter } from '../detection/hook-source.ts';
 import { writeSessionSettings } from '../detection/settings-injector.ts';
 import claudeCode from '../session/adapters/claude-code.ts';
 import * as adapters from '../session/adapters/index.ts';
-import { validateConfig } from '../server/config-store.js';
+import { validateConfig } from '../server/config-store.ts';
 import { STATES } from '../shared/states.ts';
 import { execFileSync } from 'node:child_process';
 import { fakePty } from './helpers/fake-pty.ts';
@@ -272,10 +272,10 @@ test('the title source classifies with the adapter profile', () => {
 
 test('importing sessions.ts resolves no agent binary; the first use does, and caches it', () => {
   const probe = `
-    const cps = require('./server/child-process-safe');
-    const real = cps.execSync;
-    const seen = [];
-    cps.execSync = (cmd, opts) => { seen.push(String(cmd)); return real(cmd, opts); };
+    const cp = require('node:child_process');
+    const real = cp.execSync;
+    const seen: Record<string, unknown>[] = [];
+    cp.execSync = (cmd, opts) => { seen.push(String(cmd)); return real(cmd, opts); };
     const claudeLookups = () => seen.filter((c) => /claude/.test(c)).length;
     const sessions = require('./session/sessions.ts');
     const afterRequire = claudeLookups();

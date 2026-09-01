@@ -72,7 +72,7 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 
 ### Internal
 - `#shared/*.ts` (the package imports map in `package.json`): shared modules imported directly and bundled by Vite; there is no generated twin
-- `server/backend.js` - the WS endpoints this client speaks to
+- `server/backend.ts` - the WS endpoints this client speaks to
 
 ### External
 - `@xterm/xterm`, `@xterm/addon-fit`, `@xterm/addon-webgl` - bundled by Vite, browser only

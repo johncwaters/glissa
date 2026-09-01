@@ -302,7 +302,7 @@ test('byLane and budget reach the wire on a pulled report', async () => {
 // An alert is a moment, not a state: replaying it on reconnect would re-alert a crossing that already
 // happened, possibly days later.
 test('usage-budget-alert is not retained by the control replay log', () => {
-  const { createReplayLog } = require('../server/control-replay-core');
+  const { createReplayLog } = require('../server/control-replay-core.ts');
   const log = createReplayLog();
   log.stamp({ type: 'usage-budget-alert', scope: 'daily', threshold: 75 }, 1000);
   log.stamp({ type: 'notify', session: 's', category: 'complete' }, 1000);

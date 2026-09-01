@@ -7,7 +7,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFile } = require('./child-process-safe');
+const { execFile } = require('./child-process-safe.ts');
 const {
   applyRules,
   shouldCheckPath,

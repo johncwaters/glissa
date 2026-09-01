@@ -12,7 +12,7 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 
 const { createMemoryDb, ftsMatchExpression, recordToRow } = require('../server/memory-db');
-const { SCHEMA_VERSION, isBusyError, isSqliteAvailable, openDatabase } = require('../server/glissa-db');
+const { SCHEMA_VERSION, isBusyError, isSqliteAvailable, openDatabase } = require('../server/glissa-db.ts');
 
 const START = Date.UTC(2026, 7, 22, 12, 0, 0);
 const opened = [];

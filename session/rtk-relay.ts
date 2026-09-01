@@ -3,7 +3,7 @@ import type { ChildProcess } from "node:child_process";
 import { readStdin } from "./relay-stdin.ts";
 import type { StdinLike } from "./relay-stdin.ts";
 
-import { spawn } from "../server/child-process-safe.js";
+import { spawn } from "../server/child-process-safe.ts";
 
 import { MAX_RTK_STDOUT_BYTES, RTK_PATH_ENV, normalizeRtkHookResponse } from "./core/rtk-hook-core.ts";
 

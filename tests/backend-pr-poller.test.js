@@ -15,7 +15,7 @@ const path = require('node:path');
 const WebSocket = require('ws');
 
 const { buildReviewPrompt, readReviewResult, prPollerShouldStart } = require('../server/pr-review-wiring');
-const { createBackend } = require('../server/backend');
+const { createBackend } = require('../server/backend.ts');
 const { dashboardClient } = require('./helpers/dashboard-ws');
 
 const { createPrReviewWiring } = require('../server/pr-review-wiring');

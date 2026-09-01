@@ -9,7 +9,7 @@ import type { PathLookupExec, ResolvedCommand } from "../core/spawn-command.ts";
 import { buildAgentEnv } from "../core/spawn-env.ts";
 import type { AgentEnvOptions, AgentEnvProfile, SpawnEnv } from "../core/spawn-env.ts";
 import type { PackDelivery } from "../core/pack-pointer-core.ts";
-import { execSync } from "../../server/child-process-safe.js";
+import { execSync } from "../../server/child-process-safe.ts";
 import type { AgentAdapterShape, AgentArgsOptions, AgentHookProfile, AgentSpawnCommandOptions } from "./index.ts";
 import type { HookPayload } from "../../shared/contracts/index.ts";
 

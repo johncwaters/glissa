@@ -28,6 +28,6 @@ TypeScript ESM modules used by BOTH the server and the browser bundle. Single so
 ## Dependencies
 
 ### Internal
-- Consumed by `session/sessions.ts`, `notifications/notification-manager.ts`, `server/control-handlers.js`, and the entire `public/` frontend.
+- Consumed by `session/sessions.ts`, `notifications/notification-manager.ts`, `server/control-handlers.ts`, and the entire `public/` frontend.
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

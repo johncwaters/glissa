@@ -70,7 +70,7 @@ if (args[0] === 'pair') {
 
 const isAgentCommand = args[0] === 'agent';
 if (isAgentCommand) {
-  const { runAgentSetupCli } = require('../server/agent-setup-cli');
+  const { runAgentSetupCli } = require('../server/agent-setup-cli.ts');
   process.exit(runAgentSetupCli(args.slice(1)));
 }
 
@@ -132,7 +132,7 @@ function runDoctor() {
   const os = require('node:os');
   const path = require('node:path');
   const fs = require('node:fs');
-  const { execSync } = require('../server/child-process-safe');
+  const { execSync } = require('../server/child-process-safe.ts');
   const pkg = require('../package.json');
   const { npmGlobalBinDir, pnpmGlobalBinDir, onPath, formatPathNotice } = require('./path-doctor');
 
@@ -178,7 +178,7 @@ function runDoctor() {
       line(`${id} pack carrier`, adapter.capabilities.packs ? adapter.packCarrier : 'unsupported');
       if (adapter.packNoticeCaveat) line(`${id} pack notices`, adapter.packNoticeCaveat);
     }
-    const { inspectGrokAgentSetup } = require('../server/agent-setup-cli');
+    const { inspectGrokAgentSetup } = require('../server/agent-setup-cli.ts');
     const grokSetup = inspectGrokAgentSetup();
     line('grok hook setup', `${grokSetup.classification}: ${grokSetup.filePath}`);
   } catch (err) {

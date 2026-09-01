@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { registerControlHandlers } = require('../server/control-handlers');
+const { registerControlHandlers } = require('../server/control-handlers.ts');
 
 function harness() {
   const controlWss = new EventEmitter();

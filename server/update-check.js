@@ -11,9 +11,9 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { execFileAsync } = require('./child-process-safe');
-const { glissaHomeDir } = require('./config-store');
-const { writeJsonAtomicSync } = require('./json-file');
+const { execFileAsync } = require('./child-process-safe.ts');
+const { glissaHomeDir } = require('./config-store.ts');
+const { writeJsonAtomicSync } = require('./json-file.ts');
 const {
   decideInstallFlavor,
   decideUpdateStatus,

@@ -8,7 +8,7 @@ const { stripTypeScriptTypes } = require('node:module');
 const os = require('node:os');
 const path = require('node:path');
 
-const { execFileAsync, execSync } = require('./child-process-safe');
+const { execFileAsync, execSync } = require('./child-process-safe.ts');
 const { buildVsix, extensionIdOf } = require('./core/vsix-core.ts');
 const {
   EDITOR_CANDIDATES, decideEditorTargets, isExtensionInstalled, visionsExtensionFiles,
@@ -16,8 +16,8 @@ const {
 const { relayInvocation } = require('./core/editor-setup-core.ts');
 const { applyChanges, decideImpliedDefaults } = require('./core/visions-defaults-core.ts');
 const { isUnder, underTestRunner } = require('./core/db-path-guard.ts');
-const { createLaneLog } = require('./lane-log');
-const { unwireEditors, wireEditors } = require('./editor-wire');
+const { createLaneLog } = require('./lane-log.ts');
+const { unwireEditors, wireEditors } = require('./editor-wire.ts');
 const { resolvePathCommandMatches } = require('../session/core/spawn-command.ts');
 
 const PACKAGE_ROOT = path.join(__dirname, '..');
@@ -155,7 +155,7 @@ async function unwireEverything() {
 // One run per transition of `visions.enabled`, and failure is a log line: an editor that could not be
 // wired must never be able to stop the lane it was for.
 /**
- * @param {{ getConfig?: () => { visions?: { enabled?: boolean } },
+ * @param {{ getConfig?: () => { visions?: { enabled?: unknown } | null },
  *   configStore?: { configPath?: string, save: (mutator: (config: Record<string, unknown>) => void) => Record<string, unknown> | null } | null,
  *   logger?: Console, debug?: boolean | (() => boolean), env?: NodeJS.ProcessEnv,
  *   onConfigChanged?: (() => void | Promise<void>) | null,

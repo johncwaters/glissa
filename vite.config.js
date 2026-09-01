@@ -14,7 +14,7 @@ function glissaBackendPlugin() {
   return {
     name: 'glissa-backend',
     configureServer(server) {
-      const { createBackend } = require('./server/backend');
+      const { createBackend } = require('./server/backend.ts');
       backend = createBackend(server.httpServer, {
         staticDir: null,
         // Dev sessions are the ones being debugged, so the debug button and health panel default

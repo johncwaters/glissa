@@ -23,7 +23,7 @@ const {
   pruneLedger,
 } = require('../server/core/usage-lane-core.ts');
 const { createLaneLedger } = require('../server/usage-lane-ledger');
-const { registerEphemeralSession } = require('../server/ephemeral-session');
+const { registerEphemeralSession } = require('../server/ephemeral-session.ts');
 
 const NOW = Date.parse('2026-08-19T12:00:00.000Z');
 const DAY_MS = 24 * 60 * 60 * 1000;

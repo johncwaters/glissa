@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { glissaHomeDir } = require('./config-store');
+const { glissaHomeDir } = require('./config-store.ts');
 
 const DEFAULT_POSTHOG_REPORT_DIR = path.join(glissaHomeDir(), 'posthog-reports');
 const POSTHOG_REPORT_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;

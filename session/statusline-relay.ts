@@ -10,7 +10,7 @@ import type { StdinLike } from "./relay-stdin.ts";
 // statusLine REPLACES the global one (live-verified 2.1.235) and must not delete their HUD.
 
 // Via the shared wrapper: this spawns a console child several times per turn, windowsHide matters.
-import { spawn } from "../server/child-process-safe.js";
+import { spawn } from "../server/child-process-safe.ts";
 
 // Bounded hard: the POST is telemetry, and the status line is the operator's. Anything slower than
 // this is abandoned, not waited on.

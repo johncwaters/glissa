@@ -15,8 +15,8 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 | `DESIGN.md`, `DESIGN.json`, `PRODUCT.md` | Visual system and product definition |
 | `docs/`, `bin/` | Design records and npm CLI |
 | `server/` | Backend runtime and lanes (`server/AGENTS.md`) |
-| `server/child-process-safe.js` | The ONLY importer of `node:child_process`, bar the extension packed outside it |
-| `server/git-workspace.js` | The ONLY module allowed to run `git worktree` |
+| `server/child-process-safe.ts` | The ONLY importer of `node:child_process`, bar the extension packed outside it |
+| `server/git-workspace.ts` | The ONLY module allowed to run `git worktree` |
 | `server/core/` | Pure decision modules for everything in `server/`, no IO |
 | `session/` | Session domain (`session/AGENTS.md`) |
 | `session/sessions.ts` | Session lifecycle and PTY ownership |

@@ -15,7 +15,7 @@
  */
 
 const { laneMapFromLedger, pruneLedger } = require('./core/usage-lane-core.ts');
-const { createJsonStateWriter } = require('./json-file');
+const { createJsonStateWriter } = require('./json-file.ts');
 
 /** @param {{ ledgerPath?: string | null, fsPromises?: typeof import('node:fs/promises'), nowFn?: () => number, retainDays?: number, logger?: Pick<Console, 'warn'> | null }} [options] */
 function createLaneLedger({
@@ -75,7 +75,7 @@ function createLaneLedger({
    * any usage number. `vendor` defaults to claude, so a pre-M5 caller (the ephemeral lanes, all Claude)
    * records exactly as before.
    */
-  /** @type {import('./ephemeral-session').RecordLane} */
+  /** @type {import('./ephemeral-session.ts').RecordLane} */
   function record(sessionId, lane, vendor = 'claude') {
     if (!ledgerPath || !sessionId || !lane) return;
     // Serialized so records apply in arrival order and whenIdle() has one chain to settle on.

@@ -19,7 +19,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { createAgentLogIngest } = require('../server/ingest-agent-logs');
+const { createAgentLogIngest } = require('../server/ingest-agent-logs.ts');
 const { createMemoryIngest } = require('../server/memory-ingest-wiring');
 const { createMemoryStore } = require('../server/memory-store');
 const { hashMemoryLine, resolveMemoryConfig } = require('../server/core/memory-core.ts');

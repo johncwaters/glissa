@@ -23,7 +23,7 @@ const path = require('node:path');
 
 const {
   awaitSessionExit, drainPending, firstLine, raceWithAbort, registerEphemeralSession,
-} = require('./ephemeral-session');
+} = require('./ephemeral-session.ts');
 const {
   DEFAULT_TIMEOUT_SECONDS,
   ERROR_SOURCE_SESSION,
@@ -37,7 +37,7 @@ const {
 } = require('./core/visions-dispatch-core.ts');
 const { buildLanePermissions } = require('./core/lane-permissions-core.ts');
 const { readIntentProposal, sanitizeIntentText } = require('./core/visions-intent-core.ts');
-const { createLaneLog } = require('./lane-log');
+const { createLaneLog } = require('./lane-log.ts');
 
 const RESULT_VERDICTS = new Set(['COMMENTS', 'NONE', 'ERROR']);
 const RESULT_FILE = VISIONS_RESULT_FILE;
@@ -133,8 +133,8 @@ async function readCommentsResult(resultPath, { lineCount = 0, onBytesRead = nul
 
 /**
  * @param {{ sessions?: Map<string, unknown>, closeSessionDataClients?: (id: string) => void,
- *   hookRouter?: Pick<InstanceType<typeof import('../detection/hook-source.ts').HookRouter>, 'register' | 'unregister'>|null, getHookPort?: (() => number | null) | null, spawnGate?: unknown,
- *   replayBufferKB?: number, recordLane?: import('./ephemeral-session').RecordLane | null }} [options]
+ *   hookRouter?: Pick<InstanceType<typeof import('../detection/hook-source.ts').HookRouter>, 'register' | 'unregister'>|null, getHookPort?: (() => number | null) | null, spawnGate?: { run: (task: () => unknown) => Promise<unknown> } | null,
+ *   replayBufferKB?: number, recordLane?: import('./ephemeral-session.ts').RecordLane | null }} [options]
  * @returns {VisionsSpawn}
  */
 function createVisionsSpawn({

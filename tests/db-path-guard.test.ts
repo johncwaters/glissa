@@ -10,7 +10,7 @@ import {
   decideDbOpenRefusal,
   underTestRunner,
 } from '../server/core/db-path-guard.ts';
-import { dbPathForConfig, openDatabase } from '../server/glissa-db.js';
+import { dbPathForConfig, openDatabase } from '../server/glissa-db.ts';
 import { createMemoryStore } from '../server/memory-store.js';
 import { resolveMemoryConfig } from '../server/core/memory-core.ts';
 

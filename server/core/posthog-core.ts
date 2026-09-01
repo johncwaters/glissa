@@ -564,7 +564,7 @@ function unarchivedInvestigations(log: unknown): InvestigationRecord[] {
 }
 
 /** Shape check for the archive control message, before the id is matched against the log. */
-function validateInvestigationId(id: unknown): { ok: boolean; error?: string; id?: string } {
+function validateInvestigationId(id: unknown): { ok: false; error: string } | { ok: true; id: string } {
   const value = String(id ?? '').trim();
   if (!value) return { ok: false, error: 'id is required' };
   if (!INVESTIGATION_ID_RE.test(value)) return { ok: false, error: 'Invalid investigation id' };
@@ -604,7 +604,7 @@ function decideVanishedEntry(
 function validateIssueRef({
   projectId,
   issueId,
-}: { projectId?: unknown; issueId?: unknown } = {}): { ok: boolean; error?: string; projectId?: string; issueId?: string } {
+}: { projectId?: unknown; issueId?: unknown } = {}): { ok: false; error: string } | { ok: true; projectId: string; issueId: string } {
   const project = String(projectId ?? '').trim();
   const issue = String(issueId ?? '').trim();
   if (!project) return { ok: false, error: 'projectId is required' };
@@ -614,7 +614,7 @@ function validateIssueRef({
 }
 
 /** The PostHog status one dashboard action maps to, or a refusal for anything unlisted. */
-function decideIssueAction(action: unknown): { ok: boolean; error?: string; status?: string } {
+function decideIssueAction(action: unknown): { ok: false; error: string } | { ok: true; status: string } {
   if (typeof action !== 'string') return { ok: false, error: 'Unknown issue action' };
   const status = ISSUE_ACTION_STATUS[action.trim().toLowerCase()];
   if (!status) return { ok: false, error: 'Unknown issue action' };

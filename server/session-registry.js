@@ -9,8 +9,8 @@ const { configuredIntegrationBranch } = require('./core/integration-branch-core.
 
 /** @typedef {import('./core/session-registry-core.ts').RegistryProject & Record<string, unknown>} RegistryProject */
 /** @typedef {Record<string, unknown> & { projects: RegistryProject[], integrationBranch?: string|null }} RegistryConfig */
-/** @typedef {{ id: string, cwd: string, branch: string, integrationBranch?: string, hasWork: boolean }} RegistryWorktree */
-/** @typedef {{ id: string, name: string, path: string, state: string, stateSince: number, pendingRestart?: boolean, dangerouslySkipPermissions?: boolean, isWorktree?: boolean, resumeSessionId?: string|null, _killReap?: Promise<unknown>|null, start: () => unknown, destroy: () => void, toSnapshot: () => Record<string, unknown>, getWorktreeCarry?: () => Record<string, unknown>|null, adoptWorktree: (worktree: import('../session/session-worktree-lifecycle.ts').AdoptWorktreeOptions) => void, discardWorktree?: () => unknown, discardWorktreeIfClean: () => unknown }} RegistrySession */
+/** @typedef {{ id: string, cwd: string, branch: string, integrationBranch?: string | null, hasWork: boolean }} RegistryWorktree */
+/** @typedef {{ id: string, name: string, path: string, state: string, stateSince: number, on: import('node:events').EventEmitter['on'], off: import('node:events').EventEmitter['off'], pendingRestart?: boolean, dangerouslySkipPermissions?: boolean, isWorktree?: boolean, resumeSessionId?: string|null, _killReap?: Promise<unknown>|null, start: () => unknown, destroy: () => void, toSnapshot: () => Record<string, unknown>, getWorktreeCarry?: () => Record<string, unknown>|null, adoptWorktree: (worktree: import('../session/session-worktree-lifecycle.ts').AdoptWorktreeOptions) => void, discardWorktree?: () => unknown, discardWorktreeIfClean: () => unknown }} RegistrySession */
 /** @typedef {{ listSessionWorktrees: (input: { projectPath: string, integrationBranch: string|null }) => RegistryWorktree[], removeWorktreeByPath: (input: { projectPath: string, cwd: string, branch: string }) => void }} RegistryGitWorkspace */
 
 /**

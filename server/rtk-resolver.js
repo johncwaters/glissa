@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 
 const { resolveRtkPath } = require('../session/core/rtk-command.ts');
-const { execSync } = require('./child-process-safe');
+const { execSync } = require('./child-process-safe.ts');
 
 function resolveRtkPathFromSystem() {
   return resolveRtkPath({

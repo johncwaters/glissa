@@ -10,7 +10,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const path = require('node:path');
 
-const { registerControlHandlers } = require('../server/control-handlers');
+const { registerControlHandlers } = require('../server/control-handlers.ts');
 
 function fakeConfigStore(cfg) {
   return {

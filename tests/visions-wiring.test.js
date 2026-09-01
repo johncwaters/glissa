@@ -17,8 +17,8 @@ const os = require('node:os');
 const path = require('node:path');
 const WebSocket = require('ws');
 
-const { createBackend } = require('../server/backend');
-const { createConfigStore } = require('../server/config-store');
+const { createBackend } = require('../server/backend.ts');
+const { createConfigStore } = require('../server/config-store.ts');
 const { CONFIG_SCALAR_KEYS, ConfigUpdate } = require('../shared/contracts/index.ts');
 const { MAX_PROMPT_BYTES } = require('../server/core/visions-dispatch-core.ts');
 const { DIGEST_BUDGET_CHARS, createVisionsWiring, VISIONS_DEBOUNCE_MS } = require('../server/visions-wiring');

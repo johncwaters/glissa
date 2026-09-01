@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { writeTextAtomic, writeTextAtomicSync } = require('../server/json-file');
+const { writeTextAtomic, writeTextAtomicSync } = require('../server/json-file.ts');
 
 function tempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-atomic-'));

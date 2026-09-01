@@ -604,7 +604,7 @@ function applyPackDelta(
   packName: string,
   deliver: unknown,
   { maxPacks = MAX_PACKS_PER_SESSION }: { maxPacks?: number } = {},
-): { ok: boolean; packs?: string[]; error?: string } {
+): { ok: false; error: string } | { ok: true; packs: string[] } {
   const { names } = normalizePackNames(currentPacks, { maxPacks: Number.POSITIVE_INFINITY });
   if (deliver !== true) return { ok: true, packs: names.filter((name) => name !== packName) };
   if (names.includes(packName)) return { ok: true, packs: names };

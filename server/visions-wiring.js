@@ -73,9 +73,9 @@ const {
   isFixSetFresh,
   readSweepResult,
 } = require('./core/visions-fix-core.ts');
-const { createJsonStateWriter } = require('./json-file');
+const { createJsonStateWriter } = require('./json-file.ts');
 const { ACTIVITY_METHOD } = require('./core/ingest-editor-core.ts');
-const { createLaneLog } = require('./lane-log');
+const { createLaneLog } = require('./lane-log.ts');
 
 // Quiet window before a document is swept.
 const VISIONS_DEBOUNCE_MS = 300;
@@ -181,8 +181,8 @@ function changeFailureReason(uri, version, result) {
 /**
  * @param {{ debounceMs?: number, setTimeoutFn?: typeof setTimeout, clearTimeoutFn?: typeof clearTimeout, nowFn?: () => number,
  *   sweep?: (text: string) => { diagnostics: object[], fixes: object[] }, maxPayload?: number, autoFix?: boolean, fixLogMax?: number,
- *   applyEditTimeoutMs?: number, logger?: Console, broadcast?: import('./backend-websockets').ControlBroadcast | null, dispatchConfig?: object | null,
- *   dispatch?: ((options: { uri: string, text: string, findings: object[], intent: string, digest: string, memory: { text: string, count: number, version: string | null } | null, prompt: string }) => Promise<{ verdict: string, reason?: string | null, diagnostics?: unknown, comments?: unknown, hand?: unknown, intent?: unknown }>) | null,
+ *   applyEditTimeoutMs?: number, logger?: Console, broadcast?: import('./backend-websockets.ts').ControlBroadcast | null, dispatchConfig?: object | null,
+ *   dispatch?: ((options: { uri: string, text: string, findings?: object[], intent?: string, digest?: string, memory?: { text: string, count: number, version: string | null } | null, prompt?: string | null }) => Promise<{ verdict: string, errorSource?: string | null, reason?: string | null, diagnostics?: unknown, comments?: unknown, hand?: unknown, intent?: unknown }>) | null,
  *   contextDigest?: ((options: { scopes: null, budgetChars: number, now: number }) => string | null) | null, contextSeq?: (() => number | null) | null,
  *   scopeProjects?: { id: string, path: string }[] | null, knownProjectIds?: string[] | null,
  *   getMemoryStore?: (() => { append: (input: object) => Promise<{ id: string } | null>, records?: () => object[], retrieve?: (options: { query: string, project: string | null, limit: number }) => object[], noteDelivered?: (text: string) => void, readPublishedManifest?: () => Promise<{ version?: string } | null> } | null) | null,

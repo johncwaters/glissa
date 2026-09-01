@@ -22,9 +22,9 @@ const os = require('node:os');
 const path = require('node:path');
 const WebSocket = require('ws');
 
-const { createBackend } = require('../server/backend');
+const { createBackend } = require('../server/backend.ts');
 const { dashboardClient } = require('./helpers/dashboard-ws');
-const { createReplayLog } = require('../server/control-replay-core');
+const { createReplayLog } = require('../server/control-replay-core.ts');
 
 const MARKDOWN_URI = 'file:///tmp/plan-visions.md';
 const REPEATED_WORD_MARKDOWN = '# Title\n\nA line with with a repeat.\n';

@@ -4,8 +4,8 @@ const core = require('./core/posthog-core.ts');
 const recurrence = require('./core/posthog-recurrence.ts');
 const traffic = require('./core/traffic-spike-core.ts');
 const { normalizeIssues, parseSpikeIssueIds } = require('./posthog-api');
-const { firstLine, raceWithAbort } = require('./ephemeral-session');
-const { createTickLoop } = require('./lane-runner');
+const { firstLine, raceWithAbort } = require('./ephemeral-session.ts');
+const { createTickLoop } = require('./lane-runner.ts');
 
 /*
  * The PostHog monitoring poller. IO-FREE by construction, exactly like server/pr-poller.js: the
@@ -573,6 +573,8 @@ function createPosthogPoller(deps) {
       projects: summaries,
       investigations: currentInvestigations(),
     });
+    // The tick loop reads a returned outcome as a failed poll; this lane never reports one.
+    return undefined;
   }
 
   async function start() {

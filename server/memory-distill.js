@@ -9,12 +9,12 @@ const path = require('node:path');
 
 const {
   awaitSessionExit, drainPending, firstLine, raceWithAbort, registerEphemeralSession,
-} = require('./ephemeral-session');
+} = require('./ephemeral-session.ts');
 const { buildLanePermissions } = require('./core/lane-permissions-core.ts');
-const { createLaneLog } = require('./lane-log');
-const { isBusyError } = require('./glissa-db');
+const { createLaneLog } = require('./lane-log.ts');
+const { isBusyError } = require('./glissa-db.ts');
 const { needsDistill } = require('./core/distill-core.ts');
-const { createTickLoop } = require('./lane-runner');
+const { createTickLoop } = require('./lane-runner.ts');
 const core = require('./core/memory-core.ts');
 const distillCore = require('./core/memory-distill-core.ts');
 
@@ -60,8 +60,8 @@ function writeStandaloneDenySettings(permissions) {
 /**
  * @param {{ sessions?: Map<string, unknown>, closeSessionDataClients?: (id: string) => void,
  *   hookRouter?: Pick<InstanceType<typeof import('../detection/hook-source.ts').HookRouter>, 'register' | 'unregister'> | null,
- *   getHookPort?: (() => number | null) | null, spawnGate?: unknown,
- *   replayBufferKB?: number, recordLane?: import('./ephemeral-session').RecordLane | null }} [options]
+ *   getHookPort?: (() => number | null) | null, spawnGate?: { run: (task: () => unknown) => Promise<unknown> } | null,
+ *   replayBufferKB?: number, recordLane?: import('./ephemeral-session.ts').RecordLane | null }} [options]
  */
 function createMemoryDistillSpawn({
   sessions = new Map(), closeSessionDataClients = () => {}, hookRouter = null, getHookPort = null,

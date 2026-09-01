@@ -5,8 +5,8 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 
-const { createBackend } = require("../server/backend");
-const { runAgentSetupCli } = require("../server/agent-setup-cli");
+const { createBackend } = require("../server/backend.ts");
+const { runAgentSetupCli } = require("../server/agent-setup-cli.ts");
 const grok = require("../session/adapters/grok.ts").default;
 
 const SESSION_ID = "grok-probe-session";

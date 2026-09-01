@@ -38,7 +38,7 @@ export interface TailState {
   offset: number;
   carry: string;
   head: string | null;
-  vendorState: unknown;
+  vendorState: Record<string, string> | null;
 }
 
 export interface TailReadPlan {

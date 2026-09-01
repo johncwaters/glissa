@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { createGitWorkspace } = require('../server/git-workspace');
+const { createGitWorkspace } = require('../server/git-workspace.ts');
 const { hasGit, git } = require('./helpers/git-fixture');
 
 const GIT = hasGit();

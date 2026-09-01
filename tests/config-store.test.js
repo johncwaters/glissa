@@ -13,7 +13,7 @@ const path = require('node:path');
 
 const {
   createConfigStore, ensureProjectIds, validateConfig, loadConfigFile, DEFAULT_CONFIG, SECRET_PRESENCE_SUFFIX,
-} = require('../server/config-store');
+} = require('../server/config-store.ts');
 
 function writeTmpConfig(cfg) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-cfgstore-'));
@@ -623,7 +623,7 @@ test('a duplicate event for content already applied is not re-applied', async ()
 // The escalation ladder's delay is an operator-facing timeout like every other one, not a constant
 // buried in the manager.
 test('phoneEscalationMs is a settable timeout key with the five-minute default', async () => {
-  const { DEFAULT_CONFIG } = require('../server/config-store');
+  const { DEFAULT_CONFIG } = require('../server/config-store.ts');
   const { ConfigUpdate } = require('../shared/contracts/index.ts');
   assert.equal('phoneEscalationMs' in ConfigUpdate.shape, true);
   assert.equal(DEFAULT_CONFIG.phoneEscalationMs, 300000);
@@ -669,7 +669,7 @@ test('reverting to bytes that were applied before a save still reloads', async (
 // inherited the umask (0644 on a typical Linux box), so every account on a shared host could read those
 // credentials. The modes are advisory on Windows, hence the gate.
 test('a saved config.json, and its backup, are owner-only', { skip: process.platform === 'win32' }, async () => {
-  const { CONFIG_FILE_MODE } = require('../server/config-store');
+  const { CONFIG_FILE_MODE } = require('../server/config-store.ts');
   await withStoreAsync(richConfig(), async (store, p) => {
     fs.chmodSync(p, 0o644); // as an older Glissa (or an operator's editor) would have left it
     assert.ok(store.save((cfg) => { cfg.port = 4999; }), 'the save succeeded');

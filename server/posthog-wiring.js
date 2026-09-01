@@ -15,21 +15,21 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { execFileAsync } = require('./child-process-safe');
+const { execFileAsync } = require('./child-process-safe.ts');
 const { Session } = require('../session/sessions.ts');
 const {
   awaitSessionExit, createJobResultFile, readResultFile, registerEphemeralSession,
-} = require('./ephemeral-session');
+} = require('./ephemeral-session.ts');
 const core = require('./core/posthog-core.ts');
 const { normalizePackNames } = require('./core/pack-core.ts');
 const { configuredIntegrationBranch } = require('./core/integration-branch-core.js');
 const { createPosthogPoller } = require('./posthog-poller');
 const { createPosthogApi } = require('./posthog-api');
 const { sendPosthogPing } = require('./posthog-telegram');
-const { emptyLaneStatus } = require('./lane-status');
-const { createLaneRunner } = require('./lane-runner');
-const { writeJsonAtomic } = require('./json-file');
-const { glissaHomeDir } = require('./config-store');
+const { emptyLaneStatus } = require('./lane-status.ts');
+const { createLaneRunner } = require('./lane-runner.ts');
+const { writeJsonAtomic } = require('./json-file.ts');
+const { glissaHomeDir } = require('./config-store.ts');
 const { DEFAULT_POSTHOG_REPORT_DIR } = require('./posthog-report');
 
 // Belt-and-suspenders deny-list for the headless investigation sessions (they run under
@@ -90,13 +90,11 @@ const FORCE_TICK_DEBOUNCE_MS = 3000;
  *     trafficSpikeCooldownMinutes?: number, trafficSpikeEnabled?: boolean, trafficSpikeMinUsers?: number,
  *     trafficSpikeMultiplier?: number, transientRecurrenceLimit?: number, userEscalationThreshold?: number } | null,
  *   telegram?: { botToken?: string, chatId?: string } | null }} PosthogWiringConfig */
+/** @typedef {{ isGit: boolean, cwd: string, branch?: string | null, base?: string | null, baseSha?: string | null }} PosthogWorkspace */
 /** @typedef {{
  *   create: (options: { projectPath: string, teamId: string, label: string, worktreeBase: string, baseBranch?: string | null, forkFromHead?: boolean }) =>
- *     Promise<{ isGit: boolean, cwd: string, branch: string, base: string, baseSha?: string } | null> |
- *     { isGit: boolean, cwd: string, branch: string, base: string, baseSha?: string } | null,
- *   discard: (options: { projectPath: string, workspace: {
- *     isGit: boolean, cwd: string, branch: string, base: string, baseSha?: string
- *   } }) => Promise<unknown> | unknown
+ *     Promise<PosthogWorkspace | null> | PosthogWorkspace | null,
+ *   discard: (options: { projectPath: string, workspace: PosthogWorkspace }) => Promise<unknown> | unknown
  * }} PosthogGitWorkspace */
 
 // PostHog issue ids reach the filesystem, a git branch name and the prompt, so they are reduced to a
@@ -425,7 +423,7 @@ function posthogPackNames(cfg) {
  *   getHookPort: (() => number | null) | null, spawnGate: { run: (callback: () => unknown) => Promise<unknown> },
  *   gitWorkspace?: PosthogGitWorkspace | null, runCommand?: typeof runCli,
  *   broadcast?: (message: Record<string, unknown>) => void,
- *   recordLane?: import('./ephemeral-session').RecordLane | null,
+ *   recordLane?: import('./ephemeral-session.ts').RecordLane | null,
  *   makeSession?: (options: ConstructorParameters<typeof Session>[0]) => InstanceType<typeof Session> }} options
  */
 function createPosthogWiring({

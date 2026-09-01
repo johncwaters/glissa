@@ -10,7 +10,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 
-const { awaitSessionExit, drainPending, raceWithAbort } = require('../server/ephemeral-session');
+const { awaitSessionExit, drainPending, raceWithAbort } = require('../server/ephemeral-session.ts');
 
 function deferred() {
   let resolve;

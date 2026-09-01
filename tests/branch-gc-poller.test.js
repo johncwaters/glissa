@@ -3,10 +3,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createBranchGcPoller } = require('../server/branch-gc-poller');
-const { createBranchGcWiring } = require('../server/branch-gc-wiring');
+const { createBranchGcPoller } = require('../server/branch-gc-poller.ts');
+const { createBranchGcWiring } = require('../server/branch-gc-wiring.ts');
 const { DAY_MS } = require('../server/core/branch-gc-core.ts');
-const { createGitWorkspace } = require('../server/git-workspace');
+const { createGitWorkspace } = require('../server/git-workspace.ts');
 
 const NOW_MS = Date.parse('2026-08-25T12:00:00Z');
 

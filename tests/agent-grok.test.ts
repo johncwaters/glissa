@@ -16,7 +16,7 @@ import {
   inspectGrokAgentSetup,
   ensureWritableHooksDirectory,
   replaceFileAtomically,
-} from "../server/agent-setup-cli.js";
+} from "../server/agent-setup-cli.ts";
 import { renderGrokHooksFile, classifyGrokHooksFile } from "../session/core/grok-hooks-file-core.ts";
 import { fakePty } from "./helpers/fake-pty.ts";
 import type { SessionOptions } from "../session/sessions.ts";
