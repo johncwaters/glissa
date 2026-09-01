@@ -1,6 +1,3 @@
-// One derivation of "where do my own files live", because the same module runs from two layouts: a dev
-// checkout (source .ts beside the package root) and the published package (bundled .js under dist/).
-
 import path from 'node:path';
 
 export interface RuntimePaths {
@@ -30,7 +27,7 @@ function findPackageRoot(startDirectory: string, hasPackageJson: (directory: str
   for (;;) {
     if (hasPackageJson(directory)) return directory;
     const parent = path.dirname(directory);
-    // No package.json anywhere above: fall back to the source-layout guess every call site used before.
+
     if (parent === directory) return path.resolve(startDirectory, '..');
     directory = parent;
   }

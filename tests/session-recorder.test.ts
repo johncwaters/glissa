@@ -1,10 +1,3 @@
-// Round-trip tests for session-recorder.js: write every record kind through
-// SessionRecorder, then read the JSONL file back and assert fidelity
-// (ordering, timestamp shape, payload contents).
-//
-// Recording is on by default in SIGNALS mode (hooks + state transitions, the forensic minimum);
-// raw PTY bytes are opt-in. See AGENTS.md, "Session Recording".
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -28,11 +21,6 @@ function findRecordingFile(baseDir: string, name: string) {
   return path.join(baseDir, entries[0]);
 }
 
-// SessionRecorder.close() calls stream.end() and immediately nulls the
-// stream reference; the underlying fs.WriteStream flush is asynchronous, so
-// a synchronous readdir/readFile right after close() races the actual
-// write. Capture the stream before closing and await its 'finish' event
-// (or resolve immediately when there is no stream, e.g. close-before-open).
 function closeAndFlush(recorder: SessionRecorder) {
   const stream = recorder._stream;
   if (!stream) {
@@ -174,7 +162,7 @@ test('close is idempotent and safe before open', async () => {
     recorder2.open();
     recorder2.writeData('x');
     await closeAndFlush(recorder2);
-    recorder2.close(); // second close must not throw
+    recorder2.close();
 
     const filepath = findRecordingFile(baseDir, 'idempotent-close-2');
     const records = readLines(filepath);
@@ -203,8 +191,6 @@ test('writes after close are silently dropped (no throw, file unchanged)', async
   }
 });
 
-// Signals mode: the default. The forensic records a detection post-mortem needs are kept; the
-// bulky ones are not written at all.
 test('signals mode records hooks and state transitions but no PTY bytes, input or resizes', async () => {
   const baseDir = makeBaseDir();
   try {
@@ -293,7 +279,6 @@ test('createRecorder honors a config-provided baseDir', async () => {
   }
 });
 
-// A constructed-but-never-started session (DORMANT at boot) must not touch the disk at all.
 test('no file is created until the first record is written', async () => {
   const baseDir = makeBaseDir();
   try {
@@ -312,13 +297,9 @@ test('createRecorder returns null only when both signals and capture are off', (
   assert.equal(createRecorder('s1', undefined, false), null);
 });
 
-// The forensic guarantee, end to end at the Session seam: the records that a detection
-// post-mortem reads (verbatim hook payloads + the transitions they caused) reach the file
-// without any capture opt-in.
 test('a live session records its hook payloads and transitions in signals mode', async (t) => {
   const baseDir = makeBaseDir();
-  // Mocked timers keep this at the detection seam: real ones would also let the debounced
-  // post-turn worktree check fire against this repo.
+
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   try {
     const recorder = new SessionRecorder({ name: 'live-session', baseDir });
@@ -332,9 +313,9 @@ test('a live session records its hook payloads and transitions in signals mode',
       event: 'Stop',
       payload: { session_id: 'abcd1234-0000-0000-0000-abcdabcdabcd', background_tasks: [] },
     });
-    t.mock.timers.tick(20); // past the conflict window: the ready resolves and transitions
+    t.mock.timers.tick(20);
     assert.equal(s.state, STATES.COMPLETE);
-    t.mock.timers.reset(); // the stream flush below needs real async
+    t.mock.timers.reset();
     await closeAndFlush(recorder);
     s.destroy();
 
@@ -386,7 +367,7 @@ test('retention keeps only the newest retainFiles recordings of THIS session', a
     fs.writeFileSync(otherSession, '{"type":"header"}\n');
 
     const recorder = new SessionRecorder({ name: 'capped', baseDir, retainDays: 0, retainFiles: 2 });
-    recorder.open(); // this is now the newest file, so 2 of the 3 older ones must go
+    recorder.open();
     await recorder.retentionDone;
     await closeAndFlush(recorder);
 

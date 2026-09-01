@@ -7,11 +7,6 @@ import { decideBindHost } from './core/remote-config.ts';
 import { buildTitleClearSequence, buildTitleSequence } from './core/terminal-title.ts';
 import { createLifecycle } from './server-lifecycle.ts';
 
-// Which address the listeners bind. Loopback unless GLISSA_HOST says otherwise, and a non-loopback
-// GLISSA_HOST is REFUSED unless GLISSA_INSECURE_BIND=1 states the intent: Glissa's control WebSocket
-// is unauthenticated and accepts an arbitrary project path plus dangerouslySkipPermissions, so a
-// listener reachable off-box is remote code execution as this account. Remote access is meant to go
-// through remote mode (a second, cookie-gated listener behind a reverse proxy), not a wider bind.
 const bind = decideBindHost({
   envHost: process.env.GLISSA_HOST,
   insecureBind: process.env.GLISSA_INSECURE_BIND === '1',
@@ -24,7 +19,6 @@ if (!bind.allowed) {
 
 const server = http.createServer();
 
-// A boot-gate refusal (e.g. an invalid remote block) is an operator message, not a stack trace.
 function isBootRefusal(error: unknown): error is Error {
   if (!(error instanceof Error)) return false;
   if (!('glissaBoot' in error)) return false;
@@ -61,11 +55,6 @@ function isPortInUse(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'EADDRINUSE';
 }
 
-// Single-instance guard. If another Glissa already holds the port, exit cleanly instead of crashing
-// with an unhandled listen error. This is the backstop against two backends running against the same
-// config.json + port (the per-process config self-write guard cannot dedup across processes, so two
-// instances would ping-pong reloads and respawn each other's sessions). A clean exit (no respawn)
-// means a stray menu restart can never bootstrap a second, invisible, looping instance.
 server.on('error', (err) => {
   if (isPortInUse(err)) {
     console.error(`Another Glissa is already running on port ${port} - exiting.`);
@@ -83,9 +72,6 @@ server.listen(port, bind.host, () => {
   }
 });
 
-// Remote mode: a SECOND listener serving the same app, where every request needs a paired device
-// cookie. It binds loopback too - a reverse proxy (tailscale serve) is the thing that faces the
-// network, so the cookie gate is the only trust boundary crossed, not the bind address.
 const remoteServers: Server[] = [];
 if (backend.remote.enabled) {
   const remoteServer = http.createServer();
@@ -105,19 +91,9 @@ if (backend.remote.enabled) {
   remoteServers.push(remoteServer);
 }
 if (!backend.remote.enabled) {
-  // The enabled case announces itself with its own listener line above; the disabled case has no
-  // listener to announce, so without this the log is silent about remote mode and an operator
-  // debugging "my phone cannot reach it" has nothing to read.
   console.log('Glissa remote mode is disabled (set remote.enabled in config.json to turn it on)');
 }
 
-// Route every termination signal through the same lifecycle path as the dashboard-triggered shutdown
-// (server/backend.ts wires an identical createLifecycle instance to the control WS "shutdown" message):
-// requestShutdown awaits the in-flight PTY reaps shutdown() started, then closes the listener with a
-// bounded fallback exit timer. The fallback matters because an open dashboard tab holds a live WS
-// connection, so httpServer.close()'s callback alone would never fire and the process would hang
-// forever on SIGINT/SIGTERM/SIGBREAK/SIGHUP. createLifecycle owns the single re-entry guard, so no
-// local shuttingDown flag is needed here.
 function exitWithClearedTerminalTitle(code?: number): never {
   writeTerminalTitle(buildTitleClearSequence());
   process.exit(code);

@@ -1,16 +1,6 @@
-// ── Theme management ─────────────────────────────────────────
-// Single source of truth for all colors. Themes are applied by
-// setting CSS custom properties on :root. The terminal theme is
-// derived from CSS variables at runtime.
-
 import { playNyanJingle } from './alert-sound.ts';
 import { startNyanCat, stopNyanCat } from './nyan-cat.ts';
 
-// ── Theme definitions ────────────────────────────────────────
-
-// The state and ANSI values the three dark themes agree on. Each spreads these and overrides only the
-// accent-adjacent keys, so a shared color can never drift between two of them. The light and unicorn
-// themes share nothing with these and stay literal.
 const BASE_STATE_COLORS = {
   '--state-running':      '#22c55e',
   '--state-running-bg':   'rgba(34, 197, 94, 0.06)',
@@ -274,8 +264,6 @@ const THEMES: Record<string, ThemeDefinition> = {
 
 const DEFAULT_THEME = 'phyrexian';
 
-// ── Application ──────────────────────────────────────────────
-
 let _currentThemeId: string | null = null;
 
 export function applyTheme(themeId: string) {
@@ -300,7 +288,6 @@ export function applyTheme(themeId: string) {
   stopNyanCat();
 }
 
-// Terminal values starting with '--' are resolved from the live CSS variables.
 export function getTerminalTheme(): Record<string, string> {
   const theme = THEMES[_currentThemeId || DEFAULT_THEME];
   if (!theme) return {};

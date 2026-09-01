@@ -1,23 +1,3 @@
-/*
- * Glissa Backend - Express + WebSocket server factory
- *
- * Control WebSocket additions:
- *   Client -> Server: { type: 'shutdown' }
- *   Server -> Client: { type: 'shutting-down' }
- *
- * Exports a single function `createBackend(httpServer, options)` that wires
- * Express middleware, control/data WebSocket servers, and session management
- * onto a provided HTTP server. Used by both:
- *   - server/main.ts (production: standalone HTTP server)
- *   - vite.config.ts (dev: attached to Vite's internal HTTP server)
- *
- * node-pty crash risk: Sessions spawn native PTY processes via node-pty.
- * If the Node process crashes without calling shutdown(), PTY child processes
- * may become orphaned. SIGINT handlers in server/main.ts and the Vite plugin
- * mitigate this for graceful exits, but unexpected crashes (segfault, OOM)
- * cannot be caught. This is a known limitation of node-pty.
- */
-
 import crypto from 'node:crypto';
 import type { Server } from 'node:http';
 import packageJson from '../package.json' with { type: 'json' };
@@ -56,16 +36,9 @@ interface CreateBackendOptions extends BackendLaneOptions {
   onRestart?: (() => void) | null;
 }
 
-/**
- * Create and wire the Glissa backend onto an existing HTTP server. `staticDir` 'auto' detects dist/ vs
- * public/ (production), null skips static serving entirely (Vite mode), and a string is an absolute
- * path to serve from.
- */
 function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
   const { staticDir = 'auto', settingsDefaults } = options;
 
-  // settingsDefaults is a per-launch fallback for keys config.json omits, never persisted (the dev
-  // server defaults debugMode on that way). Production passes nothing and behaves as before.
   const configStore = createConfigStore({ settingsDefaults });
   const { config } = configStore;
   const port = process.env.GLISSA_PORT
@@ -89,10 +62,6 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     listenerPortsFor,
   } = trust;
 
-  // What the connect snapshot tells the page about which backend it is talking to. A tab left open
-  // across a server update reconnects to frames its bundle may predate, so the client reloads when
-  // this changes (public/app.js). The boot id is what makes a same-version restart, and a dev rebuild,
-  // visible at all.
   const serverBuild = `${packageJson.version}+${crypto.randomBytes(4).toString('hex')}`;
 
   let broadcastControl: ControlBroadcast | null = null;
@@ -373,10 +342,6 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
   });
   updateCheck.start();
 
-  // attach() wires the SAME Express app and upgrade handler onto the remote listener's HTTP server.
-  // Sharing them is what makes the two listeners identical except for the trust classification, so a
-  // route can never exist on one and be forgotten on the other. The Vite dev plugin never calls it,
-  // which is why remote mode is inert in dev by design.
   return {
     shutdown,
     port,

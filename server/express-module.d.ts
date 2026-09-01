@@ -1,8 +1,3 @@
-// Minimal ambient typing for the `express` surface this repo's TypeScript touches. Express 5 ships no
-// declarations and @types/express is not a dependency, so this states exactly what is called here: the
-// app factory, the three mounts (use/get/post), express.static, and the request/response members the
-// routes read. The app doubles as a plain http request listener, which is how the remote listener
-// shares it.
 declare module "express" {
   import type { IncomingMessage, ServerResponse } from "node:http";
   import type { Socket } from "node:net";

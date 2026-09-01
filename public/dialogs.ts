@@ -1,5 +1,3 @@
-// Dialog factories that remain true overlays.
-
 import addSessionHTML from './components/add-session-dialog.html?raw';
 import { sendControlMsg, sendControlRequest } from './control-ws.ts';
 import { el, query, queryTag } from './dom-helpers.ts';

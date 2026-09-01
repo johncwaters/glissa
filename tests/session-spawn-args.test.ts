@@ -1,7 +1,3 @@
-// Verifies the team-stage Session options (initialPrompt / extraClaudeArgs / ephemeral) wire into
-// start()'s claudeArgs in the right ORDER, using the injected ptySpawn fake so no real process is
-// launched (a real spawn would keep the PTY alive and hang the runner, see docs/progress.txt learning).
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Session } from '../session/sessions.ts';
@@ -30,7 +26,7 @@ test('start() appends extraClaudeArgs then the initialPrompt as the final positi
   try {
     await s.start();
     assert.equal(calls.length, 1, 'spawned once');
-    // No hookRouter injected -> no --settings; so args are exactly skipPerms + extra + prompt.
+
     assert.deepEqual(calls[0].args, [
       '--dangerously-skip-permissions',
       '-p',
@@ -38,7 +34,7 @@ test('start() appends extraClaudeArgs then the initialPrompt as the final positi
       'sonnet',
       'STAGE PROMPT TEXT\nwith a newline',
     ]);
-    // The prompt is a single argv element (never word-split).
+
     assert.equal(calls[0].args[calls[0].args.length - 1], 'STAGE PROMPT TEXT\nwith a newline');
     assert.equal(s.toSnapshot().ephemeral, true);
   } finally {

@@ -1,6 +1,3 @@
-// The pure Mill report assembler: what each pack row says, how a delivery is judged stale, how a
-// drift check that could not run is reported, and which config keys are normalized into consumers.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { MillPackRow } from '../server/core/mill-core.ts';
@@ -8,8 +5,6 @@ import type { MillPackRow } from '../server/core/mill-core.ts';
 import { MAX_OUTPUT_ROWS, budgetPercent, buildMillReport, shortBuiltReason } from '../server/core/mill-core.ts';
 import { MAX_INDEX_TOKENS, MAX_PACKS_PER_SESSION, packConsumerGroups } from '../server/core/pack-core.ts';
 
-// The report takes the SAME source enumeration the build gate reads, so the fixtures go through
-// pack-core rather than hand-building the shape: a config key added there reaches these tests for free.
 function sourcesFor({ projects = [], prReview = null, posthog = null } = {}) {
   return packConsumerGroups({
     projects,
@@ -151,8 +146,6 @@ test('a delivery is stale only when the delivered version differs from a KNOWN b
   assert.equal(pack.staleDeliveries, 1);
   assert.equal(report.totals.staleDeliveries, 1);
 });
-
-// ---- Delivery rows are addressed per PROJECT, never per card ----
 
 const SIBLING_PROJECTS = [
   { id: 'p1', name: 'glissa', path: 'C:/repo', packs: ['house-rules'] },
@@ -501,8 +494,6 @@ test('a manifest with no token estimate reports null rather than a confident zer
   assert.equal(report.packs[0].built?.budgetPct, null);
   assert.equal(report.packs[0].built?.fileCount, 2, 'counts still read as counts');
 });
-
-// ---- Per-project variants: one row per derived pack, grouped under the spec it came from ----
 
 const GROUP_SPEC = validSpec({ name: 'memory', perProjectVariants: true, sources: [{ path: '{{glissaHome}}/m/{{projectSlug}}.md', data: true }] });
 

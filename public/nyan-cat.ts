@@ -1,9 +1,3 @@
-// ── Nyan cat easter egg ──────────────────────────────────────
-// Mounted only while the Rainbow Unicorns theme is active (see theme.js).
-// Each flight re-randomizes vertical position, duration, and gap so no
-// two runs look identical; the very first flight also gets a random
-// negative animation-delay so it can enter mid-flight.
-
 import { ANIMALS, pickAnimalIndex } from './nyan-animals.ts';
 
 const MIN_TOP_VH = 5;
@@ -13,7 +7,6 @@ const MAX_DURATION_S = 11.5;
 const MIN_GAP_MS = 4000;
 const MAX_GAP_MS = 20000;
 
-// topVh is biased toward the top of its range (product of two uniforms), not uniform.
 function pickFlight(rng: () => number = Math.random) {
   const topVh = MIN_TOP_VH + (MAX_TOP_VH - MIN_TOP_VH) * rng() * rng();
   const durationS = MIN_DURATION_S + rng() * (MAX_DURATION_S - MIN_DURATION_S);
@@ -26,7 +19,7 @@ let _el: HTMLDivElement | null = null;
 let _sprite: HTMLDivElement | null = null;
 let _trail: HTMLDivElement | null = null;
 let _timeoutId: number | null = null;
-let _lastAnimal = -1; // index into ANIMALS; -1 means no flight has run yet
+let _lastAnimal = -1;
 
 function launchFlight(isFirst: boolean) {
   if (!_el || !_sprite || !_trail) return;
@@ -52,7 +45,6 @@ function launchFlight(isFirst: boolean) {
   );
 }
 
-/** Mount the flying nyan cat overlay. Idempotent; no-ops under reduced motion. */
 export function startNyanCat() {
   if (_el) return;
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
@@ -73,7 +65,6 @@ export function startNyanCat() {
   launchFlight(true);
 }
 
-/** Remove the nyan cat overlay and cancel any pending flight. Safe if never started. */
 export function stopNyanCat() {
   if (_timeoutId !== null) {
     clearTimeout(_timeoutId);

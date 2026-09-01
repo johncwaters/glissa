@@ -104,12 +104,6 @@ function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values));
 }
 
-// ── Other vendors ──
-// Codex and Grok keep their transcripts in their own homes, in their own layouts. These build the
-// CANDIDATE roots; the scanner decides which exist, and a vendor whose home is absent contributes
-// nothing rather than erroring (unlike CLAUDE_CONFIG_DIR, which is an explicit claim that a dir exists).
-
-// The env override is comma-split like CLAUDE_CONFIG_DIR, so several homes can be scanned.
 function vendorHomes(
   env: NodeJS.ProcessEnv,
   varName: string,
@@ -132,8 +126,6 @@ function grokHomes(env: NodeJS.ProcessEnv = process.env, homeDir: string | null 
   return vendorHomes(env, 'GROK_HOME', '.grok', homeDir);
 }
 
-// ccusage's Codex root rule: sessions/ and archived_sessions/ when present, else the home itself as
-// a flat JSONL dir (a real ~/.codex also holds history.jsonl and plugin fixtures, which are not usage).
 function codexRootCandidates(homes: string[]): VendorRoot[] {
   const candidates: VendorRoot[] = [];
   for (const home of homes) {
@@ -148,22 +140,18 @@ function codexFallbackRoots(homes: string[], survivingRoots: VendorRoot[]): Vend
   return homes.filter((home) => !covered.has(home)).map((home) => ({ dir: home, kind: 'flat', home }));
 }
 
-// Grok stores one updates.jsonl per session under sessions/<encoded-cwd>/<session-id>/.
 function grokRootCandidates(homes: string[]): VendorRoot[] {
   return homes.map((home) => ({ dir: path.join(home, 'sessions'), kind: 'active', home }));
 }
 
 const GROK_USAGE_FILENAME = 'updates.jsonl';
 
-// Which files in a vendor's tree are usage at all. Grok is the narrow one: everything else in its
-// session dir is transcript detail we never read.
 function isUsageFile(vendor: string, fileName: unknown): boolean {
   if (typeof fileName !== 'string') return false;
   if (vendor === 'grok') return fileName === GROK_USAGE_FILENAME;
   return fileName.endsWith('.jsonl');
 }
 
-// ccusage's active-over-archived rule, keyed on basename: the active copy is still being appended to.
 function dedupeCodexFiles<T extends { file: string; kind: string }>(files: T[]): T[] {
   const byName = new Map<string, T>();
   for (const file of files) {
@@ -178,8 +166,6 @@ function dedupeCodexFiles<T extends { file: string; kind: string }>(files: T[]):
   return Array.from(byName.values());
 }
 
-// The Codex session id is the trailing uuid of a rollout file name; the basename is the fallback for
-// any other layout. Codex token_count lines carry no session id of their own.
 function codexSessionIdFromPath(filePath: unknown): string | null {
   const base = path.basename(String(filePath || ''), '.jsonl');
   const match = /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/.exec(base);

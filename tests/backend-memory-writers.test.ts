@@ -1,9 +1,3 @@
-// M13 of docs/plan-visions-3.md: with memory on, the Visions lane must actually HOLD the store, which is
-// only true because the store is now constructed above the lane in backend.ts.
-//
-// SAFETY: the boot points at a throwaway temp config with ZERO projects via GLISSA_CONFIG, like every
-// other backend boot test (the boot worktree reconcile would otherwise touch real repos).
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -30,7 +24,7 @@ async function bootWithConfig(extra: Record<string, unknown>): Promise<BootedBac
   fs.writeFileSync(configPath, JSON.stringify({ ...base, ...extra }, null, 2), 'utf8');
   const previousConfig = process.env.GLISSA_CONFIG;
   process.env.GLISSA_CONFIG = configPath;
-  // memory.enabled implies the agent-log source, so the vendor homes go somewhere empty first.
+
   const restoreHomes = isolateTranscriptHomes(dir);
   const server = http.createServer();
   const backend = createBackend(server, { staticDir: null });

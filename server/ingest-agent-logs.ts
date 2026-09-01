@@ -1,22 +1,3 @@
-/*
- * Agent-log ingest source, IO shell (docs/plan-ingestion.md, M7). It tails the local AI agent CLIs'
- * own transcripts (Claude Code, Codex, Grok) and publishes one summarized event per completed turn or
- * tool call. Nothing here decides what a line means: that is ingest-agent-core.js, and where the next
- * read starts is ingest-tail-core.js.
- *
- * Watchers are lossy WAKEUPS, never truth (the repo's standing invariant): a 2s stat poll over the
- * active files is the correctness floor under Windows write-event coalescing, and a slower directory
- * sweep is what finds a transcript nobody was watching for yet.
- *
- * Every tail starts at end of file, so a daemon restart replays nothing: the rings carry recent
- * activity, and a project directory here can hold hundreds of megabytes of finished conversations.
- *
- * SCALE is the constraint that shapes the sweep. A real projects root holds hundreds of directories and
- * thousands of finished transcripts, so no pass here may cost one stat per transcript: a directory is
- * listed only when its mtime moved or has yet to settle, and a FILE is promotion-checked only once,
- * because an append moves neither. Anything that walks the whole tree every sweep starves the live
- * session it exists to find.
- */
 
 import fsNode from 'node:fs';
 import os from 'node:os';
@@ -45,8 +26,6 @@ const DEFAULT_DISCOVER_MS = 30000;
 const DEFAULT_ACTIVE_WITHIN_MS = 10 * 60 * 1000;
 const WATCH_POLL_DEBOUNCE_MS = 100;
 const WATCH_SWEEP_DEBOUNCE_MS = 500;
-// A Codex rollout names its cwd only in the session_meta and turn_context lines at its head, and the
-// first of those carries the whole system prompt, so the bounded head read has to clear that.
 const CODEX_HEAD_BYTES = 128 * 1024;
 
 interface TranscriptRoot {
@@ -96,7 +75,6 @@ interface TailSnapshot {
 
 interface AgentLogConsumer {
   name?: string;
-  // A tail-less publish is a real case: the memory consumer is also driven directly, with no file behind it.
   publish: (event: AgentIngestEvent, tail: TailSnapshot | null) => unknown;
   noteTail?: (entry: TailSnapshot) => void;
   userPrompts?: boolean;
@@ -109,15 +87,12 @@ interface AgentLogTarget {
   userPrompts: boolean;
 }
 
-// The three fs calls this source makes, stated as the shapes it makes them in: a test wrapping one of
-// them owes those, not the whole overloaded fs.promises surface.
 interface TranscriptFileSystem {
   open(filePath: string, flags: 'r'): Promise<fsNode.promises.FileHandle>;
   stat(target: string): Promise<fsNode.Stats>;
   readdir(dir: string, options: { withFileTypes: true }): Promise<fsNode.Dirent[]>;
 }
 
-// What this source needs off a directory watcher: closing it, and hearing that it failed.
 interface DirectoryWatcher {
   close: () => void;
   on?: (event: string, listener: () => void) => unknown;
@@ -132,8 +107,6 @@ interface AgentLogIngestOptions {
   env?: NodeJS.ProcessEnv;
   homeDir?: string;
   fsPromises?: TranscriptFileSystem;
-  // The one call shape this source makes, and the two members it reads off the handle, so a test can
-  // inject a watcher without implementing FSWatcher.
   watchFn?: (
     dir: string,
     options: { persistent: boolean },
@@ -167,7 +140,6 @@ function unrefTimer(timer: NodeJS.Timeout): NodeJS.Timeout {
   return timer;
 }
 
-// Grok encodes the session's cwd into its directory name with percent-escapes, which decode exactly.
 function decodeGrokRoot(name: string): string {
   try {
     return decodeURIComponent(name);
@@ -184,13 +156,10 @@ function sessionIdFromPath(vendor: string, dir: string, filePath: string): strin
 
 function rootFromPath(vendor: string, dir: string): string | null {
   if (vendor === 'grok') return decodeGrokRoot(path.basename(path.dirname(dir)));
-  // A Claude line carries its own cwd; the raw transcript directory stands in until one arrives.
   if (vendor === 'claude') return dir;
   return null;
 }
 
-// Codex nests its rollouts under date directories that name no project, so the cwd is read once from
-// the head of the file. Without it every event of a session joined mid-file would be machine scope.
 async function readCodexRoot(filePath: string, fsPromises: TranscriptFileSystem = fsNode.promises): Promise<string | null> {
   let handle: FileHandle | null = null;
   try {
@@ -219,11 +188,6 @@ async function readCodexRoot(filePath: string, fsPromises: TranscriptFileSystem 
   }
 }
 
-/**
- * Every transcript root the usage lane already knows how to resolve, reused rather than re-derived so the
- * two lanes can never disagree about where a vendor keeps its sessions. Pure: it names candidates, and
- * the caller decides which of them exist.
- */
 function transcriptRootCandidates(
   env: NodeJS.ProcessEnv = process.env,
   wanted: Record<string, boolean> = {},
@@ -234,11 +198,6 @@ function transcriptRootCandidates(
     candidates.push({ vendor: 'claude', dir: claudeProjectsDir(env, homeDir), maxDepth: 1 });
   }
   if (wanted.codex !== false) {
-    /*
-     * The active sessions root only. An archived rollout is a session Codex already finished moving
-     * away, so it can never append, and skipping it also removes the active-over-archived dedupe the
-     * usage lane needs and this one does not.
-     */
     for (const candidate of codexRootCandidates(codexHomes(env, homeDir))) {
       if (candidate.kind !== 'active') continue;
       candidates.push({ vendor: 'codex', dir: candidate.dir, home: candidate.home, maxDepth: 3 });
@@ -254,7 +213,6 @@ function transcriptRootCandidates(
 
 function createAgentLogIngest({
   publish = null,
-  // The M14 fan-out: every target sees the MAPPED event, and user prompts reach only the targets that asked.
   consumers = [],
   sourceConfig = {},
   laneMap = null,
@@ -273,8 +231,6 @@ function createAgentLogIngest({
   activeWithinMs = DEFAULT_ACTIVE_WITHIN_MS,
   maxActiveFiles = 32,
   maxTrackedFiles = 256,
-  // Generous on purpose: evicting a listing costs a re-stat of every file in it, so this is a guard
-  // against pathological growth rather than a working set. A real projects root sits well inside it.
   maxCachedDirs = 4096,
   maxWatchedDirs = 48,
   maxScanDirs = 2000,
@@ -302,8 +258,6 @@ function createAgentLogIngest({
   const tails = new Map<string, TailState>();
   const contexts = new Map<string, TranscriptContext>();
   const active = new Set<string>();
-  // Untracked files a watcher named by a `change` event: the one path back for a transcript that was
-  // already quiet when its directory was last listed, since an append moves no directory mtime.
   const probes = new Set<string>();
   const dirCache = new Map<string, CachedDir>();
   const watchers = new Map<string, DirectoryWatcher>();
@@ -313,14 +267,11 @@ function createAgentLogIngest({
   let sweepTimer: NodeJS.Timeout | null = null;
   let running = false;
   let disabled = false;
-  // In-flight guards that HAND BACK the running pass rather than dropping the call, so a watcher wakeup
-  // arriving mid-sweep still resolves after the work it asked for is done.
   let drainInFlight: Promise<void> | null = null;
   let sweepInFlight: Promise<void> | null = null;
   let startPromise: Promise<void> | null = null;
   let watchSupportChecked = false;
 
-  // Every pass re-reads this after each await: stop() must not be undone by work already in flight.
   function alive(): boolean {
     return running && !disabled;
   }
@@ -331,7 +282,6 @@ function createAgentLogIngest({
     try {
       watcher.close();
     } catch {
-      // A watcher whose directory already vanished is closed enough.
     }
   }
 
@@ -356,8 +306,6 @@ function createAgentLogIngest({
     dirCache.clear();
   }
 
-  // One logged warning and the source goes quiet; the lane and every other source keep running, and a
-  // restart re-arms everything (docs/plan-ingestion.md, "Adapter failure").
   function disable(reason: string): void {
     if (disabled) return;
     disabled = true;
@@ -375,7 +323,6 @@ function createAgentLogIngest({
     }
   }
 
-  // --- Roots ---------------------------------------------------------------
 
   async function statOrNull(target: string): Promise<fsNode.Stats | null> {
     try {
@@ -396,7 +343,6 @@ function createAgentLogIngest({
       roots.push(candidate);
     }
     if (wanted.codex === false) return roots;
-    // ccusage's own fallback: a Codex home with no sessions/ directory keeps its rollouts flat.
     for (const home of codexHomes(env, homeDir)) {
       if (codexHomesCovered.has(home)) continue;
       const stat = await statOrNull(home);
@@ -407,7 +353,6 @@ function createAgentLogIngest({
     return roots;
   }
 
-  // --- Bookkeeping ---------------------------------------------------------
 
   function forgetFile(filePath: string): void {
     tails.delete(filePath);
@@ -423,7 +368,6 @@ function createAgentLogIngest({
     for (const name of cached.files) forgetFile(path.join(dir, name));
   }
 
-  // --- Discovery -----------------------------------------------------------
 
   async function listDir(dir: string, vendor: string): Promise<DirListing | null> {
     let entries: fsNode.Dirent[];
@@ -446,13 +390,6 @@ function createAgentLogIngest({
     return { dirs, files };
   }
 
-  /**
-   * Fold a fresh listing into the cache. `pending` is the load-bearing field: only names never
-   * promotion-checked before (or left over from an exhausted budget) go in it, so a directory of four
-   * hundred finished transcripts is paid for ONCE rather than on every sweep, and a directory whose
-   * pending list is empty is skipped entirely. Names that disappeared are forgotten here, which is also
-   * how a deleted transcript stops costing a stat every poll.
-   */
   function cacheListing(
     dir: string,
     root: TranscriptRoot,
@@ -496,8 +433,6 @@ function createAgentLogIngest({
     if (depth >= root.maxDepth) return remaining;
     let left = remaining;
     for (const name of cached.dirs) {
-      // The shape half of the feedback-loop exclusion: a dispatch workdir's transcripts are never even
-      // listed, so they cost no stat, no watcher and no tail even when the ledger has not heard of them.
       if (isDispatchWorkdir(name)) continue;
       left = await walk(root, path.join(dir, name), depth + 1, found, left);
       if (!alive()) return left;
@@ -506,16 +441,6 @@ function createAgentLogIngest({
   }
 
 
-  /*
-   * Feedback-loop exclusion, primary mechanism: the usage-lane ledger (server/usage-lane-ledger.js).
-   * A Claude session id Glissa RECORDED spawning under one of its own ephemeral lanes never publishes,
-   * or visions dispatch output would re-enter the next visions prompt. The ledger is primary rather
-   * than the throwaway-workdir shape because it is the only one that separates the in-place PR-review
-   * lane, which runs in the operator's real project directory, from the operator's own work in that
-   * same directory; isDispatchWorkdir is the independent second layer for when the ledger has not heard.
-   */
-  // The ledger map is keyed by the vendor-namespaced composite (M5), so the lookup builds the same key
-  // from this transcript's vendor and session id.
   function isEphemeralLane(lanes: Map<string, string> | null, vendor: string, sessionId: string | null): boolean {
     if (!lanes || !sessionId) return false;
     const lane = lanes.get(laneKey(vendor, sessionId));
@@ -548,11 +473,6 @@ function createAgentLogIngest({
     active.add(filePath);
   }
 
-  /**
-   * One promotion check per file, ever. Each name is taken off `pending` as it is checked, so a
-   * directory that exhausts the sweep's stat budget resumes where it stopped instead of restarting and
-   * starving every directory below it.
-   */
   async function promoteDir(entry: FoundDir, statBudget: number, lanes: Map<string, string> | null): Promise<number> {
     const { cached } = entry;
     let budget = statBudget;
@@ -574,7 +494,6 @@ function createAgentLogIngest({
 
   function installWatch(dir: string): DirectoryWatcher | null {
     try {
-      // Watched spelling only: an 8.3 short path aborts node in native code (shared/paths.js); `dir` keeps keying tails and listings.
       const watcher = watchFn(canonicalizePath(dir), { persistent: false }, (eventType, filename) => {
         onWatchEvent(dir, eventType, filename);
       });
@@ -583,8 +502,6 @@ function createAgentLogIngest({
       }
       return watcher;
     } catch {
-      // A directory that vanished between the sweep and the watch is routine, and the poll still covers
-      // every file already tracked inside it.
       return null;
     }
   }
@@ -604,11 +521,8 @@ function createAgentLogIngest({
       if (!watcher) continue;
       watchers.set(dir, watcher);
     }
-    // Nothing to watch is not evidence about watching, so the support check waits for a real attempt.
     if (watchSupportChecked || keep.size === 0) return;
     watchSupportChecked = true;
-    // Every directory refusing a watch is a platform-level watcher failure rather than a vanished path,
-    // and the plan disables the source instead of degrading to a mode nobody asked for.
     if (watchers.size === 0) throw new Error('no transcript directory could be watched');
   }
 
@@ -616,11 +530,6 @@ function createAgentLogIngest({
     for (const dir of pickStaleByMtime(dirCache, { maxTracked: maxCachedDirs })) dirCache.delete(dir);
   }
 
-  /**
-   * The one path back for a tail evicted from the active set, or for a transcript already quiet when
-   * its directory was last listed. Bounded by the tracked set, which is itself bounded, and cheap in
-   * practice because a machine with a live session has almost nothing quiet and tracked.
-   */
   async function refreshQuietTails(statBudget: number): Promise<number> {
     let budget = statBudget;
     const now = nowFn();
@@ -633,11 +542,6 @@ function createAgentLogIngest({
       if (!alive()) return budget;
       if (!stat) continue;
       if (!isActiveMtime(stat.mtimeMs, { now, withinMs: activeWithinMs })) continue;
-      /*
-       * Take the fresh mtime onto the state. Only applyRead advances it otherwise, so a re-activated
-       * tail would still rank as the oldest thing tracked and the size cap would evict it again on the
-       * same pass, which is re-activation that never actually reaches a drain.
-       */
       const reactivated = tails.get(filePath);
       if (reactivated) reactivated.mtimeMs = stat.mtimeMs;
       active.add(filePath);
@@ -675,7 +579,6 @@ function createAgentLogIngest({
     return sweepInFlight;
   }
 
-  // --- Tailing -------------------------------------------------------------
 
   async function readRange(filePath: string, start: number, length: number): Promise<{ text: string; end: number } | null> {
     let handle: FileHandle | null = null;
@@ -685,15 +588,12 @@ function createAgentLogIngest({
       const { bytesRead } = await handle.read(buffer, 0, length, start);
       return { text: buffer.subarray(0, bytesRead).toString('utf8'), end: start + bytesRead };
     } catch {
-      // A transcript deleted or momentarily locked mid-read leaves the offset where it was, so the next
-      // poll retries the same bytes rather than skipping them.
       return null;
     } finally {
       if (handle) await handle.close().catch(() => {});
     }
   }
 
-  // A throwing target must not reach the source's guard, which would read it as a platform failure.
   function deliver(event: AgentIngestEvent, tail: TailSnapshot): void {
     for (const target of targets) {
       if (event.kind === PROMPT_KIND && !target.userPrompts) continue;
@@ -716,7 +616,6 @@ function createAgentLogIngest({
     }
   }
 
-  // What a durable-offset consumer needs to resume this file: the identity keys plus where the read ended.
   function tailSnapshot(filePath: string, context: TranscriptContext, state: TailState): TailSnapshot {
     return {
       path: filePath,
@@ -735,8 +634,6 @@ function createAgentLogIngest({
     if (!context || !state) return;
     const bound = positiveInt(maxLinesPerDrain, 200);
     const recent = lines.slice(-bound);
-    // The offset already moved past them, so a silent drop would be an invisible hole; the note rides
-    // the first surviving event exactly as the terminal source's truncation note rides its flush.
     let droppedLines = lines.length - recent.length;
     for (const rawLine of recent) {
       const mapped = mapAgentLine({
@@ -753,11 +650,6 @@ function createAgentLogIngest({
       if (isEphemeralLane(lanes, context.vendor, context.sessionId)) continue;
       if (isDispatchWorkdir(context.root)) continue;
       for (const event of mapped.events) {
-        /*
-         * agentLogs never publishes machine scope. A null root reads as "belongs to no project" in the
-         * digest, which is the shellHistory contract, and a rootless agent event would be labelled wrong
-         * AND admitted into every project's filtered digest.
-         */
         if (!event.scope.root) continue;
         if (droppedLines > 0) {
           event.summary = `${event.summary} [${droppedLines} earlier lines dropped]`;
@@ -769,8 +661,6 @@ function createAgentLogIngest({
     }
   }
 
-  // A transcript whose stat fails and whose directory listing no longer names it is gone for good; a
-  // stat that merely failed against a live listing is a momentary lock and keeps its offset.
   function forgetIfDeleted(filePath: string): void {
     const cached = dirCache.get(path.dirname(filePath));
     if (!cached) return;
@@ -781,7 +671,6 @@ function createAgentLogIngest({
   function resetContext(filePath: string): void {
     const context = contexts.get(filePath);
     if (!context) return;
-    // The file at this path is a different file now, so the root and session it revealed go with it.
     context.root = rootFromPath(context.vendor, context.dir);
     context.sessionId = sessionIdFromPath(context.vendor, context.dir, filePath);
   }
@@ -814,15 +703,9 @@ function createAgentLogIngest({
     if (lines.length === 0) return;
     publishLines(filePath, lines, lanes);
     const context = contexts.get(filePath);
-    // After the events, so a consumer that defers its offset until its own writes land has already seen them.
     if (context) noteTail(tailSnapshot(filePath, context, state));
   }
 
-  /*
-   * A file leaves the active set only on the SIZE cap, never on going quiet. Dropping a quiet tail was
-   * the idle-session-then-prompt bug: a session left alone past the window would never publish again,
-   * which is the ordinary way a carbon unit works.
-   */
   function evictStale(): void {
     for (const filePath of pickStaleByMtime(tails, { maxTracked: maxTrackedFiles })) forgetFile(filePath);
     const bound = Math.max(1, Math.floor(maxActiveFiles));
@@ -850,7 +733,6 @@ function createAgentLogIngest({
   }
 
   async function drainOnce(): Promise<void> {
-    // One ledger read per drain, never one per line: laneMap rebuilds its Map on every call.
     const lanes = currentLanes();
     await drainProbes(lanes);
     for (const filePath of [...active]) {
@@ -865,7 +747,6 @@ function createAgentLogIngest({
     return drainInFlight;
   }
 
-  // --- Lifecycle -----------------------------------------------------------
 
   function noteProbe(dir: string, filename: unknown): void {
     if (typeof filename !== 'string' || !filename) return;
@@ -877,11 +758,6 @@ function createAgentLogIngest({
     probes.add(filePath);
   }
 
-  /**
-   * A watch event is a wakeup, and its TYPE decides how expensive a wakeup. Only `rename` can mean a
-   * transcript appeared or vanished, so only `rename` schedules a sweep; a plain append fires `change`
-   * on Windows, and letting that drive a full sweep put one live session on a tree walk every 500ms.
-   */
   function onWatchEvent(dir: string, eventType: string, filename: string | Buffer | null): void {
     if (!alive()) return;
     if (eventType !== 'rename') noteProbe(dir, filename);
@@ -898,8 +774,6 @@ function createAgentLogIngest({
     }, WATCH_SWEEP_DEBOUNCE_MS));
   }
 
-  // Hands back the FIRST sweep on a repeat call rather than a resolved promise, so a caller that only
-  // holds the lane can still wait for discovery to have happened.
   function start(): Promise<void> {
     if (startPromise) return startPromise;
     if (disabled) return Promise.resolve();
@@ -913,8 +787,6 @@ function createAgentLogIngest({
     return startPromise;
   }
 
-  // Returns a promise so a caller that wants a settled teardown can await it; the guards above are what
-  // actually stop an in-flight pass from repopulating anything, and this clears again once both land.
   function stop(): Promise<void> {
     running = false;
     startPromise = null;
@@ -932,7 +804,6 @@ function createAgentLogIngest({
     name: 'agentLogs',
     start,
     stop,
-    // Driven directly by the tests, which need a deterministic sweep and drain rather than a timer race.
     discover: () => runGuarded(discover),
     poll: () => runGuarded(poll),
     get isDisabled() { return disabled; },

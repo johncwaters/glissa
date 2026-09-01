@@ -1,9 +1,3 @@
-// Visions is one switch, so enabling it implies the lanes it needs rather than seven more toggles. The
-// implied blocks are WRITTEN rather than derived at read time, or the dashboard would show sources off
-// while they ran. Anything the operator already set, true or false, is never touched.
-
-// Movement signals only. Terminal output and shell history are captured PROSE, so they stay opt-in: an
-// implied default may widen what a lane watches, never what it records.
 const IMPLIED_INGEST = Object.freeze({
   enabled: true,
   sources: Object.freeze({
@@ -23,7 +17,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-// Per SOURCE: an ingest block predating a source would otherwise leave that source off forever.
 function impliedIngestChanges(config: Record<string, unknown>): ImpliedChange[] {
   if (!isPlainObject(config.ingest)) {
     return [{ path: ['ingest'], value: JSON.parse(JSON.stringify(IMPLIED_INGEST)), why: 'visions needs machine context' }];

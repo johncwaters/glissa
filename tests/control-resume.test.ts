@@ -1,8 +1,3 @@
-// Control-WS dispatch for the per-card resume binding: resume-conversation persists resumeSessionId on
-// the project record, sets it on the live Session, and broadcasts/acks. Validation rejects unsafe ids.
-// (The list-conversations handler shells out to git + reads ~/.claude and is covered at the discovery
-// layer in conversation-history.test.ts, so it is not re-exercised here.)
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -29,7 +24,7 @@ function harness(sessions: Map<string, Session>, config: GlissaConfig) {
     broadcastControl: (message) => { broadcasts.push(message); },
   }));
   const connection = connectControl<ResumeFrame>(server);
-  connection.sent.length = 0; // drop the connect preamble
+  connection.sent.length = 0;
   return { send: connection.send, sent: connection.sent, broadcasts, saveCalls };
 }
 

@@ -25,8 +25,7 @@ const SNAPSHOT_FIELDS = Object.freeze([
 ]);
 
 type ModelTable = Record<string, Record<string, unknown>>;
-// The three calls this module makes, rather than a Pick of the overloaded fs/promises signatures, so
-// the seam can take a double.
+
 interface PricingFileSystem {
   readFile: (filePath: string, encoding: 'utf8') => Promise<string>;
   mkdir: (dirPath: string, options: { recursive: true }) => Promise<string | undefined>;
@@ -54,7 +53,6 @@ interface LoadPricingOptions {
   logger?: Pick<Console, 'warn'> | null;
 }
 
-// Only providers the snapshot covers get through a fetch; Grok is absent on purpose (it prices itself).
 const FETCH_PROVIDERS = new Set(['anthropic', 'openai']);
 
 function errorMessage(error: unknown): string {

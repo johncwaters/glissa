@@ -1,9 +1,3 @@
-// The `vscode` namespace is an argument rather than a require, so these run under node:test against a
-// stub (tests/helpers/vscode-stub.js); the extension host is the one runtime the suite cannot boot.
-//
-// Authored CommonJS-style on purpose: `server/visions-setup.ts` strips the types and packs the result
-// under the .js name the extension host loads, and that host has no ESM loader and no type stripping.
-
 interface VscodePosition {
   line: number;
   character: number;
@@ -163,8 +157,6 @@ function toCodeActions(vscodeApi: VscodeApi, actions: unknown): VscodeCodeAction
   return actions.map((action) => toCodeAction(vscodeApi, action));
 }
 
-// A versioned edit answers for the buffer it was computed from, so a stale one is REFUSED rather than
-// landing on text the carbon unit has since typed into (`server/core/visions-fix-core.ts`).
 function decideEditFreshness(edit: LspWorkspaceEdit | null | undefined, versionOfUri: VersionLookup): EditFreshness {
   const changes = documentChangesOf(edit);
   if (changes.length === 0) return { fresh: false, reason: 'no-document-changes' };

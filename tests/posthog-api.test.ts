@@ -29,7 +29,6 @@ function urlAt(calls: string[], index: number): string {
   return url;
 }
 
-// A refusal carries a status only when the transport answered at all, so a suite reading one says so.
 function refusalStatus(res: PosthogResponse): number | undefined {
   return 'status' in res ? res.status : undefined;
 }
@@ -48,7 +47,6 @@ function sentBody(init: RequestInit | undefined): Record<string, unknown> {
   return parsed;
 }
 
-// The HogQL request body: { query: { kind, query } }.
 function hogqlQuery(init: RequestInit | undefined): { kind: unknown; query: string } {
   const { query } = sentBody(init);
   if (!isRecord(query)) throw new Error('the request carried no query block');
@@ -57,13 +55,10 @@ function hogqlQuery(init: RequestInit | undefined): { kind: unknown; query: stri
   return { kind, query: sql };
 }
 
-// queryTrafficBuckets answers buckets on success and a refusal otherwise.
 function trafficOf(res: TrafficBuckets | PosthogResponse): TrafficBuckets {
   if (!('buckets' in res)) throw new Error('the traffic query was refused');
   return res;
 }
-
-// --- normalizeIssue: the shapes the query endpoint is known to return, plus defensive fallbacks ---
 
 test('normalizeIssue maps a plain object row with nested aggregations', () => {
   const issue = normalizeIssue({
@@ -133,8 +128,6 @@ test('normalizeIssues returns [] for an unusable body', () => {
   assert.deepEqual(normalizeIssues({ nope: true }), []);
 });
 
-// --- parseSpikeIssueIds ---
-
 test('parseSpikeIssueIds keeps only events newer than sinceTs', () => {
   const since = Date.parse('2026-08-09T12:00:00Z');
   const ids = parseSpikeIssueIds({
@@ -151,9 +144,6 @@ test('parseSpikeIssueIds reads the id out of event properties', () => {
   assert.deepEqual([...ids], ['p1']);
 });
 
-// A row must PROVE it is fresh. Keeping undatable rows meant an unexpected endpoint shape spiked
-// every issue on every tick: a Telegram ping plus a fresh Claude investigation, every interval,
-// forever.
 test('parseSpikeIssueIds drops a row with an unparseable timestamp', () => {
   const ids = parseSpikeIssueIds({ results: [{ issue_id: 'x', timestamp: 'not-a-date' }] }, Date.now());
   assert.equal(ids.size, 0);
@@ -169,9 +159,6 @@ test('parseSpikeIssueIds returns an empty set for an unusable body', () => {
   assert.equal(parseSpikeIssueIds({ results: 'nope' }, 0).size, 0);
 });
 
-// --- createPosthogApi: request shape, happy path, error paths (fetchFn injected, no network) ---
-
-// A real Response, so the api's ok probe, status read and text parse run against the shape fetch returns.
 function fakeResponse({ status = 200, body = {} }: { ok?: boolean; status?: number; body?: unknown } = {}): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
@@ -243,8 +230,6 @@ test('listProjects builds the organization-scoped path', async () => {
   assert.equal(urlAt(calls, 0), 'https://eu.posthog.com/api/organizations/org-1/projects/');
 });
 
-// --- updateIssueStatus: the lane's ONE write (Radar's resolve/suppress row actions) ---
-
 test('updateIssueStatus PATCHes the issue endpoint with the status body', async () => {
   const calls: FetchCall[] = [];
   const api = createPosthogApi({
@@ -295,8 +280,6 @@ test('updateIssueStatus survives a transport error', async () => {
   assert.equal(res.ok, false);
   assert.match(res.error, /ECONNRESET/);
 });
-
-// --- queryTrafficBuckets: the traffic spike lane's two read-only HogQL queries ---
 
 function trafficFetch(calls: FetchCall[], bodies: unknown[]): typeof fetch {
   return async (input, init) => {

@@ -1,10 +1,6 @@
 import net from 'node:net';
 import type { Server } from 'node:net';
 
-// listen/address/close are callback APIs whose results are wider than a test ever wants: address()
-// answers AddressInfo | string | null, and listen's callback takes no arguments a Promise executor can
-// hand it. Every backend suite needs the same three lines, so they live here once.
-
 function boundPort(server: Server): number {
   const address = server.address();
   if (address === null || typeof address === 'string') {
@@ -25,8 +21,6 @@ function closeServer(server: Server): Promise<void> {
   });
 }
 
-// A port the OS just handed out and immediately released. Remote mode decides trust by comparing
-// req.socket.localPort against the CONFIGURED remote port, so that port has to be known before boot.
 function reserveFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const probe = net.createServer();

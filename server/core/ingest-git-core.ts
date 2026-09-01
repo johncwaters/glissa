@@ -1,15 +1,3 @@
-/*
- * Pure core of the git ingest source (docs/plan-ingestion.md, M8): the git argument vectors, porcelain
- * v2 and one-line-log parsing, the watch-set derivation, the working-tree signature, and the decision of
- * which single event a settled repo owes. No IO, no timers, no clock: the shell hands in stdout and a
- * `now` and gets a verdict back.
- *
- * The SIGNATURE is the load-bearing piece. Watchers say look again and the owner recomputes (the repo's
- * standing invariant), so a `.git` write burst, the 60s poll and a linked worktree's own churn all funnel
- * into the same recompute; without a signature to compare against, each of those paths would publish the
- * same unchanged working tree again. Since M7.5 every published event is also the Visions lane's movement
- * signal, so a no-op event costs dispatch budget, not just a ring slot.
- */
 
 import crypto from 'node:crypto';
 import path from 'node:path';
@@ -17,8 +5,6 @@ import { SOURCE_DEFAULTS } from './ingest-core.ts';
 
 const SOURCE = 'git';
 
-// The config resolver owns these numbers; re-exporting them here keeps the shell's direct-construction
-// fallback from ever drifting from what a resolved config carries.
 const DEFAULT_DEBOUNCE_MS = SOURCE_DEFAULTS.git.debounceMs;
 const DEFAULT_POLL_MS = SOURCE_DEFAULTS.git.pollMs;
 
@@ -73,31 +59,13 @@ export interface GitLayout {
   commonDir: string;
 }
 
-/*
- * One resolve spawn answers every layout question: where the working tree starts, which gitdir holds THIS
- * checkout's HEAD and index (a linked worktree keeps its own under `worktrees/<name>`), and which common
- * dir holds the shared refs. rev-parse emits one line per option, in the order the options were given.
- */
 const REV_PARSE_ARGS = Object.freeze(['rev-parse', '--show-toplevel', '--absolute-git-dir', '--git-common-dir']);
 
-/*
- * `--no-optional-locks` is the whole reason the reader cannot chase its own tail: a plain `git status`
- * refreshes and REWRITES `.git/index`, which is a file this source watches, so every read would wake the
- * next one. It is also VS Code's own git-extension flag, the prior art this plan names.
- */
 const STATUS_ARGS = Object.freeze(['--no-optional-locks', 'status', '--porcelain=v2', '--branch']);
 
-// ASCII unit separator, built rather than typed (house rule on literal control characters). Any printable
-// subject survives it, which a space or a pipe would not.
 const LOG_FIELD_SEPARATOR = String.fromCharCode(31);
 const LOG_ARGS = Object.freeze(['log', '-1', '--no-color', '--format=%H%x1f%an%x1f%at%x1f%s']);
 
-/*
- * A commit subject is `%s`, which is one line already, so this trims and nothing else. It deliberately
- * does NOT slice: a cut taken before the publish-time scrub can split a quoted secret out of its closing
- * quote and publish the rest of the value as innocent words (docs/plan-ingestion.md, M11), and the ring's
- * own 400-char bound already slices the composed summary AFTER the scrub has seen it whole.
- */
 function commitSubject(text: unknown): string {
   return String(text == null ? '' : text).trim();
 }
@@ -107,12 +75,7 @@ function shortSha(sha: unknown): string | null {
   return sha.slice(0, SHORT_SHA_CHARS);
 }
 
-// --- Layout ---------------------------------------------------------------
 
-/**
- * The three rev-parse lines, absolute. git prints POSIX separators even on Windows and `--git-common-dir`
- * may come back relative to the cwd it ran in, so both are resolved against that cwd rather than trusted.
- */
 function parseRevParse(stdout: unknown, cwd: string | null | undefined): GitLayout | null {
   const lines = String(stdout || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   if (lines.length < 3) return null;
@@ -125,13 +88,6 @@ function parseRevParse(stdout: unknown, cwd: string | null | undefined): GitLayo
   };
 }
 
-/**
- * DIRECTORIES, never files. `HEAD`, `index` and `packed-refs` are all replaced by rename rather than
- * written in place, so a watch on the file itself dies with the inode it was opened against on the first
- * commit; a watch on the directory holding them survives every rewrite. `refs/heads` is watched
- * non-recursively for the same reason the poll exists: a nested branch name (`feature/x`) lives in a
- * subdirectory this never sees, and a `git pack-refs` moves the whole tree into `packed-refs` at once.
- */
 function deriveWatchDirs({ gitDir = null, commonDir = null }: { gitDir?: string | null; commonDir?: string | null } = {}): string[] {
   const dirs: string[] = [];
   for (const dir of [commonDir, commonDir ? path.join(commonDir, 'refs', 'heads') : null, gitDir]) {
@@ -141,12 +97,6 @@ function deriveWatchDirs({ gitDir = null, commonDir = null }: { gitDir?: string 
   return dirs;
 }
 
-/*
- * Lock and temp churn is git talking to itself: `index.lock` alone appears and vanishes several times in
- * one commit, and none of those names ever carries state worth recomputing for. A watch event with no
- * filename (Windows reports one for some batched writes) is NOT noise, because there is nothing to judge
- * and dropping it would lose the event the poll would otherwise have to find 60 seconds later.
- */
 function isNoiseGitFile(filename: unknown): boolean {
   if (typeof filename !== 'string' || !filename) return false;
   const base = filename.split(/[\\/]/).pop();
@@ -154,10 +104,7 @@ function isNoiseGitFile(filename: unknown): boolean {
   return base.endsWith('.lock') || base.endsWith('.tmp') || base.startsWith('tmp_obj_');
 }
 
-// --- Porcelain v2 ---------------------------------------------------------
 
-// Skip `count` space-delimited fields and return the rest of the line verbatim, which is how a path
-// containing spaces survives: porcelain v2 puts the path last precisely so it never needs quoting.
 function tailAfterFields(line: string, count: number): string {
   let index = 0;
   for (let field = 0; field < count; field += 1) {
@@ -175,7 +122,6 @@ function fieldAt(line: string, index: number): string {
 function readHeader(status: GitStatus, header: string): void {
   if (header.startsWith('branch.oid ')) {
     const value = header.slice('branch.oid '.length).trim();
-    // A repo with no commits reports the literal `(initial)` rather than a sha.
     if (value === '(initial)') {
       status.unborn = true;
       return;
@@ -202,12 +148,6 @@ function readHeader(status: GitStatus, header: string): void {
   status.behind = Math.abs(Number.parseInt(behind, 10)) || 0;
 }
 
-/*
- * A HASH, not the entry list. A repo mid-`npm install` reports thousands of untracked paths, and holding
- * that string per repo forever to compare against the next read is the kind of unbounded retention the
- * ring caps exist to prevent. The count rides along so two trees of different sizes never collide on the
- * digest alone.
- */
 function signatureOf(entries: string[]): string {
   if (entries.length === 0) return CLEAN_SIGNATURE;
   const sorted = [...entries].sort();
@@ -215,12 +155,6 @@ function signatureOf(entries: string[]): string {
   return `${sorted.length}:${digest.slice(0, 16)}`;
 }
 
-/**
- * `git status --porcelain=v2 --branch`, read into the branch facts, the four counts a one-line summary
- * needs, and the signature everything downstream dedupes on. Deliberately tolerant: an unrecognized line
- * is skipped rather than failing the read, because a future git can add header kinds and this source's
- * job is to keep publishing what it does understand.
- */
 function parsePorcelainStatus(stdout: unknown): GitStatus {
   const status: GitStatus = {
     branch: null,
@@ -244,8 +178,6 @@ function parsePorcelainStatus(stdout: unknown): GitStatus {
     const kind = line[0];
     if (kind === '1' || kind === '2') {
       const xy = fieldAt(line, 1);
-      // A rename's line ends `<path><tab><origPath>`; both halves belong in the signature, so the whole
-      // tail is kept rather than split.
       const target = tailAfterFields(line, kind === '1' ? 8 : 9);
       if (xy[0] && xy[0] !== '.') status.counts.staged += 1;
       if (xy[1] && xy[1] !== '.') status.counts.unstaged += 1;
@@ -257,7 +189,6 @@ function parsePorcelainStatus(stdout: unknown): GitStatus {
       entries.push(`u ${fieldAt(line, 1)} ${tailAfterFields(line, 10)}`);
       continue;
     }
-    // `!` lines only appear under --ignored, which this source never asks for.
     if (kind !== '?') continue;
     status.counts.untracked += 1;
     entries.push(`? ${line.slice(2)}`);
@@ -266,10 +197,6 @@ function parsePorcelainStatus(stdout: unknown): GitStatus {
   return status;
 }
 
-/**
- * The single `git log -1` line. Returns null for anything that is not a sha-led record, which is what an
- * unborn branch produces: git exits non-zero there and the shell hands the empty stdout straight through.
- */
 function parseCommitLine(stdout: unknown): GitCommit | null {
   const line = String(stdout || '').split('\n')[0];
   if (!line) return null;
@@ -285,17 +212,11 @@ function parseCommitLine(stdout: unknown): GitCommit | null {
   };
 }
 
-// --- Decisions ------------------------------------------------------------
 
 function createRepoState(): GitRepoState {
   return { initialized: false, branch: null, oid: null, signature: null };
 }
 
-/**
- * Whether this read owes a second spawn. The subject is only ever needed when HEAD actually moved or the
- * branch changed under it, so the common case (a working-tree edit, or a trigger that turned out to be
- * nothing) costs exactly one `git status` and no log at all.
- */
 function shouldReadCommit(
   previous: Partial<GitRepoState> | null | undefined,
   status: { oid?: string | null; branch?: string | null } | null | undefined,
@@ -328,8 +249,6 @@ function commitEvent({ status, commit, root = null, now = 0 }: EventInput): GitI
   return {
     source: SOURCE,
     kind: 'commit',
-    // ARRIVAL time, not the commit's own: a rebase replays week-old author dates, and the digest renders
-    // ts as an age, so trusting the record would print a stale age for something that just happened.
     ts: now,
     scope: { root, sessionId: null },
     summary: `commit ${sha} on ${branchLabel(status)}${subjectSuffix(commit)}`,
@@ -385,17 +304,6 @@ function pickEvent({
   return null;
 }
 
-/**
- * At most ONE event per repo per settle, and none at all on the first read of a repo.
- *
- * The first read is a BASELINE: a daemon start would otherwise announce every repo's current HEAD and
- * every uncommitted file as though they had just happened, which is history, not activity.
- *
- * The one-event rule is priority, not suppression of facts: a commit necessarily also empties the index
- * it committed, and a checkout necessarily rewrites the working tree, so publishing the consequence
- * beside the cause would put two digest lines behind one action. The state still advances on every
- * field, so the NEXT genuine working-tree change is measured against what the commit left behind.
- */
 function decideGitEvents({
   previous,
   status,

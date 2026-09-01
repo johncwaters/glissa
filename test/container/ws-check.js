@@ -1,13 +1,5 @@
 'use strict';
 
-// WebSocket probe for the remote-mode container suite. Raw WS handshakes in curl are not worth the
-// shell, so this is the one place the integration script shells out to node.
-//
-//   node test/container/ws-check.js <url> [--cookie <header-value>] [--origin <origin>]
-//
-// Exit 0 = the socket opened AND the control channel delivered a snapshot (a real authenticated
-// session, not just a TCP connect). Exit 1 = refused. Prints one line either way.
-
 const WebSocket = require('ws');
 
 function argValue(flag) {
@@ -37,7 +29,7 @@ const timer = setTimeout(() => {
 function done(code, message) {
   clearTimeout(timer);
   console.log(message);
-  try { ws.close(); } catch { /* already gone */ }
+  try { ws.close(); } catch {  }
   process.exit(code);
 }
 
@@ -48,7 +40,6 @@ ws.on('message', (data) => {
 });
 
 ws.on('open', () => {
-  // A data socket (/terminals/*) never sends a snapshot; opening is the whole signal there.
   if (!url.includes('/control')) done(0, 'OK open');
 });
 

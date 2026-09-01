@@ -1,5 +1,3 @@
-// Every editor talks to the SAME stdio relay; invocation resolves live so a moved install never bakes a dead path.
-
 export interface Invocation {
   command: string;
   args: string[];

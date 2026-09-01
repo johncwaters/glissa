@@ -1,7 +1,3 @@
-// Thin IO runner for post-turn hygiene checks. Lists a session's git-changed
-// files and applies the pure rules in session/core/post-turn-rules.ts, fixing in
-// place by default. Async and bounded (execFile with a timeout); it NEVER throws,
-// always resolving a structured report. See .omc/plans/post-turn-checks.md.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -67,14 +63,9 @@ interface CheckConfigLayer {
   rules?: unknown;
 }
 
-// Default config. resolveCheckConfig clones and overlays global + per-project on
-// top, so the feature is ON even when config.json has no postTurnChecks key.
 const DEFAULTS = Object.freeze({
   enabled: true,
-  mode: 'fix', // 'fix' | 'report'
-  // `slop` is the report-only code-slop detector (session/core/slop-code-patterns.ts).
-  // OFF by default: opt in per project with postTurnChecks.rules.slop = true. It never
-  // rewrites content, so it is safe to enable even when mode is 'fix'.
+  mode: 'fix',
   rules: { trailingWs: true, finalNewline: true, bom: true, slop: false },
   include: ['**/*'],
   exclude: [
@@ -136,8 +127,6 @@ function normalizeRule(val: unknown, topMode: string): RuleConfig {
 
 const SCALAR_KEYS = ['enabled', 'mode', 'maxFiles', 'maxFileBytes', 'debounceMs', 'runOnExit', 'reportDir'] as const;
 
-// Merge DEFAULTS <- global <- project. Scalars/objects: last present wins.
-// Arrays (include/exclude) replace, never concat. Rules deep-merge per key.
 function resolveCheckConfig(globalCfg?: unknown, projectCfg?: unknown): PostTurnCheckConfig {
   const base = JSON.parse(JSON.stringify(DEFAULTS)) as MutableCheckConfig;
   const layers = [globalCfg, projectCfg].filter((x): x is CheckConfigLayer => Boolean(x) && typeof x === 'object');
@@ -184,14 +173,11 @@ function execGit(args: string[], cwd: string | undefined): Promise<string | Buff
   });
 }
 
-// Resolve the worktree root for cwd. Rejects on a non-git cwd / missing git.
 async function gitRoot(cwd: string | undefined): Promise<string> {
   const out = await execGit(['rev-parse', '--show-toplevel'], cwd);
   return out.toString().trim();
 }
 
-// Changed files: tracked-modified + untracked-not-ignored, deletions dropped.
-// Returns repo-root-relative POSIX paths.
 async function listChangedFiles(root: string): Promise<string[]> {
   const out = await execGit(
     ['-c', 'core.quotepath=false', 'status', '--porcelain', '-uall', '--no-renames'],
@@ -204,14 +190,12 @@ async function listChangedFiles(root: string): Promise<string[]> {
     const xy = ln.slice(0, 2);
     const p = ln.slice(3);
     if (!p) continue;
-    if (xy.indexOf('D') !== -1) continue; // deletion in index or worktree
+    if (xy.indexOf('D') !== -1) continue;
     files.push(p);
   }
   return files;
 }
 
-// THE RUNNER. Injectable deps (gitRoot/listChangedFiles/readFile/writeFile/stat)
-// make it unit-testable without real git/fs. Never throws.
 async function runPostTurnChecks({
   cwd,
   config,
@@ -281,16 +265,10 @@ async function runPostTurnChecks({
 
   let fileIndex = 0;
   for (const rel of eligible) {
-    // Yield to the event loop between files (not before the first). The per-file
-    // work below is synchronous (sync fs + the rule transforms), and this runner
-    // shares the single Node event loop that pumps every session's PTY bytes and
-    // keystrokes. Processing a large changeset in one tick stalls all of that; a
-    // setImmediate break between files lets that I/O interleave. The cap+size
-    // guards still bound total work.
     if (fileIndex++ > 0) await new Promise((resolve) => setImmediate(resolve));
     const abs = path.join(root, rel);
     try {
-      const before = _stat(abs); // snapshot BEFORE read (mtime-race guard, PM1)
+      const before = _stat(abs);
       if (!before) {
         report.errors.push({ file: rel, message: 'skipped-race' });
         continue;
@@ -324,8 +302,6 @@ async function runPostTurnChecks({
 
   const finalReport = done();
 
-  // Best-effort last-run report file under the repo's .glissa area (excluded from
-  // scanning by the default `**/.glissa/**`, so it never dirties the next run).
   if (sessionId) {
     try {
       const dir = path.join(root, cfg.reportDir);
@@ -333,7 +309,6 @@ async function runPostTurnChecks({
       const safe = String(sessionId).replace(/[^a-zA-Z0-9_.-]/g, '_');
       fs.writeFileSync(path.join(dir, `${safe}.json`), JSON.stringify(finalReport, null, 2));
     } catch {
-      /* best-effort */
     }
   }
 

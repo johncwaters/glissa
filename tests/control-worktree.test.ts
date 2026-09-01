@@ -1,7 +1,3 @@
-// Control-WS dispatch for the worktree review gate: merge-session / discard-session-worktree delegate
-// to the Session, and request-session-diff replies with the session's diff. Session behavior itself is
-// covered in sessions-worktree.test.js.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -32,7 +28,7 @@ interface WorktreeFrame {
 function harness(sessions: Map<string, Session>): ControlConnection<WorktreeFrame> {
   const server = createControlServer(controlDeps({ projects: [] }, { sessions }));
   const connection = connectControl<WorktreeFrame>(server);
-  connection.sent.length = 0; // drop the connect preamble
+  connection.sent.length = 0;
   return connection;
 }
 
@@ -70,8 +66,7 @@ test('request-session-diff replies with the committed + uncommitted diff and the
     };
   };
   const h = harness(oneSession(s));
-  // The handler is async (getDiff shells out to git), so the reply is sent on a later tick; the
-  // dispatcher returns the handler promise through the harness so we can await it before asserting.
+
   await h.send({ type: 'request-session-diff', id: 'p1' });
   const msg = h.sent.find((m) => m.type === 'session-diff');
   assert.ok(msg, 'sent a session-diff message');
@@ -136,8 +131,6 @@ test('resync-branch on an unknown session is a no-op (no throw)', () => {
   assert.doesNotThrow(() => h.send({ type: 'resync-branch', id: 'nope' }));
 });
 
-// --- finish-session: one-click close-out delegates to Session.finishAndMerge (logic tested there) ---
-
 test('finish-session dispatches to session.finishAndMerge()', () => {
   let finished = 0;
   const s = plainSession('p1');
@@ -151,8 +144,6 @@ test('finish-session on an unknown session is a no-op (no throw)', () => {
   const h = harness(new Map());
   assert.doesNotThrow(() => h.send({ type: 'finish-session', id: 'nope' }));
 });
-
-// --- merge-continue-session: merge-as-you-go delegates to Session.mergeAndContinue (logic tested there) ---
 
 test('merge-continue-session dispatches to session.mergeAndContinue()', () => {
   let merged = 0;
@@ -176,8 +167,6 @@ test('merge-continue-session with force:true passes { force: true } through to s
   h.send({ type: 'merge-continue-session', id: 'p1', force: true });
   assert.deepEqual(calls, [{ force: true }]);
 });
-
-// --- refused merges reply to the requesting client (a silent guard refusal gave zero feedback) ---
 
 test('merge-continue-session replies session-error when a pre-merge guard refuses', async () => {
   const s = plainSession('p1', 'worker');

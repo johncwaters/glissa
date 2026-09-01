@@ -1,7 +1,3 @@
-// Week/month rollups, the calendar heatmap and the anomaly wording. All three are computed CLIENT-side from
-// the merged daily rows the report already ships, so these are the only tests that pin them: the wire
-// carries no weekly, monthly or heatmap array to check against.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -31,8 +27,6 @@ function day(dayKey: string, { tokens = 100, costUSD = 1, models = null, source 
   return row;
 }
 
-// A rolled-up row is a wire record, so the fields a test reads off one are narrowed here rather than
-// re-narrowed at every assertion.
 function modelsOf(row: UsageWireRow | undefined): UsageModelRow[] {
   const models = row?.models;
   return Array.isArray(models) ? models : [];
@@ -44,18 +38,16 @@ function cellFor(cells: Map<string, HeatmapCell>, dayKey: string): HeatmapCell {
   return cell;
 }
 
-// ── Week and month keys ──
-
 test('weekStartKey: weeks start Monday, including across a month boundary', async () => {
   const { weekStartKey } = await importCore();
-  // 2026-08-19 is a Wednesday; its week begins Monday 2026-08-17.
+
   assert.equal(weekStartKey('2026-08-19'), '2026-08-17');
   assert.equal(weekStartKey('2026-08-17'), '2026-08-17', 'a Monday is its own week start');
   assert.equal(weekStartKey('2026-08-23'), '2026-08-17', 'Sunday still belongs to the Monday before it');
-  // A week that spans the turn of the month stays ONE bucket rather than splitting at the boundary.
+
   assert.equal(weekStartKey('2026-09-01'), '2026-08-31');
   assert.equal(weekStartKey('2026-08-31'), '2026-08-31');
-  // And across a year boundary.
+
   assert.equal(weekStartKey('2027-01-01'), '2026-12-28');
   assert.equal(weekStartKey('not-a-day'), '');
 });
@@ -70,7 +62,7 @@ test('monthKey: calendar months, including December', async () => {
 
 test('weeklyRows: a week spanning two months is one bucket carrying both months of days', async () => {
   const { weeklyRows } = await importCore();
-  // Mon 2026-08-31 through Wed 2026-09-02.
+
   const rows = weeklyRows([
     day('2026-08-31', { tokens: 100, costUSD: 1 }),
     day('2026-09-01', { tokens: 200, costUSD: 2 }),
@@ -103,12 +95,11 @@ test('period rollups merge the per-model breakdown, keeping the same row shape',
     day('2026-08-18', { tokens: 100, costUSD: 1, models: [opus(100, 1)] }),
   ]);
   assert.equal(rows.length, 1);
-  // Biggest model first, same as a daily row's breakdown.
+
   assert.deepEqual(modelsOf(rows[0]).map((model) => [model.model, model.tokens]), [['claude-opus-5', 300], ['gpt-5.5', 100]]);
   assert.equal(modelsOf(rows[0])[1].vendor, 'codex', 'the vendor survives the rollup');
 });
 
-// A period is only "remembered" when every day in it is: one live day makes the total a live claim.
 test('period source: history only when every day in the bucket is history', async () => {
   const { weeklyRows, historyNote } = await importCore();
   const allHistory = weeklyRows([
@@ -126,8 +117,6 @@ test('period source: history only when every day in the bucket is history', asyn
   assert.equal(historyNote(null), '');
 });
 
-// A period row mirrors a daily row's shape, vendors included, so a consumer cannot have to branch on which
-// view it was handed.
 test('period rows carry the union of the vendors under them', async () => {
   const { weeklyRows, monthlyRows } = await importCore();
   const opus = { key: 'claude-opus-5', model: 'claude-opus-5', vendor: 'claude', tokens: 100, costUSD: 1, input: 100, output: 0, cacheCreate: 0, cacheRead: 0 };
@@ -138,10 +127,10 @@ test('period rows carry the union of the vendors under them', async () => {
   ]);
   assert.deepEqual(rows[0].vendors, ['claude', 'codex']);
   assert.deepEqual(monthlyRows([{ ...day('2026-08-17', { models: [opus] }), vendors: ['claude'] }])[0].vendors, ['claude']);
-  // A history row is rebuilt from stored day-by-model rollups, so its vendors come off the model rows.
+
   const historyOnly = weeklyRows([day('2026-08-17', { models: [codex], source: 'history' })]);
   assert.deepEqual(historyOnly[0].vendors, ['codex']);
-  // Same key as a daily row, so the shape matches even when nothing is known.
+
   assert.deepEqual(weeklyRows([{ day: '2026-08-17', tokens: 1, costUSD: 1, models: [] }])[0].vendors, []);
 });
 
@@ -151,7 +140,7 @@ test('periodRows and periodLabel: one switch, three views, one label rule', asyn
   assert.equal(periodRows(daily, 'day').length, 2);
   assert.equal(periodRows(daily, 'week').length, 1);
   assert.equal(periodRows(daily, 'month').length, 1);
-  // An unknown view falls back to days rather than rendering nothing.
+
   assert.equal(periodRows(daily, 'decade').length, 2);
   assert.equal(periodRows(null, 'day').length, 0);
   assert.equal(periodLabel('2026-08-17', 'day'), 'Aug 17');
@@ -162,21 +151,19 @@ test('periodRows and periodLabel: one switch, three views, one label rule', asyn
   assert.equal(periodHint('month'), 'calendar months');
   assert.deepEqual(PERIOD_VIEWS.map((view) => view.value), ['day', 'week', 'month']);
   assert.equal(DEFAULT_PERIOD_VIEW, 'day');
-  // Every view is selectable by the switch, or a label would have no button.
+
   assert.ok(PERIOD_VIEWS.every((view) => typeof view.label === 'string' && view.label.length > 0));
 });
 
-// ── Heatmap ──
-
 test('heatmapCells: 16 week columns of Monday-to-Sunday rows, anchored on this week', async () => {
   const { heatmapCells, HEATMAP_WEEKS, HEATMAP_DAY_LABELS } = await importCore();
-  const today = new Date(2026, 7, 19, 12); // Wednesday
+  const today = new Date(2026, 7, 19, 12);
   const { cells, weeks } = heatmapCells([day('2026-08-18')], { today });
   assert.equal(weeks, HEATMAP_WEEKS);
   assert.equal(cells.length, HEATMAP_WEEKS * 7);
   assert.equal(HEATMAP_DAY_LABELS.length, 7);
   assert.equal(HEATMAP_DAY_LABELS[0], 'Mon');
-  // The last column is the current week, and its Monday is this week's Monday.
+
   const lastColumn = cells.filter((cell) => cell.week === HEATMAP_WEEKS - 1);
   assert.equal(lastColumn.length, 7);
   assert.equal(lastColumn[0].day, '2026-08-17');
@@ -184,8 +171,6 @@ test('heatmapCells: 16 week columns of Monday-to-Sunday rows, anchored on this w
   assert.equal(lastColumn[6].day, '2026-08-23');
 });
 
-// An observed zero and an unobserved day are different claims: colouring them alike would invent quiet
-// days that were never seen.
 test('heatmapCells: an empty day in range is distinct from a no-data day', async () => {
   const { heatmapCells } = await importCore();
   const today = new Date(2026, 7, 19, 12);
@@ -194,11 +179,11 @@ test('heatmapCells: an empty day in range is distinct from a no-data day', async
     day('2026-08-18', { tokens: 100 }),
   ], { today });
   const byDay = new Map(cells.map((cell) => [cell.day, cell]));
-  // Between the two observed days: in range, no usage. A real zero.
+
   assert.equal(cellFor(byDay, '2026-08-12').noData, false);
   assert.equal(cellFor(byDay, '2026-08-12').tokens, 0);
   assert.equal(cellFor(byDay, '2026-08-12').tone, 0);
-  // Before the series began, and after today: absences.
+
   assert.equal(cellFor(byDay, '2026-08-09').noData, true);
   assert.equal(cellFor(byDay, '2026-08-20').noData, true);
   assert.equal(cellFor(byDay, '2026-08-18').noData, false);
@@ -237,8 +222,6 @@ test('heatmapCellTitle: the day, its tokens and its cost, or why there is nothin
   assert.equal(heatmapCellTitle({ day: '2026-08-03', noData: true }), 'Aug 3: no data');
 });
 
-// ── Anomaly ──
-
 test('anomalyLine: the wording names the comparison, not just "unusual"', async () => {
   const { anomalyLine, anomalyTone, hasAnomaly, NO_ANOMALY_LINE } = await importCore();
   const daily = { kind: 'daily', todayUsd: 31, todayTokens: 5000, baselineUsd: 10, ratio: 3.1, baselineDays: 30 };
@@ -246,7 +229,7 @@ test('anomalyLine: the wording names the comparison, not just "unusual"', async 
     anomalyLine({ daily, burn: null }),
     'Today is 3.1x the 30 day average: $31.00 against $10.00.',
   );
-  // A burn spike only speaks when there is no daily one: two alarms about the same afternoon is noise.
+
   const burn = { kind: 'burn', current: 500000, baseline: 200000, ratio: 2.5 };
   assert.equal(
     anomalyLine({ daily: null, burn }),
@@ -270,7 +253,7 @@ test('an anomaly raises the tab attention dot on its own', async () => {
   assert.equal(hasUsageAttention(calm), false);
   const flagged = { tokenLimit: null, anomaly: { daily: { ratio: 3, todayUsd: 30, baselineUsd: 10 }, burn: null } };
   assert.equal(hasUsageAttention(flagged), true, 'nothing else would surface it');
-  // And it does not mask the limit checks it sits beside.
+
   assert.equal(hasUsageAttention({ tokenLimit: { max: 10, pct: 0.9 }, anomaly: null }), true);
 });
 
@@ -291,10 +274,6 @@ test('no forbidden characters reach the DOM from the new builders', async () => 
     for (const glyph of forbidden) assert.equal(value.includes(glyph), false, `forbidden character in ${JSON.stringify(value)}`);
   }
 });
-
-// ── Spend budgets ──
-// The rows and their tones come from server/core/usage-budget-core.ts; these only format them and decide
-// when the tab dot is owed, so an unset budget must render nothing rather than a zero ceiling.
 
 test('budgetRows: only rows with a real ceiling, nothing at all without a budget', async () => {
   const { budgetRows } = await importCore();
@@ -317,7 +296,7 @@ test('budget row formatting: a position, not a bare percentage', async () => {
   assert.equal(budgetScopeLabel('daily'), 'today');
   assert.equal(budgetScopeLabel('monthly'), 'this month');
   assert.equal(budgetRowMeterLabel(row), 'today spend against budget');
-  // Missing numbers read as zero rather than breaking the meter geometry.
+
   assert.equal(budgetRowPct({}), 0);
   assert.equal(budgetRowText({}), '$0.00 of $0.00');
 });
@@ -330,15 +309,11 @@ test('a budget at or past 90 percent raises the tab dot on its own', async () =>
   assert.equal(hasUsageAttention(at(90)), true);
   assert.equal(hasUsageAttention(at(150)), true);
   assert.equal(hasUsageAttention({ budget: null }), false);
-  // It composes with the other two arbiters rather than replacing either.
+
   assert.equal(hasUsageAttention(at(95)), true);
   assert.equal(hasUsageAttention(at(10)), false);
   assert.equal(hasUsageAttention({ tokenLimit: { max: 10, pct: 0.95 }, budget: null }), true);
 });
-
-// ── Glissa lanes ──
-// The section exists only because Glissa spawned the sessions; the join is exact, so `other` means "not
-// spawned by Glissa" rather than "unrecognized". It stays hidden until that distinction has content.
 
 test('laneRows and laneLabel: known lanes get names, unknown ids pass through', async () => {
   const { laneRows, laneLabel } = await importCore();
@@ -355,20 +330,20 @@ test('laneRows and laneLabel: known lanes get names, unknown ids pass through', 
   assert.equal(laneLabel('posthog'), 'PostHog');
   assert.equal(laneLabel('interactive'), 'Interactive');
   assert.equal(laneLabel('other'), 'Other');
-  // A lane added server-side before this map knows about it still renders under its own id.
+
   assert.equal(laneLabel('some-new-lane'), 'some-new-lane');
   assert.equal(laneLabel(''), 'Other');
 });
 
 test('the lanes section stays hidden until a real automation lane has spend', async () => {
   const { hasLaneAttribution } = await importCore();
-  // A fresh install: only the operator's own sessions, so the section would just restate the totals.
+
   assert.equal(hasLaneAttribution({ byLane: [{ lane: 'interactive', tokens: 1, costUSD: 1, sessions: 1 }] }), false);
   assert.equal(hasLaneAttribution({ byLane: [
     { lane: 'interactive', tokens: 1, costUSD: 1, sessions: 1 },
     { lane: 'other', tokens: 1, costUSD: 1, sessions: 1 },
   ] }), false);
-  // One automation lane is enough to make the split worth showing.
+
   assert.equal(hasLaneAttribution({ byLane: [
     { lane: 'interactive', tokens: 1, costUSD: 1, sessions: 1 },
     { lane: 'pr-review', tokens: 1, costUSD: 1, sessions: 1 },
@@ -384,7 +359,7 @@ test('laneSessionsText and the scope hint say what is and is not counted', async
   assert.equal(laneSessionsText(1234), '1,234 sessions');
   assert.equal(laneSessionsText(0), '');
   assert.equal(laneSessionsText(null), '');
-  // The hint has to name the boundary, since a terminal session's spend appears here as `other`.
+
   assert.match(LANE_SCOPE_HINT, /spawned by Glissa/);
   assert.match(LANE_SCOPE_HINT, /other/);
   for (const glyph of [String.fromCharCode(0x2014), String.fromCharCode(0x2013), String.fromCharCode(0x2026)]) {

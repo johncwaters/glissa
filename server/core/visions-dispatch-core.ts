@@ -1,8 +1,3 @@
-/*
- * Pure decisions for the Visions lane's tier 3 model dispatch (docs/archive/plan-navigator.md, M4): when a
- * dispatch is allowed, what the session is told, and what of its answer is believed. No IO, no timers,
- * no clock: the wiring passes `now`, the hash and the config in, and gets a verdict back.
- */
 
 import crypto from 'node:crypto';
 
@@ -17,16 +12,9 @@ const DEFAULT_COOLDOWN_MS = 300000;
 const DEFAULT_MAX_PER_HOUR = 6;
 const DEFAULT_ACTIVITY_MAX_PER_HOUR = 2;
 const DEFAULT_TIMEOUT_SECONDS = 180;
-// Pinned, never inherited: unpinned, four dispatches on 2026-08-27 died at spawn against an account
-// limit the interactive sessions had spent, each still costing a PTY and an hour-cap slot.
 const DEFAULT_DISPATCH_MODEL = 'opus';
-// Three ERRORs in a row is a lane that cannot run, not three unlucky buffers: a limit, an expired
-// login, a broken CLI. Whatever the cause, spawning into it again spends a slot to learn nothing.
 const ERROR_BACKOFF_THRESHOLD = 3;
 const ERROR_BACKOFF_MS = 1800000;
-// Who the ERROR came from. A session that ran and answered ERROR proves the lane works, and the buffer
-// is untrusted text: text that induces that answer three times would otherwise silence tier 3 for
-// every open document for half an hour.
 const ERROR_SOURCE_SESSION = 'session';
 const ERROR_SOURCE_TRANSPORT = 'transport';
 const MAX_PROMPT_BYTES = 512 * 1024;
@@ -36,17 +24,12 @@ const MAX_MESSAGE_CHARS = 300;
 const MAX_HAND_CHARS = 300;
 const MAX_FINDING_LINES = 20;
 const HOUR_MS = 3600000;
-// How far past an edited line a comment may still claim to be about the edit (docs/plan-visions-4-focus.md, M19).
 const TOUCH_MARGIN_LINES = 3;
 const COMMENT_BASES = Object.freeze(['edit', 'intent', 'structure']);
-// A dispatch on a buffer nobody has edited since it was opened: intent and hand only, never a comment.
 const ORIENTATION_REASON = 'orientation';
 const MAX_OTHER_THREADS_IN_PROMPT = 2;
 const MODEL_DIAGNOSTIC_SEVERITY_HINT = 4;
-// Below a warning: a suggestion must not read in the editor as something being broken.
 const COMMENT_SEVERITY_INFORMATION = 3;
-// Above the comments beside it and below an error: a hand is worth stopping for, and is still not a
-// claim that anything is broken.
 const HAND_SEVERITY_WARNING = 2;
 const LINT_RULE_PATTERNS = [
   /^(?:eslint|tslint|stylelint|biome|prettier)(?:\b|[-_/])/i,
@@ -66,9 +49,6 @@ const LINT_MESSAGE_PREFIX_PATTERNS = [
   /^lint(?:\s+(?:rule|error|warning|finding|diagnostic))?\b/i,
 ];
 
-// For the one key where zero is a real setting rather than a typo: it turns activity dispatch off.
-// Stricter about type than positiveInt has to be, because null, '' and false all coerce to a zero that
-// would silently mean exactly that.
 export type DispatchTrigger = 'activity' | 'edit';
 
 export interface DispatchConfig {
@@ -144,10 +124,6 @@ const DISABLED_CONFIG = Object.freeze({
   model: DEFAULT_DISPATCH_MODEL,
 });
 
-/**
- * config.visions.dispatch, normalized. Absent, malformed, or anything other than `enabled: true`
- * resolves to the disabled shape, which is what makes the lane cost nothing until it is asked for.
- */
 function resolveDispatchConfig(raw: unknown): DispatchConfig {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ...DISABLED_CONFIG };
   const block = raw as Record<string, unknown>;
@@ -159,18 +135,12 @@ function resolveDispatchConfig(raw: unknown): DispatchConfig {
     quietMs: positiveInt(block.quietMs, DEFAULT_QUIET_MS),
     cooldownMs: positiveInt(block.cooldownMs, DEFAULT_COOLDOWN_MS),
     maxPerHour,
-    // Clamped strictly below the total, so a machine that never stops moving can never spend the budget
-    // an edit needs: the carbon unit typing always outranks the machine talking.
     activityMaxPerHour: Math.min(nonNegativeInt(block.activityMaxPerHour, DEFAULT_ACTIVITY_MAX_PER_HOUR), maxPerHour - 1),
     dispatchTimeoutSeconds: positiveInt(block.dispatchTimeoutSeconds, DEFAULT_TIMEOUT_SECONDS),
     model,
   };
 }
 
-/**
- * config.visions, normalized. It lives beside resolveDispatchConfig because the two answer the same
- * question one level apart, and the lane reads them together at its single construction site.
- */
 function resolveVisionsConfig(raw: unknown) {
   const block: Record<string, unknown> = raw && typeof raw === 'object' && !Array.isArray(raw)
     ? (raw as Record<string, unknown>)
@@ -185,7 +155,6 @@ function resolveVisionsConfig(raw: unknown) {
     : {};
   return {
     enabled: block.enabled === true,
-    // Tier 1 edits land in the carbon unit's buffer unasked, so nothing short of an explicit true opts in.
     autoFix: block.autoFix === true,
     dispatch: resolveDispatchConfig(block.dispatch),
     intent: { threadTtlMs: positiveInt(intent.threadTtlMs, DEFAULT_THREAD_TTL_MS) },
@@ -193,8 +162,6 @@ function resolveVisionsConfig(raw: unknown) {
   };
 }
 
-// Identity of a buffer for the "has it actually moved" gate: FNV-1a over the text plus its length, so
-// an edit that returns the buffer to a dispatched state is correctly seen as unchanged.
 function hashText(text: unknown): string {
   const value = typeof text === 'string' ? text : '';
   let hash = 0x811c9dc5;
@@ -216,13 +183,6 @@ function createDispatchState(): DispatchState {
   };
 }
 
-/**
- * The lane's own health, recorded from each finished dispatch. Machine-wide and not per uri: a lane
- * that cannot run fails on every buffer, and the next uri to come along must not have to rediscover
- * that at the price of another spawn. Anything that proves the CLI ran clears both the count and the
- * cooling period outright, which includes a session-sourced ERROR: only a transport or spawn failure
- * is evidence about the lane rather than about one buffer.
- */
 function noteDispatchOutcome(state: { consecutiveErrors: number; backoffUntil: number }, {
   verdict, errorSource = null, now, threshold = ERROR_BACKOFF_THRESHOLD, backoffMs = ERROR_BACKOFF_MS,
 }: {
@@ -246,13 +206,6 @@ function noteDispatchOutcome(state: { consecutiveErrors: number; backoffUntil: n
   return { backingOff: true, consecutiveErrors: 0, backoffUntil: state.backoffUntil };
 }
 
-/*
- * The second half of "has anything actually moved" (docs/plan-ingestion.md, M7.5): the ingest lane's
- * newest seq, which advances only on a NEW event and never on an aging timestamp. A caller with no
- * ingest lane passes null and can never claim movement, which is what keeps the gate byte-identical to
- * the buffer-only one. A uri dispatched before a seq was ever recorded counts as moved once, and the
- * cooldown below is what bounds that.
- */
 function hasContextMoved(state: DispatchState, uri: string, contextSeq: unknown): boolean {
   if (typeof contextSeq !== 'number' || !Number.isFinite(contextSeq)) return false;
   const recorded = state.lastSeqByUri.get(uri);
@@ -260,23 +213,11 @@ function hasContextMoved(state: DispatchState, uri: string, contextSeq: unknown)
   return contextSeq > recorded;
 }
 
-/**
- * Dispatches still inside the trailing hour, all of them or one trigger's. Read-only, so a gate check
- * never edits history.
- */
 function countRecentDispatches(state: DispatchState, now: number, trigger: DispatchTrigger | null = null): number {
   const cutoff = now - HOUR_MS;
   return state.dispatchTimes.filter((entry) => entry.ts > cutoff && (!trigger || entry.trigger === trigger)).length;
 }
 
-/*
- * What woke this dispatch, read from the state rather than from whichever timer fired: the text moved,
- * so a carbon unit typed ('edit'), or the text stood and only the ingest seq moved, so the machine did
- * ('activity'). Text and seq both moving is an edit, because the buffer is what the Visions lane answers
- * about. A uri with NO recorded hash has no state to read, which is every buffer after a restart, so
- * there and only there `armedBy` breaks the tie: without it a poke-armed cold start reads as six carbon
- * units typing at once and drains the budget a real save was going to need.
- */
 function classifyTrigger({ textStood, hashRecorded, armedBy }: {
   textStood: boolean;
   hashRecorded: boolean;
@@ -288,12 +229,6 @@ function classifyTrigger({ textStood, hashRecorded, armedBy }: {
   return 'edit';
 }
 
-/*
- * The one gate. It passes only when the lane is on, nothing is in flight, either the document or the
- * machine around it actually moved since its last dispatch, its cooldown has elapsed, and the budget its
- * trigger spends from has room. A refusal names the gate that held so the wiring can log exactly one
- * line about it, and every classified verdict carries the trigger the caller must record it under.
- */
 function decideDispatch({
   state, uri, text = null, textHash, now, config, inFlight = false, contextSeq = null, armedBy = 'edit', inScope = true,
   editedSinceOpen = true, oriented = false,
@@ -311,7 +246,6 @@ function decideDispatch({
   editedSinceOpen?: boolean;
   oriented?: boolean;
 }): DispatchVerdict {
-  // `reason` rides only on an orientation, so every other verdict keeps its three-field shape.
   const verdict = (
     dispatch: boolean,
     gate: string | null,
@@ -335,27 +269,15 @@ function decideDispatch({
   if (Number.isFinite(backoffUntil) && now < backoffUntil) return refused('error-backoff');
   const recordedHash = state.lastHashByUri.get(uri);
   const textStood = recordedHash === textHash;
-  /*
-   * A buffer with no edit since it was opened is an orientation whatever armed it: the machine asked,
-   * not the carbon unit, so it spends the activity quota and it happens once per open.
-   */
   const isOrientation = editedSinceOpen !== true;
   const trigger = isOrientation ? 'activity' : classifyTrigger({ textStood, hashRecorded: recordedHash !== undefined, armedBy });
   const reason = isOrientation ? ORIENTATION_REASON : null;
   if (isOrientation && oriented) return refused('oriented', trigger, reason);
-  // An orientation answers a buffer nobody has read yet, so neither identical text nor a cooldown this
-  // window never spent is a reason to refuse it: dispatch state is lane-wide, the `oriented` mark is per
-  // connection, and a refused orientation is lost rather than retried. The caps below still bound it.
   if (!isOrientation) {
     if (textStood && !hasContextMoved(state, uri, contextSeq)) return refused('unchanged', trigger, reason);
     const lastAt = state.lastAtByUri.get(uri);
     if (typeof lastAt === 'number' && Number.isFinite(lastAt) && now - lastAt < config.cooldownMs) return refused('cooldown', trigger, reason);
   }
-  /*
-   * The machine's own quota, inside the total below and never instead of it: activity dispatches pass
-   * both caps and edits pass only the total, which is what stops a busy hour from spending the budget a
-   * save was going to need.
-   */
   if (trigger === 'activity' && countRecentDispatches(state, now, 'activity') >= config.activityMaxPerHour) {
     return refused('activity-cap', trigger, reason);
   }
@@ -374,17 +296,10 @@ function decidePromptSize(prompt: unknown, trigger: DispatchTrigger | null = nul
   return sizeVerdict(Buffer.byteLength(typeof prompt === 'string' ? prompt : '', 'utf8'), trigger);
 }
 
-/**
- * The pre-check, run on the raw buffer before anything is built. It measures the document as
- * numberBufferLines will DELIVER it: judged raw, a band of large buffers passed here and then built a
- * prompt over the cap, so tier 3 was refused on every attempt at a size nobody could predict.
- */
 function decideDocumentSize(text: unknown, trigger: DispatchTrigger | null = null) {
   return sizeVerdict(Buffer.byteLength(numberBufferLines(text), 'utf8'), trigger);
 }
 
-// Recorded when the dispatch STARTS, so a slow session cannot let a second one through behind it. The
-// trigger is the gate's own classification, handed back so the two can never disagree about the budget.
 function recordDispatch(state: DispatchState, {
   uri, textHash, now, contextSeq = null, trigger = 'edit', reason = null,
 }: {
@@ -395,11 +310,8 @@ function recordDispatch(state: DispatchState, {
   trigger?: string | null;
   reason?: string | null;
 }): DispatchState {
-  // An orientation spends no cooldown: stamping one refused the carbon unit's first real edit dispatch
-  // for the whole cooldown after every open.
   if (reason !== ORIENTATION_REASON) state.lastAtByUri.set(uri, now);
   state.lastHashByUri.set(uri, textHash);
-  // A dispatch with no lane behind it clears the mark rather than leaving a stale one to be compared to.
   if (typeof contextSeq === 'number' && Number.isFinite(contextSeq)) state.lastSeqByUri.set(uri, contextSeq);
   if (typeof contextSeq !== 'number' || !Number.isFinite(contextSeq)) state.lastSeqByUri.delete(uri);
   const entry: DispatchTimeEntry = { ts: now, trigger: trigger === 'activity' ? 'activity' : 'edit' };
@@ -410,7 +322,6 @@ function recordDispatch(state: DispatchState, {
   return state;
 }
 
-// A closed buffer keeps no cooldown, hash or seq mark; the hourly budget is machine-wide and survives it.
 function forgetUri(state: DispatchState, uri: string): DispatchState {
   state.lastAtByUri.delete(uri);
   state.lastHashByUri.delete(uri);
@@ -426,16 +337,6 @@ function countLines(text: unknown): number {
   return counted.split('\n').length;
 }
 
-/**
- * Everything a session claims about its comments, checked. A line must be a real 1-based line of the
- * buffer that was sent, a message must be non-empty text, and the list is capped: an entry that fails
- * is dropped rather than shown or thrown over.
- *
- * `outOfRange` is counted separately from every other rejection because it is the ONE that means the
- * session numbered against something other than the buffer: an off-buffer line is evidence the whole
- * batch is offset, and the batch that lands INSIDE the buffer under the same offset is silently wrong
- * rather than silently missing (2026-08-27, 17 comments lost and 4 misplaced before this was counted).
- */
 function sanitizeCommentsWithDrops(
   raw: unknown,
   { lineCount = 0, max = MAX_COMMENTS, maxMessageChars = MAX_MESSAGE_CHARS }: {
@@ -458,32 +359,21 @@ function sanitizeCommentsWithDrops(
       outOfRange += 1;
       continue;
     }
-    // The cap stops the KEEPING, never the range check above: a full batch is exactly when the offset
-    // evidence matters, and stopping early reported zero out-of-range for the worst batches.
     if (comments.length >= max) continue;
     const message = typeof entry.message === 'string' ? entry.message.trim() : '';
     if (!message) continue;
     const comment: VisionsComment = { line: lineNumber, message: message.slice(0, maxMessageChars) };
-    // Shape only: a basis is validated and carried here, and judged by filterComments alone.
     if (typeof entry.basis === 'string' && COMMENT_BASES.includes(entry.basis)) comment.basis = entry.basis;
     comments.push(comment);
   }
   return { comments, outOfRange };
 }
 
-// The one range test both channels share, so a comment and a model diagnostic can never disagree.
 function isWithinTouchedRanges(line: number, ranges: unknown, margin: number = TOUCH_MARGIN_LINES): boolean {
   const list: TouchedLineRange[] = Array.isArray(ranges) ? ranges : [];
   return list.some((range) => line >= range.start - margin && line <= range.end + margin);
 }
 
-/*
- * The focus gate (docs/plan-visions-4-focus.md, M19), run in the wiring on a result whose shape has
- * already been checked, and only for a dispatch about edited lines: an orientation answers none of this
- * and the wiring discards its comments before it gets here. Every drop is a count, never a text: `edit`
- * missed the touched ranges, `intent` had no thread to be about, `structure` was folded into the hand or
- * had nowhere to go, and `untagged` named no basis.
- */
 function filterComments({
   comments, hand = null, touchedRanges = [], margin = TOUCH_MARGIN_LINES, activeThread = null,
 }: {
@@ -551,13 +441,6 @@ function lineTextsOf(text: unknown): string[] {
   return counted.split('\n');
 }
 
-/*
- * The buffer as the session sees it: every line carrying its own 1-based number. The bootstrap prompt
- * is `Read visions-prompt.txt` and the Read tool renders that file in `cat -n` form, so the session has
- * the PROMPT FILE's numbers on screen and no way to tell them from the buffer's own; told to count from
- * the fence instead it did so only sometimes, and 21 dispatches on 2026-08-27 lost 17 comments to the
- * out-of-range drop and put 4 more on the wrong line. The prefix removes the counting.
- */
 function numberBufferLines(text: unknown): string {
   const lines = lineTextsOf(text);
   const width = String(lines.length).length;
@@ -578,7 +461,6 @@ function isLintDomainDiagnostic({ rule = '', message = '' }: { rule?: unknown; m
   return LINT_MESSAGE_PREFIX_PATTERNS.some((pattern) => pattern.test(leadingMessage));
 }
 
-// Whole-line range: the model answers per line, so a narrower span would be a guessed word boundary.
 function lineDiagnostic({ lines, line, severity, code, message }: {
   lines: string[];
   line: number;
@@ -600,10 +482,6 @@ function lineDiagnostic({ lines, line, severity, code, message }: {
   };
 }
 
-/*
- * `touchedRanges` null means no focus rule at all (the shape-only callers); an array, empty included,
- * means the diagnostic must land inside it.
- */
 function sanitizeModelDiagnostics(raw: unknown, {
   text = '', lineCount = countLines(text), touchedRanges = null, margin = TOUCH_MARGIN_LINES,
 }: {
@@ -646,7 +524,6 @@ function mergeDiagnostics(...diagnosticLists: unknown[]): LineDiagnostic[] {
   return merged;
 }
 
-// The tab keeps its own copy, so this widens where a comment shows rather than moving it.
 function commentsToLsp(comments: unknown, { text = '' }: { text?: string } = {}): LineDiagnostic[] {
   const lines = lineTextsOf(text);
   const entries: unknown[] = Array.isArray(comments) ? comments : [];
@@ -664,8 +541,6 @@ function commentsToLsp(comments: unknown, { text = '' }: { text?: string } = {})
   return diagnostics;
 }
 
-// A raised hand as an editor diagnostic (M4 tier 4), anchored at line 1 because it is about the whole
-// document: it otherwise reached the operator only as a banner on a tab nobody was watching.
 function handToLsp(hand: unknown, { text = '' }: { text?: string } = {}): LineDiagnostic[] {
   const message = typeof hand === 'string' ? hand.trim() : '';
   if (!message) return [];
@@ -674,7 +549,6 @@ function handToLsp(hand: unknown, { text = '' }: { text?: string } = {}): LineDi
   })];
 }
 
-// The standing tier 2 findings, as the one-line-each summary the prompt carries.
 function findingLines(findings: unknown): string[] {
   const list: unknown[] = Array.isArray(findings) ? findings : [];
   const lines: string[] = [];
@@ -691,26 +565,15 @@ function findingLines(findings: unknown): string[] {
   return lines;
 }
 
-// A projection version is a server-computed sha256, so anything else is not one and is left out.
 const MEMORY_VERSION_RE = /^[0-9a-f]{8,64}$/;
 const MEMORY_VERSION_CHARS = 12;
 const MARKER_HASH_CHARS = 16;
 
-/*
- * Content-derived, so no fenced text can close its own fence and be read as instructions. sha256 and
- * not the 32-bit hashText beside it: that one is invertible and fixed-point constructible in about 2^32
- * offline evaluations, which is well inside reach for text an attacker gets to author.
- */
 function contentMarker(prefix: string, text: unknown): string {
   const digest = crypto.createHash('sha256').update(String(text == null ? '' : text), 'utf8').digest('hex');
   return `GLISSA-${prefix}-${digest.slice(0, MARKER_HASH_CHARS).toUpperCase()}`;
 }
 
-/*
- * One fence per untrusted corpus, which is what stops one body from closing another's: the marker is
- * derived from the bytes inside it, `frame` gets that marker so a section can name it mid-sentence, and
- * an empty body renders NO lines at all, so a prompt built without that source stays byte-identical.
- */
 function fencedSection(
   prefix: string,
   body: string,
@@ -729,7 +592,6 @@ function fencedSection(
   ];
 }
 
-// The cross-source context digest (docs/plan-ingestion.md, M6), fenced and framed as DATA like the buffer.
 function activitySection(digest: unknown): string[] {
   const text = typeof digest === 'string' ? digest.trim() : '';
   return fencedSection('ACTIVITY', text, (marker) => [
@@ -737,10 +599,6 @@ function activitySection(digest: unknown): string[] {
   ]);
 }
 
-/*
- * Long-term memory (docs/plan-visions-3.md, M16), retrieved for the ACTIVE project plus the global
- * layer. Outside the fence go headings, counts and the projection version only, never a remembered byte.
- */
 function memorySection(memory: unknown): string[] {
   const source: { text?: unknown; count?: unknown; version?: unknown } = memory && typeof memory === 'object'
     ? (memory as { text?: unknown; count?: unknown; version?: unknown })
@@ -756,11 +614,6 @@ function memorySection(memory: unknown): string[] {
   ]);
 }
 
-/*
- * The intent statements are model-authored from untrusted buffers and reach the prompts of other
- * documents in the project, so they get a fence of their own. Outside it go Glissa's own headings and
- * the minted thread ids, never a statement.
- */
 function fencedIntentLines(headings: string[], statements: string[], trailer: string[]): string[] {
   return fencedSection('INTENT', statements.join('\n'), (marker) => [
     ...headings,
@@ -768,10 +621,6 @@ function fencedIntentLines(headings: string[], statements: string[], trailer: st
   ], trailer);
 }
 
-/*
- * The intent lines: a bare string is the pre-M20 statement, a { active, others } pair names the thread
- * the session may advance and up to two more it may switch to. Nothing renders nothing.
- */
 function intentLinesOf(intent: unknown, maxIntentChars: number): string[] {
   if (typeof intent === 'string') {
     const workingIntent = sanitizeIntentText(intent, { maxChars: maxIntentChars });
@@ -819,11 +668,6 @@ function focusLinesOf({ touchedRanges, orientation }: { touchedRanges: unknown; 
   ];
 }
 
-/**
- * The seed prompt for one visions dispatch. Tier 3 only (suggestions and directions, never a
- * rewrite), the buffer fenced and named as DATA, and exactly one JSON result file as the only action
- * the session is asked to take. Pure string building; the wiring owns the file it names.
- */
 function buildVisionsPrompt({
   uri, text, findings = [], intent = '', digest = '', memory = null, touchedRanges = null, orientation = false, resultPath = VISIONS_RESULT_FILE,
   maxComments = MAX_COMMENTS, maxMessageChars = MAX_MESSAGE_CHARS, maxIntentChars = MAX_INTENT_CHARS, maxHandChars = MAX_HAND_CHARS,
@@ -844,8 +688,6 @@ function buildVisionsPrompt({
 }): string {
   const buffer = typeof text === 'string' ? text : '';
   const numberedBuffer = numberBufferLines(buffer);
-  // Over what is actually INSIDE the fence, so the "no text can close its own fence" property is about
-  // the bytes the session reads rather than the ones they were derived from.
   const marker = contentMarker('BUFFER', numberedBuffer);
   const standing = findingLines(findings);
   const intentLines = intentLinesOf(intent, maxIntentChars);

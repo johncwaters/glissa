@@ -1,11 +1,3 @@
-// Coverage for the per-client backfill substrate added to Session: the monotonic output
-// total (output-ring total / getOutputOffset), the getBufferSince(offset) range accessor
-// (all four branches + the boundary/null/surrogate edges), the push-before-emit ORDER
-// CONTRACT that the ws-sender backfill relies on, and the start()-time 'rebaseline' signal
-// that tells the backend to re-baseline live data-WS clients on an in-place restart.
-//
-// Sessions are exercised directly via _handlePtyData (the PTY-data hot path) with an
-// injected fake PTY, so no real process launches.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,7 +5,7 @@ import { Session } from '../session/sessions.ts';
 import { createOutputRing } from '../session/core/output-ring.ts';
 function fakePty() {
   return {
-    pid: 2147483646, // non-existent -> destroy()'s taskkill is a harmless no-op
+    pid: 2147483646,
     onData() {},
     onExit() {},
     write() {},
@@ -52,9 +44,9 @@ test('getBufferSince: exact tail within the retained window (boundary + mid-chun
 });
 
 test('getBufferSince: evicted branch (offset < base) returns full replay + evicted=true', () => {
-  const s = newSession({ replayBufferKB: 0 }); // ring max = 0 -> evict to 1 entry
+  const s = newSession({ replayBufferKB: 0 });
   s._handlePtyData('aaaa');
-  s._handlePtyData('bbbb'); // evicts 'aaaa'; retained = 'bbbb', base = 4
+  s._handlePtyData('bbbb');
   const r = s.getBufferSince(0);
   assert.equal(r.evicted, true);
   assert.equal(r.data, 'bbbb', 'full current replay (retained tail)');
@@ -73,13 +65,13 @@ test('getBufferSince: tolerates a null hole in the retained range (defensive)', 
 
 test('getBufferSince: offset on a chunk boundary never splits a surrogate pair', () => {
   const s = newSession();
-  const hi = '\uD83D'; // high surrogate of an emoji
-  const lo = '\uDE00'; // low surrogate
-  s._handlePtyData(`x${hi}`); // chunk1 ends mid-emoji (append boundary at offset 2)
-  s._handlePtyData(`${lo}y`); // chunk2 starts with the low surrogate
+  const hi = '\uD83D';
+  const lo = '\uDE00';
+  s._handlePtyData(`x${hi}`);
+  s._handlePtyData(`${lo}y`);
   const tail = s.getBufferSince(2).data;
   assert.equal(tail, `${lo}y`, 'slice starts cleanly at the chunk-append boundary');
-  const full = `x${hi}${tail}`; // prefix already sent + backfilled tail
+  const full = `x${hi}${tail}`;
   assert.equal(full, 'x\u{1F600}y');
   assert.equal([...full].length, 3, 'x, emoji, y: one code point, not mojibake');
 });
@@ -96,7 +88,7 @@ test('ORDER CONTRACT: getOutputOffset already includes the just-emitted chunk in
   const s = newSession();
   let offsetAtEmit: number | null = null;
   s.on('data', () => { offsetAtEmit = s.getOutputOffset(); });
-  s._handlePtyData('hello'); // 5 bytes
+  s._handlePtyData('hello');
   assert.equal(offsetAtEmit, 5, 'ring push + total increment happened BEFORE emit("data")');
 });
 
@@ -108,10 +100,10 @@ test("start() resets the output total to 0 and emits 'rebaseline'", async () => 
   let rebaselined = 0;
   s.on('rebaseline', () => { rebaselined++; });
   try {
-    await s.start(); // start() is async; awaiting re-bases (spawns the fake PTY)
+    await s.start();
     assert.equal(rebaselined, 1, "start() emitted 'rebaseline' exactly once");
     assert.equal(s.getOutputOffset(), 0, 'monotonic total reset to 0 on (re)start');
   } finally {
-    s.destroy(); // release timers/PTY
+    s.destroy();
   }
 });

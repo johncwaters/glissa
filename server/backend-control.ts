@@ -126,8 +126,6 @@ function createBackendControl(dependencies: BackendControlDependencies): void {
     },
   });
 
-  // Registered unconditionally and resolved live: a lane switched on by a later settings save rebuilds,
-  // but no rebuild ever revisits this listener, so a boot-time gate left connect-time repair off for good.
   const sendLaneSnapshotOnConnect = (
     laneName: string,
     readLane: () => SnapshotLane | null,

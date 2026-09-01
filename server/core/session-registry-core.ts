@@ -3,7 +3,6 @@ import type { SessionState } from '../../shared/states.ts';
 import { STATES } from '../../shared/states.ts';
 import { normalizePackNames } from './pack-core.ts';
 
-// Agent id a project may name, derived from the config schema so the two cannot drift.
 export type AgentId = ProjectConfig['agent'];
 
 export interface RegistryProject {

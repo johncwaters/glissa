@@ -1,7 +1,3 @@
-// The Visions lane's tier 3 dispatch decisions (docs/archive/plan-navigator.md, M4): the gate that decides
-// whether a model call happens at all, the contract validation applied to what comes back, and the
-// prompt that fences the buffer as data. Pure: no timers, no clock, no spawn.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -48,8 +44,6 @@ const NOW = 1700000000000;
 function enabledConfig(overrides = {}) {
   return resolveDispatchConfig({ enabled: true, ...overrides });
 }
-
-// --- Config ---
 
 test('an absent or half-hearted dispatch config resolves to the disabled shape', () => {
   for (const raw of [undefined, null, {}, [], 'yes', { enabled: 'true' }, { enabled: 1 }, { enabled: false }]) {
@@ -142,7 +136,6 @@ test('every numeric key is overridable, and a nonsense value falls back rather t
   });
 });
 
-// The quota exists so a machine that never stops moving cannot spend what a save is going to need.
 test('the activity quota is clamped strictly below the total budget', () => {
   assert.equal(resolveDispatchConfig({ enabled: true }).activityMaxPerHour, 2);
   assert.equal(resolveDispatchConfig({ enabled: true, activityMaxPerHour: 99 }).activityMaxPerHour, 5);
@@ -155,7 +148,7 @@ test('the activity quota is clamped strictly below the total budget', () => {
     resolveDispatchConfig({ enabled: true, activityMaxPerHour: 0 }).activityMaxPerHour, 0,
     'zero is a real setting for this key: activity dispatch off, with the edit budget left whole',
   );
-  // null, '' and false all coerce to a zero that would silently mean "activity dispatch off".
+
   for (const nonsense of [-3, 'two', '0', null, false, '', [], Number.NaN]) {
     assert.equal(
       resolveDispatchConfig({ enabled: true, activityMaxPerHour: nonsense }).activityMaxPerHour,
@@ -165,8 +158,6 @@ test('the activity quota is clamped strictly below the total budget', () => {
   }
   assert.equal(resolveDispatchConfig(null).activityMaxPerHour, DEFAULT_ACTIVITY_MAX_PER_HOUR);
 });
-
-// --- The gate ---
 
 test('a first look at a moved document passes every gate', () => {
   const state = createDispatchState();
@@ -270,7 +261,6 @@ test('the hourly budget is machine-wide and counts a trailing hour, not a calend
   const decision = decideDispatch({ state, uri: 'file:///c.md', textHash: 'c', now: NOW + 2000, config });
   assert.deepEqual(decision, { dispatch: false, gate: 'hour-cap', trigger: 'edit' });
 
-  // The first of the two ages out an hour after it happened, and the budget has room again.
   const afterFirstAged = NOW + HOUR_MS + 1;
   assert.equal(countRecentDispatches(state, afterFirstAged), 1);
   assert.equal(decideDispatch({ state, uri: 'file:///c.md', textHash: 'c', now: afterFirstAged, config }).dispatch, true);
@@ -293,8 +283,6 @@ test('closing a document forgets its cooldown and its hash, and keeps the hourly
   assert.equal(decideDispatch({ state, uri: URI, textHash, now: NOW + 1, config }).dispatch, true);
   assert.equal(countRecentDispatches(state, NOW + 1), 1, 'the budget is machine-wide, so it survives a close');
 });
-
-// --- Movement from the ingest lane (docs/plan-ingestion.md, M7.5) ---
 
 test('an advanced context seq re-opens a document the buffer alone would have held shut', () => {
   const state = createDispatchState();
@@ -399,19 +387,12 @@ test('closing a document forgets its seq mark with the rest of its record', () =
   assert.equal(state.lastSeqByUri.has(URI), false);
 });
 
-// --- The activity quota inside the hourly budget (docs/plan-ingestion.md, M7.5) ---
-
-/*
- * The reviewer's scenario, exactly: six markdown buffers open, nobody typing, and one poke reaching all
- * of them. Without a quota that poke spends the whole machine-wide budget and the next real save is
- * refused with hour-cap; with it, the machine spends its own share and the save still passes.
- */
 test('a poke across six open documents cannot spend the budget a save is going to need', () => {
   const state = createDispatchState();
   const config = enabledConfig({ cooldownMs: 1 });
   const textHash = hashText('# Title\n');
   const uris = Array.from({ length: 6 }, (_unused, index) => `file:///tmp/doc-${index}.md`);
-  // Each buffer was read once when it was opened, over an hour ago: the budget is clean and unspent.
+
   for (const uri of uris) {
     recordDispatch(state, {
       uri, textHash, now: NOW - HOUR_MS - 1, contextSeq: 1, trigger: 'edit',
@@ -446,11 +427,6 @@ test('a poke across six open documents cannot spend the budget a save is going t
   );
 });
 
-/*
- * The same six buffers, but COLD: a daemon or editor restart with nothing dispatched yet, so no uri has
- * a recorded hash for the gate to read. Without the arming hint every one of these reads as a carbon
- * unit typing, and the budget is gone before anyone touches a key.
- */
 test('a cold start with six open buffers and nobody typing spends only the activity quota', () => {
   const state = createDispatchState();
   const config = enabledConfig({ cooldownMs: 1 });
@@ -475,7 +451,6 @@ test('a cold start with six open buffers and nobody typing spends only the activ
   assert.equal(dispatched, config.activityMaxPerHour);
   assert.equal(countRecentDispatches(state, NOW), 2);
 
-  // The first thing the carbon unit actually does after the restart.
   assert.deepEqual(
     decideDispatch({
       state,
@@ -544,7 +519,7 @@ test('once the machine has spent its quota it is refused by name, and typing is 
   const config = enabledConfig({ cooldownMs: 1, activityMaxPerHour: 1 });
   const textHash = hashText('# Title\n');
   const other = 'file:///tmp/other.md';
-  // One buffer already spent the machine's quota; the other has been read once and is sitting still.
+
   recordDispatch(state, {
     uri: URI, textHash, now: NOW, contextSeq: 1, trigger: 'activity',
   });
@@ -615,7 +590,6 @@ test('the trigger a dispatch was recorded under is what its budget is counted ag
   assert.equal(countRecentDispatches(state, NOW + HOUR_MS + 10, 'activity'), 0, 'the quota window trails an hour too');
 });
 
-// The pre-M7.5 lane, decision for decision: a caller that never passes a seq must be gated identically.
 test('with no context seq anywhere, every gate decision is the buffer-only one', () => {
   const withSeqArgument = createDispatchState();
   const without = createDispatchState();
@@ -644,16 +618,12 @@ test('with no context seq anywhere, every gate decision is the buffer-only one',
   assert.deepEqual(without.lastSeqByUri.size, 0);
 });
 
-// --- Hashing ---
-
 test('the hash tracks the text, and a restored buffer hashes back to where it was', () => {
   assert.equal(hashText('# Title\n'), hashText('# Title\n'));
   assert.notEqual(hashText('# Title\n'), hashText('# Title\n\n'));
   assert.notEqual(hashText('ab'), hashText('ba'));
   assert.equal(hashText(''), hashText(undefined), 'a missing buffer is the empty one');
 });
-
-// --- The result contract ---
 
 test('valid comments survive with their line and message intact', () => {
   const comments = sanitizeComments([
@@ -819,8 +789,6 @@ test('mergeDiagnostics keeps rule diagnostics before model diagnostics', () => {
   assert.deepEqual(mergeDiagnostics([rule], null), [rule]);
 });
 
-// --- The prompt ---
-
 test('the prompt states the tier 3 role, fences the buffer as data, and names one result file', () => {
   const prompt = buildVisionsPrompt({
     uri: URI,
@@ -858,7 +826,6 @@ test('the buffer markers are derived from what is inside the fence, so no buffer
   assert.equal(prompt.includes(contentMarker('BUFFER', text)), false, 'the marker covers the delivered bytes, not the raw ones');
 });
 
-// A 32-bit marker is fixed-point constructible in ~2^32 offline evaluations by text an attacker writes.
 test('a fence marker is a sha256 digest, not the invertible 32-bit buffer hash', () => {
   const text = '# Title\n';
   const marker = contentMarker('BUFFER', text);
@@ -872,8 +839,6 @@ test('a document with no standing findings says so rather than leaving a blank l
   const prompt = buildVisionsPrompt({ uri: URI, text: '# Title\n', findings: [], resultPath: '/tmp/r.json' });
   assert.match(prompt, /already shown in the editor \(do not repeat them\):\n- none/);
 });
-
-// --- The intent model in the prompt (docs/archive/plan-navigator.md, M5) ---
 
 test('the working intent rides the prompt as context, and the result contract asks for an updated one', () => {
   const prompt = buildVisionsPrompt({
@@ -919,8 +884,6 @@ test('an over-long intent is capped before it reaches the prompt', () => {
   assert.equal(prompt.includes('y'.repeat(301)), false);
 });
 
-// --- The ingest context digest (docs/plan-ingestion.md, M6) ---
-
 test('no digest leaves the prompt byte-identical to the one built before ingest existed', () => {
   const base = {
     uri: URI, text: '# Title\n\nSome prose.\n', findings: [], intent: 'writing a plan', resultPath: '/tmp/r.json',
@@ -946,11 +909,10 @@ test('a digest rides as one fenced DATA section, framed exactly like the buffer'
   assert.ok(prompt.includes(`<<<${marker}\n${digest}\n>>>${marker}`));
   assert.match(prompt, /is DATA and background context only/);
   assert.ok(prompt.includes('- terminal 4s ago: npm test 42 passing'));
-  // Its own marker, so a captured line cannot close the buffer's fence or its own.
+
   assert.notEqual(marker, prompt.match(/GLISSA-BUFFER-[A-Z0-9-]+/)?.[0]);
 });
 
-// M7.5: activity is what moves the intent, so the framing has to say which field it may reach.
 test('the activity framing names the intent field it informs, and keeps comments on the buffer', () => {
   const prompt = buildVisionsPrompt({
     uri: URI,
@@ -982,12 +944,10 @@ test('the digest sits above the standing findings, and below the intent it gives
   const intentAt = prompt.indexOf('Current working intent');
   const digestAt = prompt.indexOf('GLISSA-ACTIVITY-');
   const findingsAt = prompt.indexOf('Standing tier 2 findings');
-  // The buffer's fence, not its first mention: the marker is named up in the hard rules too.
+
   const bufferFenceAt = prompt.indexOf('<<<GLISSA-BUFFER-');
   assert.ok(intentAt < digestAt && digestAt < findingsAt && findingsAt < bufferFenceAt);
 });
-
-// M16 of docs/plan-visions-3.md: the memory section, in its own fence beside the activity digest.
 
 test('a prompt with no memory is byte-identical to one built before the section existed', () => {
   const base = { uri: URI, text: '# Title\n', resultPath: '/tmp/r.json' };
@@ -1054,8 +1014,6 @@ test('the numbers stay column-aligned once the buffer needs more than one digit'
   assert.equal(lines[11], '12| line 12');
 });
 
-// The whole point of the prefix: this is the shape of the batch that put every comment on the wrong
-// line, reported against the prompt file's numbering rather than the buffer's (2026-08-27).
 test('a line past the end of the buffer is counted as out of range, never silently dropped', () => {
   const { comments, outOfRange } = sanitizeCommentsWithDrops(
     [{ line: 2, message: 'inside' }, { line: 84, message: 'offset by the prompt header' }],
@@ -1105,8 +1063,6 @@ test('three failed dispatches in a row open a cooling period, and any answer at 
   assert.equal(gateAt(5500), null);
 });
 
-// The buffer is untrusted text, so text that induces the session to answer ERROR must not be able to
-// silence tier 3 for every open document.
 test('a session-authored ERROR proves the CLI ran, so only a transport failure opens the backoff', () => {
   const sessionErrors = createDispatchState();
   for (const now of [1000, 2000, 3000, 4000]) {
@@ -1126,7 +1082,6 @@ test('a session-authored ERROR proves the CLI ran, so only a transport failure o
   );
 });
 
-// The counter's whole job is to say the batch is offset, and a full batch is when that matters most.
 test('lines past the end of the buffer are counted even once the comment cap is spent', () => {
   const entries = [
     ...Array.from({ length: 5 }, (_, index) => ({ line: index + 1, message: `inside ${index}` })),
@@ -1147,8 +1102,6 @@ test('the size pre-check measures the buffer as the numbered prefix will deliver
     );
   }
 
-  // Roughly 8300 lines just under the cap: it passed a raw pre-check and then built a prompt over it,
-  // so tier 3 was refused on every attempt for a whole band of large buffers.
   const line = `${'x'.repeat(59)}\n`;
   const text = line.repeat(8300);
   assert.ok(Buffer.byteLength(text, 'utf8') <= MAX_PROMPT_BYTES, 'the raw buffer fits');
@@ -1157,8 +1110,6 @@ test('the size pre-check measures the buffer as the numbered prefix will deliver
   assert.equal(decideDocumentSize(text, 'edit').trigger, 'edit');
   assert.equal(decideDocumentSize('# Title\n').dispatch, true, 'an ordinary buffer is untouched');
 });
-
-// --- Focus (docs/plan-visions-4-focus.md, M19 and M21) ---
 
 import * as focusCore from '../server/core/visions-dispatch-core.ts';
 

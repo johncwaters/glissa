@@ -78,7 +78,7 @@ test('spinner then stabilized idle emits ready exactly once', (t) => {
   const ready = signals.filter((s) => s.signal === 'ready');
   assert.equal(ready.length, 1);
   assert.equal(ready[0].char, '✳');
-  // working emitted once despite two spinner frames
+
   assert.equal(signals.filter((s) => s.signal === 'working').length, 1);
   src.destroy();
 });
@@ -192,8 +192,8 @@ test('unknown NON-ASCII glyph emits unknown, never ready', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const src = createOscTitleSource({ stabilizationMs: 50 });
   const signals = collect(src);
-  src.feed(bulletTitle('⠂')); // working first
-  src.feed(bulletTitle('★')); // unrecognized symbol (U+2605) - candidate new glyph
+  src.feed(bulletTitle('⠂'));
+  src.feed(bulletTitle('★'));
   t.mock.timers.tick(120);
   assert.equal(signals.filter((s) => s.signal === 'unknown').length, 1);
   assert.equal(signals.filter((s) => s.signal === 'ready').length, 0);
@@ -201,9 +201,6 @@ test('unknown NON-ASCII glyph emits unknown, never ready', (t) => {
 });
 
 test('ASCII window title (cmd.exe /c claude) emits NO signal', (t) => {
-  // On Windows, Glissa spawns `cmd.exe /c claude`, and cmd sets the console title
-  // to its command line ("C:\...\cmd.exe"). The leading 'C' is a generic window
-  // title, not a Claude activity glyph - it must be dropped silently, never `unknown`.
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const src = createOscTitleSource({ stabilizationMs: 50 });
   const signals = collect(src);

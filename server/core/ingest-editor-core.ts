@@ -1,10 +1,7 @@
-// Markers only: buffer text here would put the document a dispatch is about into that dispatch's own
-// DATA section (docs/plan-ingestion.md, M6 Sources).
-
 import { deepestRootFor, normalizeShapePath, pathOfFileUri } from './visions-scope-core.ts';
 
 const SOURCE = 'editor';
-// The one notification for a buffer the lane does not mirror; both ends key on this constant.
+
 const ACTIVITY_METHOD = 'visions/editorActivity';
 const KIND_BY_METHOD: Readonly<Record<string, string>> = Object.freeze({
   'textDocument/didOpen': 'doc-open',
@@ -46,8 +43,6 @@ function relativeTo(root: string | null | undefined, normalizedPath: string): st
   return normalizedPath.slice(root.length + 1);
 }
 
-// A relay replays every open document on each reconnect, so a repeat open is not an event; a save is,
-// every time, because it is the operator acting.
 function applyEditorNotification(
   state: EditorState,
   { method, uri, roots = [], now = 0 }: EditorNotification = {},

@@ -1,13 +1,7 @@
-// Pure normalization of one Claude Code statusLine payload. Every field is conditional by contract
-// (live-probed 2.1.235: rate_limits absent at startup and on non-subscription plans, each window
-// independently absent), so absent stays null, never zero: a 0% plan limit is a claim Claude made.
-
 import { isPlainObject, numberOrNull } from './usage-number-core.ts';
 
-// Reported percentages carry binary-float noise, so round before comparing or rendering.
 const PCT_DECIMALS = 1;
 
-// Above this, resets_at is already milliseconds; a future unit change degrades to a correct countdown.
 const SECONDS_CEILING = 1e12;
 
 export interface RateLimitWindow {
@@ -42,7 +36,6 @@ function resetsAtMs(value: unknown): number | null {
   return Math.round(numeric * 1000);
 }
 
-// A window with neither usable field is absent, not empty: a 0% bar for it would invent a fact.
 function normalizeWindow(raw: unknown): RateLimitWindow | null {
   if (!isPlainObject(raw)) return null;
   const window = raw as Record<string, unknown>;
@@ -61,7 +54,6 @@ function normalizeRateLimits(raw: unknown): RateLimitWindows | null {
   return { fiveHour, sevenDay };
 }
 
-// ts is the receive time: the payload carries no timestamp and freshness is what the panel needs.
 function normalizeStatuslinePayload(payload: unknown, nowMs: unknown): StatuslineSnapshot | null {
   if (!isPlainObject(payload)) return null;
   const fields = payload as Record<string, unknown>;
@@ -88,7 +80,6 @@ function planLimitsSignature(snapshot: { rateLimits?: RateLimitWindows | null } 
   return `${windowSignature(limits.fiveHour)}|${windowSignature(limits.sevenDay)}`;
 }
 
-// Throttle: statusLine lands several times per turn, so only a rounded-pct or reset change broadcasts.
 function shouldBroadcastPlanLimits(
   previous: { rateLimits?: RateLimitWindows | null } | null | undefined,
   next: { rateLimits?: RateLimitWindows | null } | null | undefined,

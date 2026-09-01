@@ -1,5 +1,3 @@
-// Real editors parse these files, so a real parser checks them rather than a regex.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -17,7 +15,6 @@ function pythonWithTomllib() {
       execFileSync(candidate, ['-c', 'import tomllib'], { stdio: 'ignore' });
       return candidate;
     } catch {
-      // Try the next spelling; a host without either simply skips the TOML case.
     }
   }
   return null;

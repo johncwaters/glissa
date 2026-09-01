@@ -1,8 +1,3 @@
-// Control-WS dispatch for the Hooks tab. Pinned: the report carries the stored records, the catalog,
-// Glissa's own hooks and the project list; a save mints the id, validates through the core, writes via
-// configStore.save and reloads like a hand edit; an edit must name a record we hold; a delete down to
-// none removes the key; and every refusal changes nothing.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -43,7 +38,7 @@ function harness(config: GlissaConfig, { saveFails = false, rtkPath = '/usr/bin/
     resolveRtkPath: () => rtkPath,
   }));
   const connection = connectControl<HooksFrame>(server);
-  connection.sent.length = 0; // drop the connect preamble
+  connection.sent.length = 0;
   return { send: connection.send, sent: connection.sent, broadcasts, reloads };
 }
 
@@ -81,8 +76,6 @@ test('request-hooks-report answers the stored records, the catalog, the built-in
   assert.deepEqual(report.limits, { maxTimeoutSec: MAX_TIMEOUT_SEC });
 });
 
-// The injector writes the rtk entry only when a real binary resolved, so a report listing it on
-// config.rtk alone told the operator a hook was firing that no settings file carries.
 test('the rtk row is listed on the resolved binary, not on config.rtk alone', async () => {
   const h = harness({ projects: [], rtk: true }, { rtkPath: null });
   await h.send({ type: 'request-hooks-report', requestId: 'r1' });
@@ -90,8 +83,6 @@ test('the rtk row is listed on the resolved binary, not on config.rtk alone', as
   assert.deepEqual(report?.builtin?.filter((row) => row.purpose.includes('rtk')), []);
 });
 
-// A stored record this build cannot normalize (an event a newer Claude Code added) is not ours to
-// erase: an unrelated save or delete must leave it exactly where it was.
 test('a stored record the core cannot read survives an unrelated save and an unrelated delete', async () => {
   const future = { id: 'future', name: 'f', event: 'NotYetKnown', type: 'command', command: 'x', enabled: true };
   const config: GlissaConfig = { projects: [], hooks: [future, record()] };
@@ -157,9 +148,6 @@ test('save-hook refuses a project the config does not hold', async () => {
   assert.equal(h.sent.find((m) => m.type === 'save-hook-result')?.error, 'Unknown project p9');
 });
 
-// A row toggle sends the whole record back. Refusing the ids the record already holds made a hook
-// scoped to a removed project untogglable, and stripping them client side would have quietly turned it
-// global, so an EDIT keeps the dead scope (inert: hooksForProject only ever matches a live id).
 test('an edit keeps a scope naming a project that left config; a new hook still may not name one', async () => {
   const config: GlissaConfig = { projects: [{ id: 'p1', name: 'glissa', path: '/r' }], hooks: [record({ projects: ['gone'] })] };
   const h = harness(config);
@@ -170,7 +158,6 @@ test('an edit keeps a scope naming a project that left config; a new hook still 
   assert.deepEqual(storedHook(config, 'h1')?.projects, ['gone']);
   assert.equal(storedHook(config, 'h1')?.enabled, false);
 
-  // Only the dead ids that record already carried: an edit may not introduce another one.
   h.sent.length = 0;
   await h.send({ type: 'save-hook', requestId: 'r2', hook: record({ projects: ['gone', 'alsoGone'] }) });
   assert.equal(h.sent.find((m) => m.type === 'save-hook-result')?.error, 'Unknown project alsoGone');

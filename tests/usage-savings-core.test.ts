@@ -1,7 +1,3 @@
-// The two halves of the Savings section, both pure: normalizing what the rtk CLI prints, and pricing the
-// prompt-cache reads the report already counted. The rtk sample below is verbatim from a live
-// `rtk gain --daily --format json` (rtk 0.45.0), so a change in that output breaks this rather than
-// silently reporting zeros on the dashboard.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -33,8 +29,6 @@ const RTK_SAMPLE = {
   ],
 };
 
-// A tiny table rather than the bundled snapshot: the arithmetic under test is the rate spread, and a real
-// table would tie this test to whatever LiteLLM last published.
 function pricingTable() {
   return normalizePricingTable({
     'claude-sonnet-4-5': {
@@ -44,7 +38,6 @@ function pricingTable() {
     },
     'cheap-cache-model': {
       input_cost_per_token: 0.000002,
-      // No cache_read entry at all: ratesForPrice defaults it to a tenth of input.
     },
   });
 }
@@ -113,7 +106,6 @@ test('normalizeRtkGain: a payload with no usable summary is null, never a zeroed
   }
 });
 
-// ── Cache savings ──
 
 test('computeCacheSavings: priced rows pay the input-to-cache-read spread', () => {
   const savings = computeCacheSavings(
@@ -123,7 +115,6 @@ test('computeCacheSavings: priced rows pay the input-to-cache-read spread', () =
     ],
     pricingTable(),
   );
-  // 1M x (0.000003 - 0.0000003) = 2.70, plus 500k x (0.000002 - 0.0000002) = 0.90.
   assert.ok(savings);
   assert.equal(Math.round(savings?.savedUSD * 100) / 100, 3.6);
   assert.equal(savings?.cacheReadTokens, 1_500_000);
@@ -171,8 +162,6 @@ test('computeCacheSavings: nothing read from cache is null, not a zero saving', 
   assert.equal(computeCacheSavings([{ model: 'gpt-5.5', vendor: 'codex', cacheRead: 5000 }], table), null);
 });
 
-// A cache read costing MORE than fresh input is not a saving; reporting it as a negative one would let a
-// mispriced model eat a real saving from another row.
 test('computeCacheSavings: an inverted rate spread clamps to zero rather than going negative', () => {
   const table = normalizePricingTable({
     'inverted-model': { input_cost_per_token: 0.0000001, cache_read_input_token_cost: 0.000009 },
@@ -190,8 +179,6 @@ test('computeCacheSavings: an inverted rate spread clamps to zero rather than go
   assert.equal(savings?.cacheReadTokens, 2_000_000);
 });
 
-// ratesForPrice is the shared rate reader; the savings core needs it exported rather than reimplementing
-// the cache-read default and drifting from what the cost estimate charges.
 test('ratesForPrice is exported and still defaults cache read to a tenth of input', () => {
   assert.equal(typeof ratesForPrice, 'function');
   const rates = ratesForPrice({ input_cost_per_token: 0.000002 });

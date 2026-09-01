@@ -1,7 +1,3 @@
-// The context mill's automation loop with every side effect faked: which pack a watch fire rebuilds,
-// what the fallback sweep covers, when `pack-updated` is (and is not) emitted, and that stop() closes
-// the watchers, kills the timer and drains an in-flight rebuild. No fs, no timers, no real builds.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -10,8 +6,6 @@ import type { PackService, PackServiceDependencies } from '../server/pack-servic
 import type { BuildReport, SpecListing } from '../server/pack-builder.ts';
 import type { PackWatcher } from '../server/pack-watch.ts';
 
-// Drain the microtask queue: the loop chains several awaits before a build starts, and a build
-// queued by a watch fire runs off the shared promise chain rather than inline.
 const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 const settle = async (): Promise<void> => { await flush(); await flush(); };
 
@@ -68,8 +62,6 @@ function okReport(name: string, overrides: Partial<BuildReport> = {}): BuildRepo
   };
 }
 
-// A fake service: fake watchers (recording the dir they claimed and their onChange), a fake interval,
-// and a build that returns whatever the test queued for that pack name.
 function harness({
   specs = SPECS,
   reportFor = (name) => okReport(name),
@@ -80,8 +72,7 @@ function harness({
   const watchers: RecordingWatcher[] = [];
   const builds: string[] = [];
   const buildCalls: { name: string | undefined; projects: ProjectRecord[] | null | undefined }[] = [];
-  // The interval seam a test drives by hand. The handle it answers is a REAL unref'd timer that never
-  // runs a callback of its own, because the seam is typed against NodeJS.Timeout.
+
   const interval: { callback: (() => void) | null; ms: number | null; cleared: number } = {
     callback: null, ms: null, cleared: 0,
   };
@@ -263,7 +254,7 @@ test('a sweep already running is not started again', async () => {
 
   const started = h.service.start();
   await flush();
-  // What the interval callback does, while the boot sweep is still running.
+
   void h.service.sweep();
   void h.service.sweep();
   await started;
@@ -323,10 +314,6 @@ test('an install with no specs is fully inert: no watcher, no timer, no build', 
   assert.equal(h.hasInterval(), false);
   await h.service.stop();
 });
-
-// ── Consumer gating ──
-// A pack nothing would be spawned against costs a source walk per sweep to publish bytes no session
-// will ever be handed, so it is neither watched nor swept until something names it.
 
 test('a spec with no consumers gets no watcher and is skipped by the sweep', async () => {
   const h = harness({ consumedPackNames: () => ['beta'] });
@@ -426,8 +413,6 @@ test('an unfiltered service is unaffected by the consumer gate', async () => {
 });
 
 test('ensureBuilt builds a pack the consumer filter would still skip', async () => {
-  // The assignment has been written to disk but not yet reloaded, so the in-memory consumer set does not
-  // name it yet. This is the ONLY window in which the filter must be ignored.
   const h = harness({ consumedPackNames: () => [] });
   await h.service.start();
   assert.deepEqual(h.builds, []);
@@ -476,7 +461,6 @@ test('a consumer change racing the boot sweep queues behind it rather than orpha
   await started;
   await restarted;
 
-  // One timer is live, and the restart cleared the boot one rather than assigning over it.
   assert.equal(h.intervalCleared, 1, 'the boot interval was cleared by the restart, not leaked');
   assert.equal(h.watchers.filter((w) => !w.stopped).length, 3, 'the restart reinstalled every watcher exactly once');
   await h.service.stop();
@@ -493,12 +477,8 @@ test('a restart racing stop() installs no watcher into the emptied array', async
   const stopping = h.service.stop();
   await Promise.all([restarted, stopping]);
 
-  // Every watcher ever created is closed: an fs.watch handle installed after teardown emptied the array
-  // is one nothing would ever close.
   assert.equal(h.watchers.every((w) => w.stopped), true, `${h.watchers.filter((w) => !w.stopped).length} watchers left open`);
 });
-
-// ---- Per-project variants: derived packs are recorded and announced in their own right ----
 
 function groupReport(name: string, overrides: Partial<BuildReport> = {}): BuildReport {
   return okReport(name, {
@@ -519,7 +499,7 @@ test('a derived pack gets its own version and its own pack-updated, like any oth
     'alpha-glissa-12345678': 'v-alpha-a',
     'alpha-other-87654321': 'v-alpha-b',
   });
-  // The unchanged variant publishes nothing, exactly like an unchanged plain pack.
+
   assert.deepEqual(h.updates.map((update) => update.name), ['alpha', 'alpha-glissa-12345678']);
   await h.service.stop();
 });

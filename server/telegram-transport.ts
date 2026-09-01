@@ -1,11 +1,3 @@
-// The one Telegram sendMessage path. Two callers with unrelated lifecycles share it: the PR
-// auto-review lane (server/pr-telegram.ts) and the opt-in session-notification channel
-// (notifications/channels/telegram.ts).
-//
-// Fire-and-forget by contract: it NEVER throws and never rejects. Both callers sit on paths where a
-// failed ping must not disturb the work that triggered it (a poller tick, a notification delivery
-// loop), and this process has no uncaughtException handler by design.
-
 import https from 'node:https';
 
 interface TelegramBody {
@@ -18,11 +10,11 @@ type TelegramTransport = (url: string, body: TelegramBody) => Promise<unknown>;
 interface SendTelegramOptions {
   botToken: string;
   chatId: string;
-  /** plain text, no parse_mode - no markdown escaping surprises */
+
   text: string;
-  /** log prefix identifying the calling lane */
+
   tag?: string;
-  /** injected for tests */
+
   transport?: TelegramTransport | null;
 }
 
@@ -61,10 +53,6 @@ function defaultTransport(url: string, bodyObject: TelegramBody): Promise<void> 
   });
 }
 
-/**
- * Never rejects. The durable outbox needs to know whether a ping actually landed before it may forget
- * it; the fire-and-forget callers ignore the result.
- */
 async function sendTelegramMessage({
   botToken, chatId, text, tag = 'telegram', transport,
 }: SendTelegramOptions): Promise<SendTelegramResult> {

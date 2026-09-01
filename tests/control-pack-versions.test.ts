@@ -1,9 +1,3 @@
-// The connect snapshot carries the latest built version of every context pack, which is the baseline
-// a dashboard compares each session's DELIVERED versions against. It rides the snapshot deliberately:
-// a reconnecting client is repaired by that one frame, which is why the `pack-updated` broadcast needs
-// no retention in the replay log. Booting a real backend for this would drag in the pack service's
-// real fs watchers and builds, so this drives registerControlHandlers directly.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 

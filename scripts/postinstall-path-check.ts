@@ -1,12 +1,3 @@
-// Best-effort PATH notice printed after a GLOBAL `npm install -g github:johncwaters/glissa`.
-//
-// Contract: print-only. It never edits the operator's PATH and must NEVER fail an install: every path
-// is wrapped so we always exit 0. It stays silent for local, dev, and dependency installs (gated on
-// npm_config_global), and is skipped entirely under `npm install --ignore-scripts` (the bundled
-// node-pty prebuild still loads at runtime, so glissa is unaffected).
-//
-// Reached through scripts/postinstall.mjs, which is the plain-JS half npm can run before dist exists.
-
 import os from 'node:os';
 
 import { formatPathNotice, npmGlobalBinDir, onPath } from '../bin/path-doctor.ts';
@@ -26,5 +17,4 @@ function printPathNotice(): void {
 try {
   printPathNotice();
 } catch {
-  // Install hardening must never break an install.
 }

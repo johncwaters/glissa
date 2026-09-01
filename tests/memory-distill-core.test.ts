@@ -1,7 +1,3 @@
-// M15 of docs/plan-visions-3.md: the verifier gates are the whole reason this lane may publish at all,
-// so every one of them is pinned here. Hallucinated ids, borrowed rank, an unannounced flood of new
-// claims and a rephrased locked fact each have to be mechanically detectable.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { DistillClaim, HandledClaim } from '../server/core/memory-distill-core.ts';
@@ -583,7 +579,7 @@ test('a project past its claim threshold turns the next run into a full re-disti
   ]);
   assert.deepEqual(decideDistillMode(standing, { maxProjectClaims: 10 }), { mode: 'incremental', project: null, claims: 0 });
   assert.deepEqual(decideDistillMode(standing, { maxProjectClaims: 3 }), { mode: 'full', project: '/repo/big', claims: 4 });
-  // Standing claims are a prompt corpus too, so one that no longer fits compacts whatever grew most.
+
   assert.equal(decideDistillMode(standing, { maxProjectClaims: 500, maxChars: 10 }).mode, 'full');
 });
 

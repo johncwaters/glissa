@@ -15,7 +15,6 @@ interface Fixture {
   publisher: string;
 }
 
-// git's own runner reports the exit code on `.code`; execFileSync parks it on `.status`.
 type GitFailure = Error & { code?: unknown; status?: unknown };
 type GitRunner = (args: string[], cwd: string) => string;
 type GitHijack = (args: string[], cwd: string) => void;
@@ -47,11 +46,6 @@ function createFixture(): Fixture {
   return { root, repo, publisher };
 }
 
-// The engine's default runner is promisified execFile, whose error carries the exit code on `.code`;
-// isAncestor reads exactly that to tell "not an ancestor" (exit 1) from "the probe could not run".
-// execFileSync parks the code on `.status` instead, so a test that injects a real-git runner has to
-// normalize or every ancestry probe reads as unreadable and the classification silently changes.
-// `hijack` runs BEFORE the command, which is how a test lands an operator action mid-sequence.
 function realGitRunner(hijack: GitHijack | null): GitRunner {
   return (args, cwd) => {
     if (hijack) hijack(args, cwd);
@@ -196,10 +190,6 @@ test('syncIntegrationBranch refuses to move an integration branch checked out in
   }
 });
 
-// The TOCTOU the porcelain pre-check cannot close: the branch is free when the check runs and checked
-// out by the time the mutation does. update-ref would move it anyway and strand a live index against a
-// tree it no longer describes, so the mutation is a local fetch, which git itself refuses. The operator's
-// checkout is simulated by hijacking the runner just before that fetch.
 test('syncIntegrationBranch does not move a branch checked out between the check and the mutation', { skip: !GIT }, async () => {
   const fixture = createFixture();
   const linked = path.join(fixture.root, 'linked');
@@ -226,8 +216,6 @@ test('syncIntegrationBranch does not move a branch checked out between the check
   }
 });
 
-// The pre-check classifies, the fetch enforces. A branch that raced to the remote tip between the two
-// (a sibling worktree engine, the operator's own pull) is reported for what it is, not as a fork.
 test('a sync refused after the branch already reached the remote tip reports up-to-date', { skip: !GIT }, async () => {
   const fixture = createFixture();
   try {
@@ -252,10 +240,6 @@ test('a sync refused after the branch already reached the remote tip reports up-
   }
 });
 
-// The refusal that is NOT a fork: a stale refs/heads/<branch>.lock (a crashed git, a concurrent ref
-// transaction) refuses a fast-forward that is still perfectly legal. Calling that 'diverged' would tell
-// the operator their integration branch forked, sending them to resolve a history problem they do not
-// have; it is operational, retried on the next start, and carries git's own error line.
 test('a sync refused by a stale ref lock reports update-failed, never diverged', { skip: !GIT }, async () => {
   const fixture = createFixture();
   try {
@@ -277,8 +261,6 @@ test('a sync refused by a stale ref lock reports update-failed, never diverged',
   }
 });
 
-// The ancestry probe is re-run AFTER the refusal, not reused from the pre-check: a branch that really
-// forked in the meantime is still reported as the fork it is.
 test('a sync refused after the branch really forked is still reported as diverged', { skip: !GIT }, async () => {
   const fixture = createFixture();
   try {
@@ -307,9 +289,6 @@ test('a sync refused after the branch really forked is still reported as diverge
   }
 });
 
-// The pre-update twin of the stale-lock case: the ancestry probe itself fails (an unreadable object
-// store, a git that cannot run), so Glissa knows nothing about the two branches' relationship. Reporting
-// diverged there would send the operator to resolve a fork that may not exist.
 test('a sync whose ancestry probe fails reports update-failed, never diverged', { skip: !GIT }, async () => {
   const fixture = createFixture();
   try {
@@ -333,7 +312,6 @@ test('a sync whose ancestry probe fails reports update-failed, never diverged', 
   }
 });
 
-// A probe that runs and answers "no" is the one thing that earns the word diverged, and it still does.
 test('a real fork still reports diverged once the probe answers', { skip: !GIT }, async () => {
   const fixture = createFixture();
   try {

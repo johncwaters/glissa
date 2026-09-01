@@ -1,6 +1,3 @@
-// The IO half: detection against a fake home, the one-time backup, and the round trip that puts a
-// hand-maintained file back exactly as it was found.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -61,7 +58,6 @@ test('wiring writes, is idempotent, backs up once and unwires back to the origin
   const second = wireEditors({ invocation: INVOCATION, ...detection(homeDir) });
   assert.deepEqual(second.map((entry) => entry.action), ['unchanged', 'unchanged']);
 
-  // A backup is the state before glissa ever ran, so a later run must not overwrite it.
   fs.writeFileSync(helixPath, `${fs.readFileSync(helixPath, 'utf8')}\n# operator edit\n`);
   wireEditors({ invocation: INVOCATION, ...detection(homeDir) });
   assert.equal(fs.readFileSync(`${helixPath}.glissa.bak`, 'utf8'), original);

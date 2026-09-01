@@ -1,6 +1,3 @@
-// The pure core of the distiller lane: the drift stamp a derived file carries, the staleness verdict
-// read off it, and the contract clauses the distill session's prompt must carry.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -22,10 +19,6 @@ const SOURCES = [
 function fileWith(stampLine: string, body = 'the distilled brief\n') {
   return `${stampLine}\n\n${body}`;
 }
-
-// ---------------------------------------------------------------------------
-// the stamp
-// ---------------------------------------------------------------------------
 
 test('a stamp round-trips through parse, hashes truncated to the stamped length', () => {
   const parsed = parseStampLine(fileWith(buildStampLine(SOURCES)));
@@ -80,10 +73,6 @@ test('normalizeStampSources drops junk records and dedupes by path', () => {
   assert.deepEqual(normalized, [{ path: 'a.md', sha256: '2'.repeat(STAMP_HASH_CHARS) }]);
 });
 
-// ---------------------------------------------------------------------------
-// needsDistill
-// ---------------------------------------------------------------------------
-
 test('needsDistill: a missing output is stale', () => {
   assert.deepEqual(needsDistill(SOURCES, null), { stale: true, reason: 'output file is missing' });
   assert.equal(needsDistill(SOURCES, '').stale, true);
@@ -111,10 +100,6 @@ test('needsDistill: a full-length hash in the stamp still compares equal to a tr
   const longStamp = `<!-- glissa-distill v1 ${JSON.stringify(SOURCES)} -->`;
   assert.equal(needsDistill(SOURCES, fileWith(longStamp)).stale, false);
 });
-
-// ---------------------------------------------------------------------------
-// buildDistillPrompt
-// ---------------------------------------------------------------------------
 
 const PROMPT_ARGS = {
   outputPath: 'C:/repo/packs/sources/glissa/derived/brief.md',

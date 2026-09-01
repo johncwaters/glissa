@@ -62,7 +62,6 @@ function createBackendSessionRuntime(dependencies: BackendSessionRuntimeDependen
     getGitWorkspace: dependencies.getGitWorkspace,
     getMillMetricsPort: dependencies.getMillMetricsPort || (() => null),
     rtkPathForConfig,
-    // The live config object, so a hook saved after boot is what the next spawn reads.
     getUserHooks: (projectId: string) => hooksForProject(dependencies.config.hooks, projectId),
   });
 

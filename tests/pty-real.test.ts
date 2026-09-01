@@ -1,14 +1,9 @@
-// Every other PTY test injects a hand-written fake through the ptySpawn seam, so nothing proved the
-// fakes still describe node-pty. These spawn the real module: the socket-delegation contract that
-// _guardUnixPtySocket depends on (unixTerminal.js rethrows an 'error' when listeners('error').length
-// is under 2, which once took the whole server down), plus a live child driven through Session.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import pty from 'node-pty';
 import { Session } from '../session/sessions.ts';
 import { STATES } from '../shared/states.ts';
-// node-pty's unix backend delegates on()/listeners() to the pty socket; the guard under test needs both.
+
 type UnixPty = pty.IPty & {
   on(event: string, listener: (error: Error) => void): unknown;
   listeners(event: string): unknown[];

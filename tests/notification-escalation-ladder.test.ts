@@ -1,17 +1,3 @@
-// The escalation ladder's last rung (2026-08 review, section 5, promoted by the operator's ruling to
-// the section's one endorsed durability investment).
-//
-// The shape: deliver browser best-effort, wait for an acknowledgement, and escalate an unacknowledged
-// notification to the off-dashboard channel EVEN WHILE CONNECTIONS ARE OPEN. A dashboard being open
-// is what the ordinary Telegram gate keys on, and this rung is the one delivery that disbelieves it:
-// the operator was shown a browser notification and did not act on it.
-//
-// Time is driven BY HAND here (node:test mock timers, the same mechanism tests/notification-manager.js
-// already uses on this class). Racing real timers against sleeps meant a settle that overran its margin
-// on a loaded machine read as a rung that fired, so the restart test failed under CI load and passed
-// idle. Ticking to an exact moment asserts the thing the test is actually about: whether a timer was
-// armed for that moment at all.
-
 import test from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,8 +15,7 @@ interface RecordedDelivery {
 }
 
 const PHONE_MS = 50;
-// Long enough to prove nothing further is armed, and well under the 60s escalation interval below so
-// the browser ping-pong stays out of these assertions.
+
 const QUIET_MS = PHONE_MS * 20;
 
 function makeManager({ withPhoneChannel = true, phoneEscalationMs = PHONE_MS } = {}) {
@@ -45,9 +30,7 @@ function makeManager({ withPhoneChannel = true, phoneEscalationMs = PHONE_MS } =
       phone.push({ session, category, message, context });
     }, { offDashboard: true });
   }
-  // The off-dashboard channel is CALLED on every delivery, as it always has been - its own gate is
-  // what decides whether anything leaves the machine. What is new is the flagged delivery, so that is
-  // what the rung assertions count.
+
   const escalations = () => phone.filter((delivery) => delivery.context.phoneEscalation === true);
   return { manager, browser, phone, escalations };
 }
@@ -105,11 +88,9 @@ test('a fresh trigger restarts the ladder rather than inheriting the old entry t
   t.mock.timers.tick(PHONE_MS / 2);
   manager.trigger('sess-1', 'waiting', 'second');
 
-  // The replaced entry's rung was due exactly here.
   t.mock.timers.tick(PHONE_MS / 2);
   assert.deepEqual(escalations(), [], 'the replaced entry does not escalate on the new one behalf');
 
-  // And the replacement's own rung is due half a delay later, timed from ITS delivery.
   t.mock.timers.tick(PHONE_MS / 2);
   assert.equal(escalations().length, 1);
   assert.equal(escalations()[0].message, 'second');
@@ -124,8 +105,6 @@ test('the rung fires once per entry, not once per escalation round', (t) => {
   t.mock.timers.tick(PHONE_MS);
   assert.equal(escalations().length, 1);
 
-  // Back to the browser ping-pong: being reached on the phone does not end an escalation that exists
-  // because the agent is still blocked.
   manager._transition('sess-1', 'escalation_tick');
   assert.equal(manager.getNotificationState('sess-1'), NS.DELIVERED);
   t.mock.timers.tick(QUIET_MS);
@@ -156,8 +135,6 @@ test('a zero escalation delay switches the ladder off', (t) => {
   assert.equal(manager.getNotificationState('sess-1'), NS.DELIVERED);
 });
 
-// The gate the rung leans on: the AUDIENCE test is what it bypasses, never the opt-in or the
-// credentials. An operator who never turned Telegram on is not escalated to.
 test('the escalation bypasses the dashboard-open gate and nothing else', () => {
   const configured = { enabled: true, botToken: 'b', chatId: 'c' };
   assert.deepEqual(
@@ -178,10 +155,6 @@ test('the escalation bypasses the dashboard-open gate and nothing else', () => {
   );
 });
 
-// The Telegram channel is registered UNCONDITIONALLY and decides per delivery, so "an off-dashboard
-// channel exists" is not the same question as "one would deliver this". Arming on the former put a
-// five-minute timer on every notification of every install that has Telegram off or unconfigured,
-// firing into a channel that drops it.
 test('no timer is armed when the off-dashboard channel would not deliver', (t) => {
   useFakeClock(t);
   const manager = new NotificationManager({ escalationIntervalMs: 60000, debounceMs: 0, phoneEscalationMs: PHONE_MS });
@@ -198,17 +171,12 @@ test('no timer is armed when the off-dashboard channel would not deliver', (t) =
   assert.equal(manager.getNotificationState('sess-1'), NS.DELIVERED, 'nothing to escalate to');
   assert.equal(phone.filter((d) => d.context.phoneEscalation === true).length, 0);
 
-  // The operator turns Telegram on; the NEXT notification arms, with no restart.
   telegramEnabled = true;
   manager.trigger('sess-2', 'complete', 'other build finished');
   t.mock.timers.tick(PHONE_MS);
   assert.equal(manager.getNotificationState('sess-2'), NS.ESCALATED_PHONE);
 });
 
-// A pending escalation is advisory. It must never be the reason the process stays alive for five
-// minutes after everything else has shut down. Deliberately on the REAL timer path: a mocked handle
-// reports hasRef() true whatever unref() did, so the default wiring is the only place this is true
-// coverage rather than a restatement of the fake.
 test('the escalation timer is unref\'d', (t) => {
   const { manager } = makeManager({ phoneEscalationMs: 60_000 });
   t.after(() => manager.destroy());

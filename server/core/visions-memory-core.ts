@@ -1,6 +1,3 @@
-// M13 of docs/plan-visions-3.md: every trust field is stamped from which funnel fired, never read from input.
-// M16 adds the read half: the lines one dispatch is handed, in the projection's own bullet shape.
-
 import { effectiveRank, projectionBulletFrom } from './memory-core.ts';
 import { sanitizeOneLine } from './text-core.ts';
 import { THREAD_ID_PATTERN, THREAD_ID_RE } from './visions-intent-core.ts';
@@ -41,7 +38,6 @@ function basenameOfUri(uri: unknown): string {
   return sanitizeOneLine(decoded, 120) || DEFAULT_BASENAME;
 }
 
-// The canon tags a folded repo PATH, never the Glissa project id, so two installs of one checkout agree.
 function projectTagFor(projectId: unknown, scopeProjects: Array<{ id?: unknown; path?: unknown }> | null | undefined): string | null {
   const id = nonEmptyString(projectId);
   if (!id || !Array.isArray(scopeProjects)) return null;
@@ -57,8 +53,6 @@ function projectKeyOf(project: unknown): string {
   return project === null || project === undefined ? '' : String(project);
 }
 
-// The thread an intent record belongs to rides its text as a prefix, since the record shape has no column
-// for it; anchored to the id shape so prose starting "thread pool sizing: " cannot mint a lineage.
 const INTENT_THREAD_PREFIX_RE = new RegExp(`^thread (${THREAD_ID_PATTERN}): `);
 
 function intentRecordText(text: unknown, threadId: unknown): string {
@@ -72,7 +66,6 @@ function threadIdOfIntentText(text: unknown): string | null {
   return match ? match[1] : null;
 }
 
-// One chain per project AND thread: keying on the project alone would supersede four threads out of five.
 function intentHeadKey(project: unknown, threadId: string | null): string {
   return `${projectKeyOf(project)}|${threadId || ''}`;
 }
@@ -95,7 +88,6 @@ function characterOfFix(fix: VisionsFixLike | null | undefined): number {
   return Math.floor(character);
 }
 
-// Fixes carry no id of their own, so the served identity is the rule plus where it sits.
 function servedFindingOf(fix: VisionsFixLike | null | undefined): { id: string; line: number } {
   const code = sanitizeOneLine(fix?.code == null ? 'finding' : fix.code, 60) || 'finding';
   const line = displayLineOfFix(fix);
@@ -107,7 +99,6 @@ function servedKey({ uri, version, id }: { uri?: unknown; version?: unknown; id?
   return `${nonEmptyString(uri)}|${stamped === null ? 'none' : stamped}|${nonEmptyString(id)}`;
 }
 
-// Oldest-first eviction, because a long-lived buffer would otherwise grow one key per served finding.
 function createBoundedKeySet(max: unknown = MAX_SERVED_KEYS) {
   const cap = positiveInteger(max) || MAX_SERVED_KEYS;
   const keys = new Set<string>();
@@ -148,7 +139,6 @@ function memoryInput({
   };
 }
 
-// Semantic, not episodic: a statement of what is being built is a standing claim, not an observed moment.
 function intentMemoryInput({
   text, project = null, supersedes = null, threadId = null,
 }: {
@@ -167,8 +157,6 @@ function intentMemoryInput({
   });
 }
 
-// The chain head per project and thread, so a proposal supersedes the one it replaced rather than
-// sitting beside it. A record written before the prefix existed heads the unthreaded key.
 function latestIntentHeads(records: unknown): Map<string, string> {
   const heads = new Map<string, string>();
   const newestByKey = new Map<string, number>();
@@ -212,7 +200,6 @@ function dispatchMemoryInputs({
   return inputs.filter((input): input is MemoryRecordInput => input !== null);
 }
 
-// Applications only: the editor also refuses on a version race or a timeout, which is no operator verdict.
 function fixFeedbackInput({ uri, project = null, fix }: {
   uri: string;
   project?: string | null;
@@ -265,7 +252,6 @@ function dismissFeedbackInput({ uri, project = null, id }: {
   });
 }
 
-// An editor notification is untrusted input: it names a finding and nothing else, never a rank.
 function readDismissParams(params: unknown): { uri: string; id: string } | null {
   if (!params || typeof params !== 'object' || Array.isArray(params)) return null;
   const fields = params as { uri?: unknown; id?: unknown; textDocument?: { uri?: unknown } | null };
@@ -275,15 +261,9 @@ function readDismissParams(params: unknown): { uri: string; id: string } | null 
   return { uri, id };
 }
 
-// Bounded twice: a dispatch prompt is a budget, and a record is capped but a retrieval set is not.
 const MAX_DELIVERED_RECORDS = 8;
 const MAX_DELIVERED_CHARS = 4000;
 
-/*
- * The lines one dispatch is handed, rendered in the SAME bullet shape the projection publishes so a
- * delivered line and its published twin normalize to one echo hash. Every line the caller registers
- * with the store, which is what closes the loop against a session quoting its memory back at it.
- */
 function memoryDeliveryLines(
   records: unknown,
   { maxRecords = MAX_DELIVERED_RECORDS, maxChars = MAX_DELIVERED_CHARS }: { maxRecords?: number; maxChars?: number } = {},

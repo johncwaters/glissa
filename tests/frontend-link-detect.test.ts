@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-// link-detect-core is ESM (.mjs); dynamic-import it so the suite drives the shipped module.
 const importCore = () => import('../public/session-card/link-detect-core.ts');
 
 test('findUrls: bare URL in prose, offsets cover exactly the URL', async () => {

@@ -1,8 +1,3 @@
-// The Mill IO shell against a real temp pack tree: what a malformed spec file costs, how a request
-// landing mid-pass is answered, and that no server path reaches the wire.
-//
-// Everything is a temp fixture injected through createMillWiring, so nothing here reads the operator's
-// real packs/ or ~/.glissa, and no backend is booted.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -83,7 +78,6 @@ function makeWiring(fixture: Fixture, overrides: Partial<MillWiringDependencies>
     baseDir: fixture.packsDir,
     specsDir: fixture.specsDir,
     builtRoot: fixture.builtRoot,
-    // One call per assembled report, which is what makes a pass countable from outside.
     now: () => {
       passes.count += 1;
       clock += 1;
@@ -101,8 +95,6 @@ function pull(wiring: MillWiring, requestId: string): Pull {
   return { replies, done };
 }
 
-// A failed pass answers the requestId with a reason instead of a report; every case here expects the
-// report, so the failure shape is refused once rather than at each read.
 function reportOf(payload: MillReportPayload | undefined): MillReport {
   if (!payload) throw new Error('the request went unanswered');
   if (payload.error !== null) throw new Error(`the mill pass failed: ${payload.error}`);
@@ -118,7 +110,6 @@ function packRow(report: MillReport, name: string): MillPackRow {
 test('a spec file whose JSON is not an object costs that pack row and nothing else', async (t: TestContext) => {
   const fixture = writeFixture();
   t.after(() => fs.rmSync(fixture.tmpDir, { recursive: true, force: true }));
-  // Valid JSON, so the parse does not throw; every read of spec.sources / spec.distill below would.
   writeSpec(fixture.specsDir, 'nullspec', 'null');
   writeSpec(fixture.specsDir, 'arrayspec', '[]');
 
@@ -208,8 +199,6 @@ test('a request landing mid-pass is answered from a pass that started after it a
   t.after(() => fs.rmSync(fixture.tmpDir, { recursive: true, force: true }));
 
   const { wiring, passes } = makeWiring(fixture);
-  // Started synchronously back to back, so the second lands while the first pass is still in its fs
-  // walk: that is the case where sharing the first pass would answer it from bytes read before it asked.
   const first = pull(wiring, 'r1');
   const second = pull(wiring, 'r2');
   await Promise.all([first.done, second.done]);
@@ -254,8 +243,6 @@ test('listPackNames reports every spec on disk, including one that has never bee
   }));
 
   const { wiring } = makeWiring(fixture);
-  // A first assignment is exactly what makes the mill build a pack, so validating against BUILT packs
-  // would refuse every pack it is worth assigning.
   assert.deepEqual((await wiring.listPackNames()).sort(), ['good', 'unbuilt']);
 });
 
@@ -301,7 +288,6 @@ test('two cards on one checkout are offered once, and deliver as one project', a
         { id: 'p2', name: 'glissa (2)', path: projectPath, packs: ['good'] },
       ],
     },
-    // The snapshot shape the Session class hands over, path included: it is what groups the rows.
     listSessions: () => [
       { id: 's1', name: 'glissa', path: projectPath, state: 'RUNNING', packs: [{ name: 'good', version: VERSION }] },
       { id: 's2', name: 'glissa (2)', path: projectPath, state: 'RUNNING', packs: [{ name: 'good', version: VERSION }] },
@@ -354,7 +340,6 @@ test('a spec no project and no lane names is reported as having no consumers', a
   assert.equal(report.totals.unconsumed, 1);
 });
 
-// ---- Per-project variants: the shell enumerates a group's derived packs beside it ----
 
 function writeVariantFixture(): Fixture {
   const fixture = writeFixture();
@@ -388,7 +373,6 @@ test('a group spec reports its base row plus one row per consuming project', asy
     const variant = packRow(report, `memory-${slug}`);
     assert.equal(variant.group, 'memory');
     assert.equal(variant.projectId, 'p1');
-    // Never built yet, which is a plain "not built" like any other pack, with no server path on the wire.
     assert.equal(variant.built, null);
     assert.equal(variant.builtReason, 'not built');
   } finally {

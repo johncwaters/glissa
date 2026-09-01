@@ -7,8 +7,6 @@ import type { NormalizedPr } from '../server/pr-gh.ts';
 
 type Gh = ReturnType<PrPollerDependencies['makePrGh']>;
 
-// A hand-fired timer: the handle is a real unref-ed timer that never runs its own callback, because the
-// seams are typed against NodeJS.Timeout.
 function heldTimer(): NodeJS.Timeout {
   const handle = setTimeout(() => {}, 2 ** 30);
   handle.unref();
@@ -17,15 +15,12 @@ function heldTimer(): NodeJS.Timeout {
 
 type Poller = ReturnType<typeof createPrPoller>;
 
-// The state store answers a partial map, so a suite reading one row says which row it means.
 function entryOf(poller: Poller, key: string): PrEntry {
   const entry = poller._state()[key];
   if (!entry) throw new Error(`no review state for ${key}`);
   return entry;
 }
 
-// onTickComplete reports the control-plane snapshot as a plain record, so the shape this suite asserts on
-// is stated once here and narrowed at the boundary.
 interface TickPr {
   key: string;
   phase: string;
@@ -78,7 +73,6 @@ const flush = async (n = 20) => {
   for (let i = 0; i < n; i += 1) await new Promise((resolve) => setImmediate(resolve));
 };
 
-// listPrs answers normalized rows; the poller keys them itself.
 function ownPr(over: Partial<NormalizedPr> = {}): NormalizedPr {
   return {
     number: 7,
@@ -120,8 +114,6 @@ function makeWorkspace(over: Partial<PrGitWorkspace> = {}): PrGitWorkspace {
   };
 }
 
-// Build poller deps with in-memory state + captured pings. `over.initialState` seeds the state store
-// BEFORE construction (readState reads the store lazily, so seeding after would be ignored).
 interface HarnessOverrides {
   initialState?: Record<string, unknown>;
   projects?: string[];
@@ -445,9 +437,9 @@ test('merge gate: a head advanced past the reviewed head is NOT merged (re-revie
   let mergeCalls = 0;
   let spawned = 0;
   const { poller } = harness({
-    initialState: AWAITING, // reviewedHead 'sha1'
+    initialState: AWAITING,
     gh: {
-      listPrs: async () => [ownPr({ headRefOid: 'sha2' })], // a new commit landed after review
+      listPrs: async () => [ownPr({ headRefOid: 'sha2' })],
       checksStatus: async () => 'green',
       touchesWorkflows: async () => false,
       merge: async () => { mergeCalls += 1; return { ok: true, out: '', err: '' }; },
@@ -483,7 +475,7 @@ test('merge gate: an unknown workflow-files result (gh error) fails closed - no 
     gh: {
       listPrs: async () => [ownPr()],
       checksStatus: async () => 'green',
-      touchesWorkflows: async () => null, // gh files query failed
+      touchesWorkflows: async () => null,
       merge: async () => { mergeCalls += 1; return { ok: true, out: '', err: '' }; },
     },
   });
@@ -542,7 +534,6 @@ test('filtered PRs (draft) are neither reviewed nor merged', async () => {
   assert.equal(spawned, 0);
 });
 
-// --- onTickComplete: the dashboard broadcast payload ---
 
 test('onTickComplete emits the dashboard broadcast payload', async () => {
   const { poller, summaries } = harness({

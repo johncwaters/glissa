@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
 
-// Bounded wait on an observable fact instead of counting event-loop turns, whose number differs per
-// platform (the POSIX prior-PTY reap takes more turns than the win32 taskkill the counts were tuned to).
 async function waitFor(predicate: () => boolean, label = 'condition became true'): Promise<void> {
   const deadline = Date.now() + 1000;
   while (Date.now() < deadline) {

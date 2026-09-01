@@ -6,10 +6,6 @@ import type { createMemoryStore } from '../../server/memory-store.ts';
 import type { createUsageWiring } from '../../server/usage-wiring.ts';
 import type { createVisionsWiring } from '../../server/visions-wiring.ts';
 
-// backend.getLane is the stringly-typed snapshot reader the control plane uses, so it answers unknown
-// by design. These are the test-side narrowings, in one place, each stated against the lane factory's
-// own return type: a lane whose API changes fails here rather than drifting silently across suites.
-
 type Backend = ReturnType<typeof createBackend>;
 type IngestLane = ReturnType<typeof createIngestLane>;
 type MemoryDistiller = ReturnType<typeof createMemoryDistiller>;

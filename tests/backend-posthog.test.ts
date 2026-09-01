@@ -1,7 +1,3 @@
-// The pure pieces server/posthog-wiring.ts exports for direct testing (no createBackend/httpServer):
-// the start-gate decision, the seed-prompt builder, the result-file verdict reader, and the cfg key.
-// Mirrors tests/backend-pr-poller.test.ts, which covers the PR lane the same way.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -45,8 +41,6 @@ function inertWiringDeps() {
     spawnGate: createSpawnGate(),
   };
 }
-
-// --- posthogShouldStart: inert-by-default + misconfiguration gating ---
 
 test('posthogShouldStart: inert when posthog absent or disabled (no reason, silent)', () => {
   assert.deepEqual(posthogShouldStart({}), { start: false, reason: null });
@@ -105,10 +99,6 @@ test('PostHog getStatus: enabled without telegram synthesizes a misconfigured st
   });
 });
 
-// --- makeResolveProjects: project display naming ---
-
-// makeResolveProjects reads two endpoints; the rest of the api surface exists so the stand-in is a
-// complete PosthogApi, and throws if this suite ever grows a path that reaches it.
 function fakeApi({ orgs, projectsByOrg }: {
   orgs: { id: string; name?: string }[];
   projectsByOrg: Record<string, { id: string | number; name?: string }[]>;
@@ -170,8 +160,6 @@ test('makeResolveProjects: explicit project array is taken verbatim, no org walk
   ]);
 });
 
-// --- posthogCfgKey: identity used to gate a restart to actual posthog/telegram changes ---
-
 test('posthogCfgKey: identical posthog/telegram produce the same key regardless of key order', () => {
   const a = posthogCfgKey({ posthog: ENABLED, telegram: TELEGRAM });
   const b = posthogCfgKey({ telegram: TELEGRAM, posthog: ENABLED });
@@ -210,8 +198,6 @@ test('PostHog lane passes configured packs into Session options', () => {
   }
 });
 
-// --- Auto-fix dispatch: worktree isolation, the fix deny-list, and the downgrade rule ---
-
 interface CreateCall {
   projectPath: string;
   teamId: string;
@@ -233,8 +219,6 @@ interface FixHarness {
   runCommand?: (cmd: string, args: string[], cwd: string) => Promise<CliResult>;
 }
 
-// An already-aborted signal short-circuits the session wait, so these exercise the dispatch decisions
-// (which workspace, which deny-list, which mode) without spawning or awaiting a real Session.
 function fixWiringHarness({ createResult }: { createResult?: PosthogWorkspace } = {}): FixHarness {
   const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-phrepo-'));
   const calls: { create: CreateCall[]; discard: DiscardCall[] } = { create: [], discard: [] };
@@ -297,8 +281,6 @@ test('a fix job runs in an isolated worktree on a sanitized radar-fix branch', a
   }
 });
 
-// A deterministic branch name collides with the remote branch the PREVIOUS fix for this issue pushed,
-// and every later push then fails as non-fast-forward on exactly the case a second fix exists for.
 test('two dispatches for the same issue take distinct branch labels', async () => {
   const harness = fixWiringHarness();
   try {
@@ -317,7 +299,7 @@ test('a fix session carries FIX_DENY, which allows the commit and denies the pus
   try {
     const { constructed } = await runFixSpawn(harness);
     assert.deepEqual(constructed[0].settingsPermissions, FIX_DENY);
-    // A prefix deny-list cannot constrain a push target or a gh api call, so neither is allowed at all.
+
     assert.ok(FIX_DENY.deny.includes('Bash(git push:*)'), 'the agent never pushes; the server does');
     assert.ok(FIX_DENY.deny.includes('Bash(gh:*)'), 'and never reaches GitHub by any gh subcommand');
     assert.ok(FIX_DENY.deny.includes('Bash(gh pr merge:*)'), 'the merge denial stays for defense in depth');
@@ -365,8 +347,6 @@ test('a lane with no repo configured never reaches the worktree at all', async (
     fs.rmSync(harness.repoDir, { recursive: true, force: true });
   }
 });
-
-// --- buildFixPrompt ---
 
 function fixPromptFor(over: Record<string, unknown> = {}): string {
   return buildFixPrompt({
@@ -439,8 +419,6 @@ test('buildFixPrompt builds the issue url from scrubbed ids, never from a raw pr
   assert.match(p, /https:\/\/ph\.test\/project\/1-+etc\/error_tracking\/iss-1/);
 });
 
-// --- buildInvestigationPrompt ---
-
 function promptFor(over: Record<string, unknown> = {}): string {
   return buildInvestigationPrompt({
     issueId: 'iss-1',
@@ -460,9 +438,6 @@ test('buildInvestigationPrompt names the issue, its url, the result path, and th
   assert.match(p, /posthog-reports.*iss-1\.html/, 'tells the agent where to write its HTML report');
 });
 
-// The prompt seeds a --dangerously-skip-permissions session, and an issue title is the monitored
-// app's error message: text an end user can often steer. Interpolating any of it verbatim handed a
-// visitor of that app a write primitive into this session's instructions.
 test('buildInvestigationPrompt embeds no API-derived free text, only ids', () => {
   const p = promptFor();
   assert.doesNotMatch(p, /TypeError/, 'no title');
@@ -524,8 +499,6 @@ test('buildInvestigationPrompt adds the source cross-reference step only when a 
   assert.match(promptFor({ repoPath: '/repo' }), /Cross-reference the stack frames against the source at \/repo/);
 });
 
-// --- sweepReports: the report dir is unbounded without it ---
-
 test('sweepReports keeps the newest N reports and drops the rest', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-phreports-'));
   try {
@@ -548,8 +521,6 @@ test('sweepReports keeps the newest N reports and drops the rest', async () => {
 test('sweepReports on a missing directory resolves quietly', async () => {
   await sweepReports(path.join(os.tmpdir(), 'glissa-phreports-does-not-exist'), 2);
 });
-
-// --- readInvestigationResult: verdict file parsing ---
 
 function withResultFile<T>(contents: string | null, fn: (resultPath: string) => T): T {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-phresult-'));
@@ -598,8 +569,6 @@ test('readInvestigationResult: the result file is removed after reading', () => 
   });
 });
 
-// --- readFixResult: the fix verdicts, plus the fields a fix alone reports ---
-
 test('readFixResult: a valid fix result carries the repro flag and the pull request text', () => {
   withResultFile(JSON.stringify({
     verdict: 'fixed',
@@ -618,8 +587,6 @@ test('readFixResult: a valid fix result carries the repro flag and the pull requ
   });
 });
 
-// The agent can neither push nor reach gh, so a url or a branch in its result is a claim about
-// something it could not have done. Neither field is read at all.
 test('readFixResult: a prUrl or branch the agent invented is ignored entirely', () => {
   withResultFile(JSON.stringify({
     verdict: 'FIXED', prUrl: 'https://github.com/o/r/pull/12', branch: 'main',
@@ -678,8 +645,6 @@ test('readFixResult: a missing or malformed file is ERROR and the file is remove
   });
 });
 
-// --- pushFixBranch: the server half of the handoff, which is everything the agent is denied ---
-
 const WORKSPACE: PosthogWorkspace = {
   cwd: '/wt', isGit: true, branch: 'glissa/radar-fix/1-iss-1-abc', base: 'main', baseSha: 'deadbeef',
 };
@@ -691,8 +656,6 @@ interface RunCall {
   key: string;
 }
 
-// A scripted `run`: each command's key maps to its {ok,out,err}, and every call is recorded so a test
-// can assert that a refused handoff never reached `git push`.
 function fakeRun(script: Record<string, CliResult> = {}) {
   const calls: RunCall[] = [];
   const run = async (cmd: string, args: string[], cwd: string): Promise<CliResult> => {
@@ -756,7 +719,6 @@ test('pushFixBranch reports FIXED with no url when gh printed nothing usable', a
   assert.match(res.summary, /url was not readable/);
 });
 
-// The structural half of "this lane never touches CI": refused by the server, not by the prompt.
 test('pushFixBranch refuses a workflow-touching diff, pushes nothing, and needs a carbon unit', async () => {
   const { res, calls } = await handoff({
     ...CLEAN_SCRIPT,

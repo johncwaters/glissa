@@ -1,15 +1,3 @@
-// The phone Board: the landing screen, and the phone's answer to the question the whole product
-// exists for - which session needs a carbon unit right now.
-//
-// It mirrors the desktop rail's project groups while keeping each project's rows attention-first. It
-// renders from the SAME session registry the desktop cards render from and is refreshed from the same
-// control-WS handlers in app.js that refresh the desktop rail, so there is one state pipeline, not two.
-//
-// The phone top bar is part of this screen rather than a global chrome strip: the desktop .header does
-// not render under [data-layout="phone"] at all. Everything that lived in it is ADOPTED here (the
-// connection chip, "+ Session", the help button, the hamburger with Mute / Settings / Restart / Shut
-// Down), so the client-trust gating and every existing listener come along untouched.
-
 import { STATES } from '#shared/states.ts';
 import { el, MERGE_TAGS, observeHeaderHeight, queryTag, stateChip } from '../dom-helpers.ts';
 import { attentionSummaryText, countSessionsNeedingAttention, orderRoster } from '../focus-view/attention-core.ts';
@@ -50,18 +38,11 @@ interface GroupRefs {
   rows: HTMLDivElement;
 }
 
-// createBoardScreen({ onSelectSession }) -> { el, topBarEl, refresh, getAttentionCount }
-// The shell adopts the desktop header controls into topBarEl on activation and gives them back on
-// deactivation, so ownership of those borrowed elements sits in one place.
 export function createBoardScreen({ onSelectSession }: { onSelectSession?: (id: string) => void }) {
   const screen = el('div', 'phone-board');
 
-  // No wordmark: the loading screen already brands, and at 390px every pixel the mark would take comes
-  // out of the controls that do something. Chrome recedes.
   const topBar = el('header', 'phone-topbar');
 
-  // The honest headline: how many sessions actually want you. Quiet at rest ("ALL CLEAR"), orchid and
-  // counted only when something is genuinely blocked, broken, or finished-and-unread.
   const attentionEl = el('div', 'phone-attention');
   attentionEl.setAttribute('role', 'status');
   attentionEl.setAttribute('aria-live', 'polite');
@@ -156,8 +137,7 @@ export function createBoardScreen({ onSelectSession }: { onSelectSession?: (id: 
     rowDetails.refs.glyph.textContent = glyph;
     rowDetails.refs.name.textContent = name;
     rowDetails.refs.badge.textContent = label;
-    // Merge status is read off the card's data-merge, which lifecycle.js already maintains for the
-    // remove-warning. Reusing it keeps the board off any pipeline of its own.
+
     const merge = ui.card?.dataset.merge || '';
     row.dataset.merge = merge;
     rowDetails.refs.merge.textContent = MERGE_TAGS[merge] || '';
@@ -191,12 +171,6 @@ export function createBoardScreen({ onSelectSession }: { onSelectSession?: (id: 
     rows.setAttribute('aria-label', `${group.label} sessions`);
   }
 
-  // ── Announce-once bookkeeping (the desktop rail's data-unseen rule, kept out of the DOM) ──
-  // A COMPLETE session counts toward the attention readout only until the operator opens it. Only a
-  // session that ENTERS complete while the Board is live is unseen: one already COMPLETE at
-  // snapshot/reconnect has no prior state here and is treated as already seen, so a page reload never
-  // false-announces a turn the operator read yesterday. Held in a Set rather than on the row element so
-  // the pure core is fed data, never a DOM query.
   const lastStateById = new Map<string, string>();
   const unseenCompleteIds = new Set<string>();
 
@@ -217,8 +191,6 @@ export function createBoardScreen({ onSelectSession }: { onSelectSession?: (id: 
     }
   }
 
-  // Opening a session is reading it. The shell calls this before showing the Terminal screen, which is
-  // the phone's peer of focusSession clearing the rail pill's data-unseen.
   function acknowledge(id: string) {
     unseenCompleteIds.delete(id);
   }
@@ -300,8 +272,6 @@ export function createBoardScreen({ onSelectSession }: { onSelectSession?: (id: 
     emptyDescEl.textContent = 'Spawn a session to start watching.';
   }
 
-  // Row clocks ride the shared 1s tick; only the elapsed text moves, so this never reorders under the
-  // operator's thumb mid-scroll.
   onSessionTick(() => {
     for (const [id, row] of rowById) {
       const ui = sessionUIs.get(id);

@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 
 import type { InertiaState, VelocitySample } from '../public/session-card/touch-scroll-core.ts';
 
-// touch-scroll-core is ESM (.mjs); dynamic-import it so the suite drives the shipped module.
 const importCore = () => import('../public/session-card/touch-scroll-core.ts');
 
 test('isScrollGesture: travel under the threshold is a tap, not a scroll', async () => {
@@ -43,7 +42,7 @@ test('scrollLinesForDrag: sub-row travel moves nothing but is banked as remainde
   const first = scrollLinesForDrag(9, 20);
   assert.equal(first.scrollLines, 0);
   assert.equal(first.remainderPx, 9);
-  // The next move event adds to the carry and crosses the row boundary.
+
   const second = scrollLinesForDrag(first.remainderPx + 12, 20);
   assert.equal(second.scrollLines, -1);
   assert.equal(second.remainderPx, 1);
@@ -84,7 +83,7 @@ test('shouldSendWheelReport: mouse tracking on the primary buffer reports instea
 test('shouldSendWheelReport: an untracked primary buffer scrolls local scrollback', async () => {
   const { shouldSendWheelReport } = await importCore();
   assert.equal(shouldSendWheelReport('normal', 'none'), false);
-  // An xterm that never exposed the modes surface reads as untracked rather than throwing.
+
   assert.equal(shouldSendWheelReport('normal', undefined), false);
 });
 
@@ -130,8 +129,7 @@ test('releaseVelocity: a slow release, a still finger and a degenerate window al
     { positionPx: 0, timestampMs: 5 },
     { positionPx: 40, timestampMs: 5 },
   ]), 0, 'a zero-length window would divide by zero');
-  // A finger that flicked and then held still: the lift sample stretches the window until the
-  // averaged velocity falls under the flick floor.
+
   const heldStill = releaseVelocity([
     { positionPx: 0, timestampMs: 0 },
     { positionPx: 60, timestampMs: 30 },
@@ -174,7 +172,7 @@ test('stepInertia: a coast decays to a stop and travels the analytic distance', 
   }
   assert.equal(state, null, 'friction ends the coast');
   assert.ok(nowMs <= releaseVelocityPxPerMs / SCROLL_FRICTION_PX_PER_MS2 + 16, 'stops on schedule');
-  // Continuous travel is v^2 / (2 * friction); the frame-stepped sum lands within a row of it.
+
   const expectedRows =
     (releaseVelocityPxPerMs ** 2) / (2 * SCROLL_FRICTION_PX_PER_MS2) / cellHeightPx;
   assert.ok(Math.abs(Math.abs(totalRows) - expectedRows) < 2, `travelled ${totalRows} rows`);
@@ -200,7 +198,7 @@ test('stepInertia: a cancelled coast and a zero-length frame are both no-ops', a
 
 test('stepInertia: sub-row travel is carried, not dropped, between frames', async () => {
   const { stepInertia } = await importCore();
-  // 0.5 px/ms over an 8ms frame is a few px, well under one 20px row.
+
   const first = stepInertia({ velocityPxPerMs: 0.5, lastMs: 0, cellHeightPx: 20, pendingPx: 0 }, 8);
   assert.equal(first.scrollLines, 0);
   assert.ok(first.state, 'a live coast carries state forward');

@@ -1,14 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-// The one spelling of a path that every producer agrees on. Windows names a single directory several
-// ways (an 8.3 short form like C:\Users\RUNNER~1\..., a subst drive, a junction) and only the NATIVE
-// realpath collapses them: it goes through GetFinalPathNameByHandle, while the JS fs.realpathSync
-// leaves a short path short. Returns the input untouched when the path is not on disk, so callers may
-// pass a path that does not exist yet.
-// Every path handed to fs.watch MUST go through this first: libuv expands each reported event
-// filename to its long form and asserts it still starts with the watched dir, so watching an
-// unresolved short path aborts the whole process from native code, past every try/catch.
 export function canonicalizePath(p: string): string {
   try {
     return fs.realpathSync.native(p);
@@ -22,28 +14,16 @@ export function equalsIgnoringCaseOnWindows(a: string, b: string): boolean {
   return process.platform === 'win32' && a.toLowerCase() === b.toLowerCase();
 }
 
-// Same physical directory despite spelling differences: Windows paths are case-insensitive, and the
-// two spellings being compared can come from different producers (a config hand-edit, git porcelain
-// with forward slashes, a trailing separator, an 8.3 short path inherited from %TEMP%). Misclassifying
-// two spellings of one directory as different repos skips worktree adoption and reproduces the
-// branch-in-use in-place fallback.
 export function isSameDirectoryPath(a: unknown, b: unknown): boolean {
   const resolvedA = path.resolve(String(a || ''));
   const resolvedB = path.resolve(String(b || ''));
   if (equalsIgnoringCaseOnWindows(resolvedA, resolvedB)) return true;
-  // The alias problem (8.3 short names, subst drives) is Windows-only; elsewhere the literal compare
-  // is the whole contract, and canonicalizing would silently equate symlinked directories too.
+
   if (process.platform !== 'win32') return false;
-  // Only reached once the literal spellings disagree, so the disk hit stays off the common path.
+
   return equalsIgnoringCaseOnWindows(canonicalizePath(resolvedA), canonicalizePath(resolvedB));
 }
 
-// Windows forbids < > : " / \ | ? * and control chars in a path segment, plus trailing dots/spaces.
-// Session ids can be namespaced with colons (e.g. setup:marketing:<uuid>) and session names are
-// operator-supplied, both legal as map keys and in a hook URL but illegal on disk. Callers sanitize
-// ONLY the segment, so the real id still flows verbatim into the hook URL and HookRouter registration
-// and routing is unaffected.
 export function safePathSegment(value: unknown): string {
-  // eslint-disable-next-line no-control-regex
   return String(value).replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[. ]+$/, '') || '_';
 }

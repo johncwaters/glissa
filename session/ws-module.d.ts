@@ -1,6 +1,3 @@
-// Minimal ambient typing for the `ws` surface this repo's TypeScript touches. The package ships no
-// declarations and @types/ws is not a dependency, so this states exactly what is called here, in the
-// shape ws/wrapper.mjs exports it (a default WebSocket plus named classes).
 declare module "ws" {
   import type { EventEmitter } from "node:events";
   import type { AddressInfo } from "node:net";
@@ -27,7 +24,7 @@ declare module "ws" {
     on(event: "error", listener: (error: WebSocketError) => void): this;
     on(event: "message", listener: (data: Buffer, isBinary: boolean) => void): this;
     on(event: "pong", listener: (data: Buffer) => void): this;
-    // The EventEmitter catch-all the specific overloads above would otherwise shadow.
+
     on(event: string, listener: (...args: unknown[]) => void): this;
   }
 

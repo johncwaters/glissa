@@ -1,6 +1,3 @@
-// appendJsonLine is the append-only canon's write primitive (docs/plan-visions-3.md, M12). Its whole
-// job beyond a bare appendFile is per-path serialization: two writers must never interleave a line.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

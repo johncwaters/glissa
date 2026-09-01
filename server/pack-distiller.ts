@@ -1,12 +1,3 @@
-// The distiller lane: an LLM pass that REGENERATES derived summary files inside the pack source area
-// when the sources they distill have drifted. Opt-in and off by default (config.packDistiller.enabled),
-// plus `glissa pack distill` as the manual trigger, which is always allowed.
-//
-// The mill's deterministic assembly is untouched by design. This lane produces SOURCES: reviewable
-// files that land under packs/ and show up in a plain `git diff`, and the mill still builds packs from
-// files on disk with no model in the content path. The pack service's watcher sees the written file
-// and rebuilds the pack on its own, so the two loops compose without knowing about each other.
-//
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
@@ -91,8 +82,6 @@ interface PackDistillerDependencies {
   timeoutSeconds?: number;
   setIntervalFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
   clearIntervalFn?: (handle: NodeJS.Timeout) => void;
-  // The narrow call shapes rather than the globals' types, so a test can drive this lane's deadline by
-  // hand (`typeof setTimeout` carries a `__promisify__` member no stand-in can implement).
   setTimeoutFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
   clearTimeoutFn?: (handle: NodeJS.Timeout) => void;
   log?: Pick<Console, 'log' | 'warn'>;
@@ -170,11 +159,10 @@ function writeStandaloneLaneSettings(permissions: unknown): { args: string[]; cl
   fs.writeFileSync(settingsPath, JSON.stringify({ permissions }, null, 2), 'utf8');
   return {
     args: ['--settings', settingsPath],
-    cleanup() { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ } },
+    cleanup() { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {  } },
   };
 }
 
-// Lazy loading keeps dry runs from resolving Claude on PATH, which a static import would do at load.
 const requireFromHere = createRequire(import.meta.url);
 function loadSessionConstructor(): new (options: SessionOptions) => Session {
   return (requireFromHere('../session/sessions.ts') as typeof import('../session/sessions.ts')).Session;
@@ -183,9 +171,7 @@ function loadSessionConstructor(): new (options: SessionOptions) => Session {
 function createDistillSpawn({
   sessions = new Map(), closeSessionDataClients = () => {}, hookRouter = null, getHookPort = null,
   spawnGate = null, replayBufferKB = undefined,
-  // Lane attribution: names this lane on the ledger when its headless session reports a Claude session id.
   recordLane = null,
-  // Session constructor seam: a test records the posture this lane builds without spawning anything.
   makeSession = null,
 }: DistillSpawnOptions = {}): DistillSpawn {
   return async function spawnDistill({ id, name, cwd, signal = null }) {
@@ -219,10 +205,6 @@ function makePackDistillResultFile(packName: string, index: number): Promise<Job
   return createJobResultFile(`glissa-distill-${packName}-${index}`);
 }
 
-/**
- * Every side effect is injected. The defaults point at the real builder, the real spawn and the real
- * timers, so `createPackDistiller({ enabled })` is the production wiring.
- */
 function createPackDistiller(deps: PackDistillerDependencies = {}): PackDistiller {
   const {
     enabled = false,
@@ -236,10 +218,6 @@ function createPackDistiller(deps: PackDistillerDependencies = {}): PackDistille
     writeOutput = writeOutputNoFollow,
     writePrompt = (promptPath: string, content: string) => fs.promises.writeFile(promptPath, content, 'utf8'),
     spawnDistill = createDistillSpawn(),
-    // Each distill gets a private result directory rather than a predictable name in shared temp (see
-    // createJobResultFile). ONE dep, returning { path, cleanup }, because the cleanup closure is what
-    // owns the directory: a separate remove-by-path dep would have to guess from the string whether the
-    // parent is ours to delete, and an injected path would then take its directory down with it.
     createResultFile = makePackDistillResultFile,
     readResult = readDistillResult,
     intervalHours = DEFAULT_INTERVAL_HOURS,
@@ -254,8 +232,6 @@ function createPackDistiller(deps: PackDistillerDependencies = {}): PackDistille
   let timer: NodeJS.Timeout | null = null;
   let stopped = false;
   let tickRunning = false;
-  // One queue, so an interval tick and a manual runOnce can never have two distill sessions writing
-  // under packs/ at the same time. Distills are serialized by construction, never raced.
   const distillQueue = createSerialQueue();
   let idle: Promise<unknown> = Promise.resolve();
 
@@ -322,7 +298,6 @@ function createPackDistiller(deps: PackDistillerDependencies = {}): PackDistille
     if (dryRun) return base({ status: 'stale', reason: drift.reason });
 
     let result: DistillResultVerdict;
-    // The prompt builder runs inside the try too, so a throw there cannot strand the directory.
     let resultFile: JobResultFile | null = null;
     let pendingSpawn: Promise<unknown> | null = null;
     try {
@@ -342,7 +317,6 @@ function createPackDistiller(deps: PackDistillerDependencies = {}): PackDistille
         cwd: path.dirname(resultFile.path),
       }, resultFile.path, { onPending: (promise) => { pendingSpawn = promise; } });
     } finally {
-      // Cleanup waits until an aborted session releases its private cwd.
       await drainPending(pendingSpawn);
       if (resultFile) await resultFile.cleanup();
     }
@@ -355,9 +329,6 @@ function createPackDistiller(deps: PackDistillerDependencies = {}): PackDistille
       return base({ verdict: 'ERROR', reason: `could not write output: ${firstLine(errorMessage(err))}` });
     }
 
-    // A verdict is a claim; the file on disk is the evidence. Re-running the same drift check against
-    // what was actually written is what makes a lying or half-finished session an ERROR rather than a
-    // silently accepted rewrite.
     const verify = needsDistill(hashes, await readOutput(outputPath));
     if (verify.stale) {
       return base({ verdict: result.verdict, reason: `verdict ${result.verdict} but ${verify.reason}` });
@@ -415,7 +386,6 @@ function createPackDistiller(deps: PackDistillerDependencies = {}): PackDistille
     return reports;
   }
 
-  /** One full pass: drift-check every distill entry and regenerate the stale ones. Never throws. */
   async function runOnce(options: { name?: string | null; dryRun?: boolean } = {}): Promise<DistillReport[]> {
     return queue(() => runAll(options));
   }
@@ -440,7 +410,6 @@ function createPackDistiller(deps: PackDistillerDependencies = {}): PackDistille
     await tick();
   }
 
-  // Shutdown waits for an output render already in flight.
   async function stop(): Promise<void> {
     stopped = true;
     if (timer) clearIntervalFn(timer);

@@ -1,7 +1,3 @@
-// The VS Code half of the build. The extension host is CommonJS with no ESM loader and no type
-// stripping, so its three files are emitted flat as CJS beside the manifest server/visions-setup.ts
-// packs into the vsix.
-
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

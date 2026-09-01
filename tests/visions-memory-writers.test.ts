@@ -1,7 +1,3 @@
-// M13 of docs/plan-visions-3.md: the Visions funnels that write to the memory store, driven with a fake
-// store. Trust fields are stamped by the writer, a null store writes nothing, and a store that refuses
-// or throws never reaches the relay or the dispatch path.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -16,7 +12,6 @@ import type { VisionsWiringOptions } from '../server/visions-wiring.ts';
 type MemoryStoreSeam = NonNullable<ReturnType<NonNullable<VisionsWiringOptions['getMemoryStore']>>>;
 type DispatchOutcome = Awaited<ReturnType<NonNullable<VisionsWiringOptions['dispatch']>>>;
 
-// Every field the writers stamp, so an assertion reads one rather than an unknown.
 interface MemoryInput {
   kind: string;
   layer: string;
@@ -33,7 +28,6 @@ function appendedAt(store: FakeMemoryStore, index: number): MemoryInput {
   return input;
 }
 
-// An applyEdit request the wiring sent to the editor, narrowed off the recorded frames.
 interface EditorRequest {
   id: string;
   method: string;
@@ -63,8 +57,6 @@ const SCOPE_PROJECTS = [{ id: PROJECT_ID, path: PROJECT_PATH }];
 const REPEATED_WORD_MARKDOWN = '# Title\n\nA line with with a repeat.\n';
 const FIXED_TS = 1700000000000;
 
-// Drain semantics: runPending fires what is queued and empties it. The handle is a real unref-ed timer
-// that never runs, because the seam is typed against NodeJS.Timeout.
 function fakeTimers() {
   const pendingByHandle = new Map<NodeJS.Timeout, () => void>();
   return {
@@ -135,7 +127,6 @@ function harness({ store = null, ...options }: VisionsWiringOptions & { store?: 
   };
 }
 
-// Opened and then edited, since an unedited buffer is an orientation that carries no comments (M19).
 function openMarkdown(driver: ReturnType<typeof harness>, uri = MARKDOWN_URI, text = REPEATED_WORD_MARKDOWN): void {
   driver.lsp('textDocument/didOpen', { textDocument: { uri, languageId: 'markdown', version: 0, text: '#\n' } });
   driver.lsp('textDocument/didChange', { textDocument: { uri, version: 1 }, contentChanges: [{ text }] });
@@ -361,8 +352,7 @@ test('dispatch comments and the tier 4 hand are remembered as episodic model kno
 
 test('a dispatch result cannot stamp its own trust fields', async (t) => {
   const store = fakeMemoryStore();
-  // The forged trust fields are deliberately not on the dispatch contract; the wiring must strip whatever
-  // a result carries beyond it, so they are spread in here rather than declared.
+
   const driver = dispatchingHarness(store, () => ({
     ...dispatchResult(),
     source: { kind: 'operator', vendor: 'claude' },

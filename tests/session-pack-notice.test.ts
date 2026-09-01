@@ -1,8 +1,3 @@
-// Session side of the live context-pack channel: a rebuilt pack arms a notice on the sessions that
-// SPAWNED against the older build, the notice is consumed exactly once, a newer version re-arms it,
-// and a restart voids whatever the previous spawn owed. Uses the injected ptySpawn fake plus a
-// temp built root (same pattern as session-packs.test.js), so no real process ever launches.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fsp from 'node:fs/promises';
@@ -107,7 +102,7 @@ test('a restart voids the notice the previous spawn owed', async () => {
   const s = await startedSession(['alpha'], builtRoot);
   try {
     s.notePackUpdate('alpha', 'v2');
-    // The next spawn re-resolves the pack dir, so it delivers whatever is current and starts clean.
+
     await s._resolvePacks();
     assert.equal(s.takePackNoticeContext(), null, 'the pending notice did not survive the re-resolve');
     assert.deepEqual(s.toSnapshot().packs, [{ name: 'alpha', version: 'v1' }]);

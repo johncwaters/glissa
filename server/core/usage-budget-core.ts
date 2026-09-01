@@ -94,7 +94,7 @@ function evaluateScope({ scope, spentUsd, budgetUsd, periodKey, firedState }: {
   const crossedThresholds = BUDGET_THRESHOLDS.filter((threshold) => pct >= threshold && !hasFired(firedState, scope, periodKey, threshold));
   if (crossedThresholds.length === 0) return null;
   const threshold = crossedThresholds[crossedThresholds.length - 1];
-  // Mark every newly crossed threshold so a later spend correction cannot re-fire a lower one.
+
   for (const crossed of crossedThresholds) markFired(firedState, scope, periodKey, crossed);
   return {
     scope,

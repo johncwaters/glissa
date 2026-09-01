@@ -1,10 +1,3 @@
-// The remote listener as actually wired: same Express app, different trust. Covers the things only a
-// live two-listener boot can show - the pair route existing, an unpaired 401, the hook ingress being
-// refused remotely, and an upgrade for a path Glissa does not own being closed rather than stranded.
-//
-// SAFETY: temp config with ZERO projects via GLISSA_CONFIG, like every other backend boot test (the
-// boot worktree reconcile would otherwise touch real repos).
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -65,14 +58,6 @@ function rawUpgrade(port: number, requestPath: string, extraHeaders: string[] = 
   });
 }
 
-/**
- * Asks the SERVER what it did with a socket, rather than inferring it from the client side. A second
- * 'upgrade' listener runs right after the backend's (listeners fire in registration order), so
- * socket.destroyed tells us whether the backend closed the socket or left it for another listener.
- * Reading the answer this way is also what keeps the test from stranding the very socket it is
- * asserting about: an upgraded socket is detached from the server, so closeAllConnections() would
- * never reap it and the leaked handle would hang the whole test process.
- */
 function backendDestroyedUpgrade(server: Server, port: number, requestPath: string): Promise<boolean> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`no upgrade event for ${requestPath}`)), 5000);
@@ -88,15 +73,10 @@ function backendDestroyedUpgrade(server: Server, port: number, requestPath: stri
       client.write(upgradeRequestLines(port, requestPath, []));
     });
     probe.client = client;
-    client.on('error', () => { /* the server end closing is the expected outcome */ });
+    client.on('error', () => {  });
   });
 }
 
-/**
- * Mints a pairing token the way `glissa pair` does (a second store instance over the same temp
- * pairings.json - redeem re-reads the file under its lock) and redeems it over HTTP, returning the
- * device cookie the browser would then send.
- */
 async function pairDevice(): Promise<string> {
   const { tmpDir, remotePort } = ctx();
   const minted = createPairingsStore({ filePath: path.join(tmpDir, 'pairings.json') })
@@ -198,9 +178,6 @@ test('the same unknown upgrade path is left alone on the local listener (Vite HM
   assert.equal(destroyed, false, 'another upgrade listener must still get its chance');
 });
 
-// The dashboard reconnects with '/control?since=<seq>', so a query string must reach the control route
-// and be judged by the pairing gate, not fall through to the unknown-path bucket (which is what exact
-// URL matching used to do, killing every in-page reconnect).
 test('a control upgrade with a query string is refused as a control connection, not as an unknown path', async () => {
   const { closed, body } = await rawUpgrade(ctx().remotePort, '/control?since=7');
   assert.equal(closed, true);
@@ -221,10 +198,6 @@ test('a paired device may reconnect with a replay cursor on the remote listener'
   await new Promise<void>((resolve) => { ws.once('close', () => resolve()); ws.close(); });
 });
 
-// The 2026-08 review pass reproduced this: express.static percent-decodes and resolves dot segments,
-// so an un-normalized "/pair/" prefix check exempted "/pair/%2e%2e/index.html" from the pairing gate
-// while express served the dashboard bundle under it. Impact was limited to static assets, but every
-// later app.use handler would have inherited the hole.
 test('a traversal dressed as a pair path does not escape the pairing gate', async () => {
   const { localPort, remotePort } = ctx();
   const local = await fetch(`http://127.0.0.1:${localPort}/index.html`);

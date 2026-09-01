@@ -1,7 +1,3 @@
-// The memory-distill lane end to end against a fake spawn (docs/plan-visions-3.md, M15). What a run may
-// do to memory/dist/ is the whole surface: publish and rotate, or leave the last good build exactly
-// where it was.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -26,7 +22,6 @@ interface Clock {
   at: number;
 }
 
-// One claim as the lane's result file states it.
 interface DistilledClaim {
   kind: string;
   project: string | null;
@@ -85,7 +80,6 @@ function openStore(dir: string, clock: Clock): MemoryStore {
   return store;
 }
 
-// The store answers a nullable record by design (a refused append); every seed here expects one.
 function requireRecord(record: MemoryRecord | null): MemoryRecord {
   if (!record) throw new Error('the store refused the seeded record');
   return record;
@@ -101,10 +95,6 @@ function knowledge(text: string, project: string | null = '/repos/glissa'): Know
   };
 }
 
-/**
- * The lane with its spawn replaced by a writer of whatever result file the test wants. `spawns`
- * records every prompt, so a test can assert a gate spawned nothing at all.
- */
 function makeLane(store: MemoryStore, clock: Clock, { result = null, onSpawn = null, ...config }: LaneOptions = {}): {
   distiller: ReturnType<typeof createMemoryDistiller>;
   spawns: RecordedSpawn[];
@@ -152,12 +142,10 @@ function manifestOf(dir: string, slot = 'current'): Record<string, unknown> {
   return { ...parsed };
 }
 
-// The lane speaks the incremental op contract now, so a full claim set reaches it as a list of adds.
 function distilledResult(claims: DistilledClaim[], verdict = 'DISTILLED'): DistillResult {
   return { verdict, summary: 'distilled the canon', ops: claims.map((claim) => ({ op: 'add', claim })) };
 }
 
-// A compaction run answers with a whole claim set for one project, which is the pre-M18 contract.
 function fullResult(claims: DistilledClaim[], verdict = 'DISTILLED'): DistillResult {
   return { verdict, summary: 'compacted one project', claims };
 }
@@ -272,7 +260,7 @@ test('a run past its timeout publishes nothing', async () => {
     const before = readCurrent(dir);
 
     clock.at += 2 * HOUR;
-    // A timeout the test drives by hand: the injected timer fires the abort at once.
+
     const raced = createMemoryDistiller({
       store,
       config: { ...resolveDistillConfig(null, { memoryEnabled: true }), timeoutSeconds: 60 },
@@ -455,13 +443,12 @@ test('the scratch cwd carries the prefix the ingest exclusion recognizes', async
         kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [first.id], text: 'one claim',
       }]),
     });
-    // The default makeWorkDir is the one under test, so nothing is injected over it.
+
     const report = await lane.runOnce();
     assert.equal(report.status, 'published');
     assert.equal(WORK_DIR_PREFIX, 'glissa-memory-distill-');
     assert.equal(isDispatchWorkdir(path.join(os.tmpdir(), `${WORK_DIR_PREFIX}work-ab12`)), true);
-    // The first shipped version denied these and would have failed every real run: a bare Read deny
-    // refuses the Write tool, so the result file could never be written.
+
     for (const tool of ['Read', 'Write', 'Glob', 'Grep']) {
       assert.equal(MEMORY_DISTILL_DENY_TOOLS.includes(tool), false, tool);
     }
@@ -649,7 +636,7 @@ test('a superseded record loses its claim mechanically, with nothing spawned at 
 
     await store.append({ ...knowledge('the poller ticks every 15 minutes'), supersedes: stale.id });
     clock.at += 25 * HOUR;
-    // The superseder is a record of its own, so a run reads it before the prune it caused can be seen.
+
     assert.equal((await makeLane(store, clock, { result: distilledResult([], 'NO_CHANGE') }).distiller.runOnce()).status, 'current');
 
     clock.at += 25 * HOUR;

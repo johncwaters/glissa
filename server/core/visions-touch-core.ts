@@ -1,10 +1,3 @@
-/*
- * Which lines of an open buffer the carbon unit has edited since it was opened (docs/plan-visions-4-focus.md,
- * M19). Pure: the wiring feeds it the applied changes of each didChange batch and reads the ranges back
- * at dispatch time. Ranges are 1-based inclusive line numbers, merged when they overlap or touch, and
- * shifted when a later edit above them moves the prose they point at.
- */
-
 import type { ContentChange } from './visions-buffer-core.ts';
 import {
   lineOfOffset, lineStartOffsets, offsetOfPosition, replacedSpanOfWholeTextChange,
@@ -39,7 +32,6 @@ function endsWithLineBreak(text: unknown): boolean {
   return typeof text === 'string' && /(?:\r\n|\r|\n)$/.test(text);
 }
 
-// Whole new lines inserted at a line start push the old line down intact, so it is not a produced line.
 function producedEndOf({ producedEnd, producedStart, insertedText, insertedAtLineStart }: {
   producedEnd: number;
   producedStart: number;
@@ -66,10 +58,6 @@ function mergeRanges(ranges: TouchedRange[]): TouchedRange[] {
   return merged;
 }
 
-/*
- * One change, as the lines it replaced in the text before it and the lines it produced in the text
- * after it. The delta is what every range below the replaced span shifts by.
- */
 function spanOfChange(change: ContentChange | null | undefined, textBefore: string): ChangeSpan | null {
   if (!change || typeof change !== 'object') return null;
   if (change.range === undefined || change.range === null) {
@@ -170,7 +158,6 @@ function resetUri(state: TouchState, uri: string | null): TouchState {
   return state;
 }
 
-// `3-5, 12`: the one line the edit prompt carries, and the log line beside it.
 function formatTouchedRanges(ranges: unknown): string {
   return (Array.isArray(ranges) ? ranges : [])
     .map((range: TouchedRange) => (range.start === range.end ? `${range.start}` : `${range.start}-${range.end}`))

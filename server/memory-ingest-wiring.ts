@@ -1,16 +1,3 @@
-/*
- * Memory ingest IO shell (docs/plan-visions-3.md, M14): the one consumer that turns agent-log events into
- * durable records. Its per-tick write batching and its cold-start backfill live here; every decision it
- * makes comes from server/core/memory-ingest-core.ts, and its durable offsets live in the store's
- * database beside the canon, so an offset and the records read at it agree by transaction (M12b).
- *
- * It is a TARGET of the agent-log source, never a second copy of it. With the ingest lane running, that
- * lane's source fans out to this consumer; with the ingest lane off, this shell constructs the same source
- * for itself, because `memory.enabled` implies the SOURCE and nothing else: no ring, no broadcast, no
- * digest. Which one happened is stated in the lane log.
- *
- * PRIVACY: remembered text never reaches a log line here. Counts, paths, reasons and verdicts do.
- */
 
 import nodeFs from 'node:fs';
 import path from 'node:path';
@@ -31,7 +18,6 @@ import { createLaneLog } from './lane-log.ts';
 import type { LaneLogger } from './lane-log.ts';
 import type { createMemoryStore } from './memory-store.ts';
 
-// The usage scanner's budget shape: one pass reads at most this, and what it did not reach is resumable.
 const DEFAULT_BACKFILL_BYTE_BUDGET = 8 * 1024 * 1024;
 const DEFAULT_BACKFILL_CHUNK_BYTES = 512 * 1024;
 const DEFAULT_MAX_BACKFILL_DIRS = 4000;
@@ -39,8 +25,6 @@ const DEFAULT_MAX_BACKFILL_FILES = 2000;
 
 type MemoryStore = NonNullable<ReturnType<typeof createMemoryStore>>;
 
-// The consumer touches six members of the store, so that is what it asks for: a lane test's stand-in
-// owes it those and nothing else, while a real store satisfies this by being a superset.
 type MemoryIngestStore = Pick<
   MemoryStore,
   'append' | 'appendMany' | 'dbPath' | 'deliveredHashes' | 'forgetTails' | 'saveTailOffset' | 'tailState'
@@ -91,7 +75,6 @@ function yieldTick(): Promise<void> {
   return new Promise((resolve) => { setImmediate(resolve); });
 }
 
-// The oldest moment the lane ledger can speak for, or null when it holds nothing to speak with.
 function earliestLaneEntryMs(ledger: LaneLedgerView | null | undefined): number | null {
   if (!ledger || typeof ledger.snapshot !== 'function') return null;
   let earliest: number | null = null;
@@ -110,13 +93,6 @@ function createMemoryIngest({
   env = process.env,
   fsPromises = nodeFs.promises,
   laneMap = null,
-  /*
-   * The oldest moment the lane ledger can speak for. A transcript last written BEFORE it is one the
-   * ledger has no entry for and never will, so the live tail's primary feedback-loop exclusion cannot
-   * judge it; a pr-review or Radar session from before the ledger existed would otherwise be remembered
-   * as the operator's own work. Absent (no ledger, or an empty one) skips nothing, which is the
-   * behavior of a machine that has never run one of those lanes.
-   */
   laneFloorMs = null,
   nowFn = Date.now,
   setTimeoutFn = (fn: () => void, ms: number) => setTimeout(fn, ms),
@@ -140,14 +116,7 @@ function createMemoryIngest({
     seen: 0, queued: 0, written: 0, rejected: 0, dropped: 0, offsetsSkipped: 0, laneSkipped: 0, refused: 0,
   };
   let queued: QueuedInput[] = [];
-  // Offsets a queued batch has not written yet: committing early would lose those records on a crash.
   const pendingTails = new Map<string, TailSnapshot>();
-  /*
-   * Transcripts whose records the SUBSTRATE refused, as opposed to records the write gates refused. Their
-   * offsets are frozen for the rest of this process: the durable offset stays at or before the lost range,
-   * so a later pass re-reads it, and committing any further offset for that file would step over the hole
-   * instead. A re-read is free, since a record's id is derived from its own bytes.
-   */
   const holedPaths = new Set<string>();
   let tailState: TailState = core.normalizeTailState(null);
   let loadPromise: Promise<TailState> | null = null;
@@ -156,7 +125,6 @@ function createMemoryIngest({
   let ownSource: ReturnType<typeof createAgentLogIngest> | null = null;
   let stopped = false;
 
-  // Starting empty costs the gap, never a duplicate: every unknown file restarts at end of file.
   function loadTailState(): Promise<TailState> {
     if (loadPromise) return loadPromise;
     loadPromise = (async () => {
@@ -171,11 +139,6 @@ function createMemoryIngest({
     return loadPromise;
   }
 
-  /*
-   * ONE row per transcript, in the same database the records land in, which is what retired the whole-file
-   * last-writer-wins race the lockfile existed for: a live server's consumer and a `glissa memory backfill`
-   * now write disjoint rows and SQLite arbitrates the rest. A refused write costs a re-read, never a range.
-   */
   function commitTail(tail: { path: string; size: number; mtimeMs: number; offset: number }): void {
     if (tail?.path && holedPaths.has(tail.path)) {
       log.debugNote(() => `offset held back for ${tail.path}: an earlier range was never remembered`);
@@ -188,7 +151,6 @@ function createMemoryIngest({
     log.debugNote(() => `tail state write skipped for ${tail.path}`);
   }
 
-  // --- The live consumer ----------------------------------------------------
 
   function enqueue(event: AgentIngestEvent, tailPath: string | null): boolean {
     counts.seen += 1;
@@ -219,7 +181,6 @@ function createMemoryIngest({
     scheduleFlush();
   }
 
-  // Deferred while anything is queued for that path, so a crash replays those lines rather than skipping them.
   function noteTail(tail: TailSnapshot | null | undefined): void {
     if (stopped || !tail?.path) return;
     if (queued.some((input) => input.tailPath === tail.path)) {
@@ -229,7 +190,6 @@ function createMemoryIngest({
     commitTail(tail);
   }
 
-  // Named for what it protects: the range these records came from, which nothing remembered.
   function holdOffsets(inputs: QueuedInput[]): void {
     counts.refused += inputs.length;
     for (const input of inputs) {
@@ -248,11 +208,6 @@ function createMemoryIngest({
     }
   }
 
-  /*
-   * One transaction per tick, and a refused write is a count rather than a throw: this rides the source's
-   * drain and the CLI's pass alike. `refused` is the store saying its SUBSTRATE would not take these, which
-   * is not the same answer as the write gates refusing every record, and a throw is read the same way.
-   */
   async function appendBatch(inputs: QueuedInput[]): Promise<{ written: number; refused: boolean }> {
     const records = inputs.map(({ tailPath, ...record }) => record);
     try {
@@ -265,7 +220,6 @@ function createMemoryIngest({
     }
   }
 
-  // A per-tick record cap with a yield between batches: every session on this machine shares one event loop.
   async function flushQueue(): Promise<void> {
     while (queued.length > 0 && !stopped) {
       const batch = core.planIngestBatch<QueuedInput>(queued, { maxPerTick: maxRecordsPerTick });
@@ -279,7 +233,6 @@ function createMemoryIngest({
     }
   }
 
-  // Chains a flush unconditionally: the backfill enqueues without arming the timer a conditional would wait on.
   async function whenIdle(): Promise<void> {
     if (flushTimer) clearTimeoutFn(flushTimer);
     flushTimer = null;
@@ -287,7 +240,6 @@ function createMemoryIngest({
     await flushChain;
   }
 
-  // --- The implied source ---------------------------------------------------
 
   const consumer: AgentLogConsumer = {
     name: 'memory',
@@ -296,7 +248,6 @@ function createMemoryIngest({
     noteTail,
   };
 
-  // What `memory.enabled` implies with the ingest lane off: the source alone, no ring and no broadcast.
   function startOwnSource(overrides: Record<string, unknown> = {}) {
     if (ownSource || stopped) return ownSource;
     ownSource = createAgentLogIngest({
@@ -313,7 +264,6 @@ function createMemoryIngest({
     return ownSource;
   }
 
-  // --- Cold-start backfill --------------------------------------------------
 
   function laneIsEphemeral(lanes: Map<string, string> | null, sessionId: string | null): boolean {
     if (!lanes || !sessionId) return false;
@@ -346,14 +296,12 @@ function createMemoryIngest({
     }
     let left = budget - 1;
     for (const entry of entries) {
-      // Inside the loop, not only on entry: one directory of ten thousand transcripts is the whole cap.
       if (found.length >= maxBackfillFiles) return left;
       if (entry.isFile() && isUsageFile(root.vendor, entry.name)) {
         found.push({ root, dir, file: path.join(dir, entry.name) });
         continue;
       }
       if (!entry.isDirectory() || depth >= root.maxDepth) continue;
-      // The shape half of the feedback-loop exclusion, same rule the live source walks under.
       if (isDispatchWorkdir(entry.name)) continue;
       left = await collectFiles(root, path.join(dir, entry.name), depth + 1, found, left);
       if (left <= 0) return left;
@@ -428,7 +376,6 @@ function createMemoryIngest({
     }
   }
 
-  // Cut at the last newline IN BYTES, so a chunk boundary inside a multi-byte character corrupts nothing.
   async function backfillFile(
     entry: BackfillEntry,
     budgetBytes: number,
@@ -453,7 +400,6 @@ function createMemoryIngest({
     const bytes = await readRange(entry.file, plan.start, plan.end - plan.start);
     if (!bytes) return { bytesRead: 0, partial: false, missing: false };
     const lastBreak = bytes.lastIndexOf(0x0a);
-    // A chunk with no line break at all is one line longer than the whole chunk: skip past it rather than stall.
     const consumed = lastBreak === -1 ? bytes.length : lastBreak + 1;
     const scope = await scopeFor(entry);
     if (lastBreak !== -1) {
@@ -505,11 +451,6 @@ function createMemoryIngest({
     return { ok: true, reason: null, files, bytesRead, partial };
   }
 
-  /*
-   * Safe beside a live server's own pass now that the offsets are rows: both read the same durable
-   * offsets and both write disjoint ones, so the pre-M12b refusal is gone. A database busy for the whole
-   * timeout is still reported as `locked`, which is what the operator is being told.
-   */
   async function backfill({ budgetBytes = backfillByteBudget }: { budgetBytes?: number } = {}) {
     if (stopped) return { ok: false, reason: 'stopped', files: 0, bytesRead: 0, partial: false };
     try {
@@ -521,7 +462,6 @@ function createMemoryIngest({
     }
   }
 
-  // Drains before latching: a queued record is one the source already advanced its offset past.
   async function stop(): Promise<void> {
     if (stopped) return;
     if (ownSource) await ownSource.stop();

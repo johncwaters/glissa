@@ -1,12 +1,3 @@
-// `glissa pair` - mint, list, and revoke remote-mode device pairings.
-//
-// Lives in server/ rather than bin/ on purpose: package.json "files" whitelists bin entries one by
-// one but ships server/ wholesale, so a new bin/ module would be missing from the published tarball
-// and scripts/check-package-files.js would fail the publish.
-//
-// The CLI is the operator-side half of remote mode. It never talks to a running server: it writes the
-// same pairings.json the server watches, so a mint or a revoke takes effect without a restart.
-
 import fs from 'node:fs';
 
 import { resolveConfigPath } from './config-store.ts';
@@ -101,9 +92,6 @@ function runList(store: PairingsStore, seenStore: SeenStore): number {
 function runRevoke(store: PairingsStore, id: string): number {
   const outcome = store.revokeDevice(id);
   if (outcome.ok) {
-    // Deliberately quotes the WORST case, not the usual one. A running server normally sees this
-    // within a second via fs.watch, but that watcher can fail to install or be dropped silently, and
-    // the reload interval is the guarantee. Promising "instant" would be a promise the code cannot keep.
     console.log(`Revoked ${id}. A running Glissa applies this within ${REVOCATION_PROPAGATION_SECONDS} seconds, no restart needed.`);
     return 0;
   }
@@ -115,7 +103,6 @@ function runRevoke(store: PairingsStore, id: string): number {
   return 1;
 }
 
-/** `args` is argv after the `pair` subcommand; the return value is the process exit code. */
 function runPairCli(args: string[]): number {
   const configPath = resolveConfigPath();
   const config = readConfig(configPath);

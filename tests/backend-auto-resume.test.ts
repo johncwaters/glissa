@@ -1,15 +1,3 @@
-// Steps 3 and 5 of graceful-shutdown-auto-resume: the module-level helpers backend.ts exports for
-// direct testing (no httpServer/createBackend needed - see the exports at the bottom of backend.ts).
-//
-// persistSessionField: the read-modify-write config.json persists resumeSessionId/wasActive
-// through. Exercised against a real configStore (temp file), matching config-store.test.js's
-// withStore pattern, so "no-op for an id absent from cfg.projects" is a real disk round-trip, not
-// a mock assertion.
-//
-// runAutoResume: the boot pass that spawns picked, still-DORMANT sessions through spawnGate.
-// Exercised with real Session instances and an injected ptySpawn/spawnCommand (mirrors
-// sessions-resume.test.ts / spawn-integration.test.js), so no real `claude` process ever launches.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -50,9 +38,6 @@ function withStore<T>(cfg: Record<string, unknown>, fn: (store: ConfigStore, con
   }
 }
 
-// Async-aware sibling of withStore: `finally` must not sweep the temp dir before an async fn's
-// awaited work (disk reads, _handlePtyExit) finishes. withStore's plain try/finally would run
-// cleanup the instant fn returns a pending promise, not once it settles.
 async function withStoreAsync<T>(
   cfg: Record<string, unknown>,
   fn: (store: ConfigStore, configPath: string) => Promise<T>,
@@ -71,9 +56,6 @@ async function withStoreAsync<T>(
   }
 }
 
-// Run `fn` with process.platform pinned to 'win32', then restore it (mirrors
-// tests/session-killproc.test.ts): kill() branches on platform, and pinning win32 exercises the
-// taskkill (killProc) path deterministically on any host.
 async function asWin32(fn: () => Promise<void>): Promise<void> {
   const original = Object.getOwnPropertyDescriptor(process, 'platform');
   assert.ok(original, 'process.platform is an own property to restore');
@@ -81,8 +63,6 @@ async function asWin32(fn: () => Promise<void>): Promise<void> {
   try { await fn(); }
   finally { Object.defineProperty(process, 'platform', original); }
 }
-
-// --- decideWasActiveFlip ---
 
 test('decideWasActiveFlip: entering STARTING or RUNNING always flips true', () => {
   assert.equal(decideWasActiveFlip(STATES.STARTING, 'spawn_success', false), true);
@@ -105,8 +85,6 @@ test('decideWasActiveFlip: an unrelated transition never flips', () => {
   assert.equal(decideWasActiveFlip(STATES.WAITING, 'prompt_detected', false), null);
   assert.equal(decideWasActiveFlip(STATES.COMPLETE, 'task_complete', false), null);
 });
-
-// --- persistSessionField ---
 
 test('persistSessionField writes the field to disk and to the in-memory config', () => {
   withStore({ projects: [{ id: 'p1', name: 'proj', path: 'C:/proj' }] }, (store, p) => {
@@ -144,10 +122,6 @@ test('persistSessionField clears resumeSessionId with null', () => {
   });
 });
 
-// --- runAutoResume ---
-
-// node-pty's own IPty, which is what a patched pty.spawn has to answer with. Session drives only a
-// handful of these (session/sessions.ts SessionPty); the rest exist so the stand-in is a complete IPty.
 function fakeIPty(): pty.IPty {
   const disposable = { dispose() {} };
   return {
@@ -240,11 +214,6 @@ test('runAutoResume skips a picked id with no live session in the map', async ()
   await assert.doesNotReject(() => runAutoResume(new Map(), cfg, createSpawnGate()));
 });
 
-// The DORMANT check must run at gate-execution time, not at enqueue time: the gate can serialize a
-// picked session's start() well behind another queued job, and in that window the plain
-// start-session control path (control-handlers.ts, ungated) could start the very same session.
-// Session.start()'s single-flight guard only collapses starts still in flight, not one that already
-// settled, so a stale enqueue-time check would still respawn an externally started session here.
 test('runAutoResume does not double-spawn a session started externally while queued behind the gate', async () => {
   const calls: SpawnCall[] = [];
   const sess = fakeSession('race', '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5', calls);
@@ -258,9 +227,8 @@ test('runAutoResume does not double-spawn a session started externally while que
     const blocker: { release: (() => void) | null } = { release: null };
     const blocked = gate.run(() => new Promise<void>((resolve) => { blocker.release = resolve; }));
 
-    const done = runAutoResume(sessionsMap, cfg, gate); // enqueues behind the blocker while sess is still DORMANT
+    const done = runAutoResume(sessionsMap, cfg, gate);
 
-    // Simulate the ungated start-session control path racing in while the gate is still occupied.
     await sess.start();
     assert.equal(calls.length, 1, 'the external start spawned once');
     assert.equal(sess.state, STATES.STARTING);
@@ -371,13 +339,6 @@ test('createBackend shutdown removes pending boot auto-resume listener before li
   }
 });
 
-// --- forceRestart end-to-end: wasActive must survive the transient kill window ---
-//
-// Drives a real Session through forceRestart() (kill -> transient user_kill -> respawn) with a real
-// configStore, mirroring exactly what wireSessionEvents' state-change listener does on every entry
-// (decideWasActiveFlip -> persistSessionField). Regression target: forceRestart's kill is not the
-// operator giving up on the session, so no wasActive:false write may land on disk during that window.
-
 function restartableSession(id: string, killCalls: string[][]): Session {
   return new Session({
     id,
@@ -389,8 +350,6 @@ function restartableSession(id: string, killCalls: string[][]): Session {
   });
 }
 
-// Mirrors wireSessionEvents' state-change listener (backend.ts), scoped to just the wasActive
-// persistence, against a real configStore project record.
 function wireWasActive(sess: Session, store: ConfigStore): boolean[] {
   const last: { persisted: boolean | null } = { persisted: null };
   const writes: boolean[] = [];
@@ -411,23 +370,21 @@ test('forceRestart never persists wasActive:false during its transient kill-then
       const sess = restartableSession('fr1', killCalls);
       const writes = wireWasActive(sess, store);
       try {
-        await sess.start(); // DORMANT -> INITIALIZING -> STARTING: flips wasActive true, persisted once
+        await sess.start();
         assert.deepEqual(writes, [true]);
         assert.equal(JSON.parse(fs.readFileSync(p, 'utf8')).projects[0].wasActive, true);
 
-        sess.state = STATES.RUNNING; // direct set (mirrors session-killproc.test.ts); no event, no new write
+        sess.state = STATES.RUNNING;
 
-        sess.forceRestart(); // synchronously: pendingRestart=true, kill(), transition('user_kill') -> DONE
+        sess.forceRestart();
         assert.equal(sess.state, STATES.DONE);
         assert.equal(sess.pendingRestart, true, 'restart is pending across the kill');
         assert.deepEqual(writes, [true], 'the transient user_kill/DONE was NOT persisted as false');
         assert.equal(JSON.parse(fs.readFileSync(p, 'utf8')).projects[0].wasActive, true, 'still true on disk mid-restart');
 
-        await sess._handlePtyExit(0, null); // fires forceRestart's once('exit'): clears pendingRestart, respawns
+        await sess._handlePtyExit(0, null);
         assert.equal(sess.pendingRestart, false);
-        // The respawn re-enters STARTING (flip true again) but true was already the last-persisted
-        // value, so wireWasActive's redundancy guard skips the write - the point either way is that
-        // false is never seen across the whole cycle.
+
         assert.deepEqual(writes, [true], 'never flipped false across the whole restart cycle');
         assert.equal(JSON.parse(fs.readFileSync(p, 'utf8')).projects[0].wasActive, true);
       } finally {
@@ -447,7 +404,7 @@ test('a genuine kill (not a restart) still persists wasActive:false', async () =
       try {
         await sess.start();
         sess.state = STATES.RUNNING;
-        sess.killSession(); // real kill: no pendingRestart flag set
+        sess.killSession();
         assert.equal(sess.pendingRestart, false);
         assert.deepEqual(writes, [true, false], 'an intentional kill still clears wasActive');
         assert.equal(JSON.parse(fs.readFileSync(p, 'utf8')).projects[0].wasActive, false);

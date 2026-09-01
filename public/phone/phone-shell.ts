@@ -1,24 +1,3 @@
-// The phone layout's shell: ten screens, one visible at a time, behind a bottom nav.
-//
-// This is a first-class layout, not a narrowed desktop. The desktop DOM (header, focus view, docked
-// sidebar) is not rendered at all under [data-layout="phone"]; the shell is only built the first time
-// the browser is actually in that layout, so a desktop session never pays for a line of it.
-//
-// The screens map to the phone job described in PRODUCT.md - scan, open, act, go back:
-//   Board    - the landing screen: which session needs a carbon unit (see board-screen.js)
-//   Terminal - the selected session's live terminal, full bleed (see terminal-screen.js)
-//   Review   - the real review sidebar, re-parented in as a full screen
-//   Radar    - the real Radar panel, re-parented in as a full screen
-//   PRs      - the real PRs panel, re-parented in as a full screen
-//   Usage    - the real Usage panel, re-parented in as a full screen
-//   Mill     - the real Mill panel, re-parented in as a full screen
-//   Visions - the real Visions panel, re-parented in as a full screen
-//   Hooks    - the real Hooks panel, re-parented in as a full screen
-//   Settings - the real Settings panel, re-parented in as a full screen
-//
-// Nine elements are BORROWED from the desktop DOM rather than rebuilt: the review sidebar, the Radar,
-// PRs, Usage, Mill, Visions, Hooks and Settings panels, and the header controls the Board top bar adopts. Rebuilding any
-// of them would mean a second state pipeline for the same facts.
 
 import { STATES } from '#shared/states.ts';
 import { sendControlMsg } from '../control-ws.ts';
@@ -34,9 +13,6 @@ import { getLastFocusedSessionId, setLastFocusedSessionId } from '../ui-prefs.ts
 import { createBoardScreen } from './board-screen.ts';
 import { createTerminalScreen } from './terminal-screen.ts';
 
-// Screen ids, in bottom-nav order. Board is the base screen: it is what the phone opens on, and the
-// only one the back gesture never has to leave. Nested screens do not get their own nav item: they
-// live in the More sheet, so the nav row stays four thumb-sized destinations plus one overflow.
 const BOARD = 'board';
 
 interface PhoneScreenSpec {
@@ -46,7 +22,6 @@ interface PhoneScreenSpec {
   nested?: boolean;
 }
 
-// Everything the app hands the shell to borrow, plus the one pull-surface callback.
 export interface PhoneShellHooks {
   headerControls?: AdoptableElement[];
   radarPanelEl?: HTMLElement | null;
@@ -60,16 +35,15 @@ export interface PhoneShellHooks {
 }
 
 const SCREENS: readonly PhoneScreenSpec[] = Object.freeze([
-  // Geometric glyphs from the same family as the state vocabulary; no emoji, no icon font.
-  { id: BOARD, label: 'Board', glyph: '▤' },       // square with horizontal fill: the roster list
-  { id: 'terminal', label: 'Terminal', glyph: '▸' }, // the brand forward marker: live output
-  { id: 'review', label: 'Review', glyph: '◫' },     // square bisected vertically: a diff
-  { id: 'radar', label: 'Radar', glyph: '◎', nested: true }, // ringed circle: a scan sweep
-  { id: 'prs', label: 'PRs', glyph: '⇅', nested: true },     // opposed arrows: push and pull
-  { id: 'usage', label: 'Usage', glyph: '◔', nested: true }, // part-filled circle: a consumption gauge
-  { id: 'mill', label: 'Mill', glyph: '▦', nested: true }, // square with quadrants: assembled parts
+  { id: BOARD, label: 'Board', glyph: '▤' },
+  { id: 'terminal', label: 'Terminal', glyph: '▸' },
+  { id: 'review', label: 'Review', glyph: '◫' },
+  { id: 'radar', label: 'Radar', glyph: '◎', nested: true },
+  { id: 'prs', label: 'PRs', glyph: '⇅', nested: true },
+  { id: 'usage', label: 'Usage', glyph: '◔', nested: true },
+  { id: 'mill', label: 'Mill', glyph: '▦', nested: true },
   { id: 'visions', label: 'Visions', glyph: '◇', nested: true },
-  { id: 'hooks', label: 'Hooks', glyph: '◈', nested: true }, // lozenge with a core: an event with a handler inside
+  { id: 'hooks', label: 'Hooks', glyph: '◈', nested: true },
   { id: 'settings', label: 'Settings', glyph: '@', nested: true },
 ]);
 let shellEl: HTMLDivElement | null = null;
@@ -99,24 +73,10 @@ const menuButtonById = new Map<string, HTMLButtonElement>();
 let hooks: PhoneShellHooks = {};
 let active = false;
 const SOFT_KEYBOARD_OPEN_DELTA_PX = 120;
-// Tallest visual viewport seen at the current width, which is by construction its keyboard-closed
-// height. Zero until the first measurement.
 let keyboardClosedBaselineHeightPx = 0;
 let baselineViewportWidthPx = 0;
-// Whether we have pushed our one history entry above the Board. At most one entry is ever pushed, so
-// the browser back gesture always lands on the Board rather than walking a stack of screen visits.
 let pushedHistoryEntry = false;
 
-// ── Soft keyboard ──
-// The visual viewport is the only honest measure of what the operator can see once a soft keyboard is
-// up: the layout viewport does not shrink, so a 100dvh shell keeps its bottom nav and the terminal's
-// last rows underneath the keyboard. Sizing the shell to visualViewport.height instead makes the
-// keyboard RESIZE the terminal, and the terminal's existing ResizeObserver then refits cols/rows.
-//
-// "Keyboard open" is measured against the tallest viewport seen, NOT against window.innerHeight: the
-// visual viewport also excludes collapsing browser chrome (iOS Safari's URL bar is ~90-110px), so on
-// some devices innerHeight - viewport.height clears the threshold with no keyboard up at all and
-// data-keyboard="open" latches forever, hiding the bottom nav for the rest of the session.
 function resetSoftKeyboardBaseline() {
   keyboardClosedBaselineHeightPx = 0;
   baselineViewportWidthPx = 0;
@@ -135,7 +95,6 @@ function syncVisualViewport() {
   }
   shellEl.style.setProperty('--phone-vh', `${viewport.height}px`);
   shellEl.style.setProperty('--phone-vv-top', `${viewport.offsetTop}px`);
-  // An orientation flip changes the width and invalidates the height baseline with it.
   if (viewport.width !== baselineViewportWidthPx) {
     baselineViewportWidthPx = viewport.width;
     keyboardClosedBaselineHeightPx = 0;
@@ -148,13 +107,6 @@ function syncVisualViewport() {
   shellEl.removeAttribute('data-keyboard');
 }
 
-// Deliberately NOT the ARIA tabs pattern. These screens are DESTINATIONS, not panels of one document:
-// each pushes browser history (the back gesture returns to the Board), and each holds an independent
-// surface - a live terminal, a diff panel, the Radar board - rather than alternate content for one
-// region. Tabs also imply Left/Right roving focus within a single composite control, which is wrong for
-// a bottom nav a thumb taps. So it is a plain <nav> of buttons with aria-current on the active one:
-// each button announces as a button, and half-implemented tab semantics (role=tab with no
-// aria-controls and no roving) are worse for a screen reader than no roles at all.
 function appendGlyphAndLabel(btn: HTMLButtonElement, glyph: string, label: string) {
   const glyphEl = el('span', 'phone-nav-glyph');
   glyphEl.setAttribute('aria-hidden', 'true');
@@ -197,9 +149,6 @@ function syncMoreAttention() {
   applyDotAttention(dotOf(moreButtonEl), pickStrongestAttention(nestedLevels));
 }
 
-// The More sheet: nested screens' entries, floated above the nav from the More item. It is a plain
-// popover of buttons (no menu roles for the same reason the nav has no tab roles), dismissed by
-// choosing an entry, tapping anywhere else, or Escape.
 function buildMoreMenu() {
   const menu = el('div', 'phone-nav-more-menu');
   menu.hidden = true;
@@ -238,7 +187,7 @@ function buildNav() {
     navButtonById.set(screen.id, btn);
     nav.appendChild(btn);
   }
-  moreButtonEl = buildNavButton('More', String.fromCharCode(0x22ef)); // midline horizontal ellipsis
+  moreButtonEl = buildNavButton('More', String.fromCharCode(0x22ef));
   moreButtonEl.setAttribute('aria-expanded', 'false');
   moreButtonEl.addEventListener('click', () => setMoreMenuOpen(!isMoreMenuOpen()));
   nav.appendChild(moreButtonEl);
@@ -251,15 +200,12 @@ function wrapScreen(id: string, label: string, contentEl: HTMLElement | null | u
   const section = el('section', 'phone-screen');
   section.dataset.screen = id;
   section.setAttribute('aria-label', label);
-  // Every screen starts hidden; activation reveals exactly one. Without this the screens stack visibly
-  // for a frame between build() and the first applyScreen.
   section.hidden = true;
   if (contentEl) section.appendChild(contentEl);
   screenElById.set(id, section);
   return section;
 }
 
-// Build the shell once. Everything below is idempotent so a layout flip back and forth reuses it.
 function build() {
   if (shellEl) return;
 
@@ -300,8 +246,6 @@ function build() {
   window.visualViewport?.addEventListener('resize', syncVisualViewport);
   window.visualViewport?.addEventListener('scroll', syncVisualViewport);
   window.addEventListener('popstate', onPopState);
-  // A tap anywhere outside the sheet (or Escape) dismisses it; the More button's own tap already
-  // toggled by the time this bubbles up, so it is excluded to avoid an instant reopen-close.
   document.addEventListener('click', (event) => {
     if (!isMoreMenuOpen()) return;
     if (!moreMenuEl || !moreButtonEl || !(event.target instanceof Node)) return;
@@ -313,10 +257,6 @@ function build() {
   });
 }
 
-// Open a session from the Board. Same semantics as tapping its desktop rail pill: a DORMANT session is
-// started so the screen is not a dead box, and a finished turn is acknowledged server-side so the card
-// leaves COMPLETE. WAITING is deliberately NOT dismissed - opening a blocked prompt is looking at it,
-// not answering it.
 function openSession(sessionId: string) {
   const ui = sessionUIs.get(sessionId);
   if (!ui) return;
@@ -324,31 +264,13 @@ function openSession(sessionId: string) {
   const state = ui.currentState || STATES.DORMANT;
   if (state === STATES.DORMANT) sendControlMsg({ type: 'start-session', id: sessionId });
   if (state === STATES.COMPLETE) sendControlMsg({ type: 'dismiss', id: sessionId });
-  // Opening a session is reading it: drop it from the Board's unseen set so the attention count stops
-  // counting it, the peer of focusSession clearing a rail pill's data-unseen.
   boardScreen.acknowledge(sessionId);
-  // One shared selection with the review surface, so the Review screen is already pointed at this
-  // session by the time the operator taps over to it.
   setSelectedId(sessionId);
-  // Persisted the same way the desktop Focus center persists its selection, so a layout flip (a phone
-  // rotated into landscape) lands the desktop center on the session the operator was just watching.
   setLastFocusedSessionId(sessionId);
   terminalScreen.show(sessionId);
   showScreen('terminal');
 }
 
-// ── History ──
-// Board is the base of the stack. Entering any other screen pushes exactly ONE entry, and moving
-// between non-Board screens replaces it, so the back gesture always means "return to the Board" rather
-// than walking back through every screen the operator touched. Back from the Board is the browser's
-// business.
-//
-// The entry must never outlive the phone layout, and must never be double-counted across activations.
-// Three rules keep that true: deactivate POPS an entry we own (a leftover would silently swallow one
-// browser Back press on desktop, where onPopState is inert); activate ADOPTS an inherited entry rather
-// than clearing the flag blind (history.state survives a reload, and clearing the flag would let the
-// next screen change push a duplicate); and an inherited state naming a screen we do not have is
-// normalized away instead of left unhonorable.
 function pushHistoryFor(screenId: string) {
   if (screenId === BOARD) {
     if (!pushedHistoryEntry) return;
@@ -365,33 +287,23 @@ function pushHistoryFor(screenId: string) {
   pushedHistoryEntry = true;
 }
 
-// Reconcile whatever history state this activation inherits, and return the screen to open on. A reload
-// on a non-Board screen therefore comes back to that screen with a stack that still holds exactly one
-// entry above the base, which is the same shape the operator navigated into.
 function adoptInheritedHistory() {
   const inherited = screenIdFromHistoryState(history.state);
   if (inherited && screenElById.has(inherited)) {
     pushedHistoryEntry = true;
     return inherited;
   }
-  // A state naming a screen this build no longer has: normalize the entry so the flag and the stack
-  // agree, rather than leaving a state nothing can honor.
   if (inherited) history.replaceState(null, '');
   pushedHistoryEntry = false;
   return BOARD;
 }
 
-// Give back an entry we own. back() (not replaceState) because the entry has to leave the stack: a
-// replaced entry still costs the operator one Back press that does nothing. We only ever call this
-// having pushed, so there is guaranteed to be a prior entry to land on and this can never leave the
-// site. The resulting popstate arrives after `active` is false and is correctly ignored.
 function surrenderHistoryEntry() {
   if (!pushedHistoryEntry) return;
   pushedHistoryEntry = false;
   history.back();
 }
 
-// The one entry the shell ever pushes names its screen; anything else in history.state is not ours.
 function screenIdFromHistoryState(state: unknown): string | null {
   const named = (state as { glissaScreen?: unknown } | null)?.glissaScreen;
   return typeof named === 'string' ? named : null;
@@ -400,7 +312,6 @@ function screenIdFromHistoryState(state: unknown): string | null {
 function onPopState(event: PopStateEvent) {
   if (!active) return;
   const target = screenIdFromHistoryState(event.state);
-  // Whatever we popped to, our pushed entry is no longer ahead of us.
   pushedHistoryEntry = !!target;
   applyScreen(target && screenElById.has(target) ? target : BOARD);
 }
@@ -419,25 +330,19 @@ function applyScreen(screenId: string) {
   if (!moreButtonEl || !terminalScreen) throw new Error('Phone shell is not built');
   uiState.dispatch('setPhoneScreen', screenId);
   setMoreMenuOpen(false);
-  // A screen that pulls its own data (Usage requests a report) is told it became visible; every other
-  // screen is fed by broadcasts and ignores this.
   hooks.onScreenShown?.(screenId);
   for (const [id, section] of screenElById) {
     section.hidden = id !== screenId;
   }
   syncCurrent(navButtonById, screenId);
-  // A nested screen lights the More item, since it has no nav item of its own.
   const isNestedActive = menuButtonById.has(screenId);
   if (isNestedActive) moreButtonEl.setAttribute('aria-current', 'page');
   if (!isNestedActive) moreButtonEl.removeAttribute('aria-current');
   syncCurrent(menuButtonById, screenId);
-  // A hidden terminal had no measurable box, and one that never left the slot has unchanged dimensions
-  // that make applyFit early-return; reveal() forces the fit + repaint either way.
   if (screenId === 'terminal') {
     terminalScreen.reveal();
     return;
   }
-  // The card is still borrowed by the hidden Terminal screen, so releaseCard's hand-back never runs.
   terminalScreen.unview();
 }
 
@@ -447,10 +352,6 @@ function showScreen(screenId: string) {
   applyScreen(screenId);
 }
 
-// ── Activation ──
-// mountPhoneShell wires the shell to the app once; activatePhoneShell / deactivatePhoneShell run on
-// every layout flip and are what hand the borrowed DOM (review sidebar, Radar and PRs panels, the
-// focused card) between the two layouts.
 export function mountPhoneShell(options?: PhoneShellHooks) {
   hooks = options || {};
   radarPanelEl = hooks.radarPanelEl || null;
@@ -462,9 +363,6 @@ export function mountPhoneShell(options?: PhoneShellHooks) {
   settingsPanelEl = hooks.settingsPanelEl || null;
 }
 
-// `sessionId` is the session the desktop Focus center was holding, if any. It is pre-loaded into the
-// Terminal screen but does NOT change which screen opens: a phone's job is triage, so it always lands
-// on the Board and the operator taps through.
 export function activatePhoneShell({ sessionId }: { sessionId?: string } = {}) {
   if (active) return;
   build();
@@ -473,9 +371,6 @@ export function activatePhoneShell({ sessionId }: { sessionId?: string } = {}) {
   shellEl.hidden = false;
   for (const control of (hooks.headerControls || [])) adoptElement(control, boardScreen.topBarEl);
   reparentReviewPanel(reviewMountEl);
-  // The desktop tabpanel moves in whole, so the eagerly-mounted panel keeps its state, and hidden (set
-  // by the desktop tab strip) is lifted while the phone owns it. deactivate gives it back and
-  // activateView re-applies desktop visibility.
   adoptElement(radarPanelEl, radarMountEl);
   if (radarPanelEl) radarPanelEl.hidden = false;
   adoptElement(prsPanelEl, prsMountEl);
@@ -492,7 +387,6 @@ export function activatePhoneShell({ sessionId }: { sessionId?: string } = {}) {
   if (settingsPanelEl) settingsPanelEl.hidden = false;
   syncVisualViewport();
   if (sessionId) terminalScreen.show(sessionId);
-  // Reconcile history BEFORE opening a screen, so the flag and the stack agree from the first tap.
   const startScreen = adoptInheritedHistory();
   refreshPhoneBoard();
   applyScreen(startScreen);
@@ -503,8 +397,6 @@ export function deactivatePhoneShell() {
   if (!shellEl || !terminalScreen) throw new Error('Phone shell is not built');
   active = false;
   closeSettingsSectionPicker({ returnFocus: false });
-  // Give every borrowed element back BEFORE hiding the shell, so nothing live is left inside a hidden
-  // subtree where its terminal cannot measure itself.
   terminalScreen.clear();
   reparentReviewPanel(null);
   if (radarPanelEl) releaseElement(radarPanelEl);
@@ -519,8 +411,6 @@ export function deactivatePhoneShell() {
   shellEl.hidden = true;
   shellEl.removeAttribute('data-keyboard');
   resetSoftKeyboardBaseline();
-  // The desktop layout must not inherit our history entry: nothing there listens for it, so it would
-  // cost the operator one dead Back press.
   surrenderHistoryEntry();
 }
 
@@ -528,39 +418,25 @@ export function isPhoneShellActive() {
   return active;
 }
 
-// Whether a given screen is the one on display. The peer of the desktop's active-view check, for a
-// panel that only fetches while the operator is actually looking at it.
 export function isPhoneScreenActive(screenId: string) {
   return active && uiState.snapshot().phoneScreen === screenId;
 }
 
-// The session the Terminal screen is showing, so the app can keep the desktop Focus center pointed at
-// the same session across a layout flip.
 export function getPhoneSessionId() {
   return active && terminalScreen ? terminalScreen.getSessionId() : null;
 }
 
-// Re-render from the shared session registry. Called from the same app.js control-WS handlers that
-// refresh the desktop rail; a no-op unless the phone layout is up.
 export function refreshPhoneBoard() {
   if (!active) return;
   if (!boardScreen || !terminalScreen) throw new Error('Phone shell is not built');
   restoreShownSession();
   boardScreen.refresh();
   terminalScreen.refresh();
-  // A session removed while its terminal is on screen leaves the Terminal screen holding nothing
-  // (refresh() above already cleared it). Staring at that empty state helps nobody: the session is
-  // gone, so the screen's job is over; hand the operator back to the Board. Keyed on the ACTIVE
-  // screen so a removal never yanks the operator off Review/Radar/etc, where the Terminal screen is
-  // hidden and its empty state costs nothing.
   if (uiState.snapshot().phoneScreen === 'terminal' && !terminalScreen.getSessionId()) showScreen(BOARD);
   const dot = dotOf(navButtonById.get(BOARD));
   if (dot) dot.hidden = boardScreen.getAttentionCount() === 0;
 }
 
-// Navigation seam for panels that point at another screen (Radar's PR rows). Returns false when the
-// phone layout is not up or the screen is unknown, which is the caller's signal to use the desktop
-// tab strip instead.
 export function showPhoneScreen(screenId: string) {
   if (!active) return false;
   if (!screenElById.has(screenId)) return false;
@@ -568,22 +444,11 @@ export function showPhoneScreen(screenId: string) {
   return true;
 }
 
-/*
- * A LEVEL, not a boolean: the Visions panel distinguishes a raised hand from an unseen arrival, and a
- * boolean map here made the two look identical on the phone board. A caller with only a condition to
- * report still passes `true`, which reads as the ordinary level.
- */
 export function setPhoneScreenAttention(screenId: string, attention: string | boolean | null) {
   screenAttentionById.set(screenId, typeof attention === 'string' && attention ? attention : attention === true);
   syncMoreAttention();
 }
 
-// The phone peer of the desktop's restoreFocusedSession, and what makes a reload that lands back on the
-// Terminal screen coherent instead of an empty state. On the boot/reload race the roster is empty when
-// the shell activates, so the Terminal screen has nothing to show until the first snapshot arrives;
-// re-attempt the restore from each refresh until it lands. DORMANT is refused for the same reason the
-// desktop refuses it: after a server restart every session loads DORMANT and none is worth returning
-// to. This NEVER starts or dismisses anything - it is a restore, not an operator selection.
 function restoreShownSession() {
   if (!terminalScreen) throw new Error('Phone shell is not built');
   if (terminalScreen.getSessionId()) return;

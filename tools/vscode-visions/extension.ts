@@ -1,9 +1,3 @@
-// A hand-rolled LSP client rather than vscode-languageclient: this extension rides the npm tarball, so
-// a client library would have to ride it too as vendored node_modules.
-//
-// Authored CommonJS-style on purpose: `server/visions-setup.ts` strips the types and packs the result
-// under the .js names the extension host loads, and that host has no ESM loader and no type stripping.
-
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
@@ -92,7 +86,7 @@ interface RelayProcess {
 }
 
 const LANGUAGE_ID = 'markdown';
-// Every other file reports markers only: the lane sweeps markdown alone but the machine still moved.
+
 const ACTIVITY_METHOD = 'visions/editorActivity';
 const CODE_ACTION_TIMEOUT_MS = 2000;
 const INITIAL_RESTART_MS = 1000;
@@ -224,7 +218,6 @@ function createRelayClient({ relayPath, port, output, diagnostics }: RelayClient
     });
   }
 
-  // Whole-buffer changes: the incremental path would re-derive ranges the editor already applied.
   function didChange(document: TextDocument): void {
     if (!isMirrored(document)) return;
     if (!openVersionByUri.has(document.uri.toString())) {
@@ -325,7 +318,7 @@ function createRelayClient({ relayPath, port, output, diagnostics }: RelayClient
     if (isStopping) return;
     parserState = createParserState();
     openVersionByUri.clear();
-    // The editor's own binary in node mode, so an extension host with no `node` on PATH still connects.
+
     const relay: RelayProcess = spawn(process.execPath, relayArgs(relayPath, port), {
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
       windowsHide: true,

@@ -3,8 +3,7 @@ const SOURCE = 'glissa-visions';
 const FENCE = '```';
 const FENCE_RE = /^(\s*)```/;
 const HEADING_RE = /^( {0,3})(#{1,6})(?:\s|$)/;
-// The lookbehind is load-bearing: without it a match starts INSIDE a token that begins with a digit, so
-// "a 1a fallback" reads as the word "a" twice and the fix deletes the token beside it.
+
 const WORD_RE = /(?<![A-Za-z0-9'])[A-Za-z][A-Za-z0-9']*/g;
 
 export interface DocumentPosition {
@@ -127,12 +126,10 @@ function addRepeatedWordDiagnostics(
   }
 }
 
-// The separator goes with the word, or deleting "with" out of "with with a" leaves a double space.
 function repeatedWordFix(repeated: SweepDiagnostic, lineIndex: number, previousEnd: number, end: number): SweepFix {
   return fix(repeated, range(lineIndex, previousEnd, lineIndex, end), '');
 }
 
-// A guess at WHERE the fence should close, which is why this one is never auto-applied.
 function closingFenceFix(unclosed: SweepDiagnostic, lines: string[]): SweepFix {
   const lastLine = Math.max(lines.length - 1, 0);
   const character = (lines[lastLine] || '').length;

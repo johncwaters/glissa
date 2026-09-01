@@ -1,20 +1,3 @@
-/*
- * Pure rules for LANE ATTRIBUTION: which of Glissa's own automation lanes a supervised session belonged to.
- *
- * This is the one thing a usage tool that only reads transcripts cannot do. Glissa SPAWNS its sessions, so
- * it knows that a given session id was the PR-review lane rather than someone typing, and can answer "what
- * did the review lane cost this week".
- *
- * The join is exact, never inferred: a session id is attributed only because Glissa recorded spawning it.
- * Anything not in the ledger is `other` (a terminal session, a direct CLI run, a session from before the
- * ledger existed). Guessing from a cwd or a project directory would silently mis-bill a lane.
- *
- * Identity is a VENDOR-NAMESPACED COMPOSITE key `<vendor>:<sessionId>`, the same shape the scanner's dedup
- * keys already use (usage-codex-core / usage-grok-core put the vendor in the first segment). Without it a
- * codex session id could collide with a claude one now that Glissa supervises both. Old ledger files
- * (written before the vendor field, keyed `claudeSessionId`) round-trip as vendor `claude`.
- */
-
 import { safeNumber, stringOrNull } from './usage-number-core.ts';
 
 export interface LaneLedgerEntry {
@@ -24,7 +7,6 @@ export interface LaneLedgerEntry {
   ts: number;
 }
 
-// The ledger is read back off disk, where an array can hold a null the writer never put there.
 type RawLedgerEntries = (RawLaneLedgerEntry | null | undefined)[] | null | undefined;
 
 interface RawLaneLedgerEntry {
@@ -52,26 +34,19 @@ export interface LaneRollupRow {
   sessions: number;
 }
 
-// The lane ids are the names the lanes already call themselves (registerEphemeralSession's logPrefix), so
-// there is no mapping table here to drift out of step with the code that spawns them.
 const INTERACTIVE_LANE = 'interactive';
 const OTHER_LANE = 'other';
 
-// An absent vendor means claude: the field was added in M5, and every ledger entry and usage entry that
-// predates it is a claude one.
 function vendorOf(value: unknown): string {
   const vendor = stringOrNull(value);
   return vendor === null ? 'claude' : vendor;
 }
 
-// The composite key both halves of the join build the same way, so a ledger entry and a usage entry for
-// the same session land on the same key regardless of which wrote first.
 function laneKey(vendor: unknown, sessionId: string): string {
   return `${vendorOf(vendor)}:${sessionId}`;
 }
 
 function normalizeLedgerEntry(entry: RawLaneLedgerEntry | null | undefined): LaneLedgerEntry | null {
-  // sessionId is the M5 field name; claudeSessionId is the pre-M5 spelling, read for round-trip.
   const sessionId = stringOrNull(entry?.sessionId) || stringOrNull(entry?.claudeSessionId);
   const lane = stringOrNull(entry?.lane);
   if (!sessionId || !lane) return null;
@@ -85,8 +60,7 @@ function normalizeLedger(entries: RawLedgerEntries): LaneLedgerEntry[] {
   for (const raw of entries || []) {
     const entry = normalizeLedgerEntry(raw);
     if (!entry) continue;
-    // Last write wins per composite key: a session id belongs to exactly one lane, and the newest record
-    // is the one that observed the spawn.
+
     const key = laneKey(entry.vendor, entry.sessionId);
     const existing = byKey.get(key);
     if (existing && existing.ts > entry.ts) continue;
@@ -95,8 +69,6 @@ function normalizeLedger(entries: RawLedgerEntries): LaneLedgerEntry[] {
   return Array.from(byKey.values()).sort(compareEntries);
 }
 
-// Retention matches the warehouse's, so a lane row can still be explained for as long as the day it came
-// from is still on the daily series.
 function pruneLedger(
   entries: RawLedgerEntries,
   { now, retainDays }: { now?: unknown; retainDays?: unknown } = {},
@@ -106,8 +78,7 @@ function pruneLedger(
   const nowMs = safeNumber(now);
   if (days === null || nowMs <= 0) return normalized;
   const cutoff = nowMs - days * 24 * 60 * 60 * 1000;
-  // A ts of 0 means an entry from a writer that did not stamp one; keep it rather than drop history on a
-  // technicality, since losing an attribution is worse than keeping a stale one.
+
   return normalized.filter((entry) => entry.ts === 0 || entry.ts >= cutoff);
 }
 
@@ -117,13 +88,6 @@ function laneMapFromLedger(entries: RawLedgerEntries): Map<string, string> {
   return laneByKey;
 }
 
-/*
- * Rows for the report, biggest spend first. Every vendor participates now that Glissa supervises codex/grok
- * cards: an entry whose composite key was recorded gets that lane, and everything else is `other` (a
- * terminal run of any CLI, or usage from before the ledger). `sessions` counts DISTINCT session ids, which
- * is what makes a lane row comparable over time (one long review costs more than three short ones, and the
- * count says which shape it was).
- */
 function laneRollup(
   entries: LaneUsageEntry[] | null | undefined,
   laneById: Map<string, string> | null | undefined,
@@ -145,8 +109,6 @@ function laneRollup(
     .sort((a, b) => b.costUSD - a.costUSD || b.tokens - a.tokens || a.lane.localeCompare(b.lane));
 }
 
-// Local rather than imported from usage-entry-core: that module owns transcript parsing, and this one only
-// needs the sum, so importing it would couple lane attribution to the parser.
 function totalTokensOf(entry: LaneUsageEntry | null | undefined): number {
   return safeNumber(entry?.input) + safeNumber(entry?.output) + safeNumber(entry?.cacheCreate) + safeNumber(entry?.cacheRead);
 }

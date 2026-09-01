@@ -1,6 +1,3 @@
-// Formatting only: the work behind install, setup and status lives in server/visions-setup.ts, which the
-// daemon runs by itself when the switch flips.
-
 import fs from 'node:fs';
 
 import { createRelay } from '../session/visions-relay.ts';
@@ -68,7 +65,6 @@ async function runStatus(): Promise<number> {
   return 0;
 }
 
-// The relay owns stdout from here on: it is the LSP wire, so nothing else may write a byte to it.
 function runRelay(): Promise<never> {
   createRelay().start();
   return new Promise(() => {});
@@ -85,7 +81,7 @@ function runSetup(args: string[]): number {
   }
 
   console.log(`The Visions relay is one stdio LSP server: ${commandLine(invocation)}`);
-  // A GUI-launched editor inherits the desktop session's PATH, which often lacks the npm global bin dir.
+
   if (onPath) console.log(`An editor launched from a desktop menu may not see your PATH; there, use: ${commandLine(absolute)}`);
   console.log('Turning Visions on wires these for you; this is the manual form.\n');
   for (const section of guide.sections) {

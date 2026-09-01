@@ -1,4 +1,3 @@
-/* ── Reset & base ─────────────────────────────────────────── */
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
@@ -6,8 +5,7 @@
 }
 
 :root {
-  /* Colors are set by theme.js via applyTheme().
-     Defaults here act as fallbacks before JS loads. */
+
   --bg:          #0a0810;
   --bg-card:     #100e18;
   --bg-header:   #0c0a14;
@@ -16,12 +14,10 @@
   --border-dim:  #1e1a32;
   --border-hover:#3e3660;
   --text:        #c8c0e0;
-  /* [a11y] #8276b0 cleared AA only on --bg; lifted to #8d82b9 for >=4.5:1 on
-     bg-card and bg-surface too. Theme overrides in theme.js are kept in sync. */
+
   --text-dim:    #8d82b9;
   --text-head:   #e8e0ff;
-  /* [a11y] #7a6ea8 failed AA on every surface (4.0 to 4.38); lifted to #8579b1
-     for >=4.5:1 on bg, bg-card, and bg-surface. Theme overrides kept in sync. */
+
   --text-muted:  #8579b1;
   --accent:      #c084fc;
   --accent-dim:  #9656d6;
@@ -44,18 +40,14 @@
   --state-dormant:      #5a527a;
   --state-dormant-bg:   color-mix(in oklab, var(--state-dormant) 6%, transparent);
 
-  /* [P1] Tokenized glow values for state colors */
   --state-running-glow:  color-mix(in oklab, var(--state-running) 25%, transparent);
   --state-waiting-glow:  color-mix(in oklab, var(--state-waiting) 25%, transparent);
   --state-failed-glow:   color-mix(in oklab, var(--state-failed) 25%, transparent);
   --state-done-glow:     color-mix(in oklab, var(--state-done) 25%, transparent);
   --accent-glow:         color-mix(in oklab, var(--accent) 25%, transparent);
 
-  /* [P1] Permissions warning token */
   --perms-warn: #d97706;
 
-  /* [P1] Brand-tinted shadow tokens - replace raw rgba(0,0,0,.X) shadows.
-     [P3] Uses near-black (oklch 0.06) instead of pure #000 per impeccable color-rules. */
   --shadow-tint: color-mix(in oklab, var(--accent) 15%, oklch(0.06 0 0));
   --shadow-sm:   0 2px 8px  color-mix(in srgb, var(--shadow-tint) 55%, transparent);
   --shadow-md:   0 4px 12px color-mix(in srgb, var(--shadow-tint) 55%, transparent);
@@ -68,16 +60,13 @@
   --font-mono: 'Cascadia Code', 'Fira Code', 'Consolas', 'Menlo', monospace;
   --font-ui:   'Segoe UI', system-ui, sans-serif;
 
-  /* [P2] Layout dimension tokens for split-layout calc */
   --header-h:  52px;
   --content-max: none;
 
-  /* [P3] Easing: ease-out-quart for snappier feel */
   --transition-fast: 150ms cubic-bezier(0.22, 1, 0.36, 1);
   --transition-med:  250ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* [P0] Respect prefers-reduced-motion system preference */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms;
@@ -91,7 +80,7 @@ html, body {
   height: 100%;
   background: var(--bg);
   color: var(--text);
-  /* [P3] Full mono voice - operator-console aesthetic */
+
   font-family: var(--font-mono);
   font-size: 14px;
   line-height: 1.5;
@@ -100,21 +89,18 @@ html, body {
 body {
   display: flex;
   flex-direction: column;
-  /* The app owns ALL scrolling internally (rail, radar view, sidebar each overflow-y themselves).
-     Never let stray overflow grow the document: a document scrollbar pushes the footer and the
-     terminal's bottom edge below the visible screen. */
+
   overflow: hidden;
 }
 
-/* ── Header ───────────────────────────────────────────────── */
 .header {
   position: sticky;
   top: 0;
   z-index: 100;
-  flex-shrink: 0; /* fixed strip: never squashed when the body column is tight on height */
+  flex-shrink: 0;
   background: var(--bg-header);
   border-bottom: 1px solid var(--border);
-  /* [P2] backdrop-filter removed - bg-header is opaque enough */
+
 }
 
 .header-inner {
@@ -147,7 +133,6 @@ body {
   gap: 16px;
 }
 
-/* Persistent primary action - accent-outline language, matches the dialog Confirm. */
 .btn-add-header {
   display: inline-flex;
   align-items: center;
@@ -179,18 +164,11 @@ body {
   box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
 }
 
-/* ── Status indicator ─────────────────────────────────────── */
 .status-indicator {
   position: relative;
   cursor: default;
 }
 
-/* Aggregate roll-up: persistent in the header (was a hover-only tooltip - the
-   page's headline signal should never hide). Quiet by default (text-dim); only
-   attention severities take a state color. A steady active mix yields blank text,
-   so the banner is hidden via :empty (rationale in aggregate-core). Shape varies
-   with severity via .aggregate-glyph, so the signal survives without hue
-   (color-blind safe). The element carries role="status" for aria-live. */
 .header-aggregate {
   display: inline-flex;
   align-items: center;
@@ -225,10 +203,6 @@ body {
   color: var(--state-done);
 }
 
-/* ── Connection indicator ─────────────────────────────────── */
-/* Connection status chip. The dot (styled by .connection-dot) carries the state color; the label
-   stays quiet (text-dim) for healthy states and only takes a state color when the operator must act
-   (disconnected) - the Earned Signal rule. */
 .header-connection {
   display: inline-flex;
   align-items: center;
@@ -256,7 +230,6 @@ body {
   transition: background var(--transition-med), box-shadow var(--transition-med);
 }
 
-/* Connected is the healthy resting state: green dot only, label stays quiet. */
 .header-connection[data-state="connected"] .connection-dot {
   background: var(--state-running);
   box-shadow: 0 0 6px var(--state-running-glow);
@@ -284,17 +257,6 @@ body {
   50%      { opacity: 0.3; }
 }
 
-/* NOTE on .app-shell: index.html's inline gate styles it (display:none until .app-ready, then
-   display:contents), so the shell has NO box of its own; header / .app-body / footer are direct
-   flex items of body (a height:100% flex column). Do not give .app-shell box rules here: they
-   are inert in the ready state and fight the display:none loading gate before it. */
-
-/* Single <main> landmark wrapping both tab panels. A flex column (not display:contents,
-   which can drop the landmark in some assistive tech) that fills the body below the header,
-   so the inner panels keep their flex:1 sizing. */
-/* Body row: main views (left) + the review sidebar (right), both always present. This is the DESKTOP
-   layout; the phone layout hides .app-shell entirely and re-parents the sidebar into its Review
-   screen (see the Phone Layout section). */
 .app-body {
   flex: 1;
   min-height: 0;
@@ -310,7 +272,6 @@ body {
   flex-direction: column;
 }
 
-/* ── Session card ─────────────────────────────────────────── */
 .session-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -321,12 +282,9 @@ body {
   height: 100%;
   min-height: 0;
   position: relative;
-  /* Layout/style containment: an xterm reflow inside one card no longer forces
-     sibling cards to re-layout. Deliberately NO `paint` - paint containment
-     (and content-visibility:auto, which implies it) would clip the WAITING
-     ::after glow (inset:-1px) and the COMPLETE/hover outer box-shadows. */
+
   contain: layout style;
-  /* [P1] Removed box-shadow from animated properties - avoids repaint cost on hover */
+
   transition: border-color var(--transition-med), transform var(--transition-med);
 }
 
@@ -334,9 +292,6 @@ body {
   border-color: var(--border-hover);
 }
 
-/* The elapsed readout trails the badge in the header's left zone as a quiet time-in-state clock
-   ("WORKING 2:14"); the spacer downstream absorbs its width so the right-zone tags never reflow as
-   it ticks. Settled states clear the text (session-tick.js -> ''); :empty then hides the span. */
 .session-card .card-elapsed {
   flex-shrink: 0;
   font-size: 11px;
@@ -346,8 +301,6 @@ body {
 }
 .card-elapsed:empty { display: none; }
 
-/* Completion flash - plays once on DONE/FAILED transition */
-/* [P2] DONE shortened to 900ms (success = brief), FAILED to 1.4s (keeps weight) */
 .session-card.completion-flash[data-state="DONE"] {
   animation: completion-glow 900ms ease-out;
 }
@@ -356,21 +309,18 @@ body {
   animation: failure-glow 1.4s ease-out;
 }
 
-/* [P1] Inset-ring register - loud moment, restrained shape. No outer neon spread. */
 @keyframes completion-glow {
   0%   { box-shadow: inset 0 0 0 0 color-mix(in oklab, var(--state-complete) 80%, transparent); border-color: var(--state-complete); }
   25%  { box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--state-complete) 90%, transparent); border-color: var(--state-complete); }
   100% { box-shadow: inset 0 0 0 0 color-mix(in oklab, var(--state-complete) 0%, transparent); }
 }
 
-/* Failure contracts inward - different somatic feel from success */
 @keyframes failure-glow {
   0%   { box-shadow: inset 0 0 0 4px color-mix(in oklab, var(--state-failed) 70%, transparent); border-color: var(--state-failed); }
   40%  { box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--state-failed) 85%, transparent); border-color: var(--state-failed); }
   100% { box-shadow: inset 0 0 0 0 color-mix(in oklab, var(--state-failed) 0%, transparent); }
 }
 
-/* State-driven card borders */
 .session-card[data-state="RUNNING"] {
   border-color: color-mix(in oklab, var(--state-running) 20%, transparent);
 }
@@ -392,9 +342,6 @@ body {
   pointer-events: none;
 }
 
-/* FAILED keeps a steady (non-animated) tinted ring at rest so an outcome that
-   landed while the operator was on another tab stays legible across a wall of
-   cards - louder than the quiet states, quieter than WAITING's pulse. */
 .session-card[data-state="FAILED"] {
   border-color: color-mix(in oklab, var(--state-failed) 50%, transparent);
   box-shadow: 0 0 0 1px color-mix(in oklab, var(--state-failed) 18%, transparent),
@@ -435,21 +382,16 @@ body {
   border-color: color-mix(in oklab, var(--state-waiting) 70%, var(--text-head));
 }
 
-/* ── Skip-permissions indicator ──────────────────────────── */
 .session-card[data-skip-perms] {
   border-color: color-mix(in oklab, var(--perms-warn) 25%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--perms-warn) 6%, transparent);
 }
 
 .session-card[data-skip-perms] .session-card-header {
-  /* [P1] Flattened 135° gradient to a flat brand-tinted surface - .perms-badge already signals the state */
+
   background: color-mix(in oklab, var(--perms-warn) 6%, var(--bg-surface));
 }
 
-/* Header tags (YOLO / worktree / post-turn / live-agents). One shared base so the
-   strip reads as a uniform set - same size, type, casing, and shape. Each rule
-   below adds only its tone (warning vs informational) and default visibility.
-   font-size 11px reads cleanly in the operator-console context. */
 .perms-badge,
 .agent-badge,
 .worktree-badge,
@@ -474,15 +416,12 @@ body {
 
 .perms-badge {
   display: inline-flex;
-  /* [P1] Replaced hardcoded #d97706 and border-left: 2px - use token + full 1px border */
+
   color: var(--perms-warn);
   border: 1px solid var(--perms-warn);
   background: color-mix(in oklab, var(--perms-warn) 16%, transparent);
 }
 
-/* Linked-worktree marker. Hidden by default; shown only when the card carries
-   data-worktree (set at build time, toggled live by setSessionWorktree on the
-   session-git delta). Accent tone - informational, not a warning. */
 .worktree-badge {
   display: none;
   color: var(--accent);
@@ -494,9 +433,6 @@ body {
   display: inline-flex;
 }
 
-/* Resumed-conversation marker. Hidden by default; shown only when the card carries data-resume (set at
-   build time from the snapshot, toggled live by setSessionResume on the session-resume delta). Distinct
-   dashed border so it reads apart from the solid worktree badge while sharing the informational accent. */
 .resume-badge {
   display: none;
   color: var(--accent);
@@ -508,10 +444,6 @@ body {
   display: inline-flex;
 }
 
-/* Post-turn auto-fix marker. Hidden until the card carries data-pt (toggled live
-   by setSessionPostTurn on a post-turn-result delta). "fixed" = files were
-   auto-fixed (success tone); "flagged" = report-mode findings (warning tone).
-   Reserved-height inline-flex keeps the header dimensionally stable on flip. */
 .post-turn-badge {
   display: none;
   gap: 3px;
@@ -533,10 +465,6 @@ body {
   background: color-mix(in oklab, var(--state-waiting) 14%, transparent);
 }
 
-/* Live background sub-agent count. Hidden until the card carries data-agents (toggled live by
-   setSessionAgents on a session-agents delta): the main turn ended but N background sub-agents are
-   still running, so the card stays Working instead of flipping to Complete. Accent tone (mirrors
-   .worktree-badge) - informational, not a warning. */
 .agents-badge {
   display: none;
   color: var(--accent);
@@ -548,9 +476,6 @@ body {
   display: inline-flex;
 }
 
-/* Which agent CLI this card supervises. Hidden until the card carries data-agent, which
-   setSessionAgent sets only for a NON-default agent: a Claude Code card is unchanged. Muted hairline
-   (mirrors .usage-badge) - it is standing identity, not a state change. */
 .agent-badge {
   display: none;
   text-transform: none;
@@ -564,10 +489,6 @@ body {
   display: inline-flex;
 }
 
-/* Context-pack staleness. Hidden until the card carries data-pack-stale (toggled by setSessionPacks
-   and the pack-updated broadcast): a pack this session was spawned against has been rebuilt since,
-   so it holds older context than a fresh spawn would. Warning tone (mirrors the flagged post-turn
-   badge) rather than the accent chips: it is a "you may want to restart this" hint, not a status. */
 .pack-badge {
   display: none;
   color: var(--state-waiting);
@@ -579,11 +500,6 @@ body {
   display: inline-flex;
 }
 
-/* Conversation token spend + estimated cost. Hidden until the card carries data-usage (toggled live by
-   setSessionUsage on a usage-sessions delta). Muted hairline rather than the accent tone the other
-   informational chips wear: it is standing context on every running card, not a state change, and must
-   not compete with the chips that are. lowercase for the same reason .wakeup-badge is - it reads as a
-   measurement, not a tag. */
 .usage-badge {
   display: none;
   text-transform: none;
@@ -599,11 +515,6 @@ body {
   display: inline-flex;
 }
 
-/* Pending scheduled revival ("sleeping until ~HH:MM"). Hidden until the card carries
-   data-wakeup (toggled live by setSessionWakeup on a session-wakeup delta): the turn
-   finished, but the session scheduled its own revival, so the quiet card is dormant by
-   intent, not done. Accent tone (mirrors .agents-badge) - informational, not a warning.
-   lowercase: it reads as a status phrase, not a tag. */
 .wakeup-badge {
   display: none;
   text-transform: lowercase;
@@ -616,11 +527,6 @@ body {
   display: inline-flex;
 }
 
-/* Advisory pending-prompt-kind marker ("permission" / "input"). Hidden until the card carries
-   data-prompt (toggled live by setSessionPrompt on a session-prompt delta / snapshot): shows WHAT
-   a WAITING session is waiting on. Distinct warning tone for a permission prompt (mirrors
-   .perms-badge - it is the same kind of "needs a yes/no"); accent tone for an elicitation form
-   (mirrors .agents-badge - informational). */
 .prompt-badge {
   display: none;
 }
@@ -641,7 +547,6 @@ body {
   background: color-mix(in oklab, var(--accent) 14%, transparent);
 }
 
-/* ── Card header ──────────────────────────────────────────── */
 .session-card-header {
   display: flex;
   align-items: center;
@@ -672,8 +577,6 @@ body {
   flex: 1;
 }
 
-/* The badge strip. Shrinkable and clipping, next to a flex-shrink:0 action cluster, so a crowded header
-   drops its rightmost tags rather than pushing the buttons off the card. */
 .session-card-tags {
   display: flex;
   align-items: center;
@@ -683,16 +586,11 @@ body {
   overflow: hidden;
 }
 
-/* The working heartbeat (breathe + per-chunk beat + "quiet" eyebrow) renders ONLY on the focus
-   roster-rail pill - it would be redundant on the card and the centered terminal must stay calm.
-   See the .focus-pill heartbeat block below; the shared working-breathe keyframes live here
-   (opacity-only so the JS scale beat composes on top). */
 @keyframes working-breathe {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.55; }
 }
 
-/* ── Action buttons ──────────────────────────────────────── */
 .session-actions {
   display: flex;
   align-items: center;
@@ -714,14 +612,14 @@ body {
   background: transparent;
   color: var(--text);
   transition: background var(--transition-fast), color var(--transition-fast);
-  /* [P1] Touch target extension - visual size unchanged */
+
   position: relative;
 }
 
 .btn-action::after {
   content: '';
   position: absolute;
-  /* Generous vertical target, minimal horizontal to prevent overlap with adjacent buttons */
+
   inset: -11px -2px;
 }
 
@@ -730,7 +628,6 @@ body {
   color: var(--text-head);
 }
 
-/* Light themes: use a dark overlay instead of white */
 .session-card[data-state] .btn-action:hover {
   background: color-mix(in srgb, var(--text) 8%, transparent);
 }
@@ -743,15 +640,11 @@ body {
   display: inline-flex;
 }
 
-/* ── Terminal container ───────────────────────────────────── */
 .terminal-wrap {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  /* xterm.js fit snaps rows to integer character cells, leaving a few
-     unused pixels at the bottom. Without this, that strip shows xterm's
-     bundled `.xterm { background-color: #000 }` default and looks like
-     a black bar. Match the card bg so the gap disappears. */
+
   background: var(--bg-card);
 }
 
@@ -765,8 +658,6 @@ body {
   background-color: var(--bg-card);
 }
 
-
-/* ── Focus rings ─────────────────────────────────────────── */
 .btn-action:focus-visible,
 .btn-dialog:focus-visible,
 .btn-settings-remove:focus-visible,
@@ -788,15 +679,11 @@ body {
   box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
 }
 
-/* ── Scrollbar ────────────────────────────────────────────── */
-/* [P2] Widened from 5px to 10px - mouse-draggable target */
 ::-webkit-scrollbar        { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track  { background: transparent; }
 ::-webkit-scrollbar-thumb  { background: var(--border); border-radius: 5px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
 
-
-/* ── Overflow menu ────────────────────────────────────────── */
 .session-overflow {
   position: relative;
   display: flex;
@@ -868,7 +755,6 @@ body {
   background: color-mix(in oklab, var(--state-failed) 10%, transparent);
 }
 
-/* ── Dialog animations ───────────────────────────────────── */
 @keyframes dialogFadeIn {
   from { opacity: 0; }
   to   { opacity: 1; }
@@ -879,7 +765,6 @@ body {
   to   { opacity: 1; transform: scale(1); }
 }
 
-/* ── Dialog overlay ──────────────────────────────────────── */
 .dialog-overlay {
   position: fixed;
   inset: 0;
@@ -887,11 +772,10 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  /* [P1] Tokenized scrim; [P2] backdrop-filter removed - black scrim alone does the job */
+
   background: var(--scrim);
   animation: dialogFadeIn 150ms ease;
-  /* A dialog taller than the viewport (Settings on a short window or a phone) scrolls here rather than
-     clipping both ends unreachably; the containment keeps that scroll off the document behind it. */
+
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -903,10 +787,7 @@ body {
   padding: 24px;
   width: 420px;
   max-width: calc(100vw - 32px);
-  /* dvh, not vh: a phone's vh includes the retracted browser chrome, so a vh-sized dialog hides its
-     own footer behind the address bar. The overlay is a ROW flex container, so flex-shrink:0 governs
-     width: it keeps a wide dialog at its declared width (bounded by max-width) instead of letting the
-     overlay squeeze it narrower, which would reflow the content taller and deepen the scroll. */
+
   max-height: calc(100dvh - 32px);
   overflow-y: auto;
   flex-shrink: 0;
@@ -1004,7 +885,7 @@ body {
 .btn-dialog-confirm {
   color: var(--accent);
   border-color: var(--accent-dim);
-  /* Accent-outline at rest (was an 8% fill) - one primary-button rest treatment across the app. */
+
   background: transparent;
 }
 
@@ -1022,9 +903,6 @@ body {
   background: color-mix(in oklab, var(--state-failed) 18%, transparent);
 }
 
-/* ── Resume-conversation picker ───────────────────────────── */
-/* The per-card "Resume conversation" dialog reuses .dialog chrome and adds a scrollable list of prior
-   conversations (this repo's worktrees + main). Each row is a button: title on top, dim meta below. */
 .resume-dialog {
   width: 520px;
 }
@@ -1090,10 +968,6 @@ body {
   letter-spacing: 0.02em;
 }
 
-/* ── Notices (stacked top-right) ──────────────────────────── */
-/* Replaces the old center-bottom toast that overlapped the dock and bled the
-   terminal text through its transparent fill. Notices stack below the header,
-   clear of the terminals and the minimized dock. */
 .notice-region {
   position: fixed;
   top: calc(var(--header-h) + 12px);
@@ -1105,7 +979,7 @@ body {
   width: min(360px, calc(100vw - 32px));
   max-height: calc(100vh - var(--header-h) - 32px);
   overflow-y: auto;
-  /* Let clicks fall through the gaps to the board; each notice re-enables. */
+
   pointer-events: none;
 }
 
@@ -1116,7 +990,7 @@ body {
   align-items: start;
   gap: 8px;
   padding: 10px 12px;
-  /* Opaque base with a faint state wash: readable over anything behind it. */
+
   background: color-mix(in oklab, var(--state-failed) 8%, var(--bg-card));
   border: 1px solid color-mix(in oklab, var(--state-failed) 45%, var(--border));
   border-radius: var(--radius);
@@ -1127,10 +1001,8 @@ body {
   line-height: 1.45;
 }
 
-/* Dismiss hides instantly even without motion; the slide-out is added below. */
 .notice.is-leaving { opacity: 0; }
 
-/* Motion is opt-in, honoring prefers-reduced-motion strictly (matches focus-*). */
 @media (prefers-reduced-motion: no-preference) {
   .notice {
     opacity: 0;
@@ -1141,7 +1013,6 @@ body {
   .notice.is-leaving { transform: translateX(8px); }
 }
 
-/* Real failures read a touch stronger and never auto-clear. */
 .notice.is-persistent {
   border-color: color-mix(in oklab, var(--state-failed) 60%, var(--border));
 }
@@ -1186,7 +1057,6 @@ body {
   border-radius: 2px;
 }
 
-/* ── Header menu dropdown ────────────────────────────────── */
 .header-menu {
   position: relative;
 }
@@ -1205,7 +1075,7 @@ body {
   background: transparent;
   cursor: pointer;
   transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
-  /* [P1] Touch target extension to ≥44×44 - visual size unchanged */
+
   position: relative;
 }
 
@@ -1229,7 +1099,6 @@ body {
   transform: scale(0.97);
 }
 
-/* The ? glyph reads a touch quieter than the menu bars at rest, brightening on hover/focus. */
 .btn-help {
   color: var(--text-dim);
   font-weight: 700;
@@ -1301,14 +1170,11 @@ body {
   background: var(--border);
 }
 
-/* Explicit because .menu-item has display:flex, which would override the UA [hidden] rule. Hidden
-   menu entries must leave no gap: the dropdown is sized by its remaining children. */
 .menu-item[hidden],
 .menu-divider[hidden] {
   display: none;
 }
 
-/* [P2] Mono-safe glyph column for menu items - keeps labels aligned */
 .menu-item-glyph {
   display: inline-block;
   width: 1.2em;
@@ -1369,13 +1235,10 @@ body {
   color: var(--state-failed);
 }
 
-/* ── Shortcuts reference ─────────────────────────────────── */
-/* Multi-column (not grid) so groups pack by height into two balanced columns instead of being
-   locked to a row partner: a tall group no longer forces empty space beside a short one. */
 .shortcut-groups {
   columns: 2;
   column-gap: 28px;
-  /* Cap height on a short viewport so a long list scrolls inside the panel, footer stays put below. */
+
   max-height: min(56vh, 420px);
   overflow-y: auto;
 }
@@ -1384,7 +1247,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 7px;
-  /* Keep each group whole within a column and space them down the column. */
+
   break-inside: avoid;
   margin-bottom: 18px;
 }
@@ -1402,7 +1265,6 @@ body {
   color: var(--text-muted);
 }
 
-/* dt = key chips, dd = description; the grid aligns the key column right and the labels left. */
 .shortcut-rows {
   display: grid;
   grid-template-columns: max-content 1fr;
@@ -1525,7 +1387,7 @@ body {
 
 .dialog-hint {
   font-family: var(--font-mono);
-  /* [P2] 9px → 10px - sub-10px forbidden */
+
   font-size: 10px;
   color: var(--text-muted);
   letter-spacing: 0.02em;
@@ -1610,7 +1472,7 @@ body {
   font-size: 16px;
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
-  /* [P1] Touch target extension - visual size unchanged */
+
   position: relative;
 }
 
@@ -1630,8 +1492,6 @@ body {
   gap: 8px;
 }
 
-/* ── Health monitor footer ───────────────────────────────── */
-/* In-flow at the bottom of the body flex column, below the minimized bar. */
 .health-footer {
   flex-shrink: 0;
   background: var(--bg-header);
@@ -1749,9 +1609,6 @@ body {
   color: var(--text-muted);
 }
 
-/* ── PostHog radar view ──────────────────────────────────────── */
-/* A top-level tab panel: the same scroll container and content column the PRs view uses, so the two
-   secondary views share one page rhythm. */
 .radar-view {
   flex: 1;
   min-height: 0;
@@ -1849,8 +1706,6 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Why this project earned a card despite having nothing to report. Sits where the per-project poll
-   clock used to, and is the only place a per-project time survives. */
 .radar-project-alert {
   margin-left: auto;
   font-size: 10px;
@@ -1860,8 +1715,6 @@ body {
 .radar-project-alert[data-tone="crit"] { color: var(--state-failed); }
 .radar-project-alert[data-tone="warn"] { color: var(--state-waiting); }
 
-/* Healthy projects, one row each in a single block. A quiet project is context, not a headline, so it
-   gets a hairline container instead of a card apiece. */
 .radar-quiet {
   border: 1px solid var(--border-dim);
   border-radius: var(--radius);
@@ -1880,7 +1733,6 @@ body {
   font-size: 11px;
 }
 
-/* Neutral and steady: the resting state has no color of its own, and only the loud cards above move. */
 .radar-quiet-dot {
   flex: 0 0 auto;
   width: 5px;
@@ -1918,8 +1770,6 @@ body {
   gap: 2px;
 }
 
-/* The severity stripe is the only always-visible color, so the row order and the stripe agree at a
-   glance without every chip shouting. */
 .radar-issue {
   display: flex;
   align-items: center;
@@ -2080,8 +1930,6 @@ a.radar-issue-title:hover {
   letter-spacing: 0.04em;
 }
 
-/* Per-issue actions. Muted until the row is hovered or something inside it holds focus, so a long
-   board reads as data first and a control panel second. */
 .radar-issue-actions {
   flex: 0 0 auto;
   display: flex;
@@ -2121,7 +1969,6 @@ a.radar-issue-title:hover {
   cursor: default;
 }
 
-/* Progress and outcome live here, never on the button label. */
 .radar-issue-action-status {
   font-size: 10px;
   color: var(--text-muted);
@@ -2134,9 +1981,6 @@ a.radar-issue-title:hover {
 .radar-issue-action-status[data-tone="ok"] { color: var(--state-complete); }
 .radar-issue-action-status[data-tone="error"] { color: var(--state-failed); }
 
-/* Investigations inbox. Same row rhythm as .radar-issue so the board reads as one column, but with
-   the verdict chip leading instead of a severity stripe: an archived-or-not record carries no live
-   severity, only what the investigation concluded. */
 .radar-investigations {
   display: flex;
   flex-direction: column;
@@ -2168,8 +2012,6 @@ a.radar-issue-title:hover {
   font-variant-numeric: tabular-nums;
 }
 
-/* Sections (Errors / Ops / Pull requests). One heading rhythm above the existing project heads, so a
-   three-section board still reads as one column rather than three stacked panels. */
 .radar-section {
   display: flex;
   flex-direction: column;
@@ -2282,9 +2124,6 @@ a.radar-issue-title:hover {
   color: var(--text-muted);
 }
 
-/* ── PR auto-review view ─────────────────────────────────────── */
-/* Same page rhythm and tokens as the Radar view; its own selectors because PR rows carry two extra
-   severity tones (info, ok) and a head-sha column the issue rows have no equivalent for. */
 .pr-view {
   flex: 1;
   min-height: 0;
@@ -2467,7 +2306,7 @@ a.pr-title:hover {
 
 .pr-reason {
   flex-basis: 100%;
-  margin-left: 121px; /* .pr-stripe 3px + row gap 10px + .pr-phase min-width 108px: aligns under the title */
+  margin-left: 121px;
   font-size: 10px;
   color: var(--text-muted);
 }
@@ -2477,10 +2316,6 @@ a.pr-title:hover {
   font-size: 11px;
 }
 
-/* ── Mill view ──────────────────────────────────────────────── */
-/* The context mill: one section per pack, each a short stack of lines plus a budget meter and two row
-   lists (deliveries, drifted derived files). Same page rhythm and tokens as the Usage view, without its
-   table machinery: nothing here is a sortable numeric grid. */
 .mill-view {
   flex: 1;
   min-height: 0;
@@ -2577,7 +2412,6 @@ a.pr-title:hover {
 .mill-meta[data-tone="warn"] { color: var(--state-waiting); }
 .mill-meta[data-tone="crit"] { color: var(--state-failed); }
 
-/* A line with nothing to say still spends a gap in a flex column. */
 .mill-meta:empty { display: none; }
 
 .mill-warning {
@@ -2669,7 +2503,6 @@ a.pr-title:hover {
   font-variant-numeric: tabular-nums;
 }
 
-/* The one thing on a delivery row worth spotting from across the page. */
 .mill-delivery-tag {
   padding: 0 6px;
   border-radius: var(--radius);
@@ -2683,14 +2516,12 @@ a.pr-title:hover {
 .mill-delivery[data-tone="warn"] .mill-delivery-detail,
 .mill-distill[data-tone="warn"] .mill-distill-status { color: var(--state-waiting); }
 
-/* A row list long enough to bury the sections under it scrolls in place instead. */
 .mill-outputs {
   max-height: 220px;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
 
-/* The assignment control: which projects this pack is delivered to. */
 .mill-deliver {
   display: flex;
   flex-direction: column;
@@ -2734,9 +2565,6 @@ a.pr-title:hover {
   color: var(--text-muted);
 }
 
-/* ── Hooks view ──
-   Same chrome as Mill (section heads, stat chips, meta lines) with one addition: an inline editor
-   that reuses the Settings view's inputs, so a hook form looks like every other form in the app. */
 .hooks-view {
   flex: 1;
   min-height: 0;
@@ -2826,7 +2654,6 @@ a.pr-title:hover {
 
 .hooks-warning { color: var(--state-waiting); }
 
-/* Empty state: the templates ARE the instructions. */
 .hooks-empty-state {
   display: flex;
   flex-direction: column;
@@ -2966,7 +2793,6 @@ a.pr-title:hover {
   flex-shrink: 0;
 }
 
-/* Preview: the settings JSON this row becomes, closed by default so a list of ten stays a list. */
 .hooks-preview { margin-top: 2px; }
 
 .hooks-preview-summary {
@@ -3020,7 +2846,6 @@ a.pr-title:hover {
   letter-spacing: 0.04em;
 }
 
-/* Glissa's own hooks: a disclosure, so the operator's list leads and the reference is one tap away. */
 .hooks-builtin { display: flex; flex-direction: column; gap: 10px; }
 .hooks-builtin-summary {
   display: flex;
@@ -3104,11 +2929,6 @@ a.pr-title:hover {
   color: var(--text-muted);
 }
 
-
-/* ── Hooks on a phone ──
-   Same content, thumb-shaped: every field stacks, every control reaches 44px, inputs sit at 16px so
-   iOS does not zoom the page on focus, a row's actions become a full-width strip under it, and the
-   save bar stays on screen above the nav while the operator scrolls a long form. */
 html[data-layout="phone"] .hooks-view {
   max-width: none;
   padding: 12px 10px 24px;
@@ -3200,10 +3020,6 @@ html[data-layout="phone"] .hooks-editor-error { flex-basis: 100%; font-size: 12p
 html[data-layout="phone"] .hooks-editor-shortcut { display: none; }
 html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-height: 44px; font-size: 13px; }
 
-/* ── Usage view ─────────────────────────────────────────────── */
-/* Same page rhythm and tokens as the Radar and PR views. Its own selectors because usage is the one
-   surface built out of dense numeric TABLES rather than attention rows, so it needs tabular alignment
-   and a meter the other two have no equivalent for. */
 .usage-view {
   flex: 1;
   min-height: 0;
@@ -3217,9 +3033,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   color: var(--text-dim);
 }
 
-/* The query container for the bands below. Their split has to key off the width the page actually gets,
-   which is not the viewport: the review sidebar docks beside .app-main and is resizable to 700px, so a
-   wide window can still leave this element too narrow for two tracks. */
 .usage-content {
   max-width: 1240px;
   margin: 0 auto;
@@ -3229,9 +3042,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   container: usage-panel / inline-size;
 }
 
-/* Three altitudes instead of one flat stack: a band pairs a main section with a column of the short
-   sections that qualify it. Single column at rest; room on the page is what buys the second track, so
-   nothing here keys off the phone layout. */
 .usage-band {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -3247,7 +3057,7 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
 }
 
 @container usage-panel (min-width: 1040px) {
-  /* Ceilings first: the plan and budget column leads, the burning block gets the wide track. */
+
   .usage-band-now { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); }
   .usage-band-spend,
   .usage-band-trend { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
@@ -3282,8 +3092,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   color: var(--text-muted);
 }
 
-/* The estimates caveat, condensed to one line so the numbers clear the fold. The full sentence is the
-   title here and the footnote under the tables, so nothing about the honesty is lost. */
 .usage-caveat {
   margin: 0;
   align-self: flex-start;
@@ -3294,7 +3102,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   cursor: help;
 }
 
-/* The full text, once, at the end: readable for anyone who wants it, in nobody's way. */
 .usage-footnote {
   margin: 0;
   max-width: 78ch;
@@ -3316,8 +3123,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
 .usage-meta[data-tone="warn"] { color: var(--state-waiting); }
 .usage-meta[data-tone="crit"] { color: var(--state-failed); }
 
-/* The tick-painted lines exist before they have anything to say, and the section is a flex column, so
-   an empty one would still spend a gap. */
 .usage-meta:empty,
 .usage-refresh-status:empty { display: none; }
 
@@ -3329,8 +3134,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   color: var(--state-waiting);
 }
 
-/* Quiet at rest, toned only when the projection actually lands past the reference. An always-accent
-   line is decoration, and a state color that means nothing teaches the operator to ignore it. */
 .usage-projection {
   margin: 0;
   font-size: 11px;
@@ -3385,8 +3188,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   font-variant-numeric: tabular-nums;
 }
 
-/* Tone travels on the tile, the way .radar-stat carries it, so the block numbers at risk are colored
-   where the operator is already looking instead of only on a line further down. */
 .usage-tile[data-tone="warn"] {
   border-color: color-mix(in oklab, var(--state-waiting) 55%, transparent);
 }
@@ -3399,8 +3200,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
 
 .usage-tile[data-tone="crit"] .usage-tile-value { color: var(--state-failed); }
 
-/* Block progress and the token-limit bar. Tone comes from the data attribute, the fill width is the
-   only inline style (it is the value, not the styling). */
 .usage-meter {
   height: 4px;
   border-radius: 2px;
@@ -3417,10 +3216,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
 .usage-meter[data-tone="warn"] .usage-meter-fill { background: var(--state-waiting); }
 .usage-meter[data-tone="crit"] .usage-meter-fill { background: var(--state-failed); }
 
-/* Horizontal scroll needs to LOOK scrollable: the by-model table runs eight columns and a phone shows
-   four, with nothing otherwise telling the operator the rest exist. The two `local` gradients scroll
-   with the content and so mask the pinned `scroll` shadows exactly at each end, which makes the hint
-   appear only on the side there is actually more to see. */
 .usage-table-scroll {
   overflow-x: auto;
   overscroll-behavior-x: contain;
@@ -3448,8 +3243,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   border-bottom: 1px solid var(--border-dim);
 }
 
-/* Hairline row rules plus a hover wash: at 11px a run of unruled rows smears into a block, and the
-   rule is what lets an eye track one row across five numeric columns. */
 .usage-table td {
   padding: 4px 8px 4px 0;
   color: var(--text);
@@ -3481,8 +3274,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   white-space: nowrap;
 }
 
-/* A transcript Glissa never managed still costs money, so it stays in the table; the managed rows are
-   the ones an operator can act on, so only they get the full-strength label. */
 .usage-row[data-managed="true"] .usage-session-cell {
   color: var(--text-head);
   font-weight: 600;
@@ -3517,9 +3308,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   font-variant-numeric: tabular-nums;
 }
 
-/* Official plan limits: the account's real 5 hour and 7 day windows, straight from Claude Code's
-   statusLine payload. First on the page and the only hard ceiling on it, so the two meters get more
-   height than the estimate bars below them. */
 .usage-plan {
   display: flex;
   flex-direction: column;
@@ -3566,8 +3354,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   border-radius: 3px;
 }
 
-/* Glissa lanes. The automation lanes are the actionable rows, so `other` (anything Glissa did not spawn)
-   recedes rather than competing with them. */
 .usage-lane-cell {
   color: var(--text-head);
   font-weight: 600;
@@ -3579,8 +3365,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   font-weight: 400;
 }
 
-/* Spend budgets: the operator's own ceilings, under the totals they are measured against. Taller meters
-   than the estimate bars, like the plan limits, because a ceiling is a harder fact than a trend. */
 .usage-budgets {
   display: flex;
   flex-direction: column;
@@ -3624,7 +3408,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   border-radius: 3px;
 }
 
-/* Day / Week / Month. Three stable labels; aria-pressed is the state, so no button ever renames itself. */
 .usage-period {
   display: inline-flex;
   gap: 0;
@@ -3655,7 +3438,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   background: color-mix(in oklab, var(--accent) 14%, transparent);
 }
 
-/* A row Glissa REMEMBERS rather than one it can still see. Quiet: it qualifies the row, it is not a state. */
 .usage-period-cell {
   display: inline-flex;
   align-items: baseline;
@@ -3669,8 +3451,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   color: var(--text-muted);
 }
 
-/* Calendar heatmap: one column per week, Monday to Sunday down each column. Plain grid of spans, so it
-   costs no canvas and no library, and every cell carries its own title text. */
 .usage-heatmap-scroll {
   display: flex;
   gap: 6px;
@@ -3715,28 +3495,20 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   background: color-mix(in oklab, var(--accent) 8%, var(--bg-surface));
 }
 
-/* Four filled steps, scaled to the window's own peak. */
 .usage-heatmap-cell[data-tone="1"] { background: color-mix(in oklab, var(--accent) 28%, var(--bg-surface)); }
 .usage-heatmap-cell[data-tone="2"] { background: color-mix(in oklab, var(--accent) 50%, var(--bg-surface)); }
 .usage-heatmap-cell[data-tone="3"] { background: color-mix(in oklab, var(--accent) 72%, var(--bg-surface)); }
 .usage-heatmap-cell[data-tone="4"] { background: var(--accent); }
 
-/* An observed zero and an unobserved day must not look alike: the second is an absence, drawn as a hairline
-   outline with no fill at all. */
 .usage-heatmap-cell[data-no-data="true"] {
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--border-dim);
 }
 
-/* Per-vendor split, shown only when a non-Claude vendor has data. A second row under the totals rather
-   than mixed into them: these re-cut the same numbers, they do not add to them. */
 .usage-vendor-tiles {
   margin-top: 2px;
 }
 
-/* Token composition: one stacked bar over four legend stats. A single-hue ramp on purpose (one voice),
-   ordered identically in bar and legend so the mapping never rides on color alone; the dominant segment
-   (usually cache read) is the quietest tint, so the bar spends almost no accent. */
 .usage-compo {
   display: flex;
   flex-direction: column;
@@ -3801,7 +3573,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   font-variant-numeric: tabular-nums;
 }
 
-/* Which CLI a model belongs to, on the model rows, once more than one vendor is on the page. */
 .usage-model-name-wrap {
   display: inline-flex;
   align-items: baseline;
@@ -3817,8 +3588,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   color: var(--text-muted);
 }
 
-/* Where a number came from, wherever one could be mistaken for the other. Quietest text on the page:
-   it qualifies a figure, it is not a figure. */
 .usage-provenance {
   margin: 0;
   font-size: 10px;
@@ -3827,8 +3596,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   color: var(--text-muted);
 }
 
-/* Range + refresh. The report is PULLED, so these are the only controls on the page: a range the
-   server already validates, and a hard re-read of every transcript. */
 .usage-controls {
   display: flex;
   align-items: center;
@@ -3883,14 +3650,11 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   cursor: default;
 }
 
-/* Progress lives here, never on the button label (mirrors .radar-issue-action-status). */
 .usage-refresh-status {
   font-size: 10px;
   color: var(--text-muted);
 }
 
-/* Sortable column header. The label is the column name and never changes; direction is carried by
-   aria-sort, which the triangle below is a pure response to. */
 .usage-sort {
   border: 0;
   padding: 0;
@@ -3915,8 +3679,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
 .usage-table th[aria-sort="ascending"] .usage-sort::after { content: '\25B4'; opacity: 1; }
 .usage-table th[aria-sort="descending"] .usage-sort::after { content: '\25BE'; opacity: 1; }
 
-/* Per-day model breakdown, collapsed by default: 90 retained days times an always-open chip row is a
-   wall, and the day totals are what the table is for. */
 .usage-toggle {
   border: 0;
   padding: 0;
@@ -3943,7 +3705,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   content: '\25BE';
 }
 
-/* Share of the whole, as a bar plus a number: an absolute cost cannot say which row to act on. */
 .usage-share {
   display: flex;
   align-items: center;
@@ -3980,7 +3741,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   font-variant-numeric: tabular-nums;
 }
 
-/* Recent blocks: the trend the active block is part of, bars relative to the heaviest one shown. */
 .usage-blocks {
   display: flex;
   flex-direction: column;
@@ -4022,7 +3782,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   font-variant-numeric: tabular-nums;
 }
 
-/* The live one is the only row here with a state, so it is the only one that spends any accent. */
 .usage-block[data-active="true"] .usage-block-label,
 .usage-block[data-active="true"] .usage-block-value {
   color: var(--text-head);
@@ -4032,9 +3791,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   background: var(--accent);
 }
 
-/* ── Visions view ─────────────────────────────────────────── */
-/* Same page rhythm and tokens as the Radar, PR and Usage views. Its own selectors because a finding is a
-   three-part line (where, which rule, what) rather than an attention row or a numeric cell. */
 .visions-view {
   flex: 1;
   min-height: 0;
@@ -4113,7 +3869,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   max-width: 78ch;
 }
 
-/* The empty state is a hint, not a statement, so it reads at hint weight. */
 .visions-intent-none {
   color: var(--text-muted);
   font-size: 11px;
@@ -4139,7 +3894,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   padding-bottom: 6px;
 }
 
-/* The file name is the thing being scanned for, so it takes the weight; the full uri is the title. */
 .visions-doc-name {
   margin: 0;
   min-width: 0;
@@ -4182,7 +3936,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   line-height: 1.5;
 }
 
-/* Fixed width and tabular figures so the line numbers form a column the eye can run down. */
 .visions-finding-line {
   flex: 0 0 auto;
   min-width: 4ch;
@@ -4204,8 +3957,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   color: var(--text);
 }
 
-/* Tier 3 is a card, not a row: a model comment is a paragraph offered at a pause, and it must never be
-   mistaken for the rule-based finding lines above it. The rail carries the distinction cheaply. */
 .visions-comments {
   display: flex;
   flex-direction: column;
@@ -4229,7 +3980,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   gap: 8px;
 }
 
-/* Muted and lowercase: it names who is talking, it is not a badge asking to be read first. */
 .visions-comment-chip {
   padding: 1px 6px;
   border: 1px solid var(--border-dim);
@@ -4260,8 +4010,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   max-width: 78ch;
 }
 
-/* The tier 1 changelog sits between the findings and the activity feed: what the lane silently changed,
-   under what it has to say and above what it can see. A refused row is dimmed, never hidden. */
 .visions-fixes {
   display: flex;
   flex-direction: column;
@@ -4346,8 +4094,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   overflow-wrap: anywhere;
 }
 
-/* The ingest activity feed sits below the findings: what the visions can currently SEE, under what it
-   currently has to say about it. Rows are bounded in the panel, so this list never grows without end. */
 .visions-activity {
   display: flex;
   flex-direction: column;
@@ -4410,7 +4156,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   white-space: nowrap;
 }
 
-/* Captured output is often one long line; it wraps rather than widening the panel. */
 .visions-activity-summary {
   color: var(--text);
   overflow-wrap: anywhere;
@@ -4422,7 +4167,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   color: var(--text-muted);
 }
 
-/* ── Primary view tabs (Focus / Radar / PRs / Usage / Visions) ───────── */
 .header-left {
   display: flex;
   align-items: center;
@@ -4488,9 +4232,7 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   box-shadow: 0 0 6px var(--accent);
   animation: tab-pulse 1.4s ease-in-out infinite;
 }
-/* A raised hand is the rarest thing the Visions lane produces and the only standing one: bigger, in the
-   colour this dashboard already spends on "needs you", and not pulsing, so it reads as a condition
-   rather than as an arrival. */
+
 .tab-activity.active[data-attention="hand"] {
   width: 8px;
   height: 8px;
@@ -4505,20 +4247,13 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   50%      { opacity: 0.35; }
 }
 
-/* The session-card grid is never a navigable view now (Focus borrows cards out of it into the
-   center); it stays mounted off-screen as the card home. Hide it unconditionally. */
 #sessions-container { display: none; }
-
-/* ============================================================
-   Focus view (experimental): roster rail + single-focus center
-   ============================================================ */
 
 .focus-view { display: flex; flex: 1 1 auto; min-height: 0; }
 .focus-view[hidden] { display: none; }
 
-/* ── Roster rail ── */
 .focus-rail {
-  flex: 0 0 var(--rail-width, 240px); /* default; user drag sets --rail-width inline (focus-view.js) */
+  flex: 0 0 var(--rail-width, 240px);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -4529,9 +4264,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
 }
 .focus-rail-list { display: flex; flex-direction: column; gap: 6px; }
 
-/* Rail resize handle: a 7px grab strip straddling the rail's right border (negative margins keep it
-   zero-width in the layout). Invisible at rest so the border stays the only visible line; the strip
-   lights up with the accent on hover, keyboard focus, and during a drag. */
 .focus-rail-resizer {
   flex: 0 0 7px;
   margin: 0 -3px;
@@ -4543,12 +4275,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
 .focus-rail-resizer[data-dragging] { background: color-mix(in oklch, var(--accent) 40%, transparent); }
 .focus-rail-resizer:focus-visible { outline: none; background: color-mix(in oklch, var(--accent) 40%, transparent); }
 
-/* Sticky jump header: a single readout for the attention queue (WAITING + unacknowledged COMPLETE)
-   that also carries the Alt+W legend. focus-view keeps it in a FIXED slot at the top of the rail in
-   both states, so the pill list never shifts when the queue fills or clears. It earns the one accent
-   only when something needs you (the lit state here): orchid tint + accent border + the "{n} NEED YOU"
-   count. At rest it drops to a neutral box reporting "ALL CLEAR" (the [data-empty] state below), so the
-   accent is never spent on a calm board. The opaque fill hides pills scrolling under the sticky slot. */
 .focus-rail-head {
   position: sticky;
   top: 0;
@@ -4570,12 +4296,7 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   border-color: var(--accent);
 }
 .focus-rail-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-/* Resting (nothing needs you): a COMPLETE but quiet legend, not the orchid signal box. The fill drops
-   to the opaque rail tone and the border to the neutral component edge (the accent is reserved for the
-   lit state), the "ALL CLEAR" count reads in dim lavender, and the Alt+W chips stay legible but
-   recessed. The box is fully contained (border + radius + label + keys) so it never reads half-empty,
-   yet it spends no accent and no hover lift while the board is calm. The button is disabled +
-   aria-hidden in JS, so the legend claims no action or tab stop until a session needs you. */
+
 .focus-rail-head[data-empty] {
   background: var(--bg-header);
   border-color: var(--border);
@@ -4590,14 +4311,7 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   text-transform: uppercase;
   color: var(--accent);
 }
-/* The Alt+W key uses the shared .shortcut-keys / .kbd chips (see dialogs.js). The chips read on the
-   head's accent-tinted fill as-is; no head-specific override is needed. */
 
-/* Project group header: a name divider above a group's pills, ending in a "+" quick-add button that
-   spawns another session on this project's path (no Add Session dialog). It is STRUCTURE, not signal,
-   so the name wears the quietest type (the 10px tracked eyebrow) over a 1px hairline and never a state
-   color (the pulsing pill inside still carries attention). The row itself is a plain div; only the "+"
-   is interactive. */
 .focus-rail-group {
   display: flex;
   align-items: center;
@@ -4611,7 +4325,7 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  text-transform: uppercase; /* VISUAL only: textContent / accessible name stay original case */
+  text-transform: uppercase;
   color: var(--text-dim);
   white-space: nowrap;
   overflow: hidden;
@@ -4619,9 +4333,7 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   max-width: 60%;
 }
 .focus-rail-group-rule { flex: 1; height: 1px; background: var(--border); }
-/* Header action squares: a quiet 18px button on the header's right. "+" quick-adds a session (warms to
-   the accent on hover); "×" dismisses a kept session-less project (warms to the removal tone). Shared
-   box so both read as one affordance family without competing with the pills below. */
+
 .focus-rail-group-add,
 .focus-rail-group-remove {
   flex: none;
@@ -4653,8 +4365,7 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
 .focus-rail-group-add:focus-visible,
 .focus-rail-group-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .focus-rail-group:hover .focus-rail-group-label { color: var(--text); }
-/* A kept project with no live session: dim its rule so the empty row reads as a placeholder, not an
-   active project. The label + "+" stay legible so the re-add affordance is obvious. */
+
 .focus-rail-group[data-empty] .focus-rail-group-rule { opacity: 0.5; }
 @media (prefers-reduced-motion: reduce) {
   .focus-rail-group-add,
@@ -4665,9 +4376,7 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   display: grid;
   grid-template-columns: 1fr auto auto;
   align-items: center;
-  /* No track gap: the badge/merge gaps are carried by margins instead, so the empty merge track
-     (when a session has no review tag) leaves NO phantom gutter and the badge's right edge rests in
-     the same place whether or not a merge tag is present. */
+
   gap: 0;
   width: 100%;
   padding: 8px 10px;
@@ -4715,11 +4424,9 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   letter-spacing: 0.06em;
   color: var(--accent);
 }
-/* No review tag: drop the element entirely (not just empty text) so it claims neither width nor its
-   left margin, keeping the badge's right edge fixed. */
+
 .focus-pill-merge:empty { display: none; }
 
-/* State colour drives a per-pill --st used by glyph + label. */
 .focus-pill[data-state="RUNNING"]      { --st: var(--state-running); }
 .focus-pill[data-state="WAITING"]      { --st: var(--state-waiting); }
 .focus-pill[data-state="FAILED"]       { --st: var(--state-failed); }
@@ -4730,12 +4437,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
 .focus-pill[data-state="INITIALIZING"] { --st: var(--state-initializing); }
 .focus-pill[data-state="DORMANT"]      { --st: var(--text-muted); }
 
-/* Quick-remove: each pill sits in a positioned row so a hover-only "×" can occupy its right edge and
-   tear the session down (config entry + PTY) through the same confirm the card overflow menu uses. To
-   keep the "×" from colliding with the state badge (which lives at that same right edge), the badge +
-   merge tag fade out on hover and the "×" fades in, so only one is ever visible. The button is
-   aria-hidden + tabindex -1 - a redundant MOUSE control - so the listbox keeps only role=option pills;
-   keyboard/AT users press Delete/Backspace on the focused pill instead. */
 .focus-pill-row { position: relative; }
 .focus-pill .focus-pill-badge,
 .focus-pill .focus-pill-merge { transition: opacity 120ms ease; }
@@ -4779,15 +4480,9 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   .focus-pill-remove { transition: none; }
 }
 
-/* Name hierarchy (quiet by default). A DORMANT session has not been started, so its name recedes to
-   the dim tone; a live session keeps the body tone; the FOCUSED (centered) session's name brightens
-   to the head tone so the one being watched reads clearly. .focus-pill-name hard-sets its own color,
-   so these element-level rules are required to override it (the parent .focused color never reaches
-   the name). Ordered DORMANT then focused so a focused pill always wins the equal-specificity tie. */
 .focus-pill[data-state="DORMANT"] .focus-pill-name { color: var(--text-dim); }
 .focus-pill.focused .focus-pill-name { color: var(--text-head); }
 
-/* WAITING: amber border + tint + a breathing pulse (the one loud rail state). */
 .focus-pill[data-state="WAITING"] {
   border-color: var(--state-waiting);
   background: color-mix(in oklch, var(--state-waiting) 12%, var(--bg-card));
@@ -4800,12 +4495,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   50%      { box-shadow: 0 0 0 3px color-mix(in oklch, var(--state-waiting) 22%, transparent); }
 }
 
-/* COMPLETE: a finished turn. An acknowledged (seen) pill carries a calm emerald border; an
-   unacknowledged pill (data-unseen, set when it ENTERS complete while the rail is open) ANNOUNCES
-   ONCE then HOLDS a steady bright emerald border + tint until the operator focuses it
-   (focusSession clears the flag). Only WAITING keeps pulsing; a second forever-pulse would cancel
-   the first out (earned-signal rule). Under reduced motion the one-shot flash is dropped and the
-   steady bright border remains, so the signal still reads. */
 .focus-pill[data-state="COMPLETE"] {
   border-color: color-mix(in oklch, var(--state-complete) 35%, var(--border-dim));
 }
@@ -4824,24 +4513,12 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   100% { box-shadow: 0 0 0 0 transparent; }
 }
 
-/* ── Working heartbeat (rail-only) ──
-   A RUNNING session is alive: the pill glyph breathes (the resting "this is working" pulse), and
-   each real PTY chunk fires a quick WAAPI scale beat on top (focus-view.js renderPillActivity), so
-   a streaming agent visibly beats while a thinking one settles. The breath animates OPACITY ONLY so
-   the JS beat's transform composes on top instead of fighting it. This is the heartbeat's only home
-   - the card badge / centered terminal stay deliberately calm. Reduced motion drops the breath (the
-   no-preference gate) and the JS beat (renderPillActivity skips it); only the glyph moves, so the
-   name + label stay rock-steady. */
 @media (prefers-reduced-motion: no-preference) {
   .focus-pill[data-state="RUNNING"] .focus-pill-glyph {
     animation: working-breathe 2.4s ease-in-out infinite;
   }
 }
 
-/* Gone quiet: output has stopped for a while. We report only what we observe (silence), never an
-   invented cause - so the treatment is calm information, not an alarm: the breath slows and dims,
-   and a muted lowercase eyebrow trails the badge. The word is real text (not motion), so it carries
-   the same tell under reduced motion and for a colour-blind operator. */
 .focus-pill[data-state="RUNNING"][data-activity="quiet"] .focus-pill-glyph {
   animation-duration: 3.8s;
   opacity: 0.55;
@@ -4855,33 +4532,20 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   color: var(--text-dim);
 }
 
-/* Needs-review accent (distinct from amber so it does not read as "needs input"); parked = red. */
 .focus-pill[data-merge="pending-review"] { border-color: var(--accent-dim); }
 .focus-pill[data-merge="parked"] { --st: var(--state-failed); border-color: var(--state-failed); }
 .focus-pill[data-merge="parked"] .focus-pill-merge { color: var(--state-failed); }
 
-/* ── Center: a built-in work surface, not a floating tile ──
-   The Focus tab borrows each session's live card into this column. The card was built as a grid
-   tile (rounded border, padded float, loud state glow, a header that re-states the rail pill); the
-   grid is gone (#sessions-container is display:none) and the card is only ever shown here, so in the
-   centered context it is re-cast as THE screen: a slim status strip (the toolbar) over an
-   edge-to-edge terminal, flush to the column so the rail and review sidebar frame it with their own
-   1px column borders. Tonal layering tells the three columns apart: the side rails sit on
-   --bg-header, the terminal screen on --bg-card (one step lighter, lifted), the strip on
-   --bg-surface. State recedes: the loud card border and pulse glow are dropped, the rail pill
-   carries state, and the only state color left here is a thin toolbar accent plus the badge. */
 .focus-center {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  /* Flush: no padding box, no gap. Toolbar + terminal run edge to edge in the column. The empty
-     placeholder still centers via .focus-empty margin:auto + the :empty slot collapse below. */
+
   padding: 0;
 }
 .focus-card-slot { flex: 1 1 auto; min-height: 0; display: flex; }
-/* No card borrowed in → collapse the slot so it stops grabbing the column's free space and the
-   empty-state placeholder (.focus-empty, margin:auto) centers in the middle instead of pinning top. */
+
 .focus-card-slot:empty { flex: 0 0 auto; }
 
 .focus-center .session-card.focus-centered {
@@ -4889,37 +4553,29 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   width: 100%;
   height: 100%;
   margin: 0;
-  /* Strip the grid-tile cues. The card is the work surface now: no rounded float, no outer border,
-     no state-colored border or glow. This (0,3,0) selector beats the [data-state] border/shadow
-     rules and wins the source-order tie against the completion-flash block above. */
+
   border: 0;
   border-radius: 0;
   box-shadow: none;
 }
-/* Kill the WAITING pulse ring (a card-level ::after); WAITING recedes to the quiet toolbar accent. */
+
 .focus-center .session-card.focus-centered::after { display: none; }
-/* Drop the card-level completion glow here; the one-shot lands on the toolbar accent instead. */
+
 .focus-center .session-card.focus-centered.completion-flash { animation: none; }
 
-/* ── Centered toolbar: the status strip over the screen ──
-   The borrowed card header, re-cast as a work-area toolbar: thinned to essentials and height-matched
-   to the review sidebar head, so the terminal screen and the review body begin at the same y (three
-   distinct columns, one shared top line). */
 .focus-center .session-card.focus-centered .session-card-header {
   min-height: 40px;
   padding: 0 8px 0 14px;
   position: relative;
 }
-/* Promote the session name to the title voice: this is the one place we know exactly what is
-   centered, so the name leads (weight + size + color), not the 11px header default. */
+
 .focus-center .session-card.focus-centered .session-name {
   font-size: 13px;
   font-weight: 700;
   color: var(--text-head);
   letter-spacing: 0.03em;
 }
-/* Compact every header tag uniformly so the strip stays quiet in the centered card.
-   YOLO compacts with the rest: one size for the whole set beats singling it out. */
+
 .focus-center .session-card.focus-centered .perms-badge,
 .focus-center .session-card.focus-centered .agent-badge,
 .focus-center .session-card.focus-centered .worktree-badge,
@@ -4935,9 +4591,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   line-height: 16px;
 }
 
-/* Receded state accent: a thin top line on the toolbar, the only state COLOR left in the centered
-   work area. Steady for FAILED, breathing for WAITING (a real but quiet "needs you"; the loud alarm
-   stays on the rail pulse, the NEED YOU head, and the toast), a one-shot sweep on a DONE completion. */
 .focus-center .session-card.focus-centered .session-card-header::after {
   content: '';
   position: absolute;
@@ -4966,23 +4619,12 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
 @keyframes focus-toolbar-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 @keyframes focus-toolbar-flash { 0% { opacity: 1; } 100% { opacity: 0; } }
 
-/* A small inset so the terminal reads as a screen set into the strip, not glyphs kissing the edges.
-   The padding MUST live on the .xterm element, not on .terminal-wrap: FitAddon sizes rows/cols from
-   the wrap's computed height/width (border-box here, so wrap padding is invisible to it) minus the
-   .xterm element's own padding. Padding on the wrap overstates the available space (4px tall, 12px
-   wide), and on displays whose font metrics land rows inside that phantom strip the bottom row of
-   the TUI renders past the wrap edge and gets cut off. */
 .focus-center .session-card.focus-centered .terminal-wrap .xterm { padding: 4px 6px 0; }
 
 .focus-empty { margin: auto; text-align: center; color: var(--text-dim); }
 .focus-empty-title { font-size: 14px; font-weight: 700; color: var(--text-head); margin: 0 0 4px; }
 .focus-empty-desc { font-size: 12px; margin: 0; }
 
-/* ── Review sidebar (single review home) ──
-   The worktree review gate (collapsible per-file diff + Merge / Discard) for the SELECTED session.
-   Always docked and visible on desktop: with no selection it shows an empty state. On the phone layout
-   the SAME element is re-parented into the Review screen (see the Phone Layout section), where it fills
-   the screen instead of a fixed column. Built by sidebar/review-sidebar.js. */
 .app-sidebar {
   flex: 0 0 var(--sidebar-width, clamp(320px, 26vw, 460px));
   min-width: 0;
@@ -5035,11 +4677,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   min-width: 0;
 }
 
-/* Local base branch vs its remote upstream tracking branch. A project-level fact, not
-   tied to the merge/review gate below it, so it gets its own row rather than folding into
-   .review-controls; it stays visible across every merge status, including 'none'. Collapses to
-   nothing when no session is selected or nothing has been requested yet for it (mirrors
-   .review-controls' :empty collapse). */
 .review-branch-sync {
   flex: 0 0 auto;
   padding: 6px 14px;
@@ -5063,9 +4700,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
 .review-branch-sync-text[data-sync-state="diverged"] { color: var(--state-failed); }
 .review-branch-sync-text[data-stale="true"] { opacity: 0.7; }
 
-/* Pinned control region between the title and the scrolling diff. Holds the status note, the action
-   buttons (Merge always leads), and a why-disabled reason line, so the controls never scroll away with
-   a long diff. Flat at rest (a 1px divider, no shadow); collapses entirely when empty (no selection). */
 .review-controls {
   flex: 0 0 auto;
   padding: 12px 14px;
@@ -5078,8 +4712,7 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   line-height: 1.5;
   color: var(--text-muted);
 }
-/* A failed resync (e.g. an unpushable base branch) persists in this line until the next attempt, so it
-   needs to read as an error, not a neutral disabled-reason. */
+
 .review-control-reason-error { color: var(--state-failed); }
 @keyframes review-fadeout {
   0%, 60% { opacity: 1; }
@@ -5105,8 +4738,7 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
 .review-empty-title { font-size: 13px; font-weight: 700; color: var(--text-head); margin-bottom: 6px; }
 .review-empty-desc { font-size: 12px; line-height: 1.5; }
 .review-nochanges { color: var(--text-dim); font-size: 12px; padding: 12px 0; }
-/* Loading is a real transient state, so it earns a quiet pulse (the shared `pulse` keyframe; motion is
-   opt-in, and reduced-motion stills it). */
+
 @media (prefers-reduced-motion: no-preference) {
   .review-loading { animation: pulse 1.4s ease-in-out infinite; }
 }
@@ -5122,18 +4754,8 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
 .review-status-note[data-merge="parked"] { color: var(--state-failed); }
 .review-status-note[data-merge="merged"] { color: var(--state-done); }
 
-/* Committed vs uncommitted sections. The two groups are told apart at a glance by the colored section
-   label plus a state-tinted FULL border on the diff box (committed = done, uncommitted = waiting), never a
-   side-stripe accent (banned by the design system) and without re-reading the words. A single header row
-   per section names the group ONCE, its meaning, and the stats, instead of stacking title + subtitle +
-   a separate count line. */
 .review-section {
-  /* The +/- counts appear in two contexts: the section-total stat (.review-section-stat) and the
-     per-file rows (.review-file-counts), which live in different boxes. These two custom props are the
-     shared alignment contract that makes their +/- columns stack into ONE pair of vertical columns:
-     --review-stat-gap is the +/- column gap (identical in both), and --review-row-pad is the
-     .review-file-head horizontal padding, which the section head re-uses (plus the .review-diff border)
-     as a right inset so the total's columns land directly above the per-file columns. */
+
   --review-row-pad: 10px;
   --review-stat-gap: 8px;
   margin-bottom: 12px;
@@ -5153,8 +4775,7 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 2px 10px;
-  /* Inset the right edge by the per-file row padding plus the .review-diff border (1px), so the
-     section-total +/- cluster ends at the same x as the per-file +/- clusters inside the diff box. */
+
   padding-right: calc(var(--review-row-pad) + 1px);
   margin-bottom: 8px;
 }
@@ -5180,9 +4801,7 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
 .review-add { color: var(--state-running); }
 .review-del { color: var(--state-failed); }
 .review-bin { color: var(--text-muted); }
-/* Fixed-width right-aligned numeric columns: the +/- pair stacks into aligned columns across the file
-   rows and the two section stats. The stack is monospace so tabular-nums is moot; 4ch holds the widest
-   realistic value (+155 / -141) and grows for outliers. */
+
 .review-add, .review-del { min-width: 4ch; text-align: right; }
 
 .review-diff {
@@ -5337,8 +4956,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   text-align: center;
 }
 
-/* Reported facts an operator cannot edit (the Usage tab's pricing source and scan stats): same type as
-   a hint, but a block per line so two or three of them read as a small readout. */
 .settings-readonly {
   display: flex;
   flex-direction: column;
@@ -5350,7 +4967,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   padding: 4px 0;
 }
 
-/* ── Settings primary view ───────────────────────────────── */
 .settings-view {
   min-width: 0;
   min-height: 0;
@@ -5898,8 +5514,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   align-self: stretch;
 }
 
-
-/* ── Advanced toggle in Add Session ─────────────────────── */
 .dialog-advanced-toggle {
   display: inline-flex;
   align-items: center;
@@ -5940,7 +5554,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   display: none;
 }
 
-/* ── Project picker in Add Session ──────────────────────── */
 .project-picker {
   padding: 8px 12px;
   border: 1px solid var(--border);
@@ -5978,51 +5591,27 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   cursor: pointer;
 }
 
-/* ── Responsive ──────────────────────────────────────────── */
-
-/* Narrow viewport, ANY pointer: content that must wrap rather than push a panel past the edge. These
-   are corrections to the desktop layout at a small window, not a layout of their own; the phone gets
-   the Phone Layout section below instead. */
-/* ── Touch input corrections ──────────────────────────────────
-   Keyed on the POINTER, not the width: a hover-revealed affordance is broken on any touch device,
-   including a large tablet, and a fine-pointer desktop matches none of this. */
 @media (hover: none) {
-  /* Hovering a pill BLANKS its state badge to clear room for the quick-remove "x". A touch device
-     produces no hover, or a sticky one that never lifts, so the badge either never returned or the
-     "x" it made room for never appeared. Keep state visible unconditionally here. */
+
   .focus-pill-row:hover .focus-pill-badge,
   .focus-pill-row:hover .focus-pill-merge { opacity: 1; }
 }
 
-/* The rail only exists on the desktop layout, and a coarse pointer reaches that layout above 769px
-   (a tablet - see form-factor-core.mjs). There the pill's "x" is the ONLY removal path, since there is
-   no Delete key, so it is revealed and the pill reserves its slot. A phone never renders this rail at
-   all: it gets the Board, where Remove lives in the Terminal screen's kebab. */
 @media (hover: none) and (min-width: 769px) {
   .focus-pill { padding-right: 34px; }
   .focus-pill-remove { opacity: 1; pointer-events: auto; }
 }
 
 @media (pointer: coarse) {
-  /* 16px is the threshold below which iOS Safari zooms the page on field focus, which then strands
-     half the dialog off-screen. */
+
   .dialog input,
   .dialog select,
   .dialog textarea { font-size: 16px; }
 
-  /* Tap targets. A control that owns its box simply grows to 44px; an icon-sized control keeps its
-     visual size and extends an invisible hit area instead (the ::after pattern .btn-action set), so
-     the chrome does not visibly inflate on a tablet. Each inset is bounded by the neighbor gap, so no
-     two hit areas overlap: an accidental tap can miss, but never hit the wrong control. */
   .btn-dialog,
   .review-btn,
   .header-tab { min-height: 44px; }
 
-  /* The card kebab and its menu ARE the removal path on a phone, where the Terminal screen's top bar
-     adopts them. The menu items stack vertically, so they take real height rather than a ::after bleed
-     that would put each item's hit area over its neighbour's label. .btn-action already reaches 44px
-     tall via its existing ::after; only its width is short, and 6px of sibling gap caps how far that
-     can bleed, so the button itself widens instead. */
   .overflow-item { min-height: 44px; }
   .btn-action { width: 36px; }
 
@@ -6035,9 +5624,6 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
     min-height: 44px;
   }
 
-  /* .focus-pill-remove is deliberately absent: it is already position:absolute, and a same-specificity
-     `relative` here would clobber that and drop it back into the pill's flow. Its ::after anchors to
-     the absolute box just as well. */
   .focus-rail-group-add,
   .focus-rail-group-remove { position: relative; }
 
@@ -6047,29 +5633,13 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
     content: '';
     position: absolute;
   }
-  /* 8px apart in the group header: 6px each side is the widest bleed that keeps them separate. */
+
   .focus-rail-group-add::after,
   .focus-rail-group-remove::after { inset: -13px -6px; }
-  /* Exactly the 34px slot the hover:none block reserves, so it never reaches over the pill's name. */
+
   .focus-pill-remove::after { inset: -12px -7px; }
 }
 
-/* ── Phone Layout ─────────────────────────────────────────────
-   A SECOND first-class layout, not a narrowed copy of the first. Everything below is gated on
-   [data-layout="phone"] (public/form-factor.js writes it; form-factor-core.mjs decides it), never on a
-   bare max-width, so no desktop selector is overridden and no desktop pixel is at risk here.
-
-   The desktop shell is not rendered at all: the phone gets five screens (Board, Terminal, Review,
-   Radar, PRs) behind a bottom nav. Elements that own live state - the review sidebar, the Radar and
-   PRs panels, the header controls, a session's card - are re-parented into those screens rather than
-   rebuilt, so both layouts are one app with one state pipeline.
-
-   Design posture, per DESIGN.md: monospace throughout, orchid as the only accent (the active nav item
-   and the lit attention count), flat surfaces separated by tonal steps and 1px borders, state carried
-   by glyph + label + color together, and motion spent on exactly one thing (a blocked session's
-   glyph). Reduced motion is covered by the global rule at the top of this file. */
-
-/* Reinforces index.html's unlayered gate (this @layer rule alone can't beat it); #sessions-container stays the shell's canonical home, Terminal screen borrows a card out (public/card-host.js). */
 html[data-layout="phone"] .app-shell { display: none; }
 
 .phone-shell { display: none; }
@@ -6077,30 +5647,24 @@ html[data-layout="phone"] .app-shell { display: none; }
 html[data-layout="phone"] .phone-shell {
   position: fixed;
   left: 0;
-  /* Both custom properties are written by phone-shell.js from window.visualViewport. A 100dvh shell
-     keeps its bottom nav and the terminal's last rows UNDER an open soft keyboard; sizing to the
-     visual viewport makes the keyboard resize the terminal instead, and the card's existing
-     ResizeObserver refits cols/rows from there. The dvh fallback covers engines without the API. */
+
   top: var(--phone-vv-top, 0px);
   width: 100%;
   height: var(--phone-vh, 100dvh);
-  /* Below .dialog-overlay (200) and the notice region (300): a confirm opened from a phone screen must
-     paint over it, and a toast over both. */
+
   z-index: 100;
   display: flex;
   flex-direction: column;
   background: var(--bg);
   overflow: hidden;
 }
-/* Declared AFTER (and one step more specific than) the layout rule above, so a shell hidden mid-flip
-   really is hidden rather than losing to the display:flex. */
+
 html[data-layout="phone"] .phone-shell[hidden] { display: none; }
 
 .phone-screens { flex: 1 1 auto; min-height: 0; display: flex; }
 .phone-screen { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .phone-screen[hidden] { display: none; }
 
-/* ── Phone top bar (per screen, not a global strip) ── */
 .phone-topbar {
   flex: 0 0 auto;
   display: flex;
@@ -6113,17 +5677,12 @@ html[data-layout="phone"] .phone-shell[hidden] { display: none; }
   border-bottom: 1px solid var(--border-dim);
 }
 
-/* The adopted desktop controls. "+ Session" starts the right-hand group, so the connection chip keeps
-   the slack and the hamburger stays pinned to the edge where a thumb expects it. */
 .phone-topbar > .btn-add-header { margin-left: auto; }
 .phone-topbar > .status-indicator,
 .phone-topbar .header-connection { min-width: 0; overflow: hidden; }
 
-/* ── Board screen ── */
 .phone-board { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 
-/* The honest headline. Quiet at rest so the lit state means something (the Earned Signal rule applied
-   to a readout: a count that is always coloured teaches the operator to stop reading it). */
 .phone-attention {
   flex: 0 0 auto;
   padding: 8px 14px;
@@ -6279,16 +5838,11 @@ html[data-layout="phone"] .phone-row-item {
 }
 .phone-row-elapsed:empty { display: none; }
 
-/* State at row scale. Every state tints its glyph, but only the two that genuinely need a carbon unit
-   take a lit row (tinted fill plus a full-strength badge). Everything else stays recessive so those
-   two can be found in a glance - the minimized bar's two-loud-states rule, one surface up. */
 .phone-row[data-state="RUNNING"] .phone-row-glyph { color: var(--state-running); }
 .phone-row[data-state="IDLE"] .phone-row-glyph { color: var(--state-idle); }
 .phone-row[data-state="STARTING"] .phone-row-glyph { color: var(--state-starting); }
 .phone-row[data-state="DONE"] .phone-row-glyph { color: var(--state-done); }
-/* A finished turn is emerald only while it is UNREAD; opening the session drops data-unseen and the row
-   recedes to the resting treatment. Same announce-once rule the rail pill applies, and the same rule the
-   attention count above is computed from, so the readout and the rows can never disagree. */
+
 .phone-row[data-state="COMPLETE"][data-unseen] .phone-row-glyph,
 .phone-row[data-state="COMPLETE"][data-unseen] .phone-row-badge { color: var(--state-complete); }
 
@@ -6299,9 +5853,6 @@ html[data-layout="phone"] .phone-row-item {
 .phone-row[data-state="FAILED"] .phone-row-glyph,
 .phone-row[data-state="FAILED"] .phone-row-badge { color: var(--state-failed); }
 
-/* The board's only motion, and only for a session actively blocked on the operator. Amber-and-breathing
-   versus emerald-and-steady differ on hue, saturation and animation at once, so the signal survives
-   without hue. */
 .phone-row[data-state="WAITING"] .phone-row-glyph {
   animation: phone-glyph-breathe 2s ease-in-out infinite;
 }
@@ -6310,7 +5861,6 @@ html[data-layout="phone"] .phone-row-item {
   50%      { opacity: 0.45; }
 }
 
-/* ── Terminal screen ── */
 .phone-terminal { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 
 .phone-back {
@@ -6362,8 +5912,6 @@ html[data-layout="phone"] .phone-row-item {
 }
 .phone-terminal-elapsed:empty { display: none; }
 
-/* Where the borrowed card's own action cluster (debug + the kebab holding Rename / Restart / Resume /
-   Remove) lands. Collapses when no session is shown, since the cluster travels with the card. */
 .phone-terminal-actions { flex: 0 0 auto; display: flex; align-items: center; }
 .phone-terminal-actions:empty { display: none; }
 
@@ -6375,9 +5923,6 @@ html[data-layout="phone"] .phone-row-item {
 .phone-terminal-bar[data-state="WAITING"] .phone-terminal-badge { color: var(--state-waiting); }
 .phone-terminal-bar[data-state="FAILED"] .phone-terminal-badge { color: var(--state-failed); }
 
-/* touch-action drops the double-tap-zoom wait so a tap focuses the terminal immediately, and the callout
-   suppression keeps a press from raising the OS selection/copy sheet over the keyboard we are opening.
-   Both reach the terminal through the descendant chain, so the card itself needs no copy. */
 .phone-card-slot {
   flex: 1 1 auto;
   min-height: 0;
@@ -6387,9 +5932,6 @@ html[data-layout="phone"] .phone-row-item {
 }
 .phone-card-slot[hidden] { display: none; }
 
-/* The card, re-cast as the whole screen. Same treatment (and the same (0,3,0) specificity needed to
-   beat the [data-state] border/shadow rules) the Focus center gives it: the grid-tile cues are cues
-   for a grid that is not on screen. */
 .phone-card-slot .session-card.phone-centered {
   flex: 1 1 auto;
   width: 100%;
@@ -6401,22 +5943,15 @@ html[data-layout="phone"] .phone-row-item {
 }
 .phone-card-slot .session-card.phone-centered::after { display: none; }
 .phone-card-slot .session-card.phone-centered.completion-flash { animation: none; }
-/* The card header does not render here: its name, state and elapsed clock are in the screen's top bar,
-   and its action cluster was adopted up there. The terminal gets the whole screen. */
+
 .phone-card-slot .session-card.phone-centered .session-card-header { display: none; }
-/* touch-action:none is what lets session-card/touch-scroll.js call preventDefault on a vertical drag
-   and turn it into scrollback (xterm 6.0.0 has no touch path of its own): under the `manipulation`
-   inherited from the slot the browser can claim the pan first and hand the listener a non-cancelable
-   move. Only the terminal box is claimed; the rest of the screen behaves normally. */
+
 .phone-card-slot .session-card.phone-centered .terminal-wrap {
   flex: 1 1 auto;
   min-height: 0;
   touch-action: none;
 }
 
-/* ── Touch key strip (under the phone terminal) ──
-   Esc / Tab / Ctrl+C / arrows / Paste: the keys a soft keyboard cannot produce. Quiet ghost buttons on
-   the inset surface so the strip reads as chrome under the screen, not a toolbar competing with it. */
 .phone-key-strip {
   flex: 0 0 auto;
   display: flex;
@@ -6452,7 +5987,6 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-key-strip:no
 .phone-key:active { color: var(--text-head); border-color: var(--border-hover); }
 .phone-key:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* ── Review, Radar, PRs, Usage, Mill, Visions, Hooks and Settings screens (adopted desktop panels) ── */
 .phone-review,
 .phone-radar,
 .phone-prs,
@@ -6461,8 +5995,7 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-key-strip:no
 .phone-visions,
 .phone-hooks,
 .phone-settings { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-/* The docked column's fixed flex basis is meaningless as a full screen, and there is no neighbour to
-   resize against or border off. */
+
 .phone-review > .app-sidebar { flex: 1 1 auto; border-left: none; }
 html[data-layout="phone"] .review-resize-handle { display: none; }
 html[data-layout="phone"] .review-sidebar-body { overscroll-behavior: contain; }
@@ -6472,13 +6005,10 @@ html[data-layout="phone"] .review-sidebar-body { overscroll-behavior: contain; }
 .phone-mill > .mill-view,
 .phone-visions > .visions-view,
 .phone-hooks > .hooks-view { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
-/* No overflow-y here: settings scrolls inside .settings-view-content, which needs a definite height. */
+
 .phone-settings > .settings-view { flex: 1 1 auto; min-height: 0; }
 .phone-settings .settings-view-content { overscroll-behavior: contain; }
-/* ── Usage on a phone ──
-   The desktop page is numeric tables at 11px, which is unreadable on a phone but does not need
-   restructuring the way the Radar rows did: each table already scrolls inside its own box, so the phone
-   only grows the type and loosens the tiles into a wrapping grid a thumb can read. */
+
 html[data-layout="phone"] .usage-view { padding: 14px 12px 24px; font-size: 13px; }
 html[data-layout="phone"] .usage-content { gap: 24px; }
 html[data-layout="phone"] .usage-band,
@@ -6491,9 +6021,9 @@ html[data-layout="phone"] .usage-warning,
 html[data-layout="phone"] .usage-projection,
 html[data-layout="phone"] .usage-footnote,
 html[data-layout="phone"] .usage-empty { font-size: 12px; }
-/* The plan meters are the one thing worth reading at arm's length on a phone. */
+
 html[data-layout="phone"] .usage-plan-used { font-size: 15px; }
-/* Thumb-sized period switch, and heatmap cells that survive a 390px screen by scrolling rather than shrinking. */
+
 html[data-layout="phone"] .usage-period-button { min-height: 34px; padding: 4px 14px; font-size: 11px; }
 html[data-layout="phone"] .usage-heatmap,
 html[data-layout="phone"] .usage-heatmap-days { grid-template-rows: repeat(7, 13px); }
@@ -6501,7 +6031,6 @@ html[data-layout="phone"] .usage-heatmap-cell { width: 13px; height: 13px; }
 html[data-layout="phone"] .usage-heatmap-day { line-height: 13px; }
 html[data-layout="phone"] .usage-plan-window .usage-meter { height: 8px; }
 
-/* ── Mill on a phone ── */
 html[data-layout="phone"] .mill-view {
   max-width: none;
   padding: 12px 10px 24px;
@@ -6653,22 +6182,20 @@ html[data-layout="phone"] .mill-delivery-tag {
   font-size: 8px;
   letter-spacing: 0.04em;
 }
-/* A checkbox is a touch target on a phone, so the row and the box both grow. */
+
 html[data-layout="phone"] .mill-deliver-target { padding: 8px 2px; font-size: 13px; }
 html[data-layout="phone"] .mill-deliver-box { width: 18px; height: 18px; }
 
-/* Thumb-sized controls: these are the only tappable things on the screen besides the sort headers and
-   the per-day toggles, so they get a real target rather than the desktop's 2px padding. */
 html[data-layout="phone"] .usage-select,
 html[data-layout="phone"] .usage-refresh { min-height: 34px; padding: 4px 12px; font-size: 12px; }
 html[data-layout="phone"] .usage-sort,
 html[data-layout="phone"] .usage-toggle { min-height: 30px; font-size: 11px; }
 html[data-layout="phone"] .usage-table th { padding-bottom: 8px; }
 html[data-layout="phone"] .usage-table td { padding-top: 7px; padding-bottom: 7px; }
-/* The share bar costs width the four leading columns need more on a 390px screen. */
+
 html[data-layout="phone"] .usage-share-bar { display: none; }
 html[data-layout="phone"] .usage-block-label { min-width: 11ch; }
-/* Model ids and project names are long; on a phone they wrap instead of clipping to an unreadable stub. */
+
 html[data-layout="phone"] .usage-model-cell,
 html[data-layout="phone"] .usage-session-cell { max-width: 28ch; min-width: 18ch; white-space: normal; overflow-wrap: break-word; }
 html[data-layout="phone"] .visions-view {
@@ -6689,12 +6216,7 @@ html[data-layout="phone"] .visions-doc { padding: 12px; }
 html[data-layout="phone"] .visions-finding { grid-template-columns: minmax(44px, auto) minmax(0, auto) minmax(0, 1fr); gap: 6px; }
 html[data-layout="phone"] .visions-activity-row { grid-template-columns: minmax(44px, auto) minmax(42px, auto) minmax(0, 1fr); gap: 6px; }
 html[data-layout="phone"] .visions-activity-summary { grid-column: 1 / -1; }
-/* ── Radar on a phone ──
-   The desktop board is deliberately dense: one line per issue, controls at 35% opacity until the row
-   is hovered. Neither half survives touch. There is no hover to reveal a control with, and a row of
-   eight inline parts cannot fit a phone without squeezing the title to nothing or overflowing the
-   screen sideways. Every rule below does one of two things: turn a row into a small stack (identity
-   line, then metadata, then controls) or grow a control to a thumb-sized target. */
+
 html[data-layout="phone"] .radar-view {
   padding: 14px 12px 24px;
   font-size: 13px;
@@ -6704,8 +6226,7 @@ html[data-layout="phone"] .radar-section { gap: 10px; }
 html[data-layout="phone"] .radar-section-head { flex-wrap: wrap; gap: 2px 8px; }
 html[data-layout="phone"] .radar-section-title { font-size: 12px; }
 html[data-layout="phone"] .radar-project { padding: 12px; }
-/* The project head and its stat row are short facts, not a table: wrapping keeps the stale/error
-   reason on screen instead of pushing it past the right edge. */
+
 html[data-layout="phone"] .radar-project-head { flex-wrap: wrap; gap: 2px 10px; }
 html[data-layout="phone"] .radar-project-host { flex: 1 1 100%; white-space: normal; overflow-wrap: anywhere; }
 html[data-layout="phone"] .radar-project-summary { flex-wrap: wrap; gap: 6px 14px; margin-bottom: 8px; }
@@ -6713,8 +6234,6 @@ html[data-layout="phone"] .radar-quiet { padding: 4px 12px; }
 html[data-layout="phone"] .radar-quiet-row { padding: 5px 0; font-size: 12px; flex-wrap: wrap; }
 html[data-layout="phone"] .radar-quiet-name { flex: 1 1 auto; white-space: normal; overflow-wrap: anywhere; }
 
-/* Rows become cards-without-chrome: a hairline between them replaces the 2px gap, because a stacked
-   row needs a visible boundary to read as one item. */
 html[data-layout="phone"] .radar-issues,
 html[data-layout="phone"] .radar-investigations { gap: 0; }
 html[data-layout="phone"] .radar-issue,
@@ -6728,12 +6247,8 @@ html[data-layout="phone"] .radar-investigation {
 html[data-layout="phone"] .radar-issue:last-child,
 html[data-layout="phone"] .radar-investigation:last-child { border-bottom: none; }
 
-/* The one measurement that shapes the stack. Its basis leaves room for the leading chip (the change
-   label on an issue row, the verdict on an inbox row) and nothing else, so the identity line is
-   always "chip + title" and every remaining part wraps to the metadata line under it. */
 html[data-layout="phone"] .radar-issue-copy { flex: 1 1 calc(100% - 100px); }
-/* Titles are error messages. One clipped line tells the operator almost nothing on a narrow screen,
-   so they wrap to a bounded two lines instead of ending in an ellipsis. */
+
 html[data-layout="phone"] .radar-issue-title,
 html[data-layout="phone"] .radar-issue-summary {
   display: -webkit-box;
@@ -6745,10 +6260,8 @@ html[data-layout="phone"] .radar-issue-summary {
 }
 html[data-layout="phone"] .radar-issue-summary { font-size: 11px; }
 
-/* Decoration, not data: it must never be the reason a row scrolls sideways. */
 html[data-layout="phone"] .radar-sparkline { width: 48px; opacity: 0.6; }
 
-/* Always visible (there is no hover on touch) and thumb-sized. */
 html[data-layout="phone"] .radar-issue-actions {
   opacity: 1;
   flex-basis: 100%;
@@ -6760,8 +6273,7 @@ html[data-layout="phone"] .radar-issue-action {
   padding: 0 12px;
   font-size: 11px;
 }
-/* The outcome line keeps a reserved strip whether or not it holds text, so a settling action never
-   reflows the rows under it. */
+
 html[data-layout="phone"] .radar-issue-action-status {
   flex: 1 1 100%;
   max-width: 100%;
@@ -6770,7 +6282,6 @@ html[data-layout="phone"] .radar-issue-action-status {
   overflow: visible;
 }
 
-/* Ops and PR rows carry the same one-line-or-overflow problem, with a fixed-width phase column. */
 html[data-layout="phone"] .radar-ops-row,
 html[data-layout="phone"] .radar-pr-row {
   flex-wrap: wrap;
@@ -6788,7 +6299,7 @@ html[data-layout="phone"] .radar-ops-detail {
   white-space: normal;
   overflow-wrap: anywhere;
 }
-/* A PR title is a sentence: full wrapping line under the phase chip, never an ellipsis. */
+
 html[data-layout="phone"] .radar-pr-title,
 html[data-layout="phone"] .pr-title {
   flex: 1 1 100%;
@@ -6802,7 +6313,6 @@ html[data-layout="phone"] .radar-investigation-project {
   overflow-wrap: anywhere;
 }
 
-/* ── PRs screen ── the desktop one-line PR row restacks like the Radar rows on a phone. */
 html[data-layout="phone"] .pr-view {
   padding: 14px 12px 24px;
   font-size: 13px;
@@ -6831,7 +6341,6 @@ html[data-layout="phone"] .pr-reason {
 }
 html[data-layout="phone"] .pr-unconfigured { font-size: 13px; }
 
-/* ── Empty states ── */
 .phone-empty { margin: auto; padding: 24px; text-align: center; color: var(--text-dim); }
 .phone-empty[hidden] { display: none; }
 .phone-empty-title {
@@ -6843,12 +6352,8 @@ html[data-layout="phone"] .pr-unconfigured { font-size: 13px; }
 }
 .phone-empty-desc { margin: 0; font-family: var(--font-mono); font-size: 12px; }
 
-/* ── Bottom nav ──
-   Mirror of the minimized bar's treatment, flipped to the bottom of the screen: Shadow Violet, a 1px
-   dim border on the edge that faces the content, and no ornament. Labels are constant action names,
-   never a state or a count; the one piece of state the nav carries is the Board's attention dot. */
 .phone-nav {
-  position: relative; /* anchor for the More sheet */
+  position: relative;
   flex: 0 0 auto;
   display: flex;
   align-items: stretch;
@@ -6871,7 +6376,7 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-nav { displa
   appearance: none;
   background: transparent;
   border: none;
-  /* Reserved slot for the active marker, so selecting an item never shifts the row by 2px. */
+
   border-top: 2px solid transparent;
   color: var(--text-muted);
   cursor: pointer;
@@ -6901,14 +6406,13 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-nav { displa
   background: var(--state-waiting);
 }
 .phone-nav-dot[hidden] { display: none; }
-/* The phone peer of the tab dot above: a raised hand is a standing condition, not an arrival, so it is
-   the larger mark. The board dot is already in the "needs you" colour, which leaves size to say it. */
+
 .phone-nav-dot[data-attention="hand"] {
   width: 9px;
   height: 9px;
   box-shadow: 0 0 6px var(--state-waiting);
 }
-/* Only the corner-hung nav dot needs the offset back when it grows; the More sheet's stays centred. */
+
 .phone-nav-dot[data-attention="hand"]:not(.phone-nav-menu-dot) { top: 3px; }
 .phone-nav-menu-dot {
   top: 50%;
@@ -6916,9 +6420,6 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-nav { displa
   transform: translateY(-50%);
 }
 
-/* ── More sheet ──
-   Overflow destinations (Radar, PRs) float above the nav from the More item, so the nav row never
-   grows past five thumb-sized targets. Same surface treatment as the nav it springs from. */
 .phone-nav-more-menu {
   position: absolute;
   right: 8px;
@@ -6952,8 +6453,6 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-nav { displa
 .phone-nav-menu-item:active { background: color-mix(in srgb, var(--text) 5%, transparent); }
 .phone-nav-menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .phone-nav-menu-item[aria-current="page"] { color: var(--accent); }
-
-/* ── Debug overlay ──────────────────────────────────────── */
 
 .btn-debug {
   font-size: 12px;
@@ -7034,7 +6533,6 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-nav { displa
   font-size: 10px;
 }
 
-/* Startup update notice: a thin bar under the header, populated by app.js. */
 .update-banner {
   display: flex;
   align-items: center;
@@ -7104,47 +6602,33 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-nav { displa
   color: var(--text);
 }
 
-/* Rainbow Unicorns theme: flying nyan cat easter egg. Scoped entirely
-   under [data-theme="unicorn"] as defense in depth, even though
-   public/nyan-cat.js only mounts .nyan-flight while that theme is active. */
 :root[data-theme="unicorn"] .nyan-flight {
   position: fixed;
-  /* px floor keeps top-biased flights out of the sticky header's band:
-     the header is opaque and z-index 100 sits above the sprite's 30, so
-     a flight under it reads as clipped */
+
   top: max(var(--nyan-top, 18vh), 64px);
   left: 0;
   width: 61.2px;
   height: 37.8px;
-  /* below .dialog-overlay (200) and header chrome (100): the settings
-     dialog live-previews this theme and must stay on top */
+
   z-index: 30;
   pointer-events: none;
-  /* resting state matches the fly-from keyframe: between flights the
-     inline animation is cleared and the element must sit offscreen,
-     trail included, not parked at the viewport edge */
+
   transform: translateX(-45vw);
 }
 
 :root[data-theme="unicorn"] .nyan-trail {
   position: absolute;
-  /* tuck the trail's near end under the sprite's rear (the sprite is a
-     later sibling, so it paints on top) so the trail emerges from behind
-     the animal instead of starting flush at the sprite box's left edge */
+
   right: calc(100% - 20px);
   top: 5%;
   width: 36vw;
   height: 90%;
   animation: nyan-bob 0.6s steps(1, end) infinite;
   animation-delay: -0.15s;
-  /* shared by both is-rainbow and is-sparkles: fades out toward the far
-     (left) end, away from the sprite; a small near-end fade softens the
-     20px tucked under the sprite so a short animal that doesn't cover the
-     trail's full height doesn't reveal a hard vertical edge there */
+
   mask-image: linear-gradient(to left, transparent, #000 10%, #000 55%, transparent);
   -webkit-mask-image: linear-gradient(to left, transparent, #000 10%, #000 55%, transparent);
-  /* filters apply before masking, so this outline fades out with the
-     trail instead of leaving a hard edge past the fade point */
+
   filter: drop-shadow(1px 0 0 rgba(240, 232, 255, 0.7)) drop-shadow(-1px 0 0 rgba(240, 232, 255, 0.7))
     drop-shadow(0 1px 0 rgba(240, 232, 255, 0.7)) drop-shadow(0 -1px 0 rgba(240, 232, 255, 0.7));
 }
@@ -7154,13 +6638,10 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-nav { displa
   background-repeat: repeat;
   background-size: 25.92px 34.02px;
   image-rendering: pixelated;
-  /* re-declares nyan-bob here (animation shorthand does not merge across
-     rules): this rule needs a second animation alongside it, so both
-     must be listed together */
+
   animation: nyan-bob 0.6s steps(1, end) infinite, rainbow-wave 0.6s steps(2) infinite;
   animation-delay: -0.15s, 0s;
-  /* the solid rainbow band needs far less rim than the sprites and
-     sparkles on the dark theme */
+
   filter: drop-shadow(1px 0 0 rgba(240, 232, 255, 0.25)) drop-shadow(-1px 0 0 rgba(240, 232, 255, 0.25))
     drop-shadow(0 1px 0 rgba(240, 232, 255, 0.25)) drop-shadow(0 -1px 0 rgba(240, 232, 255, 0.25));
 }
@@ -7194,12 +6675,6 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-nav { displa
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 408 42' shape-rendering='crispEdges'%3E%3Crect x='59' y='0' width='2' height='2' fill='%23f5c542'/%3E%3Crect x='58' y='2' width='4' height='1' fill='%23f5c542'/%3E%3Crect x='52' y='3' width='2' height='1' fill='%233a2852'/%3E%3Crect x='58' y='3' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='59' y='3' width='1' height='1' fill='%23ffffff'/%3E%3Crect x='60' y='3' width='2' height='1' fill='%23f5c542'/%3E%3Crect x='52' y='4' width='1' height='1' fill='%23f8f4ff'/%3E%3Crect x='53' y='4' width='1' height='1' fill='%233a2852'/%3E%3Crect x='58' y='4' width='4' height='1' fill='%23f5c542'/%3E%3Crect x='51' y='5' width='13' height='1' fill='%233a2852'/%3E%3Crect x='43' y='6' width='5' height='2' fill='%23c084fc'/%3E%3Crect x='48' y='6' width='3' height='2' fill='%23ff9ccb'/%3E%3Crect x='51' y='6' width='1' height='7' fill='%233a2852'/%3E%3Crect x='52' y='6' width='11' height='1' fill='%23f8f4ff'/%3E%3Crect x='63' y='6' width='1' height='4' fill='%233a2852'/%3E%3Crect x='52' y='7' width='6' height='1' fill='%23f8f4ff'/%3E%3Crect x='58' y='7' width='1' height='1' fill='%233a2852'/%3E%3Crect x='59' y='7' width='1' height='1' fill='%23ffffff'/%3E%3Crect x='60' y='7' width='3' height='1' fill='%23f8f4ff'/%3E%3Crect x='43' y='8' width='8' height='2' fill='%23ff9ccb'/%3E%3Crect x='52' y='8' width='5' height='1' fill='%23f8f4ff'/%3E%3Crect x='57' y='8' width='2' height='1' fill='%233a2852'/%3E%3Crect x='59' y='8' width='4' height='1' fill='%23f8f4ff'/%3E%3Crect x='52' y='9' width='11' height='1' fill='%23f8f4ff'/%3E%3Crect x='37' y='10' width='5' height='2' fill='%23c084fc'/%3E%3Crect x='42' y='10' width='9' height='1' fill='%23ff9ccb'/%3E%3Crect x='52' y='10' width='8' height='3' fill='%23f8f4ff'/%3E%3Crect x='60' y='10' width='4' height='1' fill='%233a2852'/%3E%3Crect x='42' y='11' width='4' height='1' fill='%23ff9ccb'/%3E%3Crect x='46' y='11' width='5' height='3' fill='%23f8f4ff'/%3E%3Crect x='60' y='11' width='1' height='1' fill='%233a2852'/%3E%3Crect x='61' y='11' width='2' height='1' fill='%23d8cce8'/%3E%3Crect x='63' y='11' width='1' height='1' fill='%23b8a8d0'/%3E%3Crect x='37' y='12' width='9' height='4' fill='%23ff9ccb'/%3E%3Crect x='60' y='12' width='4' height='1' fill='%233a2852'/%3E%3Crect x='51' y='13' width='2' height='1' fill='%233a2852'/%3E%3Crect x='53' y='13' width='8' height='1' fill='%23d8cce8'/%3E%3Crect x='61' y='13' width='3' height='1' fill='%233a2852'/%3E%3Crect x='16' y='14' width='21' height='1' fill='%233a2852'/%3E%3Crect x='46' y='14' width='8' height='1' fill='%23f8f4ff'/%3E%3Crect x='15' y='15' width='1' height='11' fill='%233a2852'/%3E%3Crect x='16' y='15' width='1' height='1' fill='%23f8f4ff'/%3E%3Crect x='17' y='15' width='20' height='1' fill='%23ffffff'/%3E%3Crect x='46' y='15' width='8' height='1' fill='%233a2852'/%3E%3Crect x='16' y='16' width='23' height='6' fill='%23f8f4ff'/%3E%3Crect x='39' y='16' width='1' height='5' fill='%233a2852'/%3E%3Crect x='40' y='16' width='7' height='5' fill='%23f8f4ff'/%3E%3Crect x='47' y='16' width='1' height='5' fill='%233a2852'/%3E%3Crect x='6' y='20' width='7' height='2' fill='%23c084fc'/%3E%3Crect x='13' y='20' width='2' height='2' fill='%23ff9ccb'/%3E%3Crect x='39' y='21' width='9' height='1' fill='%233a2852'/%3E%3Crect x='6' y='22' width='9' height='2' fill='%23ff9ccb'/%3E%3Crect x='16' y='22' width='28' height='2' fill='%23f8f4ff'/%3E%3Crect x='44' y='22' width='1' height='4' fill='%233a2852'/%3E%3Crect x='3' y='24' width='4' height='2' fill='%23c084fc'/%3E%3Crect x='7' y='24' width='8' height='1' fill='%23ff9ccb'/%3E%3Crect x='16' y='24' width='1' height='2' fill='%23f8f4ff'/%3E%3Crect x='17' y='24' width='26' height='1' fill='%23d8cce8'/%3E%3Crect x='43' y='24' width='1' height='2' fill='%23f8f4ff'/%3E%3Crect x='7' y='25' width='3' height='1' fill='%23ff9ccb'/%3E%3Crect x='17' y='25' width='1' height='1' fill='%23d8cce8'/%3E%3Crect x='18' y='25' width='24' height='1' fill='%23b8a8d0'/%3E%3Crect x='42' y='25' width='1' height='1' fill='%23d8cce8'/%3E%3Crect x='3' y='26' width='7' height='4' fill='%23ff9ccb'/%3E%3Crect x='16' y='26' width='28' height='1' fill='%233a2852'/%3E%3Crect x='23' y='27' width='2' height='7' fill='%23d8cce8'/%3E%3Crect x='25' y='27' width='1' height='6' fill='%233a2852'/%3E%3Crect x='26' y='27' width='2' height='6' fill='%23d8cce8'/%3E%3Crect x='28' y='27' width='1' height='6' fill='%233a2852'/%3E%3Crect x='39' y='27' width='2' height='7' fill='%23f8f4ff'/%3E%3Crect x='41' y='27' width='1' height='6' fill='%233a2852'/%3E%3Crect x='42' y='27' width='2' height='6' fill='%23f8f4ff'/%3E%3Crect x='44' y='27' width='1' height='6' fill='%233a2852'/%3E%3Crect x='25' y='33' width='4' height='1' fill='%233a2852'/%3E%3Crect x='41' y='33' width='4' height='1' fill='%233a2852'/%3E%3Crect x='23' y='34' width='3' height='1' fill='%233a2852'/%3E%3Crect x='39' y='34' width='3' height='1' fill='%233a2852'/%3E%3Crect x='127' y='0' width='2' height='1' fill='%233a2852'/%3E%3Crect x='127' y='1' width='2' height='2' fill='%23f5c542'/%3E%3Crect x='126' y='3' width='4' height='1' fill='%23f5c542'/%3E%3Crect x='120' y='4' width='2' height='1' fill='%233a2852'/%3E%3Crect x='126' y='4' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='127' y='4' width='1' height='1' fill='%23ffffff'/%3E%3Crect x='128' y='4' width='2' height='1' fill='%23f5c542'/%3E%3Crect x='120' y='5' width='1' height='1' fill='%23f8f4ff'/%3E%3Crect x='121' y='5' width='1' height='1' fill='%233a2852'/%3E%3Crect x='126' y='5' width='4' height='1' fill='%23f5c542'/%3E%3Crect x='119' y='6' width='13' height='1' fill='%233a2852'/%3E%3Crect x='111' y='7' width='5' height='2' fill='%23c084fc'/%3E%3Crect x='116' y='7' width='3' height='2' fill='%23ff9ccb'/%3E%3Crect x='119' y='7' width='1' height='7' fill='%233a2852'/%3E%3Crect x='120' y='7' width='11' height='1' fill='%23f8f4ff'/%3E%3Crect x='131' y='7' width='1' height='4' fill='%233a2852'/%3E%3Crect x='120' y='8' width='6' height='1' fill='%23f8f4ff'/%3E%3Crect x='126' y='8' width='1' height='1' fill='%233a2852'/%3E%3Crect x='127' y='8' width='1' height='1' fill='%23ffffff'/%3E%3Crect x='128' y='8' width='3' height='1' fill='%23f8f4ff'/%3E%3Crect x='111' y='9' width='8' height='2' fill='%23ff9ccb'/%3E%3Crect x='120' y='9' width='5' height='1' fill='%23f8f4ff'/%3E%3Crect x='125' y='9' width='2' height='1' fill='%233a2852'/%3E%3Crect x='127' y='9' width='4' height='1' fill='%23f8f4ff'/%3E%3Crect x='120' y='10' width='11' height='1' fill='%23f8f4ff'/%3E%3Crect x='105' y='11' width='5' height='2' fill='%23c084fc'/%3E%3Crect x='110' y='11' width='9' height='1' fill='%23ff9ccb'/%3E%3Crect x='120' y='11' width='8' height='3' fill='%23f8f4ff'/%3E%3Crect x='128' y='11' width='4' height='1' fill='%233a2852'/%3E%3Crect x='110' y='12' width='4' height='1' fill='%23ff9ccb'/%3E%3Crect x='114' y='12' width='5' height='3' fill='%23f8f4ff'/%3E%3Crect x='128' y='12' width='1' height='1' fill='%233a2852'/%3E%3Crect x='129' y='12' width='2' height='1' fill='%23d8cce8'/%3E%3Crect x='131' y='12' width='1' height='1' fill='%23b8a8d0'/%3E%3Crect x='105' y='13' width='9' height='4' fill='%23ff9ccb'/%3E%3Crect x='128' y='13' width='4' height='1' fill='%233a2852'/%3E%3Crect x='119' y='14' width='2' height='1' fill='%233a2852'/%3E%3Crect x='121' y='14' width='8' height='1' fill='%23d8cce8'/%3E%3Crect x='129' y='14' width='3' height='1' fill='%233a2852'/%3E%3Crect x='84' y='15' width='21' height='1' fill='%233a2852'/%3E%3Crect x='114' y='15' width='8' height='1' fill='%23f8f4ff'/%3E%3Crect x='83' y='16' width='1' height='11' fill='%233a2852'/%3E%3Crect x='84' y='16' width='1' height='1' fill='%23f8f4ff'/%3E%3Crect x='85' y='16' width='20' height='1' fill='%23ffffff'/%3E%3Crect x='114' y='16' width='8' height='1' fill='%233a2852'/%3E%3Crect x='84' y='17' width='23' height='6' fill='%23f8f4ff'/%3E%3Crect x='107' y='17' width='1' height='5' fill='%233a2852'/%3E%3Crect x='108' y='17' width='7' height='5' fill='%23f8f4ff'/%3E%3Crect x='115' y='17' width='1' height='5' fill='%233a2852'/%3E%3Crect x='74' y='20' width='7' height='2' fill='%23c084fc'/%3E%3Crect x='81' y='20' width='2' height='2' fill='%23ff9ccb'/%3E%3Crect x='74' y='22' width='9' height='3' fill='%23ff9ccb'/%3E%3Crect x='107' y='22' width='9' height='1' fill='%233a2852'/%3E%3Crect x='84' y='23' width='28' height='2' fill='%23f8f4ff'/%3E%3Crect x='112' y='23' width='1' height='4' fill='%233a2852'/%3E%3Crect x='113' y='23' width='1' height='5' fill='%23f8f4ff'/%3E%3Crect x='114' y='23' width='1' height='12' fill='%233a2852'/%3E%3Crect x='71' y='25' width='4' height='2' fill='%23c084fc'/%3E%3Crect x='75' y='25' width='3' height='2' fill='%23ff9ccb'/%3E%3Crect x='84' y='25' width='1' height='2' fill='%23f8f4ff'/%3E%3Crect x='85' y='25' width='26' height='1' fill='%23d8cce8'/%3E%3Crect x='111' y='25' width='1' height='2' fill='%23f8f4ff'/%3E%3Crect x='85' y='26' width='1' height='1' fill='%23d8cce8'/%3E%3Crect x='86' y='26' width='24' height='1' fill='%23b8a8d0'/%3E%3Crect x='110' y='26' width='1' height='1' fill='%23d8cce8'/%3E%3Crect x='71' y='27' width='7' height='4' fill='%23ff9ccb'/%3E%3Crect x='84' y='27' width='28' height='1' fill='%233a2852'/%3E%3Crect x='89' y='28' width='2' height='7' fill='%23d8cce8'/%3E%3Crect x='91' y='28' width='1' height='6' fill='%233a2852'/%3E%3Crect x='92' y='28' width='2' height='6' fill='%23d8cce8'/%3E%3Crect x='94' y='28' width='1' height='6' fill='%233a2852'/%3E%3Crect x='109' y='28' width='2' height='8' fill='%23f8f4ff'/%3E%3Crect x='111' y='28' width='1' height='7' fill='%233a2852'/%3E%3Crect x='112' y='28' width='2' height='7' fill='%23f8f4ff'/%3E%3Crect x='91' y='34' width='4' height='1' fill='%233a2852'/%3E%3Crect x='89' y='35' width='3' height='1' fill='%233a2852'/%3E%3Crect x='111' y='35' width='4' height='1' fill='%233a2852'/%3E%3Crect x='109' y='36' width='3' height='1' fill='%233a2852'/%3E%3Crect x='195' y='1' width='2' height='1' fill='%233a2852'/%3E%3Crect x='195' y='2' width='2' height='2' fill='%23f5c542'/%3E%3Crect x='194' y='4' width='4' height='1' fill='%23f5c542'/%3E%3Crect x='188' y='5' width='2' height='1' fill='%233a2852'/%3E%3Crect x='194' y='5' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='195' y='5' width='1' height='1' fill='%23ffffff'/%3E%3Crect x='196' y='5' width='2' height='1' fill='%23f5c542'/%3E%3Crect x='188' y='6' width='1' height='1' fill='%23f8f4ff'/%3E%3Crect x='189' y='6' width='1' height='1' fill='%233a2852'/%3E%3Crect x='194' y='6' width='4' height='1' fill='%23f5c542'/%3E%3Crect x='187' y='7' width='13' height='1' fill='%233a2852'/%3E%3Crect x='179' y='8' width='3' height='1' fill='%23c084fc'/%3E%3Crect x='182' y='8' width='1' height='1' fill='%23ffffff'/%3E%3Crect x='183' y='8' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='184' y='8' width='3' height='2' fill='%23ff9ccb'/%3E%3Crect x='187' y='8' width='1' height='7' fill='%233a2852'/%3E%3Crect x='188' y='8' width='11' height='1' fill='%23f8f4ff'/%3E%3Crect x='199' y='8' width='1' height='4' fill='%233a2852'/%3E%3Crect x='179' y='9' width='5' height='1' fill='%23c084fc'/%3E%3Crect x='188' y='9' width='6' height='1' fill='%23f8f4ff'/%3E%3Crect x='194' y='9' width='1' height='1' fill='%233a2852'/%3E%3Crect x='195' y='9' width='1' height='1' fill='%23ffffff'/%3E%3Crect x='196' y='9' width='3' height='1' fill='%23f8f4ff'/%3E%3Crect x='179' y='10' width='8' height='2' fill='%23ff9ccb'/%3E%3Crect x='188' y='10' width='5' height='1' fill='%23f8f4ff'/%3E%3Crect x='193' y='10' width='2' height='1' fill='%233a2852'/%3E%3Crect x='195' y='10' width='4' height='1' fill='%23f8f4ff'/%3E%3Crect x='188' y='11' width='11' height='1' fill='%23f8f4ff'/%3E%3Crect x='173' y='12' width='2' height='1' fill='%23c084fc'/%3E%3Crect x='175' y='12' width='1' height='1' fill='%23ffffff'/%3E%3Crect x='176' y='12' width='2' height='1' fill='%23c084fc'/%3E%3Crect x='178' y='12' width='9' height='1' fill='%23ff9ccb'/%3E%3Crect x='188' y='12' width='8' height='3' fill='%23f8f4ff'/%3E%3Crect x='196' y='12' width='4' height='1' fill='%233a2852'/%3E%3Crect x='173' y='13' width='5' height='1' fill='%23c084fc'/%3E%3Crect x='178' y='13' width='4' height='1' fill='%23ff9ccb'/%3E%3Crect x='182' y='13' width='5' height='3' fill='%23f8f4ff'/%3E%3Crect x='196' y='13' width='1' height='1' fill='%233a2852'/%3E%3Crect x='197' y='13' width='2' height='1' fill='%23d8cce8'/%3E%3Crect x='199' y='13' width='1' height='1' fill='%23b8a8d0'/%3E%3Crect x='173' y='14' width='9' height='4' fill='%23ff9ccb'/%3E%3Crect x='196' y='14' width='4' height='1' fill='%233a2852'/%3E%3Crect x='187' y='15' width='2' height='1' fill='%233a2852'/%3E%3Crect x='189' y='15' width='8' height='1' fill='%23d8cce8'/%3E%3Crect x='197' y='15' width='3' height='1' fill='%233a2852'/%3E%3Crect x='152' y='16' width='21' height='1' fill='%233a2852'/%3E%3Crect x='182' y='16' width='8' height='1' fill='%23f8f4ff'/%3E%3Crect x='151' y='17' width='1' height='11' fill='%233a2852'/%3E%3Crect x='152' y='17' width='1' height='1' fill='%23f8f4ff'/%3E%3Crect x='153' y='17' width='20' height='1' fill='%23ffffff'/%3E%3Crect x='182' y='17' width='8' height='1' fill='%233a2852'/%3E%3Crect x='152' y='18' width='23' height='6' fill='%23f8f4ff'/%3E%3Crect x='175' y='18' width='1' height='5' fill='%233a2852'/%3E%3Crect x='176' y='18' width='7' height='5' fill='%23f8f4ff'/%3E%3Crect x='183' y='18' width='1' height='5' fill='%233a2852'/%3E%3Crect x='142' y='20' width='7' height='2' fill='%23c084fc'/%3E%3Crect x='149' y='20' width='2' height='2' fill='%23ff9ccb'/%3E%3Crect x='142' y='22' width='2' height='1' fill='%23ff9ccb'/%3E%3Crect x='144' y='22' width='1' height='1' fill='%23ffffff'/%3E%3Crect x='145' y='22' width='6' height='1' fill='%23ff9ccb'/%3E%3Crect x='142' y='23' width='9' height='2' fill='%23ff9ccb'/%3E%3Crect x='175' y='23' width='9' height='1' fill='%233a2852'/%3E%3Crect x='152' y='24' width='28' height='2' fill='%23f8f4ff'/%3E%3Crect x='180' y='24' width='1' height='4' fill='%233a2852'/%3E%3Crect x='181' y='24' width='2' height='8' fill='%23f8f4ff'/%3E%3Crect x='183' y='24' width='1' height='8' fill='%233a2852'/%3E%3Crect x='139' y='26' width='4' height='2' fill='%23c084fc'/%3E%3Crect x='143' y='26' width='3' height='2' fill='%23ff9ccb'/%3E%3Crect x='152' y='26' width='1' height='2' fill='%23f8f4ff'/%3E%3Crect x='153' y='26' width='26' height='1' fill='%23d8cce8'/%3E%3Crect x='179' y='26' width='1' height='2' fill='%23f8f4ff'/%3E%3Crect x='153' y='27' width='1' height='1' fill='%23d8cce8'/%3E%3Crect x='154' y='27' width='24' height='1' fill='%23b8a8d0'/%3E%3Crect x='178' y='27' width='1' height='1' fill='%23d8cce8'/%3E%3Crect x='139' y='28' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='140' y='28' width='1' height='1' fill='%23ffffff'/%3E%3Crect x='141' y='28' width='5' height='1' fill='%23ff9ccb'/%3E%3Crect x='152' y='28' width='28' height='1' fill='%233a2852'/%3E%3Crect x='139' y='29' width='7' height='3' fill='%23ff9ccb'/%3E%3Crect x='154' y='29' width='2' height='4' fill='%23d8cce8'/%3E%3Crect x='156' y='29' width='1' height='3' fill='%233a2852'/%3E%3Crect x='157' y='29' width='2' height='3' fill='%23d8cce8'/%3E%3Crect x='159' y='29' width='1' height='3' fill='%233a2852'/%3E%3Crect x='178' y='29' width='2' height='4' fill='%23f8f4ff'/%3E%3Crect x='180' y='29' width='1' height='3' fill='%233a2852'/%3E%3Crect x='156' y='32' width='4' height='1' fill='%233a2852'/%3E%3Crect x='180' y='32' width='4' height='1' fill='%233a2852'/%3E%3Crect x='154' y='33' width='3' height='1' fill='%233a2852'/%3E%3Crect x='178' y='33' width='3' height='1' fill='%233a2852'/%3E%3Crect x='263' y='0' width='2' height='1' fill='%233a2852'/%3E%3Crect x='263' y='1' width='2' height='2' fill='%23f5c542'/%3E%3Crect x='262' y='3' width='4' height='1' fill='%23f5c542'/%3E%3Crect x='256' y='4' width='2' height='1' fill='%233a2852'/%3E%3Crect x='262' y='4' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='263' y='4' width='1' height='1' fill='%23ffffff'/%3E%3Crect x='264' y='4' width='2' height='1' fill='%23f5c542'/%3E%3Crect x='256' y='5' width='1' height='1' fill='%23f8f4ff'/%3E%3Crect x='257' y='5' width='1' height='1' fill='%233a2852'/%3E%3Crect x='262' y='5' width='4' height='1' fill='%23f5c542'/%3E%3Crect x='255' y='6' width='13' height='1' fill='%233a2852'/%3E%3Crect x='247' y='7' width='5' height='2' fill='%23c084fc'/%3E%3Crect x='252' y='7' width='3' height='2' fill='%23ff9ccb'/%3E%3Crect x='255' y='7' width='1' height='7' fill='%233a2852'/%3E%3Crect x='256' y='7' width='11' height='1' fill='%23f8f4ff'/%3E%3Crect x='267' y='7' width='1' height='4' fill='%233a2852'/%3E%3Crect x='256' y='8' width='6' height='1' fill='%23f8f4ff'/%3E%3Crect x='262' y='8' width='1' height='1' fill='%233a2852'/%3E%3Crect x='263' y='8' width='1' height='1' fill='%23ffffff'/%3E%3Crect x='264' y='8' width='3' height='1' fill='%23f8f4ff'/%3E%3Crect x='247' y='9' width='8' height='2' fill='%23ff9ccb'/%3E%3Crect x='256' y='9' width='5' height='1' fill='%23f8f4ff'/%3E%3Crect x='261' y='9' width='2' height='1' fill='%233a2852'/%3E%3Crect x='263' y='9' width='4' height='1' fill='%23f8f4ff'/%3E%3Crect x='256' y='10' width='11' height='1' fill='%23f8f4ff'/%3E%3Crect x='241' y='11' width='5' height='2' fill='%23c084fc'/%3E%3Crect x='246' y='11' width='9' height='1' fill='%23ff9ccb'/%3E%3Crect x='256' y='11' width='8' height='3' fill='%23f8f4ff'/%3E%3Crect x='264' y='11' width='4' height='1' fill='%233a2852'/%3E%3Crect x='246' y='12' width='4' height='1' fill='%23ff9ccb'/%3E%3Crect x='250' y='12' width='5' height='3' fill='%23f8f4ff'/%3E%3Crect x='264' y='12' width='1' height='1' fill='%233a2852'/%3E%3Crect x='265' y='12' width='2' height='1' fill='%23d8cce8'/%3E%3Crect x='267' y='12' width='1' height='1' fill='%23b8a8d0'/%3E%3Crect x='241' y='13' width='9' height='4' fill='%23ff9ccb'/%3E%3Crect x='264' y='13' width='4' height='1' fill='%233a2852'/%3E%3Crect x='255' y='14' width='2' height='1' fill='%233a2852'/%3E%3Crect x='257' y='14' width='8' height='1' fill='%23d8cce8'/%3E%3Crect x='265' y='14' width='3' height='1' fill='%233a2852'/%3E%3Crect x='220' y='15' width='21' height='1' fill='%233a2852'/%3E%3Crect x='250' y='15' width='8' height='1' fill='%23f8f4ff'/%3E%3Crect x='219' y='16' width='1' height='11' fill='%233a2852'/%3E%3Crect x='220' y='16' width='1' height='1' fill='%23f8f4ff'/%3E%3Crect x='221' y='16' width='20' height='1' fill='%23ffffff'/%3E%3Crect x='250' y='16' width='8' height='1' fill='%233a2852'/%3E%3Crect x='220' y='17' width='23' height='6' fill='%23f8f4ff'/%3E%3Crect x='243' y='17' width='1' height='5' fill='%233a2852'/%3E%3Crect x='244' y='17' width='7' height='5' fill='%23f8f4ff'/%3E%3Crect x='251' y='17' width='1' height='5' fill='%233a2852'/%3E%3Crect x='210' y='20' width='7' height='2' fill='%23c084fc'/%3E%3Crect x='217' y='20' width='2' height='2' fill='%23ff9ccb'/%3E%3Crect x='210' y='22' width='9' height='3' fill='%23ff9ccb'/%3E%3Crect x='243' y='22' width='9' height='1' fill='%233a2852'/%3E%3Crect x='220' y='23' width='28' height='2' fill='%23f8f4ff'/%3E%3Crect x='248' y='23' width='2' height='4' fill='%233a2852'/%3E%3Crect x='207' y='25' width='4' height='2' fill='%23c084fc'/%3E%3Crect x='211' y='25' width='3' height='2' fill='%23ff9ccb'/%3E%3Crect x='220' y='25' width='1' height='2' fill='%23f8f4ff'/%3E%3Crect x='221' y='25' width='26' height='1' fill='%23d8cce8'/%3E%3Crect x='247' y='25' width='1' height='2' fill='%23f8f4ff'/%3E%3Crect x='221' y='26' width='1' height='1' fill='%23d8cce8'/%3E%3Crect x='222' y='26' width='24' height='1' fill='%23b8a8d0'/%3E%3Crect x='246' y='26' width='1' height='1' fill='%23d8cce8'/%3E%3Crect x='207' y='27' width='7' height='4' fill='%23ff9ccb'/%3E%3Crect x='220' y='27' width='28' height='1' fill='%233a2852'/%3E%3Crect x='249' y='27' width='1' height='10' fill='%233a2852'/%3E%3Crect x='228' y='28' width='2' height='8' fill='%23d8cce8'/%3E%3Crect x='230' y='28' width='1' height='7' fill='%233a2852'/%3E%3Crect x='231' y='28' width='2' height='7' fill='%23d8cce8'/%3E%3Crect x='233' y='28' width='1' height='7' fill='%233a2852'/%3E%3Crect x='244' y='28' width='2' height='10' fill='%23f8f4ff'/%3E%3Crect x='246' y='28' width='1' height='9' fill='%233a2852'/%3E%3Crect x='247' y='28' width='2' height='9' fill='%23f8f4ff'/%3E%3Crect x='230' y='35' width='4' height='1' fill='%233a2852'/%3E%3Crect x='228' y='36' width='3' height='1' fill='%233a2852'/%3E%3Crect x='246' y='37' width='4' height='1' fill='%233a2852'/%3E%3Crect x='244' y='38' width='3' height='1' fill='%233a2852'/%3E%3Crect x='331' y='0' width='2' height='2' fill='%23f5c542'/%3E%3Crect x='330' y='2' width='4' height='1' fill='%23f5c542'/%3E%3Crect x='324' y='3' width='2' height='1' fill='%233a2852'/%3E%3Crect x='330' y='3' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='331' y='3' width='1' height='1' fill='%23ffffff'/%3E%3Crect x='332' y='3' width='2' height='1' fill='%23f5c542'/%3E%3Crect x='324' y='4' width='1' height='1' fill='%23f8f4ff'/%3E%3Crect x='325' y='4' width='1' height='1' fill='%233a2852'/%3E%3Crect x='330' y='4' width='4' height='1' fill='%23f5c542'/%3E%3Crect x='323' y='5' width='13' height='1' fill='%233a2852'/%3E%3Crect x='315' y='6' width='5' height='2' fill='%23c084fc'/%3E%3Crect x='320' y='6' width='3' height='2' fill='%23ff9ccb'/%3E%3Crect x='323' y='6' width='1' height='7' fill='%233a2852'/%3E%3Crect x='324' y='6' width='11' height='1' fill='%23f8f4ff'/%3E%3Crect x='335' y='6' width='1' height='4' fill='%233a2852'/%3E%3Crect x='324' y='7' width='6' height='1' fill='%23f8f4ff'/%3E%3Crect x='330' y='7' width='1' height='1' fill='%233a2852'/%3E%3Crect x='331' y='7' width='1' height='1' fill='%23ffffff'/%3E%3Crect x='332' y='7' width='3' height='1' fill='%23f8f4ff'/%3E%3Crect x='315' y='8' width='8' height='2' fill='%23ff9ccb'/%3E%3Crect x='324' y='8' width='5' height='1' fill='%23f8f4ff'/%3E%3Crect x='329' y='8' width='2' height='1' fill='%233a2852'/%3E%3Crect x='331' y='8' width='4' height='1' fill='%23f8f4ff'/%3E%3Crect x='324' y='9' width='11' height='1' fill='%23f8f4ff'/%3E%3Crect x='309' y='10' width='5' height='2' fill='%23c084fc'/%3E%3Crect x='314' y='10' width='9' height='1' fill='%23ff9ccb'/%3E%3Crect x='324' y='10' width='8' height='3' fill='%23f8f4ff'/%3E%3Crect x='332' y='10' width='4' height='1' fill='%233a2852'/%3E%3Crect x='314' y='11' width='4' height='1' fill='%23ff9ccb'/%3E%3Crect x='318' y='11' width='5' height='3' fill='%23f8f4ff'/%3E%3Crect x='332' y='11' width='1' height='1' fill='%233a2852'/%3E%3Crect x='333' y='11' width='2' height='1' fill='%23d8cce8'/%3E%3Crect x='335' y='11' width='1' height='1' fill='%23b8a8d0'/%3E%3Crect x='309' y='12' width='9' height='4' fill='%23ff9ccb'/%3E%3Crect x='332' y='12' width='4' height='1' fill='%233a2852'/%3E%3Crect x='323' y='13' width='2' height='1' fill='%233a2852'/%3E%3Crect x='325' y='13' width='8' height='1' fill='%23d8cce8'/%3E%3Crect x='333' y='13' width='3' height='1' fill='%233a2852'/%3E%3Crect x='288' y='14' width='21' height='1' fill='%233a2852'/%3E%3Crect x='318' y='14' width='8' height='1' fill='%23f8f4ff'/%3E%3Crect x='287' y='15' width='1' height='11' fill='%233a2852'/%3E%3Crect x='288' y='15' width='1' height='1' fill='%23f8f4ff'/%3E%3Crect x='289' y='15' width='20' height='1' fill='%23ffffff'/%3E%3Crect x='318' y='15' width='8' height='1' fill='%233a2852'/%3E%3Crect x='288' y='16' width='23' height='6' fill='%23f8f4ff'/%3E%3Crect x='311' y='16' width='1' height='5' fill='%233a2852'/%3E%3Crect x='312' y='16' width='7' height='5' fill='%23f8f4ff'/%3E%3Crect x='319' y='16' width='1' height='5' fill='%233a2852'/%3E%3Crect x='278' y='20' width='7' height='2' fill='%23c084fc'/%3E%3Crect x='285' y='20' width='2' height='2' fill='%23ff9ccb'/%3E%3Crect x='311' y='21' width='9' height='1' fill='%233a2852'/%3E%3Crect x='278' y='22' width='9' height='2' fill='%23ff9ccb'/%3E%3Crect x='288' y='22' width='28' height='2' fill='%23f8f4ff'/%3E%3Crect x='316' y='22' width='1' height='4' fill='%233a2852'/%3E%3Crect x='275' y='24' width='4' height='2' fill='%23c084fc'/%3E%3Crect x='279' y='24' width='8' height='1' fill='%23ff9ccb'/%3E%3Crect x='288' y='24' width='1' height='2' fill='%23f8f4ff'/%3E%3Crect x='289' y='24' width='26' height='1' fill='%23d8cce8'/%3E%3Crect x='315' y='24' width='1' height='2' fill='%23f8f4ff'/%3E%3Crect x='279' y='25' width='3' height='1' fill='%23ff9ccb'/%3E%3Crect x='289' y='25' width='1' height='1' fill='%23d8cce8'/%3E%3Crect x='290' y='25' width='24' height='1' fill='%23b8a8d0'/%3E%3Crect x='314' y='25' width='1' height='1' fill='%23d8cce8'/%3E%3Crect x='275' y='26' width='7' height='4' fill='%23ff9ccb'/%3E%3Crect x='288' y='26' width='28' height='1' fill='%233a2852'/%3E%3Crect x='294' y='27' width='2' height='7' fill='%23d8cce8'/%3E%3Crect x='296' y='27' width='1' height='6' fill='%233a2852'/%3E%3Crect x='297' y='27' width='2' height='6' fill='%23d8cce8'/%3E%3Crect x='299' y='27' width='1' height='6' fill='%233a2852'/%3E%3Crect x='310' y='27' width='2' height='7' fill='%23f8f4ff'/%3E%3Crect x='312' y='27' width='1' height='6' fill='%233a2852'/%3E%3Crect x='313' y='27' width='2' height='6' fill='%23f8f4ff'/%3E%3Crect x='315' y='27' width='1' height='6' fill='%233a2852'/%3E%3Crect x='296' y='33' width='4' height='1' fill='%233a2852'/%3E%3Crect x='312' y='33' width='4' height='1' fill='%233a2852'/%3E%3Crect x='294' y='34' width='3' height='1' fill='%233a2852'/%3E%3Crect x='310' y='34' width='3' height='1' fill='%233a2852'/%3E%3Crect x='399' y='0' width='2' height='1' fill='%233a2852'/%3E%3Crect x='399' y='1' width='2' height='2' fill='%23f5c542'/%3E%3Crect x='398' y='3' width='4' height='1' fill='%23f5c542'/%3E%3Crect x='392' y='4' width='2' height='1' fill='%233a2852'/%3E%3Crect x='398' y='4' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='399' y='4' width='1' height='1' fill='%23ffffff'/%3E%3Crect x='400' y='4' width='2' height='1' fill='%23f5c542'/%3E%3Crect x='392' y='5' width='1' height='1' fill='%23f8f4ff'/%3E%3Crect x='393' y='5' width='1' height='1' fill='%233a2852'/%3E%3Crect x='398' y='5' width='4' height='1' fill='%23f5c542'/%3E%3Crect x='391' y='6' width='13' height='1' fill='%233a2852'/%3E%3Crect x='383' y='7' width='3' height='1' fill='%23c084fc'/%3E%3Crect x='386' y='7' width='1' height='1' fill='%23ffffff'/%3E%3Crect x='387' y='7' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='388' y='7' width='3' height='2' fill='%23ff9ccb'/%3E%3Crect x='391' y='7' width='1' height='7' fill='%233a2852'/%3E%3Crect x='392' y='7' width='11' height='1' fill='%23f8f4ff'/%3E%3Crect x='403' y='7' width='1' height='4' fill='%233a2852'/%3E%3Crect x='383' y='8' width='5' height='1' fill='%23c084fc'/%3E%3Crect x='392' y='8' width='6' height='1' fill='%23f8f4ff'/%3E%3Crect x='398' y='8' width='1' height='1' fill='%233a2852'/%3E%3Crect x='399' y='8' width='1' height='1' fill='%23ffffff'/%3E%3Crect x='400' y='8' width='3' height='1' fill='%23f8f4ff'/%3E%3Crect x='383' y='9' width='8' height='2' fill='%23ff9ccb'/%3E%3Crect x='392' y='9' width='5' height='1' fill='%23f8f4ff'/%3E%3Crect x='397' y='9' width='2' height='1' fill='%233a2852'/%3E%3Crect x='399' y='9' width='4' height='1' fill='%23f8f4ff'/%3E%3Crect x='392' y='10' width='11' height='1' fill='%23f8f4ff'/%3E%3Crect x='377' y='11' width='2' height='1' fill='%23c084fc'/%3E%3Crect x='379' y='11' width='1' height='1' fill='%23ffffff'/%3E%3Crect x='380' y='11' width='2' height='1' fill='%23c084fc'/%3E%3Crect x='382' y='11' width='9' height='1' fill='%23ff9ccb'/%3E%3Crect x='392' y='11' width='8' height='3' fill='%23f8f4ff'/%3E%3Crect x='400' y='11' width='4' height='1' fill='%233a2852'/%3E%3Crect x='377' y='12' width='5' height='1' fill='%23c084fc'/%3E%3Crect x='382' y='12' width='4' height='1' fill='%23ff9ccb'/%3E%3Crect x='386' y='12' width='5' height='3' fill='%23f8f4ff'/%3E%3Crect x='400' y='12' width='1' height='1' fill='%233a2852'/%3E%3Crect x='401' y='12' width='2' height='1' fill='%23d8cce8'/%3E%3Crect x='403' y='12' width='1' height='1' fill='%23b8a8d0'/%3E%3Crect x='377' y='13' width='9' height='4' fill='%23ff9ccb'/%3E%3Crect x='400' y='13' width='4' height='1' fill='%233a2852'/%3E%3Crect x='391' y='14' width='2' height='1' fill='%233a2852'/%3E%3Crect x='393' y='14' width='8' height='1' fill='%23d8cce8'/%3E%3Crect x='401' y='14' width='3' height='1' fill='%233a2852'/%3E%3Crect x='356' y='15' width='21' height='1' fill='%233a2852'/%3E%3Crect x='386' y='15' width='8' height='1' fill='%23f8f4ff'/%3E%3Crect x='355' y='16' width='1' height='11' fill='%233a2852'/%3E%3Crect x='356' y='16' width='1' height='1' fill='%23f8f4ff'/%3E%3Crect x='357' y='16' width='20' height='1' fill='%23ffffff'/%3E%3Crect x='386' y='16' width='8' height='1' fill='%233a2852'/%3E%3Crect x='356' y='17' width='23' height='6' fill='%23f8f4ff'/%3E%3Crect x='379' y='17' width='1' height='5' fill='%233a2852'/%3E%3Crect x='380' y='17' width='7' height='5' fill='%23f8f4ff'/%3E%3Crect x='387' y='17' width='1' height='5' fill='%233a2852'/%3E%3Crect x='346' y='20' width='7' height='2' fill='%23c084fc'/%3E%3Crect x='353' y='20' width='2' height='2' fill='%23ff9ccb'/%3E%3Crect x='346' y='22' width='2' height='1' fill='%23ff9ccb'/%3E%3Crect x='348' y='22' width='1' height='1' fill='%23ffffff'/%3E%3Crect x='349' y='22' width='6' height='1' fill='%23ff9ccb'/%3E%3Crect x='379' y='22' width='9' height='1' fill='%233a2852'/%3E%3Crect x='343' y='23' width='4' height='2' fill='%23c084fc'/%3E%3Crect x='347' y='23' width='8' height='2' fill='%23ff9ccb'/%3E%3Crect x='356' y='23' width='28' height='2' fill='%23f8f4ff'/%3E%3Crect x='384' y='23' width='2' height='4' fill='%233a2852'/%3E%3Crect x='343' y='25' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='344' y='25' width='1' height='1' fill='%23ffffff'/%3E%3Crect x='345' y='25' width='5' height='1' fill='%23ff9ccb'/%3E%3Crect x='356' y='25' width='1' height='2' fill='%23f8f4ff'/%3E%3Crect x='357' y='25' width='26' height='1' fill='%23d8cce8'/%3E%3Crect x='383' y='25' width='1' height='2' fill='%23f8f4ff'/%3E%3Crect x='343' y='26' width='7' height='3' fill='%23ff9ccb'/%3E%3Crect x='357' y='26' width='1' height='1' fill='%23d8cce8'/%3E%3Crect x='358' y='26' width='24' height='1' fill='%23b8a8d0'/%3E%3Crect x='382' y='26' width='1' height='1' fill='%23d8cce8'/%3E%3Crect x='356' y='27' width='28' height='1' fill='%233a2852'/%3E%3Crect x='385' y='27' width='1' height='5' fill='%233a2852'/%3E%3Crect x='357' y='28' width='2' height='10' fill='%23d8cce8'/%3E%3Crect x='359' y='28' width='1' height='9' fill='%233a2852'/%3E%3Crect x='360' y='28' width='2' height='9' fill='%23d8cce8'/%3E%3Crect x='362' y='28' width='1' height='9' fill='%233a2852'/%3E%3Crect x='380' y='28' width='2' height='5' fill='%23f8f4ff'/%3E%3Crect x='382' y='28' width='1' height='4' fill='%233a2852'/%3E%3Crect x='383' y='28' width='2' height='4' fill='%23f8f4ff'/%3E%3Crect x='382' y='32' width='4' height='1' fill='%233a2852'/%3E%3Crect x='380' y='33' width='3' height='1' fill='%233a2852'/%3E%3Crect x='359' y='37' width='4' height='1' fill='%233a2852'/%3E%3Crect x='357' y='38' width='3' height='1' fill='%233a2852'/%3E%3C/svg%3E");
 }
 
-/* Additional nyan animals (every sprite except cat and unicorn, which
-   inherit nyan-bob from the base rule):
-   6-frame sheets (408x42, 68px/frame) sharing the base .nyan-sprite
-   background-size and nyan-frames stepping, each with its own motion
-   keyframe (see below) instead of nyan-bob, since a CSS animation list
-   only lets one transform-animating keyframe win per element. */
 :root[data-theme="unicorn"] .nyan-sprite.is-dragon {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 408 42' shape-rendering='crispEdges'%3E%3Crect x='38' y='8' width='4' height='1' fill='%231c1310'/%3E%3Crect x='58' y='8' width='1' height='1' fill='%23e8a33d'/%3E%3Crect x='37' y='9' width='1' height='1' fill='%231c1310'/%3E%3Crect x='38' y='9' width='3' height='1' fill='%23ffd873'/%3E%3Crect x='41' y='9' width='1' height='2' fill='%231c1310'/%3E%3Crect x='36' y='10' width='1' height='1' fill='%231c1310'/%3E%3Crect x='37' y='10' width='3' height='1' fill='%232e1a1c'/%3E%3Crect x='40' y='10' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='57' y='10' width='1' height='1' fill='%23e8a33d'/%3E%3Crect x='35' y='11' width='1' height='1' fill='%231c1310'/%3E%3Crect x='36' y='11' width='4' height='1' fill='%232e1a1c'/%3E%3Crect x='41' y='11' width='2' height='1' fill='%231c1310'/%3E%3Crect x='56' y='11' width='2' height='1' fill='%23e8a33d'/%3E%3Crect x='34' y='12' width='1' height='1' fill='%231c1310'/%3E%3Crect x='35' y='12' width='4' height='1' fill='%232e1a1c'/%3E%3Crect x='39' y='12' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='40' y='12' width='2' height='2' fill='%232e1a1c'/%3E%3Crect x='42' y='12' width='1' height='4' fill='%231c1310'/%3E%3Crect x='55' y='12' width='3' height='1' fill='%23e8a33d'/%3E%3Crect x='33' y='13' width='1' height='1' fill='%231c1310'/%3E%3Crect x='34' y='13' width='5' height='1' fill='%232e1a1c'/%3E%3Crect x='50' y='13' width='4' height='1' fill='%231c1310'/%3E%3Crect x='54' y='13' width='4' height='1' fill='%23e8a33d'/%3E%3Crect x='58' y='13' width='5' height='1' fill='%231c1310'/%3E%3Crect x='32' y='14' width='1' height='1' fill='%231c1310'/%3E%3Crect x='33' y='14' width='5' height='1' fill='%232e1a1c'/%3E%3Crect x='38' y='14' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='39' y='14' width='3' height='2' fill='%232e1a1c'/%3E%3Crect x='49' y='14' width='1' height='1' fill='%231c1310'/%3E%3Crect x='50' y='14' width='13' height='1' fill='%237a3b3f'/%3E%3Crect x='63' y='14' width='4' height='1' fill='%231c1310'/%3E%3Crect x='31' y='15' width='1' height='1' fill='%231c1310'/%3E%3Crect x='32' y='15' width='6' height='1' fill='%232e1a1c'/%3E%3Crect x='48' y='15' width='1' height='2' fill='%231c1310'/%3E%3Crect x='49' y='15' width='18' height='2' fill='%237a3b3f'/%3E%3Crect x='67' y='15' width='1' height='2' fill='%231c1310'/%3E%3Crect x='30' y='16' width='1' height='1' fill='%231c1310'/%3E%3Crect x='31' y='16' width='6' height='1' fill='%232e1a1c'/%3E%3Crect x='37' y='16' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='38' y='16' width='3' height='2' fill='%232e1a1c'/%3E%3Crect x='41' y='16' width='1' height='2' fill='%231c1310'/%3E%3Crect x='29' y='17' width='1' height='2' fill='%231c1310'/%3E%3Crect x='30' y='17' width='7' height='1' fill='%232e1a1c'/%3E%3Crect x='44' y='17' width='4' height='1' fill='%231c1310'/%3E%3Crect x='48' y='17' width='9' height='1' fill='%237a3b3f'/%3E%3Crect x='57' y='17' width='1' height='1' fill='%23ffd873'/%3E%3Crect x='58' y='17' width='1' height='1' fill='%23fff4d0'/%3E%3Crect x='59' y='17' width='4' height='1' fill='%237a3b3f'/%3E%3Crect x='63' y='17' width='5' height='1' fill='%231c1310'/%3E%3Crect x='27' y='18' width='1' height='1' fill='%231c1310'/%3E%3Crect x='30' y='18' width='6' height='1' fill='%232e1a1c'/%3E%3Crect x='36' y='18' width='1' height='1' fill='%23ffd873'/%3E%3Crect x='37' y='18' width='3' height='1' fill='%232e1a1c'/%3E%3Crect x='40' y='18' width='1' height='1' fill='%231c1310'/%3E%3Crect x='44' y='18' width='13' height='1' fill='%237a3b3f'/%3E%3Crect x='57' y='18' width='1' height='1' fill='%231c1310'/%3E%3Crect x='58' y='18' width='1' height='1' fill='%23ffd873'/%3E%3Crect x='59' y='18' width='7' height='1' fill='%237a3b3f'/%3E%3Crect x='66' y='18' width='1' height='1' fill='%231c1310'/%3E%3Crect x='26' y='19' width='3' height='2' fill='%23ffd873'/%3E%3Crect x='30' y='19' width='2' height='1' fill='%231c1310'/%3E%3Crect x='32' y='19' width='2' height='1' fill='%232e1a1c'/%3E%3Crect x='34' y='19' width='2' height='1' fill='%231c1310'/%3E%3Crect x='36' y='19' width='2' height='1' fill='%232e1a1c'/%3E%3Crect x='38' y='19' width='2' height='1' fill='%231c1310'/%3E%3Crect x='44' y='19' width='18' height='1' fill='%235a2a2e'/%3E%3Crect x='62' y='19' width='4' height='1' fill='%231c1310'/%3E%3Crect x='32' y='20' width='1' height='1' fill='%231c1310'/%3E%3Crect x='36' y='20' width='1' height='1' fill='%231c1310'/%3E%3Crect x='44' y='20' width='20' height='1' fill='%235a2a2e'/%3E%3Crect x='64' y='20' width='1' height='1' fill='%231c1310'/%3E%3Crect x='21' y='21' width='1' height='1' fill='%231c1310'/%3E%3Crect x='26' y='21' width='17' height='1' fill='%231c1310'/%3E%3Crect x='43' y='21' width='20' height='1' fill='%235a2a2e'/%3E%3Crect x='63' y='21' width='2' height='1' fill='%231c1310'/%3E%3Crect x='20' y='22' width='3' height='2' fill='%23ffd873'/%3E%3Crect x='25' y='22' width='1' height='1' fill='%231c1310'/%3E%3Crect x='26' y='22' width='38' height='1' fill='%235a2a2e'/%3E%3Crect x='64' y='22' width='1' height='2' fill='%231c1310'/%3E%3Crect x='24' y='23' width='1' height='1' fill='%231c1310'/%3E%3Crect x='25' y='23' width='39' height='1' fill='%235a2a2e'/%3E%3Crect x='19' y='24' width='5' height='1' fill='%231c1310'/%3E%3Crect x='24' y='24' width='39' height='1' fill='%235a2a2e'/%3E%3Crect x='63' y='24' width='1' height='1' fill='%231c1310'/%3E%3Crect x='19' y='25' width='1' height='3' fill='%231c1310'/%3E%3Crect x='20' y='25' width='31' height='1' fill='%235a2a2e'/%3E%3Crect x='51' y='25' width='12' height='1' fill='%231c1310'/%3E%3Crect x='20' y='26' width='27' height='1' fill='%235a2a2e'/%3E%3Crect x='47' y='26' width='4' height='1' fill='%231c1310'/%3E%3Crect x='20' y='27' width='26' height='1' fill='%235a2a2e'/%3E%3Crect x='46' y='27' width='1' height='6' fill='%231c1310'/%3E%3Crect x='10' y='28' width='9' height='1' fill='%231c1310'/%3E%3Crect x='19' y='28' width='1' height='1' fill='%235a2a2e'/%3E%3Crect x='20' y='28' width='4' height='1' fill='%231c1310'/%3E%3Crect x='24' y='28' width='22' height='1' fill='%235a2a2e'/%3E%3Crect x='10' y='29' width='1' height='2' fill='%231c1310'/%3E%3Crect x='11' y='29' width='8' height='1' fill='%235a2a2e'/%3E%3Crect x='19' y='29' width='1' height='2' fill='%231c1310'/%3E%3Crect x='24' y='29' width='1' height='4' fill='%231c1310'/%3E%3Crect x='25' y='29' width='21' height='1' fill='%235a2a2e'/%3E%3Crect x='11' y='30' width='8' height='1' fill='%233d1f22'/%3E%3Crect x='25' y='30' width='21' height='3' fill='%233d1f22'/%3E%3Crect x='10' y='31' width='10' height='1' fill='%231c1310'/%3E%3Crect x='25' y='33' width='1' height='1' fill='%231c1310'/%3E%3Crect x='26' y='33' width='19' height='1' fill='%233d1f22'/%3E%3Crect x='45' y='33' width='1' height='1' fill='%231c1310'/%3E%3Crect x='26' y='34' width='5' height='1' fill='%231c1310'/%3E%3Crect x='31' y='34' width='3' height='1' fill='%233d1f22'/%3E%3Crect x='34' y='34' width='6' height='1' fill='%231c1310'/%3E%3Crect x='40' y='34' width='3' height='1' fill='%233d1f22'/%3E%3Crect x='43' y='34' width='2' height='1' fill='%231c1310'/%3E%3Crect x='31' y='35' width='1' height='1' fill='%231c1310'/%3E%3Crect x='32' y='35' width='1' height='1' fill='%233d1f22'/%3E%3Crect x='33' y='35' width='1' height='1' fill='%231c1310'/%3E%3Crect x='40' y='35' width='1' height='1' fill='%231c1310'/%3E%3Crect x='41' y='35' width='1' height='1' fill='%233d1f22'/%3E%3Crect x='42' y='35' width='1' height='1' fill='%231c1310'/%3E%3Crect x='31' y='36' width='3' height='1' fill='%231c1310'/%3E%3Crect x='40' y='36' width='3' height='1' fill='%231c1310'/%3E%3Crect x='106' y='2' width='1' height='3' fill='%231c1310'/%3E%3Crect x='105' y='5' width='2' height='1' fill='%231c1310'/%3E%3Crect x='106' y='8' width='4' height='1' fill='%231c1310'/%3E%3Crect x='126' y='8' width='1' height='1' fill='%23e8a33d'/%3E%3Crect x='105' y='9' width='1' height='1' fill='%231c1310'/%3E%3Crect x='106' y='9' width='3' height='1' fill='%23ffd873'/%3E%3Crect x='109' y='9' width='1' height='2' fill='%231c1310'/%3E%3Crect x='104' y='10' width='1' height='1' fill='%231c1310'/%3E%3Crect x='105' y='10' width='3' height='1' fill='%232e1a1c'/%3E%3Crect x='108' y='10' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='125' y='10' width='1' height='1' fill='%23e8a33d'/%3E%3Crect x='103' y='11' width='1' height='1' fill='%231c1310'/%3E%3Crect x='104' y='11' width='4' height='1' fill='%232e1a1c'/%3E%3Crect x='109' y='11' width='2' height='1' fill='%231c1310'/%3E%3Crect x='124' y='11' width='2' height='1' fill='%23e8a33d'/%3E%3Crect x='102' y='12' width='1' height='1' fill='%231c1310'/%3E%3Crect x='103' y='12' width='4' height='1' fill='%232e1a1c'/%3E%3Crect x='107' y='12' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='108' y='12' width='2' height='2' fill='%232e1a1c'/%3E%3Crect x='110' y='12' width='1' height='4' fill='%231c1310'/%3E%3Crect x='123' y='12' width='3' height='1' fill='%23e8a33d'/%3E%3Crect x='101' y='13' width='1' height='1' fill='%231c1310'/%3E%3Crect x='102' y='13' width='5' height='1' fill='%232e1a1c'/%3E%3Crect x='118' y='13' width='4' height='1' fill='%231c1310'/%3E%3Crect x='122' y='13' width='4' height='1' fill='%23e8a33d'/%3E%3Crect x='126' y='13' width='5' height='1' fill='%231c1310'/%3E%3Crect x='100' y='14' width='1' height='1' fill='%231c1310'/%3E%3Crect x='101' y='14' width='5' height='1' fill='%232e1a1c'/%3E%3Crect x='106' y='14' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='107' y='14' width='3' height='2' fill='%232e1a1c'/%3E%3Crect x='117' y='14' width='1' height='1' fill='%231c1310'/%3E%3Crect x='118' y='14' width='13' height='1' fill='%237a3b3f'/%3E%3Crect x='131' y='14' width='4' height='1' fill='%231c1310'/%3E%3Crect x='99' y='15' width='1' height='1' fill='%231c1310'/%3E%3Crect x='100' y='15' width='6' height='1' fill='%232e1a1c'/%3E%3Crect x='116' y='15' width='1' height='2' fill='%231c1310'/%3E%3Crect x='117' y='15' width='18' height='2' fill='%237a3b3f'/%3E%3Crect x='135' y='15' width='1' height='2' fill='%231c1310'/%3E%3Crect x='98' y='16' width='1' height='1' fill='%231c1310'/%3E%3Crect x='99' y='16' width='6' height='1' fill='%232e1a1c'/%3E%3Crect x='105' y='16' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='106' y='16' width='3' height='2' fill='%232e1a1c'/%3E%3Crect x='109' y='16' width='1' height='2' fill='%231c1310'/%3E%3Crect x='97' y='17' width='1' height='2' fill='%231c1310'/%3E%3Crect x='98' y='17' width='7' height='1' fill='%232e1a1c'/%3E%3Crect x='112' y='17' width='4' height='1' fill='%231c1310'/%3E%3Crect x='116' y='17' width='9' height='1' fill='%237a3b3f'/%3E%3Crect x='125' y='17' width='1' height='1' fill='%23ffd873'/%3E%3Crect x='126' y='17' width='1' height='1' fill='%23fff4d0'/%3E%3Crect x='127' y='17' width='4' height='1' fill='%237a3b3f'/%3E%3Crect x='131' y='17' width='5' height='1' fill='%231c1310'/%3E%3Crect x='95' y='18' width='1' height='1' fill='%231c1310'/%3E%3Crect x='98' y='18' width='6' height='1' fill='%232e1a1c'/%3E%3Crect x='104' y='18' width='1' height='1' fill='%23ffd873'/%3E%3Crect x='105' y='18' width='3' height='1' fill='%232e1a1c'/%3E%3Crect x='108' y='18' width='1' height='1' fill='%231c1310'/%3E%3Crect x='112' y='18' width='13' height='1' fill='%237a3b3f'/%3E%3Crect x='125' y='18' width='1' height='1' fill='%231c1310'/%3E%3Crect x='126' y='18' width='1' height='1' fill='%23ffd873'/%3E%3Crect x='127' y='18' width='7' height='1' fill='%237a3b3f'/%3E%3Crect x='134' y='18' width='1' height='1' fill='%231c1310'/%3E%3Crect x='94' y='19' width='3' height='2' fill='%23ffd873'/%3E%3Crect x='98' y='19' width='2' height='1' fill='%231c1310'/%3E%3Crect x='100' y='19' width='2' height='1' fill='%232e1a1c'/%3E%3Crect x='102' y='19' width='2' height='1' fill='%231c1310'/%3E%3Crect x='104' y='19' width='2' height='1' fill='%232e1a1c'/%3E%3Crect x='106' y='19' width='2' height='1' fill='%231c1310'/%3E%3Crect x='112' y='19' width='18' height='1' fill='%235a2a2e'/%3E%3Crect x='130' y='19' width='4' height='1' fill='%231c1310'/%3E%3Crect x='100' y='20' width='1' height='1' fill='%231c1310'/%3E%3Crect x='104' y='20' width='1' height='1' fill='%231c1310'/%3E%3Crect x='112' y='20' width='20' height='1' fill='%235a2a2e'/%3E%3Crect x='132' y='20' width='1' height='1' fill='%231c1310'/%3E%3Crect x='89' y='21' width='1' height='1' fill='%231c1310'/%3E%3Crect x='94' y='21' width='17' height='1' fill='%231c1310'/%3E%3Crect x='111' y='21' width='20' height='1' fill='%235a2a2e'/%3E%3Crect x='131' y='21' width='2' height='1' fill='%231c1310'/%3E%3Crect x='78' y='22' width='10' height='1' fill='%231c1310'/%3E%3Crect x='88' y='22' width='3' height='2' fill='%23ffd873'/%3E%3Crect x='93' y='22' width='1' height='1' fill='%231c1310'/%3E%3Crect x='94' y='22' width='38' height='1' fill='%235a2a2e'/%3E%3Crect x='132' y='22' width='1' height='2' fill='%231c1310'/%3E%3Crect x='78' y='23' width='1' height='2' fill='%231c1310'/%3E%3Crect x='79' y='23' width='8' height='1' fill='%235a2a2e'/%3E%3Crect x='87' y='23' width='1' height='1' fill='%231c1310'/%3E%3Crect x='92' y='23' width='1' height='1' fill='%231c1310'/%3E%3Crect x='93' y='23' width='39' height='1' fill='%235a2a2e'/%3E%3Crect x='79' y='24' width='9' height='1' fill='%235a2a2e'/%3E%3Crect x='88' y='24' width='4' height='1' fill='%231c1310'/%3E%3Crect x='92' y='24' width='39' height='1' fill='%235a2a2e'/%3E%3Crect x='131' y='24' width='1' height='1' fill='%231c1310'/%3E%3Crect x='78' y='25' width='9' height='1' fill='%231c1310'/%3E%3Crect x='87' y='25' width='32' height='1' fill='%235a2a2e'/%3E%3Crect x='119' y='25' width='12' height='1' fill='%231c1310'/%3E%3Crect x='87' y='26' width='1' height='2' fill='%231c1310'/%3E%3Crect x='88' y='26' width='27' height='1' fill='%235a2a2e'/%3E%3Crect x='115' y='26' width='4' height='1' fill='%231c1310'/%3E%3Crect x='88' y='27' width='26' height='1' fill='%235a2a2e'/%3E%3Crect x='114' y='27' width='1' height='6' fill='%231c1310'/%3E%3Crect x='87' y='28' width='5' height='1' fill='%231c1310'/%3E%3Crect x='92' y='28' width='22' height='1' fill='%235a2a2e'/%3E%3Crect x='92' y='29' width='1' height='4' fill='%231c1310'/%3E%3Crect x='93' y='29' width='21' height='1' fill='%235a2a2e'/%3E%3Crect x='93' y='30' width='21' height='3' fill='%233d1f22'/%3E%3Crect x='93' y='33' width='1' height='1' fill='%231c1310'/%3E%3Crect x='94' y='33' width='19' height='1' fill='%233d1f22'/%3E%3Crect x='113' y='33' width='1' height='1' fill='%231c1310'/%3E%3Crect x='94' y='34' width='5' height='1' fill='%231c1310'/%3E%3Crect x='99' y='34' width='3' height='1' fill='%233d1f22'/%3E%3Crect x='102' y='34' width='6' height='1' fill='%231c1310'/%3E%3Crect x='108' y='34' width='3' height='1' fill='%233d1f22'/%3E%3Crect x='111' y='34' width='2' height='1' fill='%231c1310'/%3E%3Crect x='99' y='35' width='1' height='1' fill='%231c1310'/%3E%3Crect x='100' y='35' width='1' height='1' fill='%233d1f22'/%3E%3Crect x='101' y='35' width='1' height='1' fill='%231c1310'/%3E%3Crect x='108' y='35' width='1' height='1' fill='%231c1310'/%3E%3Crect x='109' y='35' width='1' height='1' fill='%233d1f22'/%3E%3Crect x='110' y='35' width='1' height='1' fill='%231c1310'/%3E%3Crect x='99' y='36' width='3' height='1' fill='%231c1310'/%3E%3Crect x='108' y='36' width='3' height='1' fill='%231c1310'/%3E%3Crect x='174' y='8' width='4' height='1' fill='%231c1310'/%3E%3Crect x='194' y='8' width='1' height='1' fill='%23e8a33d'/%3E%3Crect x='173' y='9' width='1' height='1' fill='%231c1310'/%3E%3Crect x='174' y='9' width='3' height='1' fill='%23ffd873'/%3E%3Crect x='177' y='9' width='1' height='2' fill='%231c1310'/%3E%3Crect x='172' y='10' width='1' height='1' fill='%231c1310'/%3E%3Crect x='173' y='10' width='3' height='1' fill='%232e1a1c'/%3E%3Crect x='176' y='10' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='193' y='10' width='1' height='1' fill='%23e8a33d'/%3E%3Crect x='171' y='11' width='1' height='1' fill='%231c1310'/%3E%3Crect x='172' y='11' width='4' height='1' fill='%232e1a1c'/%3E%3Crect x='177' y='11' width='2' height='1' fill='%231c1310'/%3E%3Crect x='192' y='11' width='2' height='1' fill='%23e8a33d'/%3E%3Crect x='170' y='12' width='1' height='1' fill='%231c1310'/%3E%3Crect x='171' y='12' width='4' height='1' fill='%232e1a1c'/%3E%3Crect x='175' y='12' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='176' y='12' width='2' height='2' fill='%232e1a1c'/%3E%3Crect x='178' y='12' width='1' height='4' fill='%231c1310'/%3E%3Crect x='191' y='12' width='3' height='1' fill='%23e8a33d'/%3E%3Crect x='169' y='13' width='1' height='1' fill='%231c1310'/%3E%3Crect x='170' y='13' width='5' height='1' fill='%232e1a1c'/%3E%3Crect x='186' y='13' width='4' height='1' fill='%231c1310'/%3E%3Crect x='190' y='13' width='4' height='1' fill='%23e8a33d'/%3E%3Crect x='194' y='13' width='5' height='1' fill='%231c1310'/%3E%3Crect x='168' y='14' width='1' height='1' fill='%231c1310'/%3E%3Crect x='169' y='14' width='5' height='1' fill='%232e1a1c'/%3E%3Crect x='174' y='14' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='175' y='14' width='3' height='2' fill='%232e1a1c'/%3E%3Crect x='185' y='14' width='1' height='1' fill='%231c1310'/%3E%3Crect x='186' y='14' width='13' height='1' fill='%237a3b3f'/%3E%3Crect x='199' y='14' width='4' height='1' fill='%231c1310'/%3E%3Crect x='167' y='15' width='1' height='1' fill='%231c1310'/%3E%3Crect x='168' y='15' width='6' height='1' fill='%232e1a1c'/%3E%3Crect x='184' y='15' width='1' height='2' fill='%231c1310'/%3E%3Crect x='185' y='15' width='18' height='2' fill='%237a3b3f'/%3E%3Crect x='203' y='15' width='1' height='2' fill='%231c1310'/%3E%3Crect x='166' y='16' width='1' height='1' fill='%231c1310'/%3E%3Crect x='167' y='16' width='6' height='1' fill='%232e1a1c'/%3E%3Crect x='173' y='16' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='174' y='16' width='3' height='2' fill='%232e1a1c'/%3E%3Crect x='177' y='16' width='1' height='2' fill='%231c1310'/%3E%3Crect x='165' y='17' width='1' height='2' fill='%231c1310'/%3E%3Crect x='166' y='17' width='7' height='1' fill='%232e1a1c'/%3E%3Crect x='180' y='17' width='4' height='1' fill='%231c1310'/%3E%3Crect x='184' y='17' width='9' height='1' fill='%237a3b3f'/%3E%3Crect x='193' y='17' width='1' height='1' fill='%23ffd873'/%3E%3Crect x='194' y='17' width='1' height='1' fill='%23fff4d0'/%3E%3Crect x='195' y='17' width='4' height='1' fill='%237a3b3f'/%3E%3Crect x='199' y='17' width='5' height='1' fill='%231c1310'/%3E%3Crect x='163' y='18' width='1' height='1' fill='%231c1310'/%3E%3Crect x='166' y='18' width='6' height='1' fill='%232e1a1c'/%3E%3Crect x='172' y='18' width='1' height='1' fill='%23ffd873'/%3E%3Crect x='173' y='18' width='3' height='1' fill='%232e1a1c'/%3E%3Crect x='176' y='18' width='1' height='1' fill='%231c1310'/%3E%3Crect x='180' y='18' width='13' height='1' fill='%237a3b3f'/%3E%3Crect x='193' y='18' width='1' height='1' fill='%231c1310'/%3E%3Crect x='194' y='18' width='1' height='1' fill='%23ffd873'/%3E%3Crect x='195' y='18' width='7' height='1' fill='%237a3b3f'/%3E%3Crect x='202' y='18' width='1' height='1' fill='%231c1310'/%3E%3Crect x='162' y='19' width='3' height='2' fill='%23ffd873'/%3E%3Crect x='166' y='19' width='2' height='1' fill='%231c1310'/%3E%3Crect x='168' y='19' width='2' height='1' fill='%232e1a1c'/%3E%3Crect x='170' y='19' width='2' height='1' fill='%231c1310'/%3E%3Crect x='172' y='19' width='2' height='1' fill='%232e1a1c'/%3E%3Crect x='174' y='19' width='2' height='1' fill='%231c1310'/%3E%3Crect x='180' y='19' width='18' height='1' fill='%235a2a2e'/%3E%3Crect x='198' y='19' width='4' height='1' fill='%231c1310'/%3E%3Crect x='168' y='20' width='1' height='1' fill='%231c1310'/%3E%3Crect x='172' y='20' width='1' height='1' fill='%231c1310'/%3E%3Crect x='180' y='20' width='20' height='1' fill='%235a2a2e'/%3E%3Crect x='200' y='20' width='1' height='1' fill='%231c1310'/%3E%3Crect x='157' y='21' width='1' height='1' fill='%231c1310'/%3E%3Crect x='162' y='21' width='17' height='1' fill='%231c1310'/%3E%3Crect x='179' y='21' width='20' height='1' fill='%235a2a2e'/%3E%3Crect x='199' y='21' width='2' height='1' fill='%231c1310'/%3E%3Crect x='156' y='22' width='3' height='2' fill='%23ffd873'/%3E%3Crect x='161' y='22' width='1' height='1' fill='%231c1310'/%3E%3Crect x='162' y='22' width='38' height='1' fill='%235a2a2e'/%3E%3Crect x='200' y='22' width='1' height='2' fill='%231c1310'/%3E%3Crect x='160' y='23' width='1' height='1' fill='%231c1310'/%3E%3Crect x='161' y='23' width='39' height='1' fill='%235a2a2e'/%3E%3Crect x='155' y='24' width='5' height='1' fill='%231c1310'/%3E%3Crect x='160' y='24' width='39' height='1' fill='%235a2a2e'/%3E%3Crect x='199' y='24' width='1' height='1' fill='%231c1310'/%3E%3Crect x='146' y='25' width='9' height='1' fill='%231c1310'/%3E%3Crect x='155' y='25' width='32' height='1' fill='%235a2a2e'/%3E%3Crect x='187' y='25' width='12' height='1' fill='%231c1310'/%3E%3Crect x='146' y='26' width='1' height='2' fill='%231c1310'/%3E%3Crect x='147' y='26' width='36' height='1' fill='%235a2a2e'/%3E%3Crect x='183' y='26' width='4' height='1' fill='%231c1310'/%3E%3Crect x='147' y='27' width='35' height='1' fill='%235a2a2e'/%3E%3Crect x='182' y='27' width='1' height='6' fill='%231c1310'/%3E%3Crect x='146' y='28' width='14' height='1' fill='%231c1310'/%3E%3Crect x='160' y='28' width='22' height='1' fill='%235a2a2e'/%3E%3Crect x='160' y='29' width='1' height='4' fill='%231c1310'/%3E%3Crect x='161' y='29' width='21' height='1' fill='%235a2a2e'/%3E%3Crect x='161' y='30' width='21' height='3' fill='%233d1f22'/%3E%3Crect x='161' y='33' width='1' height='1' fill='%231c1310'/%3E%3Crect x='162' y='33' width='19' height='1' fill='%233d1f22'/%3E%3Crect x='181' y='33' width='1' height='1' fill='%231c1310'/%3E%3Crect x='162' y='34' width='5' height='1' fill='%231c1310'/%3E%3Crect x='167' y='34' width='3' height='1' fill='%233d1f22'/%3E%3Crect x='170' y='34' width='6' height='1' fill='%231c1310'/%3E%3Crect x='176' y='34' width='3' height='1' fill='%233d1f22'/%3E%3Crect x='179' y='34' width='2' height='1' fill='%231c1310'/%3E%3Crect x='167' y='35' width='1' height='1' fill='%231c1310'/%3E%3Crect x='168' y='35' width='1' height='1' fill='%233d1f22'/%3E%3Crect x='169' y='35' width='1' height='1' fill='%231c1310'/%3E%3Crect x='176' y='35' width='1' height='1' fill='%231c1310'/%3E%3Crect x='177' y='35' width='1' height='1' fill='%233d1f22'/%3E%3Crect x='178' y='35' width='1' height='1' fill='%231c1310'/%3E%3Crect x='167' y='36' width='3' height='1' fill='%231c1310'/%3E%3Crect x='176' y='36' width='3' height='1' fill='%231c1310'/%3E%3Crect x='242' y='9' width='4' height='1' fill='%231c1310'/%3E%3Crect x='262' y='9' width='1' height='1' fill='%23e8a33d'/%3E%3Crect x='241' y='10' width='1' height='1' fill='%231c1310'/%3E%3Crect x='242' y='10' width='3' height='1' fill='%23ffd873'/%3E%3Crect x='245' y='10' width='1' height='2' fill='%231c1310'/%3E%3Crect x='240' y='11' width='1' height='1' fill='%231c1310'/%3E%3Crect x='241' y='11' width='3' height='1' fill='%232e1a1c'/%3E%3Crect x='244' y='11' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='261' y='11' width='1' height='1' fill='%23e8a33d'/%3E%3Crect x='239' y='12' width='1' height='1' fill='%231c1310'/%3E%3Crect x='240' y='12' width='4' height='1' fill='%232e1a1c'/%3E%3Crect x='245' y='12' width='2' height='1' fill='%231c1310'/%3E%3Crect x='260' y='12' width='2' height='1' fill='%23e8a33d'/%3E%3Crect x='238' y='13' width='1' height='1' fill='%231c1310'/%3E%3Crect x='239' y='13' width='4' height='1' fill='%232e1a1c'/%3E%3Crect x='243' y='13' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='244' y='13' width='2' height='2' fill='%232e1a1c'/%3E%3Crect x='246' y='13' width='1' height='4' fill='%231c1310'/%3E%3Crect x='259' y='13' width='3' height='1' fill='%23e8a33d'/%3E%3Crect x='237' y='14' width='1' height='1' fill='%231c1310'/%3E%3Crect x='238' y='14' width='5' height='1' fill='%232e1a1c'/%3E%3Crect x='254' y='14' width='4' height='1' fill='%231c1310'/%3E%3Crect x='258' y='14' width='4' height='1' fill='%23e8a33d'/%3E%3Crect x='262' y='14' width='5' height='1' fill='%231c1310'/%3E%3Crect x='236' y='15' width='1' height='1' fill='%231c1310'/%3E%3Crect x='237' y='15' width='5' height='1' fill='%232e1a1c'/%3E%3Crect x='242' y='15' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='243' y='15' width='3' height='2' fill='%232e1a1c'/%3E%3Crect x='253' y='15' width='1' height='1' fill='%231c1310'/%3E%3Crect x='254' y='15' width='13' height='1' fill='%237a3b3f'/%3E%3Crect x='267' y='15' width='4' height='1' fill='%231c1310'/%3E%3Crect x='235' y='16' width='1' height='1' fill='%231c1310'/%3E%3Crect x='236' y='16' width='6' height='1' fill='%232e1a1c'/%3E%3Crect x='252' y='16' width='1' height='2' fill='%231c1310'/%3E%3Crect x='253' y='16' width='18' height='2' fill='%237a3b3f'/%3E%3Crect x='271' y='16' width='1' height='2' fill='%231c1310'/%3E%3Crect x='234' y='17' width='1' height='1' fill='%231c1310'/%3E%3Crect x='235' y='17' width='6' height='1' fill='%232e1a1c'/%3E%3Crect x='241' y='17' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='242' y='17' width='3' height='2' fill='%232e1a1c'/%3E%3Crect x='245' y='17' width='1' height='2' fill='%231c1310'/%3E%3Crect x='233' y='18' width='1' height='2' fill='%231c1310'/%3E%3Crect x='234' y='18' width='7' height='1' fill='%232e1a1c'/%3E%3Crect x='248' y='18' width='4' height='1' fill='%231c1310'/%3E%3Crect x='252' y='18' width='9' height='1' fill='%237a3b3f'/%3E%3Crect x='261' y='18' width='1' height='1' fill='%23ffd873'/%3E%3Crect x='262' y='18' width='1' height='1' fill='%23fff4d0'/%3E%3Crect x='263' y='18' width='4' height='1' fill='%237a3b3f'/%3E%3Crect x='267' y='18' width='5' height='1' fill='%231c1310'/%3E%3Crect x='231' y='19' width='1' height='1' fill='%231c1310'/%3E%3Crect x='234' y='19' width='6' height='1' fill='%232e1a1c'/%3E%3Crect x='240' y='19' width='1' height='1' fill='%23ffd873'/%3E%3Crect x='241' y='19' width='3' height='1' fill='%232e1a1c'/%3E%3Crect x='244' y='19' width='1' height='1' fill='%231c1310'/%3E%3Crect x='248' y='19' width='13' height='1' fill='%237a3b3f'/%3E%3Crect x='261' y='19' width='1' height='1' fill='%231c1310'/%3E%3Crect x='262' y='19' width='1' height='1' fill='%23ffd873'/%3E%3Crect x='263' y='19' width='7' height='1' fill='%237a3b3f'/%3E%3Crect x='270' y='19' width='1' height='1' fill='%231c1310'/%3E%3Crect x='230' y='20' width='3' height='2' fill='%23ffd873'/%3E%3Crect x='234' y='20' width='2' height='1' fill='%231c1310'/%3E%3Crect x='236' y='20' width='2' height='1' fill='%232e1a1c'/%3E%3Crect x='238' y='20' width='2' height='1' fill='%231c1310'/%3E%3Crect x='240' y='20' width='2' height='1' fill='%232e1a1c'/%3E%3Crect x='242' y='20' width='2' height='1' fill='%231c1310'/%3E%3Crect x='248' y='20' width='18' height='1' fill='%235a2a2e'/%3E%3Crect x='266' y='20' width='4' height='1' fill='%231c1310'/%3E%3Crect x='236' y='21' width='1' height='1' fill='%231c1310'/%3E%3Crect x='240' y='21' width='1' height='1' fill='%231c1310'/%3E%3Crect x='248' y='21' width='20' height='1' fill='%235a2a2e'/%3E%3Crect x='268' y='21' width='1' height='1' fill='%231c1310'/%3E%3Crect x='225' y='22' width='1' height='1' fill='%231c1310'/%3E%3Crect x='230' y='22' width='14' height='1' fill='%231c1310'/%3E%3Crect x='244' y='22' width='2' height='2' fill='%23e8a33d'/%3E%3Crect x='246' y='22' width='1' height='1' fill='%231c1310'/%3E%3Crect x='247' y='22' width='20' height='1' fill='%235a2a2e'/%3E%3Crect x='267' y='22' width='2' height='1' fill='%231c1310'/%3E%3Crect x='224' y='23' width='3' height='2' fill='%23ffd873'/%3E%3Crect x='229' y='23' width='1' height='1' fill='%231c1310'/%3E%3Crect x='230' y='23' width='14' height='1' fill='%235a2a2e'/%3E%3Crect x='246' y='23' width='22' height='1' fill='%235a2a2e'/%3E%3Crect x='268' y='23' width='1' height='2' fill='%231c1310'/%3E%3Crect x='228' y='24' width='1' height='1' fill='%231c1310'/%3E%3Crect x='229' y='24' width='11' height='1' fill='%235a2a2e'/%3E%3Crect x='240' y='24' width='2' height='1' fill='%231c1310'/%3E%3Crect x='242' y='24' width='26' height='1' fill='%235a2a2e'/%3E%3Crect x='223' y='25' width='5' height='1' fill='%231c1310'/%3E%3Crect x='228' y='25' width='12' height='1' fill='%235a2a2e'/%3E%3Crect x='240' y='25' width='2' height='3' fill='%23e8a33d'/%3E%3Crect x='242' y='25' width='25' height='1' fill='%235a2a2e'/%3E%3Crect x='267' y='25' width='1' height='1' fill='%231c1310'/%3E%3Crect x='223' y='26' width='1' height='3' fill='%231c1310'/%3E%3Crect x='224' y='26' width='16' height='2' fill='%235a2a2e'/%3E%3Crect x='242' y='26' width='13' height='1' fill='%235a2a2e'/%3E%3Crect x='255' y='26' width='12' height='1' fill='%231c1310'/%3E%3Crect x='242' y='27' width='9' height='1' fill='%235a2a2e'/%3E%3Crect x='251' y='27' width='4' height='1' fill='%231c1310'/%3E%3Crect x='224' y='28' width='26' height='1' fill='%235a2a2e'/%3E%3Crect x='250' y='28' width='1' height='6' fill='%231c1310'/%3E%3Crect x='223' y='29' width='5' height='1' fill='%231c1310'/%3E%3Crect x='228' y='29' width='22' height='1' fill='%235a2a2e'/%3E%3Crect x='214' y='30' width='10' height='1' fill='%231c1310'/%3E%3Crect x='228' y='30' width='1' height='4' fill='%231c1310'/%3E%3Crect x='229' y='30' width='21' height='1' fill='%235a2a2e'/%3E%3Crect x='214' y='31' width='1' height='2' fill='%231c1310'/%3E%3Crect x='215' y='31' width='8' height='2' fill='%233d1f22'/%3E%3Crect x='223' y='31' width='1' height='2' fill='%231c1310'/%3E%3Crect x='229' y='31' width='21' height='3' fill='%233d1f22'/%3E%3Crect x='214' y='33' width='10' height='1' fill='%231c1310'/%3E%3Crect x='229' y='34' width='1' height='1' fill='%231c1310'/%3E%3Crect x='230' y='34' width='19' height='1' fill='%233d1f22'/%3E%3Crect x='249' y='34' width='1' height='1' fill='%231c1310'/%3E%3Crect x='230' y='35' width='5' height='1' fill='%231c1310'/%3E%3Crect x='235' y='35' width='3' height='1' fill='%233d1f22'/%3E%3Crect x='238' y='35' width='6' height='1' fill='%231c1310'/%3E%3Crect x='244' y='35' width='3' height='1' fill='%233d1f22'/%3E%3Crect x='247' y='35' width='2' height='1' fill='%231c1310'/%3E%3Crect x='235' y='36' width='1' height='1' fill='%231c1310'/%3E%3Crect x='236' y='36' width='1' height='1' fill='%233d1f22'/%3E%3Crect x='237' y='36' width='1' height='1' fill='%231c1310'/%3E%3Crect x='244' y='36' width='1' height='1' fill='%231c1310'/%3E%3Crect x='245' y='36' width='1' height='1' fill='%233d1f22'/%3E%3Crect x='246' y='36' width='1' height='1' fill='%231c1310'/%3E%3Crect x='235' y='37' width='3' height='1' fill='%231c1310'/%3E%3Crect x='244' y='37' width='3' height='1' fill='%231c1310'/%3E%3Crect x='310' y='8' width='4' height='1' fill='%231c1310'/%3E%3Crect x='331' y='8' width='1' height='1' fill='%23e8a33d'/%3E%3Crect x='309' y='9' width='1' height='1' fill='%231c1310'/%3E%3Crect x='310' y='9' width='3' height='1' fill='%23ffd873'/%3E%3Crect x='313' y='9' width='1' height='2' fill='%231c1310'/%3E%3Crect x='308' y='10' width='1' height='1' fill='%231c1310'/%3E%3Crect x='309' y='10' width='3' height='1' fill='%232e1a1c'/%3E%3Crect x='312' y='10' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='330' y='10' width='1' height='1' fill='%23e8a33d'/%3E%3Crect x='307' y='11' width='1' height='1' fill='%231c1310'/%3E%3Crect x='308' y='11' width='4' height='1' fill='%232e1a1c'/%3E%3Crect x='313' y='11' width='2' height='1' fill='%231c1310'/%3E%3Crect x='329' y='11' width='2' height='1' fill='%23e8a33d'/%3E%3Crect x='306' y='12' width='1' height='1' fill='%231c1310'/%3E%3Crect x='307' y='12' width='4' height='1' fill='%232e1a1c'/%3E%3Crect x='311' y='12' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='312' y='12' width='2' height='2' fill='%232e1a1c'/%3E%3Crect x='314' y='12' width='1' height='4' fill='%231c1310'/%3E%3Crect x='328' y='12' width='3' height='1' fill='%23e8a33d'/%3E%3Crect x='305' y='13' width='1' height='1' fill='%231c1310'/%3E%3Crect x='306' y='13' width='5' height='1' fill='%232e1a1c'/%3E%3Crect x='323' y='13' width='4' height='1' fill='%231c1310'/%3E%3Crect x='327' y='13' width='4' height='1' fill='%23e8a33d'/%3E%3Crect x='331' y='13' width='5' height='1' fill='%231c1310'/%3E%3Crect x='304' y='14' width='1' height='1' fill='%231c1310'/%3E%3Crect x='305' y='14' width='5' height='1' fill='%232e1a1c'/%3E%3Crect x='310' y='14' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='311' y='14' width='3' height='2' fill='%232e1a1c'/%3E%3Crect x='322' y='14' width='1' height='1' fill='%231c1310'/%3E%3Crect x='323' y='14' width='13' height='1' fill='%237a3b3f'/%3E%3Crect x='336' y='14' width='3' height='1' fill='%231c1310'/%3E%3Crect x='303' y='15' width='1' height='1' fill='%231c1310'/%3E%3Crect x='304' y='15' width='6' height='1' fill='%232e1a1c'/%3E%3Crect x='321' y='15' width='1' height='2' fill='%231c1310'/%3E%3Crect x='322' y='15' width='17' height='2' fill='%237a3b3f'/%3E%3Crect x='339' y='15' width='1' height='2' fill='%231c1310'/%3E%3Crect x='302' y='16' width='1' height='1' fill='%231c1310'/%3E%3Crect x='303' y='16' width='6' height='1' fill='%232e1a1c'/%3E%3Crect x='309' y='16' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='310' y='16' width='3' height='2' fill='%232e1a1c'/%3E%3Crect x='313' y='16' width='1' height='2' fill='%231c1310'/%3E%3Crect x='301' y='17' width='1' height='2' fill='%231c1310'/%3E%3Crect x='302' y='17' width='7' height='1' fill='%232e1a1c'/%3E%3Crect x='316' y='17' width='5' height='1' fill='%231c1310'/%3E%3Crect x='321' y='17' width='9' height='1' fill='%237a3b3f'/%3E%3Crect x='330' y='17' width='1' height='1' fill='%23ffd873'/%3E%3Crect x='331' y='17' width='1' height='1' fill='%23fff4d0'/%3E%3Crect x='332' y='17' width='3' height='1' fill='%237a3b3f'/%3E%3Crect x='335' y='17' width='5' height='1' fill='%231c1310'/%3E%3Crect x='299' y='18' width='1' height='1' fill='%231c1310'/%3E%3Crect x='302' y='18' width='6' height='1' fill='%232e1a1c'/%3E%3Crect x='308' y='18' width='1' height='1' fill='%23ffd873'/%3E%3Crect x='309' y='18' width='3' height='1' fill='%232e1a1c'/%3E%3Crect x='312' y='18' width='1' height='1' fill='%231c1310'/%3E%3Crect x='316' y='18' width='14' height='1' fill='%237a3b3f'/%3E%3Crect x='330' y='18' width='1' height='1' fill='%231c1310'/%3E%3Crect x='331' y='18' width='1' height='1' fill='%23ffd873'/%3E%3Crect x='332' y='18' width='6' height='1' fill='%237a3b3f'/%3E%3Crect x='338' y='18' width='1' height='1' fill='%231c1310'/%3E%3Crect x='298' y='19' width='3' height='2' fill='%23ffd873'/%3E%3Crect x='302' y='19' width='2' height='1' fill='%231c1310'/%3E%3Crect x='304' y='19' width='2' height='1' fill='%232e1a1c'/%3E%3Crect x='306' y='19' width='2' height='1' fill='%231c1310'/%3E%3Crect x='308' y='19' width='2' height='1' fill='%232e1a1c'/%3E%3Crect x='310' y='19' width='2' height='1' fill='%231c1310'/%3E%3Crect x='316' y='19' width='18' height='1' fill='%235a2a2e'/%3E%3Crect x='334' y='19' width='4' height='1' fill='%231c1310'/%3E%3Crect x='304' y='20' width='1' height='1' fill='%231c1310'/%3E%3Crect x='308' y='20' width='1' height='1' fill='%231c1310'/%3E%3Crect x='316' y='20' width='21' height='1' fill='%235a2a2e'/%3E%3Crect x='337' y='20' width='1' height='1' fill='%231c1310'/%3E%3Crect x='293' y='21' width='1' height='1' fill='%231c1310'/%3E%3Crect x='298' y='21' width='17' height='1' fill='%231c1310'/%3E%3Crect x='315' y='21' width='21' height='1' fill='%235a2a2e'/%3E%3Crect x='336' y='21' width='2' height='1' fill='%231c1310'/%3E%3Crect x='292' y='22' width='3' height='2' fill='%23ffd873'/%3E%3Crect x='297' y='22' width='1' height='1' fill='%231c1310'/%3E%3Crect x='298' y='22' width='39' height='1' fill='%235a2a2e'/%3E%3Crect x='337' y='22' width='1' height='2' fill='%231c1310'/%3E%3Crect x='296' y='23' width='1' height='1' fill='%231c1310'/%3E%3Crect x='297' y='23' width='40' height='1' fill='%235a2a2e'/%3E%3Crect x='282' y='24' width='14' height='1' fill='%231c1310'/%3E%3Crect x='296' y='24' width='40' height='1' fill='%235a2a2e'/%3E%3Crect x='336' y='24' width='1' height='1' fill='%231c1310'/%3E%3Crect x='282' y='25' width='1' height='2' fill='%231c1310'/%3E%3Crect x='283' y='25' width='41' height='1' fill='%235a2a2e'/%3E%3Crect x='324' y='25' width='12' height='1' fill='%231c1310'/%3E%3Crect x='283' y='26' width='36' height='1' fill='%235a2a2e'/%3E%3Crect x='319' y='26' width='5' height='1' fill='%231c1310'/%3E%3Crect x='282' y='27' width='9' height='1' fill='%231c1310'/%3E%3Crect x='291' y='27' width='27' height='1' fill='%235a2a2e'/%3E%3Crect x='318' y='27' width='1' height='6' fill='%231c1310'/%3E%3Crect x='291' y='28' width='5' height='1' fill='%231c1310'/%3E%3Crect x='296' y='28' width='22' height='1' fill='%235a2a2e'/%3E%3Crect x='296' y='29' width='1' height='4' fill='%231c1310'/%3E%3Crect x='297' y='29' width='21' height='1' fill='%235a2a2e'/%3E%3Crect x='297' y='30' width='21' height='3' fill='%233d1f22'/%3E%3Crect x='297' y='33' width='1' height='1' fill='%231c1310'/%3E%3Crect x='298' y='33' width='19' height='1' fill='%233d1f22'/%3E%3Crect x='317' y='33' width='1' height='1' fill='%231c1310'/%3E%3Crect x='298' y='34' width='5' height='1' fill='%231c1310'/%3E%3Crect x='303' y='34' width='3' height='1' fill='%233d1f22'/%3E%3Crect x='306' y='34' width='6' height='1' fill='%231c1310'/%3E%3Crect x='312' y='34' width='3' height='1' fill='%233d1f22'/%3E%3Crect x='315' y='34' width='2' height='1' fill='%231c1310'/%3E%3Crect x='303' y='35' width='1' height='1' fill='%231c1310'/%3E%3Crect x='304' y='35' width='1' height='1' fill='%233d1f22'/%3E%3Crect x='305' y='35' width='1' height='1' fill='%231c1310'/%3E%3Crect x='312' y='35' width='1' height='1' fill='%231c1310'/%3E%3Crect x='313' y='35' width='1' height='1' fill='%233d1f22'/%3E%3Crect x='314' y='35' width='1' height='1' fill='%231c1310'/%3E%3Crect x='303' y='36' width='3' height='1' fill='%231c1310'/%3E%3Crect x='312' y='36' width='3' height='1' fill='%231c1310'/%3E%3Crect x='380' y='3' width='1' height='2' fill='%231c1310'/%3E%3Crect x='379' y='5' width='2' height='1' fill='%231c1310'/%3E%3Crect x='378' y='8' width='4' height='1' fill='%231c1310'/%3E%3Crect x='400' y='8' width='1' height='1' fill='%23e8a33d'/%3E%3Crect x='377' y='9' width='1' height='1' fill='%231c1310'/%3E%3Crect x='378' y='9' width='3' height='1' fill='%23ffd873'/%3E%3Crect x='381' y='9' width='1' height='2' fill='%231c1310'/%3E%3Crect x='376' y='10' width='1' height='1' fill='%231c1310'/%3E%3Crect x='377' y='10' width='3' height='1' fill='%232e1a1c'/%3E%3Crect x='380' y='10' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='399' y='10' width='1' height='1' fill='%23e8a33d'/%3E%3Crect x='375' y='11' width='1' height='1' fill='%231c1310'/%3E%3Crect x='376' y='11' width='4' height='1' fill='%232e1a1c'/%3E%3Crect x='381' y='11' width='2' height='1' fill='%231c1310'/%3E%3Crect x='398' y='11' width='2' height='1' fill='%23e8a33d'/%3E%3Crect x='374' y='12' width='1' height='1' fill='%231c1310'/%3E%3Crect x='375' y='12' width='4' height='1' fill='%232e1a1c'/%3E%3Crect x='379' y='12' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='380' y='12' width='2' height='2' fill='%232e1a1c'/%3E%3Crect x='382' y='12' width='1' height='4' fill='%231c1310'/%3E%3Crect x='397' y='12' width='3' height='1' fill='%23e8a33d'/%3E%3Crect x='373' y='13' width='1' height='1' fill='%231c1310'/%3E%3Crect x='374' y='13' width='5' height='1' fill='%232e1a1c'/%3E%3Crect x='392' y='13' width='4' height='1' fill='%231c1310'/%3E%3Crect x='396' y='13' width='4' height='1' fill='%23e8a33d'/%3E%3Crect x='400' y='13' width='5' height='1' fill='%231c1310'/%3E%3Crect x='372' y='14' width='1' height='1' fill='%231c1310'/%3E%3Crect x='373' y='14' width='5' height='1' fill='%232e1a1c'/%3E%3Crect x='378' y='14' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='379' y='14' width='3' height='2' fill='%232e1a1c'/%3E%3Crect x='388' y='14' width='2' height='1' fill='%231c1310'/%3E%3Crect x='391' y='14' width='1' height='1' fill='%231c1310'/%3E%3Crect x='392' y='14' width='12' height='1' fill='%237a3b3f'/%3E%3Crect x='404' y='14' width='3' height='1' fill='%231c1310'/%3E%3Crect x='371' y='15' width='1' height='1' fill='%231c1310'/%3E%3Crect x='372' y='15' width='6' height='1' fill='%232e1a1c'/%3E%3Crect x='388' y='15' width='2' height='2' fill='%23e8a33d'/%3E%3Crect x='390' y='15' width='1' height='2' fill='%231c1310'/%3E%3Crect x='391' y='15' width='16' height='2' fill='%237a3b3f'/%3E%3Crect x='407' y='15' width='1' height='2' fill='%231c1310'/%3E%3Crect x='370' y='16' width='1' height='1' fill='%231c1310'/%3E%3Crect x='371' y='16' width='6' height='1' fill='%232e1a1c'/%3E%3Crect x='377' y='16' width='1' height='2' fill='%23ffd873'/%3E%3Crect x='378' y='16' width='3' height='2' fill='%232e1a1c'/%3E%3Crect x='381' y='16' width='1' height='2' fill='%231c1310'/%3E%3Crect x='369' y='17' width='1' height='2' fill='%231c1310'/%3E%3Crect x='370' y='17' width='7' height='1' fill='%232e1a1c'/%3E%3Crect x='384' y='17' width='6' height='1' fill='%231c1310'/%3E%3Crect x='390' y='17' width='9' height='1' fill='%237a3b3f'/%3E%3Crect x='399' y='17' width='1' height='1' fill='%23ffd873'/%3E%3Crect x='400' y='17' width='1' height='1' fill='%23fff4d0'/%3E%3Crect x='401' y='17' width='2' height='1' fill='%237a3b3f'/%3E%3Crect x='403' y='17' width='5' height='1' fill='%231c1310'/%3E%3Crect x='367' y='18' width='1' height='1' fill='%231c1310'/%3E%3Crect x='370' y='18' width='6' height='1' fill='%232e1a1c'/%3E%3Crect x='376' y='18' width='1' height='1' fill='%23ffd873'/%3E%3Crect x='377' y='18' width='3' height='1' fill='%232e1a1c'/%3E%3Crect x='380' y='18' width='1' height='1' fill='%231c1310'/%3E%3Crect x='384' y='18' width='15' height='1' fill='%237a3b3f'/%3E%3Crect x='399' y='18' width='1' height='1' fill='%231c1310'/%3E%3Crect x='400' y='18' width='1' height='1' fill='%23ffd873'/%3E%3Crect x='401' y='18' width='5' height='1' fill='%237a3b3f'/%3E%3Crect x='406' y='18' width='1' height='1' fill='%231c1310'/%3E%3Crect x='366' y='19' width='3' height='2' fill='%23ffd873'/%3E%3Crect x='370' y='19' width='2' height='1' fill='%231c1310'/%3E%3Crect x='372' y='19' width='2' height='1' fill='%232e1a1c'/%3E%3Crect x='374' y='19' width='2' height='1' fill='%231c1310'/%3E%3Crect x='376' y='19' width='2' height='1' fill='%232e1a1c'/%3E%3Crect x='378' y='19' width='2' height='1' fill='%231c1310'/%3E%3Crect x='384' y='19' width='18' height='1' fill='%235a2a2e'/%3E%3Crect x='402' y='19' width='5' height='1' fill='%231c1310'/%3E%3Crect x='372' y='20' width='1' height='1' fill='%231c1310'/%3E%3Crect x='376' y='20' width='1' height='1' fill='%231c1310'/%3E%3Crect x='384' y='20' width='22' height='1' fill='%235a2a2e'/%3E%3Crect x='406' y='20' width='1' height='1' fill='%231c1310'/%3E%3Crect x='350' y='21' width='10' height='1' fill='%231c1310'/%3E%3Crect x='361' y='21' width='1' height='1' fill='%231c1310'/%3E%3Crect x='366' y='21' width='17' height='1' fill='%231c1310'/%3E%3Crect x='383' y='21' width='22' height='1' fill='%235a2a2e'/%3E%3Crect x='405' y='21' width='2' height='1' fill='%231c1310'/%3E%3Crect x='350' y='22' width='1' height='2' fill='%231c1310'/%3E%3Crect x='351' y='22' width='8' height='2' fill='%235a2a2e'/%3E%3Crect x='359' y='22' width='1' height='2' fill='%231c1310'/%3E%3Crect x='360' y='22' width='3' height='2' fill='%23ffd873'/%3E%3Crect x='365' y='22' width='1' height='1' fill='%231c1310'/%3E%3Crect x='366' y='22' width='40' height='1' fill='%235a2a2e'/%3E%3Crect x='406' y='22' width='1' height='2' fill='%231c1310'/%3E%3Crect x='364' y='23' width='1' height='1' fill='%231c1310'/%3E%3Crect x='365' y='23' width='41' height='1' fill='%235a2a2e'/%3E%3Crect x='350' y='24' width='9' height='1' fill='%231c1310'/%3E%3Crect x='359' y='24' width='1' height='1' fill='%235a2a2e'/%3E%3Crect x='360' y='24' width='4' height='1' fill='%231c1310'/%3E%3Crect x='364' y='24' width='41' height='1' fill='%235a2a2e'/%3E%3Crect x='405' y='24' width='1' height='1' fill='%231c1310'/%3E%3Crect x='359' y='25' width='1' height='3' fill='%231c1310'/%3E%3Crect x='360' y='25' width='33' height='1' fill='%235a2a2e'/%3E%3Crect x='393' y='25' width='12' height='1' fill='%231c1310'/%3E%3Crect x='360' y='26' width='27' height='1' fill='%235a2a2e'/%3E%3Crect x='387' y='26' width='6' height='1' fill='%231c1310'/%3E%3Crect x='360' y='27' width='26' height='1' fill='%235a2a2e'/%3E%3Crect x='386' y='27' width='1' height='6' fill='%231c1310'/%3E%3Crect x='359' y='28' width='5' height='1' fill='%231c1310'/%3E%3Crect x='364' y='28' width='22' height='1' fill='%235a2a2e'/%3E%3Crect x='364' y='29' width='1' height='4' fill='%231c1310'/%3E%3Crect x='365' y='29' width='21' height='1' fill='%235a2a2e'/%3E%3Crect x='365' y='30' width='21' height='3' fill='%233d1f22'/%3E%3Crect x='365' y='33' width='1' height='1' fill='%231c1310'/%3E%3Crect x='366' y='33' width='19' height='1' fill='%233d1f22'/%3E%3Crect x='385' y='33' width='1' height='1' fill='%231c1310'/%3E%3Crect x='366' y='34' width='5' height='1' fill='%231c1310'/%3E%3Crect x='371' y='34' width='3' height='1' fill='%233d1f22'/%3E%3Crect x='374' y='34' width='6' height='1' fill='%231c1310'/%3E%3Crect x='380' y='34' width='3' height='1' fill='%233d1f22'/%3E%3Crect x='383' y='34' width='2' height='1' fill='%231c1310'/%3E%3Crect x='371' y='35' width='1' height='1' fill='%231c1310'/%3E%3Crect x='372' y='35' width='1' height='1' fill='%233d1f22'/%3E%3Crect x='373' y='35' width='1' height='1' fill='%231c1310'/%3E%3Crect x='380' y='35' width='1' height='1' fill='%231c1310'/%3E%3Crect x='381' y='35' width='1' height='1' fill='%233d1f22'/%3E%3Crect x='382' y='35' width='1' height='1' fill='%231c1310'/%3E%3Crect x='371' y='36' width='3' height='1' fill='%231c1310'/%3E%3Crect x='380' y='36' width='3' height='1' fill='%231c1310'/%3E%3C/svg%3E");
   animation: dragon-swoop 2.4s ease-in-out infinite, nyan-frames 0.6s steps(6) infinite;
@@ -7544,21 +7019,14 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-nav { displa
   50%      { transform: translateY(3.6px); }
 }
 
-/* 6-frame sprite sheet, 68x42 per frame in a 408x42 viewBox (61.2x37.8
-   render box): one step per frame, matching background-size 367.2px = 6 x
-   61.2px. Shared by every .nyan-sprite animal. */
 @keyframes nyan-frames {
   to { background-position-x: -367.2px; }
 }
 
-/* 16x21 tile, two 8-wide segments offset by one stripe height; steps(2)
-   snaps between the two so the stripes read as an offset wave. */
 @keyframes rainbow-wave {
   to { background-position-x: -25.92px; }
 }
 
-/* background-image does not interpolate: each keyframe holds its value
-   until the next one, giving a discrete twinkle rather than a fade. */
 @keyframes sparkle-twinkle {
   0%   { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 21' shape-rendering='crispEdges'%3E%3Crect x='4' y='4' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='14' y='9' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='13' y='9' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='15' y='9' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='14' y='8' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='14' y='10' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='7' y='15' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='7' y='16' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='7' y='17' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='8' y='15' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='8' y='16' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='8' y='17' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='9' y='15' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='9' y='16' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='9' y='17' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='6' y='16' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='10' y='16' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='8' y='14' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='8' y='18' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='19' y='3' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='18' y='3' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='20' y='3' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='19' y='2' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='19' y='4' width='1' height='1' fill='%23c084fc'/%3E%3C/svg%3E"), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 21' shape-rendering='crispEdges'%3E%3Crect x='3' y='3' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='3' y='4' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='3' y='5' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='4' y='3' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='4' y='4' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='4' y='5' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='5' y='3' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='5' y='4' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='5' y='5' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='2' y='4' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='6' y='4' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='4' y='2' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='4' y='6' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='14' y='9' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='13' y='9' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='15' y='9' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='14' y='8' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='14' y='10' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='8' y='16' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='19' y='3' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='18' y='3' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='20' y='3' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='19' y='2' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='19' y='4' width='1' height='1' fill='%23c084fc'/%3E%3C/svg%3E"); }
   25%  { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 21' shape-rendering='crispEdges'%3E%3Crect x='4' y='4' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='3' y='4' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='5' y='4' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='4' y='3' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='4' y='5' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='13' y='8' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='13' y='9' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='13' y='10' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='14' y='8' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='14' y='9' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='14' y='10' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='15' y='8' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='15' y='9' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='15' y='10' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='12' y='9' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='16' y='9' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='14' y='7' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='14' y='11' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='8' y='16' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='7' y='16' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='9' y='16' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='8' y='15' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='8' y='17' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='19' y='3' width='1' height='1' fill='%23c084fc'/%3E%3C/svg%3E"), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 21' shape-rendering='crispEdges'%3E%3Crect x='4' y='4' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='3' y='4' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='5' y='4' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='4' y='3' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='4' y='5' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='14' y='9' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='8' y='16' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='7' y='16' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='9' y='16' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='8' y='15' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='8' y='17' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='18' y='2' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='18' y='3' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='18' y='4' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='19' y='2' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='19' y='3' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='19' y='4' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='20' y='2' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='20' y='3' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='20' y='4' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='17' y='3' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='21' y='3' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='19' y='1' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='19' y='5' width='1' height='1' fill='%23c084fc'/%3E%3C/svg%3E"); }
@@ -7567,19 +7035,11 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-nav { displa
   100% { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 21' shape-rendering='crispEdges'%3E%3Crect x='4' y='4' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='14' y='9' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='13' y='9' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='15' y='9' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='14' y='8' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='14' y='10' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='7' y='15' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='7' y='16' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='7' y='17' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='8' y='15' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='8' y='16' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='8' y='17' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='9' y='15' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='9' y='16' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='9' y='17' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='6' y='16' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='10' y='16' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='8' y='14' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='8' y='18' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='19' y='3' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='18' y='3' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='20' y='3' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='19' y='2' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='19' y='4' width='1' height='1' fill='%23c084fc'/%3E%3C/svg%3E"), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 21' shape-rendering='crispEdges'%3E%3Crect x='3' y='3' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='3' y='4' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='3' y='5' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='4' y='3' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='4' y='4' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='4' y='5' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='5' y='3' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='5' y='4' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='5' y='5' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='2' y='4' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='6' y='4' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='4' y='2' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='4' y='6' width='1' height='1' fill='%23ff9ccb'/%3E%3Crect x='14' y='9' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='13' y='9' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='15' y='9' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='14' y='8' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='14' y='10' width='1' height='1' fill='%23f5c542'/%3E%3Crect x='8' y='16' width='1' height='1' fill='%237dd3fc'/%3E%3Crect x='19' y='3' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='18' y='3' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='20' y='3' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='19' y='2' width='1' height='1' fill='%23c084fc'/%3E%3Crect x='19' y='4' width='1' height='1' fill='%23c084fc'/%3E%3C/svg%3E"); }
 }
 
-/* layer 1 travels 77.76px (two 38.88px tiles), layer 2 travels 116.64px
-   (three tiles, staying two tiles ahead of layer 1); both are multiples of
-   the 38.88px tile width, so the repeating backgrounds loop seamlessly at
-   different speeds */
 @keyframes sparkle-drift {
   from { background-position: 0 0, 19.44px 8.91px; }
   to   { background-position: -77.76px 0, -97.2px 8.91px; }
 }
 
-/* Motion keyframes for the 8 additional animals: each replaces nyan-bob
-   entirely on its sprite rule (see comment above the sprite rules) rather
-   than combining with it, since two transform-animating keyframes on one
-   element can't compose; only the last one listed wins. */
 @keyframes dragon-swoop {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(6px); }
@@ -7632,25 +7092,16 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-nav { displa
   50% { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 21' shape-rendering='crispEdges'%3E%3Crect x='13' y='2' width='1' height='1' fill='%23c9852a'/%3E%3Crect x='13' y='3' width='1' height='1' fill='%23f2b23d'/%3E%3Crect x='11' y='4' width='1' height='1' fill='%23c9852a'/%3E%3Crect x='12' y='4' width='1' height='1' fill='%23f2b23d'/%3E%3Crect x='13' y='4' width='1' height='1' fill='%23fff2b0'/%3E%3Crect x='14' y='4' width='1' height='1' fill='%23f2b23d'/%3E%3Crect x='15' y='4' width='1' height='1' fill='%23c9852a'/%3E%3Crect x='6' y='5' width='1' height='1' fill='%23f2b23d'/%3E%3Crect x='13' y='5' width='1' height='1' fill='%23f2b23d'/%3E%3Crect x='21' y='5' width='1' height='1' fill='%23fff2b0'/%3E%3Crect x='5' y='6' width='1' height='1' fill='%23f2b23d'/%3E%3Crect x='6' y='6' width='1' height='1' fill='%23fff2b0'/%3E%3Crect x='7' y='6' width='1' height='1' fill='%23f2b23d'/%3E%3Crect x='13' y='6' width='1' height='1' fill='%23c9852a'/%3E%3Crect x='6' y='7' width='1' height='1' fill='%23f2b23d'/%3E%3Crect x='23' y='9' width='1' height='1' fill='%23f2b23d'/%3E%3Crect x='8' y='11' width='1' height='1' fill='%237b4fae'/%3E%3Crect x='17' y='11' width='1' height='2' fill='%23f2b23d'/%3E%3Crect x='15' y='12' width='2' height='1' fill='%23f2b23d'/%3E%3Crect x='18' y='12' width='2' height='1' fill='%23f2b23d'/%3E%3Crect x='16' y='13' width='1' height='2' fill='%23f2b23d'/%3E%3Crect x='17' y='13' width='1' height='1' fill='%23fff2b0'/%3E%3Crect x='18' y='13' width='1' height='2' fill='%23f2b23d'/%3E%3Crect x='4' y='15' width='1' height='1' fill='%23f2b23d'/%3E%3Crect x='15' y='15' width='1' height='1' fill='%237b4fae'/%3E%3Crect x='19' y='15' width='1' height='1' fill='%237b4fae'/%3E%3Crect x='3' y='16' width='1' height='1' fill='%23f2b23d'/%3E%3Crect x='4' y='16' width='1' height='1' fill='%23fff2b0'/%3E%3Crect x='5' y='16' width='1' height='1' fill='%23f2b23d'/%3E%3Crect x='4' y='17' width='1' height='1' fill='%23f2b23d'/%3E%3Crect x='10' y='18' width='1' height='1' fill='%237b4fae'/%3E%3Crect x='22' y='18' width='1' height='1' fill='%23fff2b0'/%3E%3C/svg%3E"); }
 }
 
-/* Shared by every single-layer trail: x-travel is two 38.88px tiles so the
-   repeating background loops seamlessly; per-trail speed comes from each
-   rule's animation duration, not a separate keyframe. */
 @keyframes trail-drift {
   from { background-position: 0 0; }
   to { background-position: -77.76px 0; }
 }
 
-/* bubbles alone also creep y by one 34.02px tile height for a slight
-   upward drift, so they keep their own keyframe. */
 @keyframes bubbles-drift {
   from { background-position: 0 0; }
   to { background-position: -77.76px -34.02px; }
 }
 
-/* Not covered by the global reduced-motion rule (style.css top): that rule
-   ends the animation in 0.01ms, leaving a static cat parked at its base
-   position. Decorative element must vanish entirely. public/nyan-cat.js
-   also no-ops on this same media query, so this is belt and suspenders. */
 @media (prefers-reduced-motion: reduce) {
   :root[data-theme="unicorn"] .nyan-flight {
     display: none;

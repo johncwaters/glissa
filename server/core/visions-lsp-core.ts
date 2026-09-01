@@ -57,7 +57,7 @@ function readNeededBodyBytes(state: LspParserState): number | LspParseError | nu
   const headerText = state.buffer.subarray(0, headerEndAt).toString('ascii');
   state.buffer = state.buffer.subarray(headerEndAt + HEADER_END.length);
   const contentLength = contentLengthFromHeader(headerText);
-  // Nothing after a headerless block can be framed, and an editor's own LSP client does not send one.
+
   if (contentLength === null) {
     state.buffer = Buffer.alloc(0);
     return { parseError: true, reason: 'missing-content-length', raw: headerText };

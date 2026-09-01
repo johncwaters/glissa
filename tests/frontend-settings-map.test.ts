@@ -23,7 +23,6 @@ function specAllows(spec: MillBlockSpec, parts: readonly string[]): boolean {
   return specAllows(block, remaining);
 }
 
-// DEFAULT_CONFIG is a literal object, so a dotted path is walked as data rather than by key type.
 const DEFAULT_CONFIG_RECORD: Record<string, unknown> = DEFAULT_CONFIG;
 const MILL_SPECS_BY_KEY: Record<string, MillBlockSpec> = { memory: MEMORY_SPEC, millMetrics: MILL_METRICS_SPEC, packDistiller: PACK_DISTILLER_SPEC, ingest: INGEST_SPEC };
 

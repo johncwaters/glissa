@@ -1,9 +1,3 @@
-/*
- * The scaffolding every ephemeral lane (pr-review, posthog, pack-distill, visions) shares: the map
- * registration, the wait-for-exit, the hard-timeout race, and the file-borne verdict reader. Each lane
- * keeps its own prompts, verdict sets and fallback wording; only the mechanics live here.
- */
-
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,24 +6,14 @@ import type { Session } from '../session/sessions.ts';
 import { awaitBounded } from './core/shutdown-core.ts';
 import { firstLine } from './core/text-core.ts';
 
-// The fixed name inside a job's private result directory: the directory is already unique, so the file
-// inside it carries no identity and never has to be told apart from anything.
 const JOB_RESULT_FILENAME = 'result.json';
 
-// How long a timeout-abort waits for the killed PTY tree to actually die before giving up on it. Same
-// order as the lifecycle's own reap bound: long enough for a taskkill or a signalled group to settle,
-// short enough that a child which resists kill cannot pin a lane's concurrency slot.
 const ABORT_REAP_CAP_MS = 3000;
 
 interface SpawnGate {
   run: (task: () => unknown) => Promise<unknown>;
 }
 
-/**
- * Wait for a seeded session to exit, honoring an AbortSignal (a lane's hard timeout) by destroying it.
- * Rejects only when the Session itself errors. With no spawn gate the start still runs off a microtask,
- * so a synchronous throw reaches the same rejection path.
- */
 async function awaitSessionExit(sess: Session, { signal = null, spawnGate = null, reapCapMs = ABORT_REAP_CAP_MS }: {
   signal?: AbortSignal | null;
   spawnGate?: SpawnGate | null;
@@ -44,18 +28,8 @@ async function awaitSessionExit(sess: Session, { signal = null, spawnGate = null
       sess.on('exit', done);
       sess.on('error', fail);
       if (signal) {
-        /*
-         * A timeout-abort must not resolve before the PTY tree it just killed is REAPED. The caller's
-         * finally block discards the job's worktree, and a survivor still inside it is a problem on
-         * either platform: on Windows a claude/cmd/conhost holding a handle makes the discard fail
-         * outright, leaking the checkout and the branch, while on POSIX it can still be writing into a
-         * tree being removed under it. destroy() starts the kill (taskkill /T /F on Windows, SIGKILL to
-         * the process group plus a liveness poll on POSIX) and parks either one on `_killReap`
-         * (sessions.ts), so that is what is awaited here - bounded, because a child that resists kill
-         * must cost a delay, never the lane's concurrency slot.
-         */
         onAbort = () => {
-          try { sess.destroy(); } catch { /* already gone */ }
+          try { sess.destroy(); } catch {  }
           if (!sess._killReap) { done(); return; }
           void awaitBounded([sess._killReap], { capMs: reapCapMs }).then(done, done);
         };
@@ -68,28 +42,20 @@ async function awaitSessionExit(sess: Session, { signal = null, spawnGate = null
       started.catch(fail);
     });
   } finally {
-    if (signal && onAbort) { try { signal.removeEventListener('abort', onAbort); } catch { /* noop */ } }
+    if (signal && onAbort) { try { signal.removeEventListener('abort', onAbort); } catch {  } }
   }
 }
 
-/**
- * Race `start` against a hard timeout so a hung `claude -p` can never pin a lane's concurrency slot.
- * On timeout the signal is aborted (the lane's spawn destroys the session) and `onTimeout()` is the
- * verdict; `onEmpty()` covers a start that resolved nothing at all.
- */
 async function raceWithAbort<T>({
   start, timeoutMs, onTimeout, onEmpty,
   setTimeoutFn = (fn, ms) => setTimeout(fn, ms), clearTimeoutFn = clearTimeout,
   onPending = null,
 }: {
-  // A start that resolves nothing (an aborted spawn) falls through to onEmpty, so the outcome type is
-  // the one the two fallbacks name.
   start: (signal: AbortSignal) => Promise<T | null | undefined>;
   timeoutMs: number;
   onTimeout: () => T;
   onEmpty: () => T;
-  // The narrow call shape rather than `typeof setTimeout`, so a test can hand this deadline a timer it
-  // fires by hand (the global's `__promisify__` member makes that type unimplementable).
+
   setTimeoutFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
   clearTimeoutFn?: (handle: NodeJS.Timeout) => void;
   onPending?: ((promise: Promise<unknown>) => void) | null;
@@ -104,28 +70,13 @@ async function raceWithAbort<T>({
     if (handle && typeof handle.unref === 'function') handle.unref();
   });
   const started = start(controller.signal);
-  /*
-   * A timeout resolves the VERDICT the moment it fires, which is the point: a hung job must free its
-   * concurrency slot at once, not one reap later. But the aborted session is still being killed for a
-   * moment afterwards, so a caller with cleanup that cannot run under a live process - discarding the
-   * job's worktree - takes the start promise here and drains it first, with drainPending below.
-   */
+
   if (typeof onPending === 'function') onPending(started);
   const result = await Promise.race([started, timeout]);
   if (handle) clearTimeoutFn(handle);
   return result || onEmpty();
 }
 
-/**
- * Wait for an aborted job's start promise to settle before cleaning up under it. awaitSessionExit is
- * what makes that mean "the killed PTY tree has been reaped", which is what keeps a survivor out of the
- * worktree the caller is about to discard: a held handle fails the discard outright on Windows, and a
- * process still writing into a tree being removed is no better on POSIX.
- *
- * Bounded on REAL timers, deliberately not a lane's injected timeout seam: that seam is a JOB deadline
- * a test drives by hand, so routing this through it would leave the drain waiting for a callback
- * nobody fires. The bound also has to outlast the reap wait inside awaitSessionExit.
- */
 function drainPending(pending: Promise<unknown> | null | undefined, { capMs = ABORT_REAP_CAP_MS + 500 }: {
   capMs?: number;
 } = {}): Promise<void> {
@@ -138,25 +89,13 @@ interface JobResultFile {
   cleanup(): Promise<void>;
 }
 
-/*
- * A private directory for one dispatched job's result file. The agent is TOLD this path, so a
- * predictable name directly under the system temp dir is a symlink-plant target wherever that dir is
- * shared: on a multi-user POSIX host another account can pre-create the path and redirect the write.
- * mkdtemp mints a fresh 0700 directory nobody else can have claimed, and the informative name that used
- * to be the filename rides its prefix instead.
- *
- * cleanup() must run on EVERY exit path of the job, and it is the ONLY way to remove what this minted:
- * the closure is what carries ownership of the directory. A helper taking the path back and deciding
- * from its shape whether the parent is ours would recursively delete any caller-supplied directory
- * whose file happened to be named result.json, which is a trap nobody reading the call site would see.
- */
 async function createJobResultFile(prefix: unknown): Promise<JobResultFile> {
   const safePrefix = String(prefix).replace(/[^\w.-]+/g, '-');
   const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), `${safePrefix}-`));
   return {
     path: path.join(dir, JOB_RESULT_FILENAME),
     async cleanup() {
-      try { await fs.promises.rm(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+      try { await fs.promises.rm(dir, { recursive: true, force: true }); } catch {  }
     },
   };
 }
@@ -173,11 +112,6 @@ interface ResultFileOutcome {
 type ResultDecorator = (parsed: Record<string, unknown>) => Record<string, unknown>;
 type ResultValidator = (parsed: Record<string, unknown>) => { ok?: boolean; verdict: string; summary: string } | null | undefined;
 
-/**
- * Read the verdict a dispatched session wrote to its result file. Missing or invalid means ERROR, so a
- * crashed or confused session never masquerades as a finished job. The file is removed either way.
- * `decorate` adds the per-lane extra fields from the same parsed object.
- */
 function readResultFile(
   resultPath: string,
   allowed: Set<string> | null,
@@ -225,22 +159,12 @@ function readResultFile(
   } catch {
     return failedRead('missing', 'no result file');
   } finally {
-    try { fs.rmSync(resultPath, { force: true }); } catch { /* best-effort */ }
+    try { fs.rmSync(resultPath, { force: true }); } catch {  }
   }
 }
 
-/**
- * The lane ledger's attribution callback. Every ephemeral lane forwards its own copy here, so the
- * signature lives once rather than being re-guessed per lane.
- */
 type RecordLane = (sessionId: string, lane: string, vendor?: string) => void;
 
-// Register an ephemeral (never persisted) Session in its lane's map with guaranteed cleanup:
-// removal + data-client close on 'exit', and a wrapped destroy() because callers'
-// removeAllListeners can pre-empt the 'exit' cleanup (every orchestrator/poller finish path
-// calls destroy()). logPrefix names the lane in error logs (e.g. 'pr-review', 'posthog').
-// The members registration touches, stated structurally rather than as a slice of Session: every lane
-// hands a real Session, while a suite pinning the registration itself owes only this much.
 interface RegisterableSession {
   on(event: 'claude-session-id', listener: (payload: { id: string; vendor?: string }) => void): unknown;
   on(event: 'error', listener: (error: Error) => void): unknown;
@@ -258,15 +182,8 @@ function registerEphemeralSession({ map, id, sess, closeSessionDataClients, logP
   recordLane?: RecordLane | null;
 }): void {
   map.set(id, sess);
-  /*
-   * Lane attribution. Every ephemeral lane registers here and already names itself via logPrefix, so this is
-   * the one place that knows both the lane and the Claude session id it spawned. Hooks do fire for these
-   * headless `-p` sessions (live-verified: UserPromptSubmit, Stop and SessionEnd all arrive carrying
-   * session_id), which is what makes the lanes attributable at all.
-   */
+
   if (typeof recordLane === 'function') {
-    // Every ephemeral lane spawns Claude today, so vendor is claude; passed through rather than assumed so
-    // a future non-Claude lane records under its own namespace.
     sess.on('claude-session-id', ({ id: claudeSessionId, vendor }) => recordLane(claudeSessionId, logPrefix, vendor));
   }
   sess.on('error', (err) => console.error(`[${logPrefix} ${name}] error: ${err.message}`));

@@ -1,10 +1,3 @@
-/*
- * The ingest lane IO shell (docs/plan-ingestion.md, M6), driven on injected timers with no sockets and
- * no real sessions: publish never broadcasting on its own, the 1s batch with its 50-event frame and
- * overflow count, the connect-time snapshot, the digest accessor, the session tap over a fake Session's
- * public EventEmitter surface, and a stop() that cancels every timer and detaches every tap.
- */
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
@@ -18,7 +11,6 @@ import { TRUNCATION_NOTE } from '../server/core/ingest-terminal-core.ts';
 
 const NOW = 1700000000000;
 
-// The frames this suite reads off the broadcast seam, which answers the stringly control-message shape.
 interface IngestFrame {
   type: string;
   overflow: number;
@@ -44,8 +36,6 @@ function frameOf(message: Record<string, unknown> | undefined): IngestFrame {
   };
 }
 
-// A Session as the tap sees it: an EventEmitter with an id and a cwd, nothing else. The tap must never
-// need more than the public surface, because session/sessions.ts is not modified by this milestone.
 class FakeSession extends EventEmitter {
   id: string;
 
@@ -73,8 +63,6 @@ interface FakeTimers {
   readonly timeoutCount: number;
 }
 
-// Timers the suite fires by hand. Each handle is a REAL unref'd timer that never runs a callback of its
-// own, because the lane's seams are typed against NodeJS.Timeout; the callback rides a side map.
 function fakeTimers(): FakeTimers {
   const intervals = new Map<NodeJS.Timeout, () => void>();
   const timeouts = new Map<NodeJS.Timeout, () => void>();
@@ -139,7 +127,6 @@ function drivenLane(
   return { lane, timers, broadcasts, warnings, notes, clock };
 }
 
-// attachSessionTap answers null when the terminal source is off; every case here has it on.
 function tapOf(tap: ReturnType<ReturnType<typeof createIngestLane>['attachSessionTap']>) {
   if (!tap) throw new Error('the terminal source is off, so nothing was tapped');
   return tap;
@@ -149,17 +136,14 @@ function commit(summary: string) {
   return { source: 'git', kind: 'commit', summary, scope: { root: '/repo' } };
 }
 
-// --- Lane logging ---------------------------------------------------------
-
 test('the lane names its enabled sources at start and says starting, not started', () => {
   const { notes } = drivenLane({ enabled: true, sources: { git: { enabled: true }, terminal: { enabled: true } } });
   assert.ok(notes.some((line) => line === '[ingest] lane started: terminal, git'), `saw ${JSON.stringify(notes)}`);
-  // start() is async, so a line claiming "started" would outrun any failure it could report.
+
   assert.ok(notes.some((line) => line === '[ingest] starting the git source'));
   assert.equal(notes.some((line) => line.includes('source started')), false);
 });
 
-// Counts and seqs, never an event summary: a summary is captured terminal output or command text.
 test('the batch-flush line is debug-gated and carries counts rather than summaries', () => {
   const quiet = drivenLane({ enabled: true, sources: { git: { enabled: true } } });
   quiet.lane.publish(commit('a secret command nobody should read in a log'));
@@ -184,8 +168,6 @@ test('a debug getter that throws reads as debug off rather than failing the batc
   assert.equal(broadcasts.length, 1, 'the frame still went out');
   assert.deepEqual(warnings, []);
 });
-
-// --- Publish and batching -------------------------------------------------
 
 test('publish stores the event and broadcasts nothing on its own', () => {
   const { lane, broadcasts } = drivenLane({ enabled: true, sources: { git: { enabled: true } } });
@@ -240,8 +222,6 @@ test('a broadcast that throws costs a warning, not the lane', () => {
   lane.publish(commit('two'));
   assert.equal(lane.recentEvents().length, 2);
 });
-
-// --- The activity poke (docs/plan-ingestion.md, M7.5) ---------------------
 
 test('a batch that carried events tells the consumer once, and an empty interval tells it nothing', () => {
   const pokes: unknown[] = [];
@@ -311,7 +291,6 @@ test('latestSeq advances only on a stored event, which is what movement means', 
   lane.publish({ source: 'nowhere', kind: 'commit', summary: 'dropped' });
   assert.equal(lane.latestSeq(), afterFirst, 'an unknown source is not an event');
 
-  // Rejected AFTER the source check, inside normalization: an undeclared kind, and an empty summary.
   lane.publish({ source: 'git', kind: 'not-a-kind', summary: 'dropped' });
   lane.publish({ source: 'git', kind: 'commit', summary: '   ' });
   assert.equal(lane.latestSeq(), afterFirst, 'a seq burnt on a rejected push would read as movement');
@@ -320,7 +299,6 @@ test('latestSeq advances only on a stored event, which is what movement means', 
   lane.publish(commit('two'));
   assert.ok(lane.latestSeq() > afterFirst);
 
-  // Reading the digest ages its relative times; the movement signal must not move with them.
   const readAgain = lane.latestSeq();
   lane.buildDigest({ now: NOW + 600000 });
   assert.equal(lane.latestSeq(), readAgain);
@@ -332,8 +310,6 @@ test('a full ring keeps its seq, so eviction is not mistaken for the machine goi
   assert.equal(lane.recentEvents().length, 3);
   assert.equal(lane.latestSeq(), 20);
 });
-
-// --- Snapshot -------------------------------------------------------------
 
 test('the snapshot is the current rings, newest first, and names the enabled sources', () => {
   const { lane, clock } = drivenLane({
@@ -358,8 +334,6 @@ test('the snapshot is bounded, so a full ring cannot become one enormous connect
   assert.equal(frameOf(lane.snapshotMessage()).events.length, 10);
 });
 
-// --- Digest ---------------------------------------------------------------
-
 test('buildDigest reads the rings synchronously and reports nothing when they are empty', () => {
   const { lane } = drivenLane({ enabled: true, sources: { git: { enabled: true } } });
   assert.equal(lane.buildDigest({ now: NOW }), '');
@@ -367,8 +341,6 @@ test('buildDigest reads the rings synchronously and reports nothing when they ar
   const digest = lane.buildDigest({ now: NOW });
   assert.ok(digest.includes('- git 0s ago: fix the gate'));
 });
-
-// --- Session tap ----------------------------------------------------------
 
 test('a tapped session flushes its coalesced output into the rings on the flush timer', () => {
   const { lane, timers } = drivenLane();
@@ -401,7 +373,7 @@ test('a secret straddling the summary cut is scrubbed end to end, through the ta
   const { lane, timers } = drivenLane();
   const sess = new FakeSession();
   lane.attachSessionTap(sess);
-  // The offset that put the 400-char summary tail INSIDE the assignment, past the name the scrub needs.
+
   sess.emit('data', `${'x'.repeat(200)} api_key=sk-live-DEADBEEFCAFEBABE${'z'.repeat(376)}\n`);
   timers.runTimeouts();
   const [event] = lane.recentEvents();
@@ -452,12 +424,10 @@ test('a PTY exit flushes what the dead process left but KEEPS the tap, because t
   sess.emit('data', 'output before the exit\n');
   sess.emit('exit', { exitCode: 0 });
 
-  // The exit IS the flush boundary: the dead PTY's last bytes go out without waiting the window.
   assert.deepEqual(lane.recentEvents().map((event) => event.summary), ['output before the exit']);
   assert.equal(lane.tapCount, 1, 'restart, force-restart and start-on-dormant all reuse this object');
   assert.equal(sess.listenerCount('data'), 1);
 
-  // A restart on the same object: wireSessionEvents does NOT run again, so this is the only tap it gets.
   sess.emit('data', 'output after the restart\n');
   timers.runTimeouts();
   assert.deepEqual(
@@ -482,8 +452,6 @@ test('a recreated session under the same project id gets a fresh tap, and the st
   const oldSess = new FakeSession('p1');
   lane.attachSessionTap(oldSess);
 
-  // Exactly backend.js _modifyChangedSessions: destroy() removes every listener synchronously and emits
-  // no 'exit', then a NEW Session is built under the same stable project id and wired.
   oldSess.removeAllListeners();
   const newSess = new FakeSession('p1');
   const tap = tapOf(lane.attachSessionTap(newSess));
@@ -516,7 +484,7 @@ test('detach tolerates the listeners already being gone, because destroy() remov
   const { lane } = drivenLane();
   const sess = new FakeSession();
   const tap = tapOf(lane.attachSessionTap(sess));
-  // What Session.destroy() does before anything gets a chance to detach politely.
+
   sess.removeAllListeners();
   tap.detach();
   tap.detach();
@@ -532,8 +500,6 @@ test('the terminal source off means no tap is ever attached and no data listener
   assert.equal(sess.listenerCount('data'), 0);
   assert.equal(lane.tapCount, 0);
 });
-
-// --- Stop -----------------------------------------------------------------
 
 test('stop cancels the batch timer, detaches every tap, and refuses later publishes', () => {
   const { lane, timers, broadcasts } = drivenLane();
@@ -575,7 +541,7 @@ test('the wire bounds are the plan values, and a caller can read them rather tha
   assert.equal(BATCH_INTERVAL_MS, 1000, 'one activity frame per second at most');
   assert.equal(MAX_EVENTS_PER_FRAME, 50);
   assert.equal(SNAPSHOT_EVENT_LIMIT, 100);
-  // The defaults are what a lane built with no timer overrides actually uses.
+
   const { lane, timers, broadcasts } = drivenLane(
     { enabled: true, sources: { git: { enabled: true, maxEntries: 500 } } },
     { batchIntervalMs: BATCH_INTERVAL_MS, maxEventsPerFrame: MAX_EVENTS_PER_FRAME },

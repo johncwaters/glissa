@@ -1,7 +1,3 @@
-// Control-WS dispatch for the update-settings usage extension: validates the optional nested usage
-// object (server/control-handlers.ts validateUsage), persists a sanitized copy, and echoes the result
-// via settings-updated. control-settings.test.ts covers the prReview/posthog pair the same way.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -65,8 +61,6 @@ function usageBlock(cfg: GlissaConfig): Record<string, unknown> {
   return usage;
 }
 
-// --- happy path ---
-
 test('a full valid usage block persists and echoes in settings-updated', () => {
   const usage = {
     enabled: true,
@@ -92,8 +86,6 @@ test('a partial usage block persists only the keys it carried', () => {
   assert.deepEqual(h.cfg.usage, { costMode: 'display' });
 });
 
-// --- an untouched tab never materializes the block ---
-
 test('a save that omits usage never writes the block', () => {
   const h = harness(baseCfg());
   h.send({ type: 'update-settings', settings: { repoRoots: [] } });
@@ -107,8 +99,6 @@ test('an explicitly null usage is valid and still writes nothing', () => {
   assert.equal(h.cfg.usage, undefined);
 });
 
-// --- type rejection: a wrong type is refused, never coerced ---
-
 test('a non-object usage is rejected with settings-error', () => {
   for (const value of ['nope', 42, true, ['a']]) {
     const h = sendUsage(value);
@@ -119,8 +109,6 @@ test('a non-object usage is rejected with settings-error', () => {
   }
 });
 
-// A usage key that is absent from USAGE_BOOLEAN_KEYS validates fine and is then silently dropped by
-// sanitizeUsage, so the round trip is what proves the key is actually wired.
 test('rtkSavings round trips through validate and sanitize', () => {
   for (const rtkSavings of [true, false]) {
     const h = sendUsage({ rtkSavings });
@@ -140,8 +128,6 @@ test('a non-boolean enabled, fetchPricing or rtkSavings is rejected', () => {
     assert.equal(h.cfg.usage, undefined);
   }
 });
-
-// --- integer ranges ---
 
 test('a non-integer or out-of-range interval/retention/block value is rejected', () => {
   const cases: [string, unknown][] = [
@@ -169,8 +155,6 @@ test('the range boundaries themselves are accepted', () => {
   assert.deepEqual(h.cfg.usage, usage);
 });
 
-// --- costMode enum ---
-
 test('an unknown costMode is rejected and the three known ones are accepted', () => {
   const h = sendUsage({ costMode: 'estimate' });
   const err = errorFrom(h);
@@ -183,8 +167,6 @@ test('an unknown costMode is rejected and the three known ones are accepted', ()
     assert.deepEqual(ok.cfg.usage, { costMode });
   }
 });
-
-// --- extraProjectsDirs: absolute paths only ---
 
 test('a relative extraProjectsDirs entry is rejected (it would resolve against the server cwd)', () => {
   const h = sendUsage({ extraProjectsDirs: ['some/relative/claude'] });
@@ -215,14 +197,10 @@ test('an absolute extraProjectsDirs entry is trimmed on the way to disk', () => 
   assert.deepEqual(h.cfg.usage, { extraProjectsDirs: [absolute] });
 });
 
-// --- sanitize drops what the dialog echoes back ---
-
 test('unknown usage keys are dropped rather than persisted', () => {
   const h = sendUsage({ enabled: true, pricingSource: 'snapshot', scanStats: { files: 12 }, dirs: ['C:/x'] });
   assert.deepEqual(h.cfg.usage, { enabled: true }, 'only known keys survive');
 });
-
-// --- request-usage-report dispatch ---
 
 test('request-usage-report without a wired lane replies an error, never a silent drop', async () => {
   const h = harness(baseCfg());
@@ -254,8 +232,6 @@ test('request-usage-report passes force through and drops an out-of-range days',
   assert.equal(h.sent.filter((m) => m.type === 'usage-report').length, 3, 'every request is answered');
 });
 
-// --- connect replay ---
-
 test('a connecting client gets the live usage-sessions and the cached usage-report', () => {
   const h = harness(baseCfg(), {
     getUsageSessions: () => ({ type: 'usage-sessions', ts: 1, pricingSource: 'snapshot', sessions: [] }),
@@ -272,10 +248,6 @@ test('a caller that wires no usage accessors replays no usage messages', () => {
   assert.equal(h.sent.filter((m) => m.type.startsWith('usage-')).length, 0, 'an older caller sees nothing new on the wire');
   assert.ok(h.sent.some((m) => m.type === 'snapshot'), 'the pre-existing connect frames still go out');
 });
-
-// --- budgets ---
-// Null and absent both mean "no ceiling". A zero or negative budget is rejected rather than coerced,
-// because it would put every budget surface permanently over its limit.
 
 test('a valid budget block round trips through the wire', () => {
   const h = sendUsage({ budget: { dailyUsd: 16, monthlyUsd: 400.5 } });
@@ -297,9 +269,6 @@ test('a partial budget block persists only the field it carried', () => {
   assert.deepEqual(usageBlock(h.cfg).budget, { dailyUsd: 5 });
 });
 
-// NaN and Infinity are deliberately absent from this list: JSON.stringify turns them into null on the way
-// in, which is the valid "no ceiling" value. The validator's finite check therefore guards the hand-edited
-// config.json path, not this one.
 test('a zero, negative or non-numeric budget is rejected', () => {
   for (const value of [0, -1, '16', true, {}]) {
     const h = sendUsage({ budget: { dailyUsd: value } });

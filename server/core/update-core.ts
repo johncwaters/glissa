@@ -1,7 +1,3 @@
-// Pure decisions behind the self-update check. The freshness signal is the latest GitHub release tag.
-// Everything here is IO-free and clock-free (the caller passes `now`), so the shell in
-// server/update-check.js stays a thin wrapper around these rules.
-
 const REPO_SLUG = 'johncwaters/glissa';
 const SHA_RE = /^[0-9a-f]{40}$/;
 const NPM_GLOBAL_COMMAND = `npm install -g github:${REPO_SLUG} --allow-git=root`;
@@ -17,9 +13,6 @@ export interface ReleaseTag {
   sha: string | null;
 }
 
-// A commit id, lowercased, or null for anything that is not a full 40-hex sha. Every sha entering the
-// comparison goes through here, so a short sha, a ref name, or a truncated read can never compare equal
-// or unequal by accident.
 function normalizeSha(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const sha = value.trim().toLowerCase();
@@ -27,16 +20,12 @@ function normalizeSha(value: unknown): string | null {
   return sha;
 }
 
-// First 7 chars of a known sha, for display. Empty string when there is no sha to shorten.
 function shortSha(value: unknown): string {
   const sha = normalizeSha(value);
   if (!sha) return '';
   return sha.slice(0, SHORT_SHA_LENGTH);
 }
 
-// The commit out of an npm `resolved` spec, e.g.
-// 'git+https://github.com/johncwaters/glissa.git#<40hex>'. Null when there is no fragment or the
-// fragment is not a sha (a tag or branch spec resolves that way).
 function parseResolvedSha(resolved: unknown): string | null {
   if (typeof resolved !== 'string') return null;
   const fragmentAt = resolved.lastIndexOf('#');
@@ -78,10 +67,6 @@ function parseLsRemoteTags(stdout: unknown): { version: string; sha: string } | 
   return latest;
 }
 
-// How this copy of Glissa was installed, and the commit it was built from where that is knowable from a
-// file alone. Precedence is by reliability: the hidden global lockfile records the exact commit npm
-// resolved, package.json `gitHead` is npm's own stamp on the packed tarball, and a `.git` directory means
-// a clone whose HEAD the shell reads with a git call.
 function decideInstallFlavor({ lockfileSha, gitHeadSha, hasGitDir }: {
   lockfileSha?: unknown;
   gitHeadSha?: unknown;
@@ -95,8 +80,6 @@ function decideInstallFlavor({ lockfileSha, gitHeadSha, hasGitDir }: {
   return { flavor: 'unknown', installedSha: null };
 }
 
-// The command that actually updates THIS install. An unknown flavor gets the clone command: it is the
-// safe guess for a checkout, and it fails loudly rather than reinstalling over the wrong thing.
 function buildUpdateCommand(flavor: unknown, latestVersion: unknown): string {
   if (flavor === 'npm-global' && textOrNull(latestVersion)) {
     return `npm install -g github:${REPO_SLUG}#v${latestVersion} --allow-git=root`;
@@ -124,9 +107,6 @@ function parseVersionTriple(version: unknown): number[] | null {
   return triple;
 }
 
-// Compare two semver-ish strings. Returns 1 if a > b, -1 if a < b, 0 if equal OR either side is
-// unparseable (fail-open: an unknown/odd version never reports as "newer", so it never triggers a
-// false update nudge).
 function compareSemver(a: unknown, b: unknown): number {
   const ta = parseVersionTriple(a);
   const tb = parseVersionTriple(b);
@@ -180,9 +160,6 @@ function decideUpdateStatus({ installedSha, latestSha: remoteSha, currentVersion
   };
 }
 
-// Whether a persisted check result may be reused instead of hitting the network. A missing, malformed,
-// or future-dated timestamp is never fresh, so the failure mode is one extra check rather than a stale
-// verdict that outlives its subject.
 function isCheckFresh(lastCheckAt: unknown, nowMs: unknown, ttlMs: unknown): boolean {
   if (!Number.isFinite(lastCheckAt)) return false;
   if (!Number.isFinite(nowMs)) return false;

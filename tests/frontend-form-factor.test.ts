@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-// form-factor-core is ESM (.mjs); dynamic-import it so the suite drives the shipped module.
 const importCore = () => import('../public/form-factor-core.ts');
 
 test('decideLayout: a coarse pointer on a narrow viewport is the phone layout', async () => {

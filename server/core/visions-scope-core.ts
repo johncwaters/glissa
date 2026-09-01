@@ -65,8 +65,6 @@ function isUriInProjects(uri: unknown, normalizedProjectPaths: string[] | null |
   return normalizedProjectPaths.some((scopePath) => isWithin(scopePath, uriPath));
 }
 
-// Nested roots resolve to the DEEPEST one that contains the path: a project checked out inside another
-// owns its own files, and the shallower root would otherwise claim every one of them.
 function deepestRootFor(normalizedPath: string, roots: unknown): string | null {
   let owner: string | null = null;
   for (const raw of Array.isArray(roots) ? roots : []) {

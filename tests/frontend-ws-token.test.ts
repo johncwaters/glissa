@@ -3,8 +3,6 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-// A unique query defeats the ESM module cache so tests do not share token state; the .ts pathname is
-// what Node keys its type stripping on, so the module still loads as source.
 let freshModuleCounter = 0;
 
 type WsTokenModule = typeof import('../public/ws-token.ts');

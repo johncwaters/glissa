@@ -7,7 +7,6 @@ import { INSTALL_FAILURE_COOLDOWN_MS } from '../server/core/rtk-install-core.ts'
 
 const SILENT = { log() {}, warn() {} };
 
-// The Promise executor runs synchronously, so settle is replaced before deferred() returns.
 function deferred(): { parked: Promise<void>; release: () => void } {
   let settle: () => void = () => {};
   const parked = new Promise<void>((resolve) => { settle = resolve; });

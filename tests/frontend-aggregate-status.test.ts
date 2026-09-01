@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 
 import type { AggregateCounts } from '../public/session-card/aggregate-core.ts';
 
-// aggregate-core is a browser module; dynamic-import it so the suite drives the shipped source.
 const importCore = () => import('../public/session-card/aggregate-core.ts');
 
 const C = (o: Partial<AggregateCounts>): AggregateCounts => ({ waiting: 0, failed: 0, done: 0, complete: 0, dormant: 0, total: 0, ...o });
@@ -25,7 +24,7 @@ test('computeAggregate: failed outranks complete', async () => {
 
 test('computeAggregate: an active mix raises no banner (running counter removed)', async () => {
   const { computeAggregate } = await importCore();
-  // 3 complete + 2 active, no waiting/failed: nothing actionable, so the banner is blank.
+
   const r = computeAggregate(C({ complete: 3, total: 5 }));
   assert.equal(r.text, '');
   assert.equal(r.severity, '');
@@ -48,7 +47,7 @@ test('computeAggregate: all dormant', async () => {
 
 test('computeAggregate: a partial active mix (some done/dormant) stays blank', async () => {
   const { computeAggregate } = await importCore();
-  // 2 active out of 4 (1 done, 1 dormant): not all-exited, not all-dormant, no alerts -> blank.
+
   const r = computeAggregate(C({ done: 1, dormant: 1, total: 4 }));
   assert.equal(r.text, '');
   assert.equal(r.severity, '');

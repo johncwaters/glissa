@@ -1,9 +1,3 @@
-/*
- * Pure decisions for the Visions lane's tier 1 silent fixes (docs/archive/plan-navigator-2.md, M6): which fixes may
- * be applied without asking, which of them a codeAction request is asking about, what the LSP payloads
- * carrying them look like, and when a stored fix set has gone stale. No IO, no clock, no timers.
- */
-
 import type { DocumentRange, SweepDiagnostic, SweepFix } from './visions-rules-core.ts';
 import { SOURCE, WARNING } from './visions-rules-core.ts';
 
@@ -16,11 +10,6 @@ export interface FixLogEntry {
   ts: number;
 }
 
-/*
- * The whole auto-safe judgement, in one place. A deleted repeated word is recoverable by undo and cannot
- * mean anything other than what it says; every other detector either guesses a position (unclosed-fence)
- * or would rewrite structure, so it stays pull-only and the carbon unit asks for it.
- */
 const AUTO_SAFE_CODES = Object.freeze(['repeated-word']);
 const QUICKFIX_KIND = 'quickfix';
 const DEFAULT_FIX_LOG_MAX = 20;
@@ -42,10 +31,6 @@ function autoSafeFixes(fixes: unknown): SweepFix[] {
   return listOf<SweepFix>(fixes).filter(isAutoSafeFix);
 }
 
-/*
- * A sweep reports either an array of diagnostics (every caller before M6, and any sweep a test injects)
- * or both halves. Reading it here keeps the wiring from having to know which kind it was handed.
- */
 function readSweepResult(result: unknown): { diagnostics: SweepDiagnostic[]; fixes: SweepFix[] } {
   if (Array.isArray(result)) return { diagnostics: result as SweepDiagnostic[], fixes: [] };
   if (!result || typeof result !== 'object') return { diagnostics: [], fixes: [] };
@@ -72,11 +57,6 @@ function readRange(range: DocumentRange | null | undefined): DocumentRange | nul
   return { start, end };
 }
 
-/*
- * Inclusive at both ends, so a bare cursor (a zero-width selection) sitting against a finding still
- * offers its fix. An editor asks with whatever the caret happens to be touching, and a quick fix the
- * carbon unit can see but not select would read as the lane being broken.
- */
 function rangesOverlap(left: DocumentRange | null | undefined, right: DocumentRange | null | undefined): boolean {
   const first = readRange(left);
   const second = readRange(right);
@@ -86,7 +66,6 @@ function rangesOverlap(left: DocumentRange | null | undefined, right: DocumentRa
   return true;
 }
 
-// An absent or malformed range means the editor asked about the whole document, never about nothing.
 function filterFixesByRange(fixes: unknown, range: DocumentRange | null | undefined): SweepFix[] {
   const requested = readRange(range);
   if (!requested) return listOf<SweepFix>(fixes);
@@ -99,7 +78,6 @@ function fixTitle(fix: SweepFix | null | undefined): string {
   return titled || (fix?.message ? String(fix.message) : 'Apply the Visions fix');
 }
 
-// The diagnostic the fix answers, rebuilt from what the fix carries so a code action can point at it.
 function diagnosticOfFix(fix: SweepFix | null | undefined) {
   return {
     range: fix?.range,
@@ -110,11 +88,6 @@ function diagnosticOfFix(fix: SweepFix | null | undefined) {
   };
 }
 
-/*
- * Versioned by construction, in both payload builders: an edit computed against a buffer the carbon unit
- * has since typed into is REFUSED by the editor rather than landing on moved text. A version that is not
- * a number becomes null, which is the LSP way of saying the client should not check.
- */
 function versionedIdentifier(uri: string | undefined, version: unknown) {
   const value = Number(version);
   return { uri, version: Number.isFinite(value) ? Math.floor(value) : null };
@@ -151,7 +124,6 @@ function buildApplyEditParams(fixes: unknown, { uri, version }: { uri?: string; 
   return { label: applyEditLabel(batch.length), edit: workspaceEdit(batch, { uri, version }) };
 }
 
-// A fix set describes exactly one buffer state, so it is served only against the hash it was swept from.
 function isFixSetFresh(entry: { textHash?: unknown } | null | undefined, textHash: unknown): boolean {
   if (!entry || typeof textHash !== 'string' || !textHash) return false;
   return entry.textHash === textHash;
@@ -162,7 +134,6 @@ function lineOfFix(fix: SweepFix | null | undefined): number {
   return Number.isFinite(line) && line > 0 ? Math.floor(line) : 0;
 }
 
-// The changelog record, LSP-zero-based like the diagnostic it came from; the tab does the +1.
 function fixLogEntry({ uri, fix, applied, ts }: {
   uri?: unknown;
   fix?: SweepFix | null;
@@ -179,14 +150,12 @@ function fixLogEntry({ uri, fix, applied, ts }: {
   };
 }
 
-// What one broadcast says about one fix, beside the uri and ts the frame already carries.
 function fixPayload(entry: FixLogEntry) {
   return {
     code: entry.code, line: entry.line, message: entry.message, applied: entry.applied,
   };
 }
 
-// Newest first, so the ring is what the tab renders rather than something it has to reverse.
 function appendFixLog<T>(ring: unknown, entry: T, max: unknown = DEFAULT_FIX_LOG_MAX): T[] {
   const cap = Number.isFinite(Number(max)) && Number(max) > 0 ? Math.floor(Number(max)) : DEFAULT_FIX_LOG_MAX;
   return [entry, ...listOf<T>(ring)].slice(0, cap);

@@ -3,8 +3,6 @@ import assert from 'node:assert/strict';
 
 import { normalizeOrigin, decideOriginAllowed, hostOfOrigin } from '../server/core/origin-policy.ts';
 
-// The listener a dashboard socket lands on. Every loopback decision below is relative to it: that is
-// the whole point of the 2026-08 port-exact rule.
 const LISTENER = [3000];
 
 test('normalizeOrigin lowercases, drops the trailing slash and the default port', () => {
@@ -34,11 +32,10 @@ test('a loopback origin is admitted only on a listener port', () => {
   const opts = { listenerPorts: LISTENER };
   assert.equal(decideOriginAllowed('http://localhost:3000', [], opts), true);
   assert.equal(decideOriginAllowed('http://127.0.0.1:3000', [], opts), true);
-  // The gap this closes: another web app on another local port (a dev server, a notebook, Grafana)
-  // used to be admitted to a channel that spawns permissionless sessions.
+
   assert.equal(decideOriginAllowed('http://localhost:5173', [], opts), false);
   assert.equal(decideOriginAllowed('http://127.0.0.1:8888', [], opts), false);
-  // No port at all means the scheme default, which is a listener port only on a server bound there.
+
   assert.equal(decideOriginAllowed('http://localhost', [], opts), false);
   assert.equal(decideOriginAllowed('http://localhost', [], { listenerPorts: [80] }), true);
   assert.equal(decideOriginAllowed('https://localhost', [], { listenerPorts: [443] }), true);

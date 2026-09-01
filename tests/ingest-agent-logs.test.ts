@@ -1,22 +1,3 @@
-/*
- * The agent-log ingest source against REAL temp directories (docs/plan-ingestion.md, M7): synthetic
- * Claude, Codex and Grok transcripts written to disk and driven end to end into the rings and the
- * digest, the EOF start, the config gate, and the feedback-loop exclusion.
- *
- * The exclusion is the load-bearing rule this file exists for. A visions dispatch is a headless Claude
- * session that writes a transcript exactly like any other, so ingesting it would feed the Visions lane's
- * own output back into its next prompt. Its two INDEPENDENT layers are pinned separately, each on a
- * fixture the other would not catch: the ledger (primary) on an ordinary project directory, and the
- * dispatch-workdir shape with no ledger present at all.
- *
- * The scale tests are not padding. A promotion pass that re-checks finished transcripts is correct on a
- * fixture of three files and starves the live session on a real projects root of several hundred
- * directories, so the fixtures there are sized to the real thing.
- *
- * SAFETY: every root is a throwaway temp directory injected through CLAUDE_CONFIG_DIR, CODEX_HOME and
- * GROK_HOME, so no test here ever reads the operator's real transcripts.
- */
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -46,8 +27,6 @@ interface HomesContext extends Homes {
   build: (overrides?: Partial<AgentLogIngestOptions>) => AgentLogIngest;
 }
 
-// --- Harness --------------------------------------------------------------
-
 function makeHomes(): Homes {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-agentlogs-'));
   const claudeHome = path.join(tmpDir, 'claude');
@@ -72,7 +51,6 @@ function makeHomes(): Homes {
   };
 }
 
-// A real unref'd timer that never runs a callback of its own: the seams are typed against NodeJS.Timeout.
 function parkedTimer(): NodeJS.Timeout {
   const handle = setTimeout(() => {}, 2 ** 30);
   handle.unref();
@@ -92,8 +70,6 @@ interface RecordingTimers extends Partial<AgentLogIngestOptions> {
   timeoutDelays: number[];
 }
 
-// Records the delays the adapter asks for, which is how the watch-event tests tell a 100ms poll poke
-// from a 500ms discovery sweep without waiting for either.
 function recordingTimers(): RecordingTimers {
   const timeoutDelays: number[] = [];
   return {
@@ -105,8 +81,6 @@ function recordingTimers(): RecordingTimers {
   };
 }
 
-// Counts the stats the sweep spends, which is the only way to see the difference between a promotion
-// pass that memoizes its rejections and one that re-walks every finished transcript forever.
 function countingFs(): { counts: { stat: number; readdir: number }; fsPromises: TranscriptFileSystem } {
   const counts = { stat: 0, readdir: 0 };
   return {
@@ -119,8 +93,6 @@ function countingFs(): { counts: { stat: number; readdir: number }; fsPromises: 
   };
 }
 
-// Holds the sweep open inside its first readdir, so a test can call stop() with a pass genuinely in
-// flight rather than hoping to hit the window.
 function gatedFs(): { release: () => void; fsPromises: TranscriptFileSystem } {
   const held: { release: (() => void) | null } = { release: null };
   const gate = new Promise<void>((resolve) => { held.release = () => resolve(); });
@@ -163,13 +135,11 @@ function withHomes(fn: (context: HomesContext) => Promise<void>): () => Promise<
   };
 }
 
-// lane.agentLogs is null when the source is off; every case reading it has it on.
 function agentLogsOf(lane: ReturnType<typeof createIngestLane>) {
   if (!lane.agentLogs) throw new Error('the agentLogs source is off on this lane');
   return lane.agentLogs;
 }
 
-// One assistant message as Claude Code actually writes it: cwd and sessionId on the line itself.
 function claudeAssistant({ text = null, tools = [], sessionId, cwd = 'C:\\repo', ts = null }: {
   text?: string | null;
   tools?: { name: string; input: Record<string, unknown> }[];
@@ -189,8 +159,6 @@ function claudeAssistant({ text = null, tools = [], sessionId, cwd = 'C:\\repo',
   })}\n`;
 }
 
-// A prompt as Claude Code writes it. A tool RESULT arrives on a `user` line too, which is why the
-// mapper reads the content blocks rather than the line type alone.
 function claudeUser({ text, sessionId, cwd = 'C:\\repo', ts = null }: {
   text: string;
   sessionId: string;
@@ -221,8 +189,6 @@ function seedClaudeTranscript(projects: string, { dirName = 'C--repo', sessionId
 function append(filePath: string, text: string): void {
   fs.appendFileSync(filePath, text, 'utf8');
 }
-
-// --- EOF start and the happy path -----------------------------------------
 
 test('a completed turn surfaces as an agent-turn without any of the history before it', withHomes(async ({ projects, events, build }) => {
   const filePath = seedClaudeTranscript(projects, {
@@ -338,8 +304,6 @@ test('a truncated transcript is read from the start rather than skipped forever'
   assert.deepEqual(events.map((event) => event.summary), ['claude: the file was rewritten short']);
 }));
 
-// --- Vendors --------------------------------------------------------------
-
 test('a Codex rollout under its date directories reaches the rings with the session cwd', withHomes(async ({ codexSessions, events, build }) => {
   const dir = path.join(codexSessions, '2026', '08', '21');
   fs.mkdirSync(dir, { recursive: true });
@@ -395,17 +359,9 @@ test('a Grok session publishes its completed turn once, not its chunks', withHom
   assert.equal(events[0].scope.root, 'C:\\repo', 'the percent-encoded directory decodes back exactly');
 }));
 
-// --- The feedback-loop exclusion -------------------------------------------
-
-/*
- * The two layers are tested SEPARATELY on purpose. Each fixture matches only its own mechanism, so a
- * regression in either one fails a test instead of being masked by the other: the ledger cases use an
- * ordinary project directory that no shape rule would catch, and the shape cases carry no ledger at all.
- */
-
 test('layer 1, the ledger: a visions-lane transcript in an ordinary project dir is never opened', withHomes(async ({ projects, events, build }) => {
   const filePath = seedClaudeTranscript(projects, { dirName: 'C--repo', sessionId: 'visions-session' });
-  // laneMap() is keyed by the M5 vendor-namespaced composite <vendor>:<sessionId>; these are Claude transcripts.
+
   const adapter = build({ laneMap: () => new Map([['claude:visions-session', 'visions']]) });
   await adapter.start();
   assert.equal(adapter.trackedCount, 0, 'a lane transcript costs not even a tail');
@@ -418,15 +374,12 @@ test('layer 1, the ledger: a visions-lane transcript in an ordinary project dir 
 }));
 
 test('layer 1, the ledger: a record landing AFTER the sweep still stops the lane publishing', withHomes(async ({ projects, events, build }) => {
-  // The in-place PR-review lane runs in the operator's REAL project directory, which is exactly the
-  // case no path or workdir shape can catch and the ledger is primary for.
   const filePath = seedClaudeTranscript(projects, { dirName: 'C--repo', sessionId: 'late-lane' });
   const lanes = new Map();
   const adapter = build({ laneMap: () => lanes });
   await adapter.start();
   assert.equal(adapter.trackedCount, 1, 'nothing in the ledger yet, so the file is tailed');
 
-  // The claude-session-id hook lands and the ledger learns which lane spawned this session.
   lanes.set('claude:late-lane', 'pr-review');
   append(filePath, claudeAssistant({ text: 'review output arriving after the sweep', sessionId: 'late-lane' }));
   await adapter.poll();
@@ -439,8 +392,7 @@ test('layer 2, the workdir shape: a dispatch transcript is excluded with NO ledg
     dirName: encodeProjectDir(workDir),
     sessionId: 'unrecorded-visions',
   });
-  // No laneMap: the ledger never heard of this session, which is the single point of failure this
-  // layer exists to remove.
+
   const adapter = build();
   await adapter.start();
   assert.equal(adapter.trackedCount, 0, 'a dispatch workdir is not even listed');
@@ -508,20 +460,11 @@ test('every ephemeral lane is excluded by the same rule, with no lane-name list 
   assert.deepEqual(events.map((event) => event.summary), ['claude: operator output']);
 }));
 
-// --- Scale --------------------------------------------------------------------
-
 function setMtime(target: string, whenMs: number): void {
   const when = new Date(whenMs);
   fs.utimesSync(target, when, when);
 }
 
-/*
- * Realistic scale, because this defect only exists at scale. The real projects root on the machine this
- * was written against holds 753 directories and 7167 transcripts, one directory alone holding 408. A
- * promotion pass that re-stats every finished transcript spends its whole budget on the biggest
- * directory and never reaches the live session below it, which is silent: the source simply reports
- * nothing forever.
- */
 test('a big finished directory cannot starve a live session in a lower-sorting one', withHomes(async ({ projects, events, build }) => {
   const longAgo = Date.now() - (60 * 60 * 1000);
   const bigDir = path.join(projects, 'C--big-finished-project');
@@ -533,7 +476,6 @@ test('a big finished directory cannot starve a live session in a lower-sorting o
   }
   const liveFile = seedClaudeTranscript(projects, { dirName: 'C--live-project', sessionId: 'sess-live' });
 
-  // The big directory sorts FIRST, so it is the one that gets the budget.
   setMtime(path.join(projects, 'C--live-project'), Date.now() - 60000);
   setMtime(bigDir, Date.now());
 
@@ -543,7 +485,6 @@ test('a big finished directory cannot starve a live session in a lower-sorting o
   await adapter.start();
   assert.equal(adapter.trackedCount, 0, 'sweep one is entirely consumed by the finished directory');
 
-  // Sweep two must RESUME where sweep one stopped rather than restarting the same 400 rejections.
   await adapter.discover();
   assert.equal(adapter.trackedCount, 1, 'the live session must be reached on the next sweep');
 
@@ -580,7 +521,6 @@ test('a new transcript among finished ones is still found, whether or not creati
   assert.deepEqual(events.map((event) => event.summary), ['claude: a new session in an old project']);
 }));
 
-// Frozen clock + forced-back mtime reproduce the same-tick mtime collision deterministically on any filesystem.
 test('a transcript born in the tick the last listing read is still found, not lost for the life of the daemon', withHomes(async ({ projects, build }) => {
   const tick = Math.floor(Date.now() / 1000) * 1000;
   const dir = path.join(projects, 'C--same-tick');
@@ -605,8 +545,6 @@ test('the directory listing cache is bounded rather than growing with the tree',
   assert.ok(adapter.cachedDirCount <= 3, `cache grew to ${adapter.cachedDirCount}`);
 }));
 
-// --- Waking back up ---------------------------------------------------------
-
 test('a session left quiet past the active window still publishes when it resumes', withHomes(async ({ projects, events, build }) => {
   const filePath = seedClaudeTranscript(projects, { sessionId: 'sess-quiet' });
   const clock = { now: Date.now() };
@@ -617,7 +555,6 @@ test('a session left quiet past the active window still publishes when it resume
   await adapter.poll();
   assert.deepEqual(events.map((event) => event.summary), ['claude: the first turn']);
 
-  // The carbon unit went to lunch. This is the ordinary shape of a working session, not an edge case.
   clock.now += 20 * 60 * 1000;
   await adapter.discover();
   await adapter.poll();
@@ -633,7 +570,7 @@ test('a session left quiet past the active window still publishes when it resume
 test('a tail pushed out of the active set by newer work is picked back up when it moves again', withHomes(async ({ projects, events, build }) => {
   const quiet = seedClaudeTranscript(projects, { dirName: 'C--quiet', sessionId: 'sess-pushed-out' });
   const busy = seedClaudeTranscript(projects, { dirName: 'C--busy', sessionId: 'sess-busy' });
-  // One active slot, so the newer file evicts the older one from the poll.
+
   const adapter = build({ maxActiveFiles: 1 });
   await adapter.start();
 
@@ -643,11 +580,7 @@ test('a tail pushed out of the active set by newer work is picked back up when i
   assert.equal(adapter.activeCount, 1, 'only one file may be polled');
 
   append(quiet, claudeAssistant({ text: 'the evicted session woke up', sessionId: 'sess-pushed-out' }));
-  /*
-   * The active set is ordered by mtime, and two appends microseconds apart can land on the SAME
-   * filesystem timestamp, which makes the eviction order arbitrary and this test a coin flip. A session
-   * that genuinely wakes up later has a later mtime; this says so instead of hoping for one.
-   */
+
   const wokeAt = new Date(Date.now() + 1000);
   fs.utimesSync(quiet, wokeAt, wokeAt);
   await adapter.discover();
@@ -657,8 +590,6 @@ test('a tail pushed out of the active set by newer work is picked back up when i
     'an evicted tail must be reachable again, or it is lost for the life of the daemon',
   );
 }));
-
-// --- Watch events -----------------------------------------------------------
 
 function watchCapture() {
   const listeners: { dir: string; listener: (eventType: string, fileName: string | null) => void }[] = [];
@@ -699,7 +630,6 @@ test('a change naming an untracked transcript promotes it, which is the only wak
   await adapter.start();
   assert.equal(adapter.trackedCount, 0, 'a transcript dead for an hour is not recent activity');
 
-  // The session wakes up. Appending moves no directory mtime, so the sweep alone would never see it.
   append(filePath, claudeAssistant({ text: 'the dormant session woke', sessionId: 'sess-dormant' }));
   const projectWatch = capture.listeners.find((entry) => entry.dir.endsWith('C--repo'));
   if (!projectWatch) throw new Error('the project directory is not watched');
@@ -712,12 +642,10 @@ test('a change naming an untracked transcript promotes it, which is the only wak
   assert.deepEqual(events.map((event) => event.summary), ['claude: and its next turn publishes']);
 }));
 
-// --- Scope ------------------------------------------------------------------
-
 test('an agent event with no root is dropped, because machine scope is the shellHistory contract', withHomes(async ({ codexSessions, events, build }) => {
   const dir = path.join(codexSessions, '2026', '08', '21');
   fs.mkdirSync(dir, { recursive: true });
-  // No session_meta and no turn_context, so nothing in this file or its path names a project.
+
   const filePath = path.join(dir, 'rollout-2026-08-21T10-00-00-00000000-0000-7000-8000-000000000000.jsonl');
   fs.writeFileSync(filePath, '', 'utf8');
 
@@ -735,11 +663,10 @@ test('an agent event with no root is dropped, because machine scope is the shell
 test('a Codex session joined mid-file still gets its root, read once from the head', withHomes(async ({ codexSessions, events, build }) => {
   const dir = path.join(codexSessions, '2026', '08', '21');
   fs.mkdirSync(dir, { recursive: true });
-  // Codex names the rollout file after its session id, which is where the id comes from, exactly as the
-  // usage lane resolves it.
+
   const sessionId = '11111111-1111-7111-8111-111111111111';
   const filePath = path.join(dir, `rollout-2026-08-21T11-00-00-${sessionId}.jsonl`);
-  // The head already holds session_meta, and the tail starts at EOF, so only a head read can recover it.
+
   fs.writeFileSync(filePath, `${JSON.stringify({
     timestamp: new Date().toISOString(),
     type: 'session_meta',
@@ -766,7 +693,6 @@ test('a rotated transcript does not inherit the previous file root and session',
   await adapter.poll();
   assert.equal(events[0].scope.root, 'C:\\old-project');
 
-  // A new file at the same path, whose lines name no cwd of their own.
   fs.rmSync(filePath);
   fs.writeFileSync(filePath, `${JSON.stringify({
     type: 'assistant',
@@ -780,8 +706,6 @@ test('a rotated transcript does not inherit the previous file root and session',
   assert.notEqual(latest.scope.root, 'C:\\old-project', 'the old cwd must not ride into the new file');
   assert.equal(latest.scope.sessionId, 'sess-context', 'the session falls back to the path, not the old line');
 }));
-
-// --- Bounds ------------------------------------------------------------------
 
 test('lines dropped to stay inside the drain bound are reported, never silently lost', withHomes(async ({ projects, events, build }) => {
   const filePath = seedClaudeTranscript(projects, { sessionId: 'sess-flood' });
@@ -808,12 +732,7 @@ test('a deleted transcript stops costing a stat on every poll', withHomes(async 
   assert.equal(adapter.trackedCount, 1);
 
   fs.rmSync(filePath);
-  /*
-   * A directory is re-listed only when its mtime moved, which is the whole scale rule. Creating and
-   * deleting inside one millisecond can leave that mtime where it was, so the sweep would skip the
-   * listing and the test would flake on timer resolution rather than on the behavior it pins. Any real
-   * deletion has elapsed time behind it; this says so explicitly.
-   */
+
   const deletedAt = new Date(Date.now() + 1000);
   fs.utimesSync(path.dirname(filePath), deletedAt, deletedAt);
   await adapter.discover();
@@ -821,8 +740,6 @@ test('a deleted transcript stops costing a stat on every poll', withHomes(async 
   assert.equal(adapter.trackedCount, 0, 'a transcript its directory no longer names is gone for good');
   assert.equal(adapter.activeCount, 0);
 }));
-
-// --- Failure and lifecycle -------------------------------------------------
 
 test('stop during an in-flight sweep leaves nothing behind when that sweep settles', withHomes(async ({ projects, build }) => {
   seedClaudeTranscript(projects, { sessionId: 'sess-racing' });
@@ -850,7 +767,6 @@ test('nothing to watch is not evidence about watching, so the support check wait
   assert.equal(adapter.isDisabled, false, 'no roots yet means no verdict on watching');
   assert.deepEqual(warnings, []);
 
-  // The operator installs Claude Code and a projects root appears after boot.
   fs.mkdirSync(path.join(claudeHome, 'projects'), { recursive: true });
   await adapter.discover();
   assert.equal(adapter.isDisabled, true, 'the check must still run once there is something to watch');
@@ -866,7 +782,6 @@ test('a watcher that refuses every directory disables the source with one warnin
   assert.equal(warnings.length, 1, 'one warning, not a retry loop');
   assert.ok(warnings[0].includes('agent-log source disabled'));
 
-  // And it stays quiet rather than re-warning on every later wakeup.
   await adapter.poll();
   await adapter.discover();
   assert.equal(warnings.length, 1);
@@ -892,8 +807,6 @@ test('a missing vendor home is silently absent rather than an error', withHomes(
   assert.equal(adapter.trackedCount, 0);
   assert.deepEqual(warnings, []);
 }));
-
-// --- Through the lane ------------------------------------------------------
 
 function laneWith(
   homes: Homes,
@@ -952,14 +865,6 @@ test('a secret in an agent transcript is scrubbed by the publish-time pass, with
   }
 }));
 
-/*
- * The scrub-ordering regression, pinned at ring level against the real path and in the shape the shell
- * source's own fix pinned. This source must hand its text on RAW so normalizeEvent can scrub before it
- * folds and slices: when the mapper sliced first (240 chars of turn text, 120 of tool target), a quoted
- * secret straddling the cut lost its closing quote, the scrub's quoted alternative stopped matching, and
- * its bare-token alternative took only the first WORD of the value, publishing the rest as ordinary text.
- * A tool target carries a `command`, so `Bash export TOKEN="..."` is the exact live shape.
- */
 test('a secret past a long prefix in a tool command is scrubbed whole, never down to its first word', withHomes(async (homes) => {
   const filePath = seedClaudeTranscript(homes.projects, { sessionId: 'sess-target' });
   const { lane } = laneWith(homes, { enabled: true, sources: { agentLogs: { enabled: true } } });
@@ -1007,7 +912,7 @@ test('a secret past a long prefix in a turn summary is scrubbed whole, and the r
     for (const word of ['hunter', 'two three four five', 'six']) {
       assert.ok(!secret.summary.includes(word), `leaked ${word}: ${secret.summary}`);
     }
-    // The vendor prefix is composed before publish, so the ring's 400 covers the whole composed line.
+
     const long = events.find((event) => event.summary.includes('a very long turn'));
     if (!long) throw new Error('the long turn never reached the ring');
     assert.equal(long.summary.length, 400, 'the ring bound is the one slice in the pipeline');
@@ -1038,9 +943,6 @@ test('lane stop tears the agent-log source down with it', withHomes(async (homes
   assert.equal(agentLogsOf(lane).trackedCount, 0);
 }));
 
-// --- The M14 publish fan-out ----------------------------------------------
-
-// The negative pin: with ingest on and memory off, prompt text reaches neither the rings nor the control WS.
 test('with nothing asking for them, user prompts reach neither the rings nor a broadcast', withHomes(async (homes) => {
   const filePath = seedClaudeTranscript(homes.projects, { sessionId: 'sess-prompt' });
   const { lane, broadcasts } = laneWith(homes, { enabled: true, sources: { agentLogs: { enabled: true } } });
@@ -1139,8 +1041,6 @@ test('a throwing target costs one warning, never the drain or the target beside 
   }
 }));
 
-// Grok holds a chunked user message until something proves it complete, so the one rule worth pinning is
-// that spending it clears it: a tool call, then more agent chunks, must not re-emit the same prompt.
 test('a held Grok prompt is emitted exactly once, whatever kinds follow it', withHomes(async ({ grokSessions, env }) => {
   const encodedCwd = encodeURIComponent('C:\\repo');
   const dir = path.join(grokSessions, encodedCwd, '019fde0f-453b-72a3-bf55-d1fd726cb2ad');

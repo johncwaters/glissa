@@ -55,11 +55,6 @@ import {
 } from '../shared/settings-ranges.ts';
 import { USAGE_VENDOR_KEYS, USAGE_BUDGET_KEYS } from '../shared/usage-config.ts';
 
-/**
- * One inbound control frame, after the ClientMessage contract has parsed it. The union's variants all
- * carry a passthrough index signature, so the fields the handlers read are stated once here rather than
- * re-narrowed per handler.
- */
 interface ControlRequest {
   type: string;
   id?: string;
@@ -99,8 +94,7 @@ interface MillControl {
 
 interface ControlHandlerDeps {
   sessions: Map<string, Session>;
-  // Passed by the backend wiring for symmetry with the registry; the dispatch table reaches sessions
-  // through `sessions` and never mints one itself.
+
   makeSession?: (project: ProjectEntry, config: GlissaConfig) => Session;
   wireSessionEvents?: (session: Session) => void;
   config: GlissaConfig;
@@ -211,7 +205,7 @@ const POSTHOG_NUMERIC_KEYS = Object.freeze([
   'trafficSpikeCooldownMinutes',
   'trafficSpikeBaselineDays',
 ]);
-// Listed keys override the default positive floor, allowing zero cooldown and capping baseline days.
+
 const POSTHOG_NUMERIC_RANGES = Object.freeze({
   intervalMinutes: POSTHOG_INTERVAL_RANGE,
   maxConcurrentInvestigations: POSTHOG_MAX_CONCURRENT_RANGE,
@@ -226,11 +220,7 @@ const POSTHOG_NUMERIC_RANGES = Object.freeze({
   trafficSpikeCooldownMinutes: POSTHOG_TRAFFIC_COOLDOWN_RANGE,
   trafficSpikeBaselineDays: POSTHOG_TRAFFIC_BASELINE_RANGE,
 });
-// `recurrenceDedupe` is the recurrence-dedupe kill switch and defaults to ON, so absence means
-// enabled; the poller reads it as `!== false`. allowStatusWrites/dailyDigest were validated and
-// persisted here while no module in the lane ever read them, which promised behavior (PostHog writes,
-// a digest) that does not exist; a key earns a place in this list when something consumes it.
-// `autoFix` is the auto-fix dispatch opt-in and defaults to OFF, so absence means diagnose-only.
+
 const POSTHOG_BOOLEAN_KEYS = Object.freeze(['enabled', 'recurrenceDedupe', 'trafficSpikeEnabled', 'autoFix']);
 const POSTHOG_STRING_KEYS = Object.freeze(['host', 'apiKey', 'repoPath']);
 const POSTHOG_VALUE_KEYS = Object.freeze(['projects', 'projectMap']);
@@ -239,8 +229,6 @@ const USAGE_BOOLEAN_KEYS = Object.freeze(['enabled', 'fetchPricing', 'planLimits
 const USAGE_VALUE_KEYS = Object.freeze(['costMode', 'extraProjectsDirs']);
 const TELEGRAM_STRING_KEYS = Object.freeze(['botToken', 'chatId']);
 
-// A settings payload never echoes a stored secret (server/config-store.js redacts both blocks), so an
-// absent key here means "left alone", not "cleared"; only an explicit value, '' included, rewrites one.
 function mergeSettingsBlockOverStored(stored: unknown, incoming: Record<string, unknown>): Record<string, unknown> {
   const merged: Record<string, unknown> = stored && typeof stored === 'object' && !Array.isArray(stored) ? { ...stored } : {};
   for (const [key, value] of Object.entries(incoming)) {
@@ -272,7 +260,7 @@ const DASHBOARD_SETTING_PATHS = Object.freeze([
   ...USAGE_BUDGET_KEYS.map((key) => `usage.budget.${key}`),
   ...TELEGRAM_STRING_KEYS.map((key) => `telegram.${key}`),
 ]);
-// Max days a client may ask a usage report to cover, matching the retainDays ceiling.
+
 const USAGE_REPORT_MAX_DAYS = 3650;
 const execFileAsync = promisify(execFile);
 
@@ -281,9 +269,6 @@ async function runGitForConversationHistory(args: string[], cwd: string): Promis
   return stdout;
 }
 
-// Single wire-format builder for every 'error'/'settings-error' reply, so all call sites agree on the
-// shape. `requestId` is omitted from the payload entirely when not passed (matches every call site that
-// never carried one), rather than defaulting to null, to keep the wire format byte-identical to before.
 function sendError(ws: ControlSocket, message: string, { type = 'error', requestId }: { type?: string; requestId?: string | null } = {}): void {
   const payload = requestId !== undefined ? { type, requestId, message } : { type, message };
   ws.send(JSON.stringify(payload));
@@ -325,8 +310,6 @@ function requestValidationErrorReply(msg: Record<string, unknown> | null | undef
 
 const MILL_SPECS = [MEMORY_SPEC, MILL_METRICS_SPEC, PACK_DISTILLER_SPEC, INGEST_SPEC];
 
-// Reads `since` from a `/control?since=<n>` upgrade URL. Returns null for a missing/malformed
-// value (no query string, no param, non-numeric) so the caller treats it as "no replay wanted".
 function parseSinceParam(url: string | undefined): number | null {
   if (!url) return null;
   const qIndex = url.indexOf('?');
@@ -337,12 +320,6 @@ function parseSinceParam(url: string | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/**
- * Register control WebSocket handlers using a handler-map dispatch pattern.
- * Dependencies are injected via the deps object (factory pattern).
- *
- * Sessions are keyed by stable `id` (UUID). The mutable `name` is display-only.
- */
 function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandlerDeps) {
   const {
     sessions,
@@ -357,43 +334,35 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     handleClientFocus,
     buildHealthSnapshot,
     getUpdateStatus,
-    // Cached last PostHog tick summary (optional - undefined in older callers/tests).
+
     getPosthogStatus,
     posthogReportsDir = null,
-    // PostHog per-issue actions (optional - undefined in older callers/tests, which then refuse).
+
     posthogSetIssueStatus = null,
     posthogArchiveInvestigation = null,
-    // Cached last PR auto-review tick summary (optional - undefined in older callers/tests).
+
     getPrStatus,
-    // Latest built version per context pack (optional - {} in older callers/tests, which then just
-    // means no card can be judged stale).
+
     getPackVersions = () => ({}),
-    // Identifies the running backend to the page, so a tab open across a server update reloads
-    // instead of talking to a build its bundle predates.
+
     serverBuild = () => null,
-    // Usage lane accessors (optional - undefined in older callers/tests, which then replay nothing and
-    // refuse a report request).
+
     getUsageSessions = null,
     getUsageReport = null,
     requestUsageReport = null,
     getPlanLimits = null,
-    // Context mill report accessors (optional - undefined in older callers/tests, which then replay
-    // nothing and refuse a report request).
+
     millReport = null,
-    // The pack names a spec file defines, so an assignment can be refused before it is persisted
-    // (optional - undefined in older callers/tests, which then refuse every assignment).
+
     listPackNames = null,
     resolvePackSourceRoots = null,
-    // Builds a newly delivered pack before the reload recreates the session that resolves it (optional -
-    // undefined in older callers/tests, which then persist the assignment and build nothing).
+
     ensurePacksBuilt = null,
-    // Replay of transient broadcasts missed across a reconnect gap (optional - undefined in
-    // older callers/tests; connect then behaves as before, snapshot-only).
+
     controlReplayLog = null,
-    // Last rtk self-install outcome (optional - undefined in older callers/tests, which then report idle).
+
     getRtkInstallStatus = (): Record<string, unknown> | null => null,
-    // Where an rtk binary resolved, so the Hooks tab lists the rtk entry on the same condition the
-    // injector writes it on rather than on config.rtk alone.
+
     resolveRtkPath = () => getRtkPath(),
     conversationFs = fs,
     conversationGit = runGitForConversationHistory,
@@ -404,15 +373,11 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     return buildSettingsPayloadFrom({ configStore, rtkInstallStatus: getRtkInstallStatus() });
   }
 
-  /** Find a session by stable id. */
   function findSession(msg: ControlRequest): Session | null {
     if (msg.id && sessions.has(msg.id)) return sessions.get(msg.id) ?? null;
     return null;
   }
 
-  // Human-readable copy for the pre-merge guard refusals (refused: true results from
-  // Session.mergeWorktree / mergeAndContinue). Those guards fire BEFORE any merge-status change, so
-  // nothing is broadcast for them; this reply to the requesting client is the operator's only feedback.
   const MERGE_REFUSAL_COPY: Record<string, string> = {
     'destroyed':         'session no longer exists',
     'no-worktree':       'no worktree to merge',
@@ -433,14 +398,7 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     for (const [, sess] of sessions) {
       list.push(sess.toSnapshot());
     }
-    // packVersions rides the snapshot rather than a frame of its own: it is global (not per session),
-    // and the snapshot is exactly what repairs a client's view on reconnect, which is why the
-    // `pack-updated` broadcast needs no replay retention.
-    //
-    // serverBuild rides it for the same reason. The dashboard is served by the same process, so the
-    // only skew case is a tab left open across a server update: it reconnects to a backend whose
-    // frames its bundle may not understand. The client compares this across reconnects and reloads on
-    // a change (public/app.js), which is cheap insurance against a silently half-broken dashboard.
+
     return {
       type: 'snapshot', sessions: list, packVersions: getPackVersions(), serverBuild: serverBuild(),
     };
@@ -467,10 +425,9 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
       sendError(ws, `Unknown agent "${requestedAgent}"`);
       return;
     }
-    // Anything not registered was refused above, so what is left is empty or one of the known ids.
+
     const agent = requestedAgent as NonNullable<ProjectEntry['agent']> | '';
 
-    // Check for duplicate name
     for (const [, sess] of sessions) {
       if (sess.name === name) {
         sendError(ws, `Session "${name}" already exists`);
@@ -484,16 +441,10 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
       return;
     }
 
-    // SECURITY: sessions run with --dangerously-skip-permissions BY DEFAULT (the product default),
-    // allowing unrestricted file writes and shell commands without confirmation. The dialog sends
-    // dangerouslySkipPermissions:false only when the operator opts into prompts. Glissa's control
-    // WebSocket has no authentication (it trusts all localhost connections), so do not expose Glissa
-    // beyond localhost without adding auth.
-    const skipPerms = msg.dangerouslySkipPermissions !== false; // default YOLO; false === opt-in to prompts
+    const skipPerms = msg.dangerouslySkipPermissions !== false;
     const project: ProjectEntry = { id: generateProjectId(), name, path: resolvedPath };
-    if (!skipPerms) project.dangerouslySkipPermissions = false; // persist the opt-out so reloads keep it
-    // Absent or default means the default adapter; persist only a non-default choice so a Claude Code
-    // project record is byte-identical to a pre-picker one.
+    if (!skipPerms) project.dangerouslySkipPermissions = false;
+
     if (agent && agent !== DEFAULT_AGENT_ID) project.agent = agent;
 
     const freshConfig = configStore.save(cfg => {
@@ -531,7 +482,6 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
       return;
     }
 
-    // Check for duplicate name (excluding self)
     for (const [, other] of sessions) {
       if (other !== sess && other.name === newName) {
         sendError(ws, `Session "${newName}" already exists`);
@@ -555,7 +505,6 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
       return;
     }
 
-    // order is an array of session ids
     const allExist = order.every(id => sessions.has(id));
     if (!allExist) {
       sendError(ws, 'Session list changed during reorder');
@@ -591,10 +540,6 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     console.log(`[control] Sessions reordered`);
   }
 
-  // List the Claude conversations resumable INTO this session's card: every transcript under the
-  // session repo's main checkout and its linked worktrees, newest-first (see
-  // session/core/conversation-history.js). Async (it shells out to `git worktree list`); the dispatch
-  // loop awaits the returned promise. Replies with the session's current binding so the picker can mark it.
   async function handleListConversations(msg: ControlRequest, ws: ControlSocket): Promise<void> {
     const sess = findSession(msg);
     if (!sess) {
@@ -622,10 +567,6 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     }));
   }
 
-  // Bind a card to a prior conversation (or clear with a falsy conversationId). Persists
-  // resumeSessionId on the project record (survives a server restart) and sets it on the live Session.
-  // Deliberately does NOT (re)start: it takes effect on the next start/restart, so a running session is
-  // never killed out from under the operator. The frontend decides whether to start a DORMANT card.
   function handleResumeConversation(msg: ControlRequest, ws: ControlSocket): void {
     const sess = findSession(msg);
     if (!sess) { sendError(ws, 'Session not found'); return; }
@@ -645,8 +586,6 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     });
     if (freshConfig) applyConfigReload(freshConfig);
 
-    // Re-fetch: a config reload could (in principle) have rebuilt the Session object; set on whatever
-    // instance is live now so the binding is never lost to a recreate.
     const live = sessions.get(sess.id) || sess;
     live.setResumeConversation(conversationId);
 
@@ -675,7 +614,7 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
       return;
     }
     const s = parsedSettings.data;
-    // The scalar and mill key lists are string-keyed, which the parsed update's exact shape is not.
+
     const incoming: Record<string, unknown> = s;
 
     const invalidPaths = (s.repoRoots || []).filter(p => !fs.existsSync(p));
@@ -725,7 +664,6 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     console.log('[control] Settings updated via UI');
   }
 
-  // Probes each registered adapter for a resolvable binary (cached per id by the adapter registry).
   function handleListAgents(msg: ControlRequest, ws: ControlSocket): void {
     const agents = listAgentIds().map((id) => {
       const adapter = getAdapter(id);
@@ -758,20 +696,6 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     }));
   }
 
-  /*
-   * The three per-issue Radar actions. All of them are DASHBOARD-EQUIVALENT (open/paste into a
-   * session, change an issue status in PostHog, re-run an investigation), so they carry no remote
-   * refusal: a paired phone is meant to be able to act on an error the same way the desk dashboard
-   * can, and the control WS can already spawn a session anywhere. See
-   * server/core/request-trust.ts for the actions that do need the local listener.
-   *
-   * Every reply is a requestId round-trip, so an OLD client (which never sends these) sees nothing
-   * new on the wire.
-   */
-
-  // The facts one issue is currently known by, read from the last tick summary rather than from the
-  // client: the row's own title/counts arrive over the same socket, but trusting them would let any
-  // control-WS message choose the text pasted into a session.
   function findPosthogIssue(projectId: unknown, issueId: unknown) {
     const status = typeof getPosthogStatus === 'function' ? getPosthogStatus() : null;
     const projects = Array.isArray(status?.projects) ? status.projects : [];
@@ -796,8 +720,6 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     }
   }
 
-  // Everything one level inside the folders the operator already keeps repos in. One-shot cold path
-  // (an operator click that is about to spawn a Claude session), so sync readdir is fine.
   function listSiblingRepoDirs(): { name: string; path: string }[] {
     const entries: { name: string; path: string }[] = [];
     for (const parent of posthogCore.projectParentDirs(config.projects)) {
@@ -807,7 +729,7 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
           entries.push({ name: dirent.name, path: path.join(parent, dirent.name) });
         }
       } catch (err) {
-        // A parent that is simply gone is ordinary (a project path from another machine), not news.
+
         if (errorCode(err) === 'ENOENT' || errorCode(err) === 'ENOTDIR') continue;
         console.warn(`[control] posthog auto-create: cannot read ${parent}: ${errorCode(err) || errorMessage(err)}`);
       }
@@ -815,11 +737,6 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     return entries;
   }
 
-  /**
-   * Create the Glissa project a Radar row wants when none is mapped yet, or null when the repo
-   * cannot be resolved CONFIDENTLY. Refusing to guess is the point: an auto-created session points a
-   * permissionless Claude at a directory, so a wrong directory is worse than the mapping error.
-   */
   function autoCreatePosthogProject(projectId: unknown, posthogProjectName: unknown): ProjectEntry | null {
     const projectMap = config.posthog?.projectMap;
     const mappedEntry = projectMap && typeof projectMap === 'object'
@@ -848,8 +765,6 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     return project;
   }
 
-  // Open (or wake) the Glissa session mapped to this PostHog project and paste an investigation
-  // prompt into it, WITHOUT a trailing CR: the operator reads the draft and presses Enter.
   function handlePosthogOpenSession(msg: ControlRequest, ws: ControlSocket): void {
     const reply = (payload: Record<string, unknown>) => replyTo(ws, msg, 'posthog-open-session-result', { ok: false, error: null, ...payload });
     const ref = posthogCore.validateIssueRef(msg);
@@ -891,8 +806,6 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     reply({ ok: res.ok === true, error: res.error || null, status: res.status || null });
   }
 
-  // Archive one investigations-inbox record. The id is a log key, not an issue reference: the record
-  // it names routinely outlives the issue row it came from, which is the point of the inbox.
   async function handlePosthogArchiveInvestigation(msg: ControlRequest, ws: ControlSocket): Promise<void> {
     const reply = (payload: Record<string, unknown>) => replyTo(ws, msg, 'posthog-archive-investigation-result', { ok: false, error: null, ...payload });
     const ref = posthogCore.validateInvestigationId(msg.id);
@@ -902,13 +815,6 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     reply({ ok: res.ok === true, error: res.error || null });
   }
 
-  /*
-   * The pulled half of the usage protocol: the report is large (daily + per-model + per-session +
-   * blocks), so it is never broadcast, only replied to the requesting socket like
-   * request-health-snapshot. `force` re-reads every transcript from offset zero (an operator hard
-   * refresh); an out-of-range `days` is dropped rather than rejected, so an old or sloppy client gets
-   * the lane's own retention window instead of an error.
-   */
   async function handleRequestUsageReport(msg: ControlRequest, ws: ControlSocket): Promise<void> {
     if (!requestUsageReport) {
       ws.send(JSON.stringify({ type: 'usage-report', requestId: msg.requestId || null, error: 'Usage tracking is not running' }));
@@ -920,7 +826,6 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     ws.send(JSON.stringify(report));
   }
 
-  // One pack delivery toggle per message; the delta-not-replace and trust rationale live in AGENTS.md.
   async function handleSetProjectPacks(msg: ControlRequest, ws: ControlSocket): Promise<void> {
     const reply = (payload: Record<string, unknown>) => replyTo(ws, msg, 'set-project-packs-result', { ok: false, error: null, ...payload });
     const projectId = typeof msg.projectId === 'string' ? msg.projectId.trim() : '';
@@ -929,13 +834,12 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     const pack = typeof msg.pack === 'string' ? msg.pack.trim() : '';
     if (!PACK_NAME_RE.test(pack)) { reply({ error: 'pack must be a pack name' }); return; }
     if (typeof msg.deliver !== 'boolean') { reply({ error: 'deliver must be a boolean' }); return; }
-    // Only an ADD is checked against the specs. A removal must work even for a name whose spec is gone,
-    // which is exactly the list an operator most needs to be able to fix.
+
     if (msg.deliver) {
       if (!listPackNames) { reply({ error: 'The context mill is not running' }); return; }
       const known = new Set(await listPackNames());
       if (!known.has(pack)) { reply({ error: `No pack spec named "${pack}"` }); return; }
-      // Refused at ASSIGNMENT too: a checkbox that ticks and then silently skips every spawn is worse.
+
       const sourceRoots = resolvePackSourceRoots ? await resolvePackSourceRoots(pack) : [];
       if (isSelfReferentialPack(sourceRoots, project.path)) {
         reply({ error: `Pack "${pack}" is built from files inside this project, which its sessions already load` });
@@ -943,15 +847,12 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
       }
     }
 
-    // The mutator cannot abort a save, so its verdict comes back out here and a refusal simply leaves
-    // the record untouched.
     const outcome: { value: { error: string } | { packs: string[] } | null } = { value: null };
     const freshConfig = configStore.save((cfg) => {
       const records = Array.isArray(cfg.projects) ? cfg.projects : [];
       const record = records.find((p) => p.id === projectId);
       if (!record) { outcome.value = { error: 'Unknown project' }; return; }
-      // Delivery is addressed per PROJECT: every card on this checkout moves together, or one project
-      // would deliver a pack to whichever of its cards happened to be ticked.
+
       const planned: { member: ProjectEntry; packs: string[] }[] = [];
       for (const member of sameProjectRecords(records, record)) {
         const next = applyPackDelta(member.packs, pack, msg.deliver);
@@ -960,31 +861,25 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
       }
       outcome.value = { packs: planned.find((entry) => entry.member === record)?.packs ?? [] };
       for (const { member, packs } of planned) {
-        // An empty list REMOVES the key, so a project that delivers nothing reads exactly as one that
-        // never named a pack.
+
         if (packs.length === 0) delete member.packs;
         if (packs.length > 0) member.packs = packs;
       }
     });
     if (!freshConfig) { reply({ error: 'Could not write config.json' }); return; }
-    // A save whose mutator refused still WROTE (the bytes are unchanged), so the refusal has to be
-    // reported here rather than read as success.
+
     const savedOutcome = outcome.value;
     if (!savedOutcome) { reply({ error: 'Could not update project packs' }); return; }
     if ('error' in savedOutcome) { reply({ error: savedOutcome.error }); return; }
 
-    // Answered before the reload: the write has already landed, and a throw further down must not leave
-    // the requester with no frame and a checkbox disabled forever.
     reply({ ok: true, projectId, pack, deliver: msg.deliver, packs: savedOutcome.packs });
-    // The Mill tab is a pull surface, so this says "your report is out of date" rather than carrying one.
+
     broadcastControl({ type: 'project-packs-updated', projectId, packs: savedOutcome.packs });
     console.log(`[control] set-project-packs: ${project.name} ${msg.deliver ? '+' : '-'}${pack}`);
 
-    // Built BEFORE the reload: the respawn resolves packs at spawn, and a first delivery is never yet built.
     if (msg.deliver && ensurePacksBuilt) {
       try {
-        // The saved config, not the in-memory one: a per-project pack VARIANT is derived from the
-        // assignment this write just landed, and the reload that would publish it runs below.
+
         await ensurePacksBuilt([pack], freshConfig);
       } catch (err) {
         console.warn(`[control] set-project-packs: build of "${pack}" failed: ${errorMessage(err)}`);
@@ -993,16 +888,12 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     applyConfigReload(freshConfig);
   }
 
-  /*
-   * The Mill tab's pull: one report per request, assembled on demand from the pack specs, their
-   * manifests and the live sessions. Replied to the requesting socket only, like the usage report.
-   */
   function handleRequestMillReport(msg: ControlRequest, ws: ControlSocket) {
     if (!millReport) {
       ws.send(JSON.stringify({ type: 'mill-report', requestId: typeof msg.requestId === 'string' ? msg.requestId : null, error: 'The context mill is not running' }));
       return;
     }
-    // The build is async, so the asking socket may be gone by the time it lands.
+
     return millReport.requestReport(msg, (payload) => {
       if (ws.readyState === 1) ws.send(JSON.stringify(payload));
     });
@@ -1016,12 +907,6 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     }, 200);
   }
 
-  /*
-   * The Hooks tab. Operator hooks live in config.json under `hooks` and are injected into every Claude
-   * Code session's per-session settings file at spawn (detection/settings-injector.ts), so a save here
-   * reaches sessions on their next start or restart, never a live one. Like set-project-packs, the
-   * write goes through configStore.save and a reload, so a hand edit and a tab edit take one path.
-   */
   function builtinHooksReport() {
     return describeBuiltinHooks({
       detectScheduledWakeups: config.detectScheduledWakeups !== false,
@@ -1045,7 +930,7 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
       builtin: builtinHooksReport(),
       events: HOOK_EVENT_CATALOG,
       projects: hooksReportProjects(),
-      // The one home of the ceiling the core enforces, so the editor does not re-type it.
+
       limits: { maxTimeoutSec: HOOK_MAX_TIMEOUT_SEC },
       error: null,
     });
@@ -1057,18 +942,15 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     const requestedId = typeof input.id === 'string' ? input.id : '';
     if (requestedId && !HOOK_ID_RE.test(requestedId)) { reply({ error: 'hook id is invalid' }); return; }
     const id = requestedId || crypto.randomUUID();
-    // An id the client made up for an edit must name a record we hold; a new hook always gets ours.
+
     const stored = requestedId ? readStoredHooks(config.hooks).find((hook) => hook.id === requestedId) : null;
     if (requestedId && !stored) { reply({ error: 'Unknown hook' }); return; }
-    // An edit may keep the scope the record already carries, dead project ids included, so a hook wired
-    // to a removed project can still be toggled or renamed instead of silently going global. A stale id
-    // stays inert: hooksForProject only ever matches a live one. A NEW hook must name live projects.
+
     const knownProjectIds = new Set(hooksReportProjects().map((project) => project.id));
     for (const projectId of stored?.projects || []) knownProjectIds.add(projectId);
     const normalized = normalizeHook(input, { id, knownProjectIds });
     if (!normalized.ok) { reply({ error: normalized.error }); return; }
-    // Upserted into the RAW stored list: a record this build cannot normalize is not ours to erase on
-    // an unrelated save, and a raw entry with this id is the one being replaced.
+
     const freshConfig = configStore.save((cfg) => {
       cfg.hooks = upsertHook(rawStoredHooks(cfg.hooks), normalized.hook);
     });
@@ -1082,12 +964,11 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
   function handleDeleteHook(msg: ControlRequest, ws: ControlSocket): void {
     const reply = (payload: Record<string, unknown>) => replyTo(ws, msg, 'delete-hook-result', { ok: false, error: null, ...payload });
     const id = typeof msg.id === 'string' ? msg.id : '';
-    // Checked against the RAW list: a record this build cannot read is invisible in the tab, but its id
-    // still has to be deletable or a hand edit is the only way out.
+
     if (!rawStoredHooks(config.hooks).some((hook) => hook && hook.id === id)) { reply({ error: 'Unknown hook' }); return; }
     const freshConfig = configStore.save((cfg) => {
       const remaining = removeHook(rawStoredHooks(cfg.hooks), id);
-      // An empty list REMOVES the key, so a config that never had hooks reads exactly as before.
+
       if (remaining.length === 0) delete cfg.hooks;
       if (remaining.length > 0) cfg.hooks = remaining;
     });
@@ -1106,8 +987,6 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     }, 200);
   }
 
-  // Handler map - single dispatch table for all control message types
-  // Session action handlers use findSession() for stable id lookup.
   const handlers = {
     'add-session':      handleAddSession,
     'list-conversations': handleListConversations,
@@ -1140,50 +1019,30 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     'dismiss':          (msg: ControlRequest) => { const s = findSession(msg); if (s) s.dismiss(); },
     'sleep':            (msg: ControlRequest) => { const s = findSession(msg); if (s) s.sleep(); },
     'wake':             (msg: ControlRequest) => { const s = findSession(msg); if (s) s.wake(); },
-    // Worktree review gate: merge the session's worktree into the integration branch, throw it away,
-    // or stream its diff to the requesting client. Merge PROGRESS/RESULT rides the broadcast
-    // 'merge-status' events, but a merge REFUSED by a pre-merge guard (refused: true) changes no
-    // status and broadcasts nothing, so reportMergeRefusal replies to the requesting client instead;
-    // without it a refused merge click does nothing with zero feedback.
+
     'merge-session':              async (msg: ControlRequest, ws: ControlSocket) => { const s = findSession(msg); if (s) reportMergeRefusal(ws, s, await s.mergeWorktree()); },
-    // One-click close-out: merge the worktree into the integration branch and return the
-    // session to DORMANT. A live but quiescent session (COMPLETE/IDLE) is ended first, then merged once
-    // it settles; a parked/failed merge keeps its worktree (no data loss). All of that is decided in
-    // Session.finishAndMerge (which self-guards the state), so the handler just delegates.
+
     'finish-session':             (msg: ControlRequest) => { const s = findSession(msg); if (s) s.finishAndMerge(); },
-    // Merge-as-you-go: merge the live session's worktree into the integration branch and rebase the
-    // worktree onto it, WITHOUT ending the session, so the operator keeps working and commits as they go.
-    // Session.mergeAndContinue self-guards the state and emits 'merge-status' (broadcast) once a merge
-    // actually starts; a guard refusal is replied via reportMergeRefusal (see merge-session above).
+
     'merge-continue-session':     async (msg: ControlRequest, ws: ControlSocket) => { const s = findSession(msg); if (s) reportMergeRefusal(ws, s, await s.mergeAndContinue({ force: msg.force === true })); },
     'discard-session-worktree':   (msg: ControlRequest) => { const s = findSession(msg); if (s) s.discardWorktree(); },
-    // Parked-merge handoff: paste a context-rich prompt (why it parked + the conflicting files + how to
-    // rebase/resolve) into the session's live PTY so the agent in the worktree can finish the merge.
-    // Session.pasteMergePrompt self-guards (parked + live PTY), so the handler just delegates.
+
     'resolve-session-merge':      (msg: ControlRequest) => { const s = findSession(msg); if (s) s.pasteMergePrompt(); },
     'request-session-diff':       async (msg: ControlRequest, ws: ControlSocket) => {
       const s = findSession(msg);
       if (!s) return;
-      // getDiff is async (it shells out to git off the event loop). Awaiting here keeps a large diff
-      // from stalling every other session; the reply is sent when git returns.
+
       const { committed, uncommitted, hasCommits } = await s.getDiff();
       ws.send(JSON.stringify({ type: 'session-diff', id: s.id, committed, uncommitted, hasCommits }));
     },
-    // Branch sync: whether this session's project base branch is ahead/behind its
-    // remote upstream. Sent only in reply to an explicit sidebar open/refresh (see review-sidebar.js
-    // requestBranchSync) - never polled. getBranchSync includes a bounded `git fetch` for freshness.
+
     'request-branch-sync':        async (msg: ControlRequest, ws: ControlSocket) => {
       const s = findSession(msg);
       if (!s) return;
       const sync = await s.getBranchSync();
       ws.send(JSON.stringify({ type: 'branch-sync-status', id: s.id, ...sync }));
     },
-    // On-demand resync: fetch + fast-forward/push the session's project base branch against its remote
-    // upstream (never for a diverged branch - Session.resyncBranch enforces that, not this handler).
-    // Reuses the branch-sync-status reply shape, additively carrying action/error, so the sidebar's
-    // existing branch-sync-status handler updates both the indicator and the resync outcome from one
-    // message. Session.resyncBranch coalesces a concurrent call itself, so a duplicate message here can
-    // never race two mutating git commands.
+
     'resync-branch':               async (msg: ControlRequest, ws: ControlSocket) => {
       const s = findSession(msg);
       if (!s) return;
@@ -1203,43 +1062,33 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
       ws.send(JSON.stringify({ type: 'health-snapshot', stats: buildHealthSnapshot() }));
     },
   };
-  // tests/contracts-control-messages.test.js slices the dispatch table out of this file's SOURCE
-  // between two literal markers, so the table's opening line may not carry an annotation; the
-  // string-keyed view the dispatch needs is taken here instead.
+
   const handlerTable: Record<string, ControlHandler> = handlers;
 
   controlWss.on('connection', (socket: WebSocket, req) => {
     const ws = socket as ControlSocket;
     ws.send(JSON.stringify(buildSnapshot()));
-    // Per-connection, so it cannot ride the snapshot (that one is also BROADCAST on config reload,
-    // which would hand every client whichever connection's trust built it). Sent after the snapshot
-    // so that one stays the first frame of a (re)connect, which control-ws.js keys its seq reset on.
+
     ws.send(JSON.stringify({ type: 'client-trust', trust: normalizeClientTrust(ws.glissaTrust) }));
     if (buildHealthSnapshot) {
       ws.send(JSON.stringify({ type: 'health-snapshot', stats: buildHealthSnapshot() }));
     }
-    // Replay a cached startup update-check result to a client connecting AFTER the check resolved.
-    // Guarded for the accessor's absence exactly like buildHealthSnapshot above: existing control-WS
-    // tests call registerControlHandlers without getUpdateStatus, and an unguarded call would throw.
+
     const update = typeof getUpdateStatus === 'function' ? getUpdateStatus() : null;
     if (update?.updateAvailable) {
       ws.send(JSON.stringify({ type: 'update-available', ...update }));
     }
-    // Same cached-snapshot replay for the PostHog lane: ticks are ~15 minutes apart, so a client
-    // connecting between them would otherwise show an empty panel until the next one.
+
     const posthogStatus = typeof getPosthogStatus === 'function' ? getPosthogStatus() : null;
     if (posthogStatus) {
       ws.send(JSON.stringify(posthogStatus));
     }
-    // And the same for the PR auto-review lane, whose ticks are just as far apart.
+
     const prStatus = typeof getPrStatus === 'function' ? getPrStatus() : null;
     if (prStatus) {
       ws.send(JSON.stringify(prStatus));
     }
-    // Usage lane. The per-card payload is rebuilt live (it is small, and the session-to-transcript
-    // mapping may have moved since the last push); the report is replayed from its cache only, because
-    // building one costs a full aggregate pass no client has asked for yet. Both are null until the
-    // lazy first scan lands, which is the same connection that triggered it.
+
     const usageSessions = typeof getUsageSessions === 'function' ? getUsageSessions() : null;
     if (usageSessions) {
       ws.send(JSON.stringify(usageSessions));
@@ -1248,23 +1097,17 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     if (usageReport) {
       ws.send(JSON.stringify(usageReport));
     }
-    // Context mill: replayed from its cache only, for the same reason the usage report is. A client
-    // connecting before anyone has asked gets nothing and pulls its own.
+
     const millCached = millReport ? millReport.getCachedReport() : null;
     if (millCached) {
       ws.send(JSON.stringify(millCached));
     }
-    // Official plan limits: account-wide, and pushed only when a percentage actually moves, so a client
-    // that connects between statusLine callbacks would otherwise see nothing until the next turn.
+
     const planLimits = typeof getPlanLimits === 'function' ? getPlanLimits() : null;
     if (planLimits) {
       ws.send(JSON.stringify(planLimits));
     }
 
-    // Replay transient broadcasts missed while this client was disconnected. The client
-    // declares its own cursor (`?since=<lastSeq>`) since the server holds no per-connection
-    // state across a reconnect; absent param (first connect) means no replay. Sent AFTER
-    // snapshot/health/update so ordering matches a client that never disconnected.
     const since = parseSinceParam(req?.url);
     if (controlReplayLog && since !== null) {
       const { entries, evicted } = controlReplayLog.entriesSince(since);
@@ -1292,9 +1135,7 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
       const request: ControlRequest = parsedMessage.data;
       if (!Object.hasOwn(handlers, request.type)) return;
       const handler = handlerTable[request.type];
-      // Run synchronously so a sync handler's side effects land in this tick (the existing tests and
-      // callers rely on that). Only an async handler returns a thenable; attach a catch so its rejection
-      // can't become an unhandledRejection, and return it so a direct test caller can await completion.
+
       const result = handler(request, ws);
       if (result instanceof Promise) {
         return result.catch((err: unknown) => {

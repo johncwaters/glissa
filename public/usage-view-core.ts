@@ -1,9 +1,3 @@
-// ── Usage view: pure formatting, ordering and thresholds ──────
-// Every string the Usage panel renders is built here, so the panel is DOM only and the wording is
-// testable without a browser. No literal em dash, en dash or ellipsis is produced anywhere: a missing
-// value reads as the ASCII placeholder below, ranges read "Aug 12 to Aug 19", and a projection reads
-// "->" (tests/frontend-usage-view.test.js pins that).
-
 import { attentionSignature } from './attention-ack-core.ts';
 
 export interface UsageModelRow {
@@ -153,12 +147,9 @@ export const USAGE_CAVEAT_SHORT = 'Estimated list prices, not a bill.';
 
 export const USAGE_DISABLED_HINT = 'Enable in Settings.';
 
-// ccusage's own warning threshold, applied to both the block so far and where it is projected to land.
 export const TOKEN_LIMIT_WARN_PCT = 80;
 export const SESSION_ROW_LIMIT = 10;
 
-// What a range control may ask for. `days` of null means "whatever the lane retains", which is the
-// server's own default when the field is omitted.
 export const RANGE_OPTIONS: readonly { value: string; label: string; days: number | null }[] = Object.freeze([
   { value: '7', label: 'Last 7 days', days: 7 },
   { value: '30', label: 'Last 30 days', days: 30 },
@@ -170,8 +161,7 @@ export const DEFAULT_RANGE_VALUE = 'all';
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DAY_KEY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const TEXT_SORT_KEYS = new Set(['day', 'model', 'label']);
-// A name sorts A to Z on first click; everything measured, dates included, leads with the biggest or the
-// newest, which is what the tables already default to.
+
 const ASC_BY_DEFAULT_KEYS = new Set(['model', 'label']);
 
 function groupThousands(digits: string) {
@@ -190,9 +180,6 @@ export function formatCount(value: unknown) {
   return `${sign}${groupThousands(String(Math.abs(rounded)))}`;
 }
 
-// Sub-cent totals are real on a per-model row, so they keep four decimals instead of rounding to a
-// misleading $0.00, and anything below the last representable digit says so rather than printing a
-// nonzero cost as $0.0000.
 export function formatUsd(value: unknown) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return NO_VALUE;
   const abs = Math.abs(value);
@@ -212,9 +199,9 @@ export function formatTokens(value: unknown) {
     const rounded = Math.round(abs);
     return `${rounded === 0 ? '' : sign}${rounded}`;
   }
-  // 999950 already rounds to 1.0M at this precision, so it crosses here rather than reading "1000k".
+
   if (abs < 999950) return `${sign}${trimTrailingZeros((abs / 1000).toFixed(1))}k`;
-  // Same reasoning one tier up: cache-read totals over a long retention window do reach billions.
+
   if (abs < 999995000) return `${sign}${trimTrailingZeros((abs / 1e6).toFixed(2))}M`;
   return `${sign}${trimTrailingZeros((abs / 1e9).toFixed(2))}B`;
 }
@@ -225,8 +212,6 @@ export function formatPercent(pct: unknown) {
   return `${trimTrailingZeros(pct.toFixed(1))}%`;
 }
 
-// Share is measured against cost when there is any, because that is the question ("what is expensive"),
-// and falls back to tokens on a report whose costs are all zero (display cost mode, or no price table).
 export function shareBasis(totals: UsageTotals | null | undefined) {
   const cost = Number(totals?.costUSD);
   if (Number.isFinite(cost) && cost > 0) return 'costUSD';
@@ -253,7 +238,6 @@ export function dayLabel(day: unknown) {
   return `${month} ${Number(parts[3])}`;
 }
 
-// "Aug 12 to Aug 19", the no-dash form of a date range.
 export function dayRangeLabel(days: unknown) {
   const keys = dayKeysOf(days);
   if (keys.length === 0) return '';
@@ -270,9 +254,6 @@ function dayKeysOf(days: unknown) {
     .sort();
 }
 
-// The report's own calendar day, in the SERVER's timezone. The daily buckets are keyed there
-// (server/core/usage-aggregate-core.ts runs on the server clock), so asking the browser what day it is
-// reads the wrong bucket for any viewer in another zone, which remote mode makes routine.
 export function reportDayKey(report: UsageReport | null | undefined) {
   const ts = Number(report?.ts);
   if (!Number.isFinite(ts) || ts <= 0) return '';
@@ -287,8 +268,6 @@ function dayKeyInZone(ts: number, tz: string | null) {
   return safeZoneFormat(ts, { year: 'numeric', month: '2-digit', day: '2-digit' });
 }
 
-// An unknown zone name throws rather than falling back, so a report from a host Glissa cannot resolve
-// degrades to this machine's day instead of losing the tile.
 function safeZoneFormat(ts: number, options: Intl.DateTimeFormatOptions) {
   try {
     return new Intl.DateTimeFormat('en-CA', options).format(new Date(ts));
@@ -318,8 +297,6 @@ export function blockLabel(startTs: unknown) {
   return `${month} ${date.getDate()} ${hours}:${mins}`;
 }
 
-// Burn rate as tiles rather than a sentence: these are the two numbers an operator compares against a
-// threshold, so they get the same weight as the block's own totals.
 export function burnTiles(burn: UsageBurn | null | undefined) {
   if (!burn || typeof burn !== 'object') return [];
   const tiles: { label: string; value: string; sub: string }[] = [];
@@ -349,7 +326,6 @@ export function projectionLine(projection: UsageProjection | null | undefined) {
   return `${head}, ${remaining}`;
 }
 
-// Geometry for the block progress bar: how far through its own window the active block is.
 export function blockProgress(block: UsageBlock | null | undefined, now = Date.now()) {
   const start = Number(block?.startTs);
   const end = Number(block?.endTs);
@@ -372,11 +348,6 @@ export function tokenLimitTone(pct: unknown) {
   return 'ok';
 }
 
-// The wire carries tokenLimit.pct as a RATIO of the largest completed block (see
-// server/core/usage-blocks-core.ts), so the percent every threshold and meter here works in is derived
-// rather than assumed.
-// Absent has to stay distinct from zero here: Number(null) is 0, and a missing reference reported as
-// "0% of the limit" would read as a calm block rather than an unknown one.
 function finiteNumber(value: unknown) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   return value;
@@ -415,10 +386,6 @@ export function projectionLimitLine(projection: UsageProjection | null | undefin
   return `On this burn rate the block ends at ${Math.round(pct)}% of that reference.`;
 }
 
-// ── Token composition ──
-// Where the tokens went, measured against the four parts' own sum rather than the report's token total:
-// the parts ARE that total, and a share of anything else would not add up to 100.
-
 const COMPOSITION_PARTS = Object.freeze([
   { key: 'input', label: 'input' },
   { key: 'output', label: 'output' },
@@ -439,10 +406,6 @@ export function compositionParts(totals: UsageTotals | null | undefined) {
     return { key: part.spec.key, label: part.spec.label, value, pct, title: `${part.spec.label} ${value}, ${formatPercent(pct)}` };
   });
 }
-
-// ── Glissa lanes ──
-// Which of Glissa's own automation lanes the spend belonged to. The join is exact (Glissa recorded spawning
-// the session), so `other` genuinely means "not spawned by Glissa" rather than "unrecognized".
 
 const LANE_LABELS: Readonly<Record<string, string>> = Object.freeze({
   interactive: 'Interactive',
@@ -466,11 +429,6 @@ export function laneRows(report: UsageReport | null | undefined): UsageLaneRow[]
   return (rows as UsageLaneRow[]).filter((row) => row && typeof row.lane === 'string');
 }
 
-/*
- * The section is worth showing only once a lane OTHER than interactive-or-other has spend. A fresh install
- * has nothing but the operator's own sessions, and a section that says "Interactive: everything" restates
- * the totals directly above it.
- */
 export function hasLaneAttribution(report: UsageReport | null | undefined) {
   return laneRows(report).some((row) => row.lane !== 'interactive' && row.lane !== 'other');
 }
@@ -480,11 +438,6 @@ export function laneSessionsText(sessions: unknown) {
   if (count === null || count <= 0) return '';
   return `${formatCount(count)} ${count === 1 ? 'session' : 'sessions'}`;
 }
-
-// ── Savings ──
-// What the token-saving systems around a session are worth. Two independent claims kept apart on purpose:
-// rtk counts compressed command output across the whole machine from its own records, while the cache
-// figure is Glissa's arithmetic over the same Claude model rows the cost estimate uses.
 
 export function rtkSavings(savings: UsageSavings | null | undefined): RtkSavings | null {
   const rtk = savings?.rtk;
@@ -502,8 +455,6 @@ export function hasSavings(savings: UsageSavings | null | undefined) {
   return rtkSavings(savings) !== null || cacheSavings(savings) !== null;
 }
 
-// The headline is the tokens rtk never sent, because that is the figure with a unit an operator can
-// compare against the totals above it; the rate and the sample size qualify it underneath.
 export function rtkSavingsTile(savings: UsageSavings | null | undefined) {
   const rtk = rtkSavings(savings);
   if (!rtk) return null;
@@ -523,7 +474,7 @@ export function cacheSavingsTile(savings: UsageSavings | null | undefined) {
   const unpriced = unpricedModels.filter((model) => model);
   const sub = `${tokens} cache read tokens`;
   if (unpriced.length === 0) return { value: formatUsd(finiteNumber(cache.savedUSD) ?? 0), sub };
-  // Named as a floor rather than a total: an unpriced model's tokens are counted, its dollars are not.
+
   const noun = unpriced.length === 1 ? 'model' : 'models';
   return {
     value: formatUsd(finiteNumber(cache.savedUSD) ?? 0),
@@ -531,12 +482,6 @@ export function cacheSavingsTile(savings: UsageSavings | null | undefined) {
   };
 }
 
-// ── Spend budgets ──
-// The rows and their tones come from server/core/usage-budget-core.ts, which owns the ladder; nothing is
-// recomputed here. These only format them, and decide when the tab dot is owed.
-
-// The tone ladder's own top step. A budget that far along is worth pulling an operator over, which is a
-// stronger claim than the warn step and so has its own threshold.
 export const BUDGET_ATTENTION_PCT = 90;
 
 export function budgetRows(report: UsageReport | null | undefined): UsageBudgetRow[] {
@@ -550,7 +495,6 @@ export function budgetScopeLabel(scope: unknown) {
   return 'today';
 }
 
-// "$12.40 of $16.00" reads as a position; a bare percentage does not say how much room is left.
 export function budgetRowText(row: UsageBudgetRow | null | undefined) {
   return `${formatUsd(finiteNumber(row?.spentUsd) ?? 0)} of ${formatUsd(finiteNumber(row?.budgetUsd) ?? 0)}`;
 }
@@ -565,11 +509,6 @@ export function budgetRowMeterLabel(row: UsageBudgetRow | null | undefined) {
   return `${budgetScopeLabel(row?.scope)} spend against budget`;
 }
 
-// ── Period rollups ──
-// Week and month views are derived HERE, from the daily rows the report already ships, rather than being
-// three more arrays on the wire: the merged daily series is the single source, so a period total can never
-// disagree with the days it is made of.
-
 export const PERIOD_VIEWS = Object.freeze([
   { value: 'day', label: 'Day' },
   { value: 'week', label: 'Week' },
@@ -580,7 +519,7 @@ export const DEFAULT_PERIOD_VIEW = 'day';
 function parseDayKey(day: unknown) {
   const parts = DAY_KEY_RE.exec(String(day ?? ''));
   if (!parts) return null;
-  // Local noon, so a period key can never be shifted a day by a DST transition.
+
   return new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]), 12);
 }
 
@@ -592,8 +531,6 @@ function dayKeyOfDate(date: Date) {
   return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
 }
 
-// Weeks start Monday and are keyed by that Monday's day key, so a week spanning a month boundary stays one
-// bucket instead of splitting.
 export function weekStartKey(day: unknown) {
   const date = parseDayKey(day);
   if (!date) return '';
@@ -660,7 +597,7 @@ function addDayToPeriod(bucket: PeriodBucket, row: UsageWireRow | null | undefin
   bucket.cacheRead += finiteNumber(row?.cacheRead) ?? 0;
   bucket.days += 1;
   bucket.sources.add(row?.source === 'history' ? 'history' : 'live');
-  // Vendors union from row.vendors AND model rows: history rows rebuilt from rollups carry no vendors.
+
   const vendors: string[] = Array.isArray(row?.vendors) ? row.vendors : [];
   for (const vendor of vendors) bucket.vendorSet.add(vendor);
   const modelRows = (row?.models || []) as UsageModelRow[];
@@ -678,7 +615,6 @@ function addDayToPeriod(bucket: PeriodBucket, row: UsageWireRow | null | undefin
   }
 }
 
-// A period is history only when EVERY day in it is: one live day makes the total a live claim.
 function serializePeriodBucket(bucket: PeriodBucket): UsageWireRow {
   const { modelByName, sources, vendorSet, ...rest } = bucket;
   const row: UsageWireRow = { ...rest };
@@ -718,7 +654,6 @@ export function periodRows(daily: unknown, view: string): UsageWireRow[] {
 
 const MONTH_KEY_RE = /^(\d{4})-(\d{2})$/;
 
-// One label rule for all three views, so a switch between them reads as the same table.
 export function periodLabel(key: unknown, view: string) {
   if (view === 'month') {
     const parts = MONTH_KEY_RE.exec(String(key ?? ''));
@@ -740,8 +675,6 @@ export function periodHint(view: string) {
   return 'newest first by default';
 }
 
-// A row Glissa REMEMBERS is a different claim from one it can still see, so history is labelled wherever
-// it appears rather than blended in silently.
 export function historyNote(rows: unknown) {
   const list: UsageWireRow[] = Array.isArray(rows) ? rows : [];
   const hasHistory = list.some((row) => row?.source === 'history');
@@ -749,10 +682,6 @@ export function historyNote(rows: unknown) {
   return 'older days from local history';
 }
 
-// ── Calendar heatmap ──
-// Trailing 16 weeks of the merged series as week columns of Monday-to-Sunday rows. Tone is a FIXED
-// fraction of the window's own maximum rather than a quantile: quantiles guarantee dark cells even on a
-// quiet fortnight, which would read as heavy usage that is not there.
 export const HEATMAP_WEEKS = 16;
 const HEATMAP_TONE_FRACTIONS = Object.freeze([0.05, 0.25, 0.5, 0.75]);
 export const HEATMAP_DAY_LABELS = Object.freeze(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
@@ -769,11 +698,6 @@ export function heatmapTone(tokens: unknown, max: unknown) {
   return tone;
 }
 
-/*
- * Cells for the grid, oldest week first. An EMPTY day (in range, no usage) is distinct from a NO-DATA day
- * (before the series began, or after today): the first is a real zero, the second is an absence, and
- * colouring them alike would invent quiet days that were never observed.
- */
 export function heatmapCells(
   daily: unknown,
   { weeks = HEATMAP_WEEKS, today = new Date() }: { weeks?: number; today?: Date | number | string } = {}
@@ -788,8 +712,7 @@ export function heatmapCells(
   const start = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() - (weeks - 1) * 7, 12);
   const startKey = dayKeyOfDate(start);
   const cells: HeatmapCell[] = [];
-  // Scaled to the window's OWN peak, not the whole series: a heavy month last quarter must not flatten
-  // every cell of the fortnight on screen.
+
   let max = 0;
   for (const row of rows) {
     if (String(row.day) < startKey || String(row.day) > todayKey) continue;
@@ -809,7 +732,7 @@ export function heatmapCells(
         tokens: finiteNumber(row?.tokens) ?? 0,
         costUSD: finiteNumber(row?.costUSD) ?? 0,
         source: row?.source === 'history' ? 'history' : row ? 'live' : null,
-        // No data at all: outside the observed series, so it gets the empty treatment and says so.
+
         noData: beyondToday || beforeSeries || (!row && firstDay === null),
         tone: heatmapTone(row?.tokens, max),
       });
@@ -818,7 +741,6 @@ export function heatmapCells(
   return { cells, max, weeks };
 }
 
-// Every field is read defensively, so a caller holding a partly-built cell can still label it.
 export function heatmapCellTitle(cell: Partial<HeatmapCell> | null | undefined) {
   const label = dayLabel(cell?.day);
   if (cell?.noData) return `${label}: no data`;
@@ -826,10 +748,6 @@ export function heatmapCellTitle(cell: Partial<HeatmapCell> | null | undefined) 
   if (tokens <= 0) return `${label}: no usage`;
   return `${label}: ${formatTokens(tokens)} tokens, ${formatUsd(finiteNumber(cell?.costUSD) ?? 0)}`;
 }
-
-// ── Anomaly ──
-// Machine level, evaluated server-side (the burn check needs block internals). The wording always names
-// the comparison: "3.1x the 30 day average" is actionable, "unusual usage" is not.
 
 export function anomalyLine(anomaly: UsageAnomaly | null | undefined) {
   const daily = anomaly?.daily;
@@ -862,10 +780,6 @@ function formatRatio(ratio: unknown) {
   return `${trimTrailingZeros(value.toFixed(1))}x`;
 }
 
-// ── Vendors ──
-// The lane reads Codex CLI and Grok CLI transcripts alongside Claude's. Everything vendor-aware is
-// additive: a machine with only Claude usage reports one vendor and renders exactly as it did before.
-
 const VENDOR_LABELS: Readonly<Record<string, string>> = Object.freeze({ claude: 'Claude', codex: 'Codex', grok: 'Grok' });
 
 export function vendorLabel(vendor: unknown) {
@@ -874,8 +788,6 @@ export function vendorLabel(vendor: unknown) {
   return VENDOR_LABELS[key] || key;
 }
 
-// A model row's vendor is only worth showing once another vendor is on the page; on an all-Claude machine
-// it is noise on every row.
 export function modelRowPrefix(row: { vendor?: unknown } | null | undefined, totals: UsageTotals | null | undefined) {
   if (!hasMultiVendorUsage(totals)) return '';
   return vendorLabel(row?.vendor);
@@ -895,8 +807,6 @@ export function vendorTotalsRows(totals: UsageTotals | null | undefined) {
     }));
 }
 
-// More than one vendor, or a single vendor that is not Claude: either way the split is worth showing.
-// Key inspection only (no row building): this runs once per rendered model row via modelRowPrefix.
 export function hasMultiVendorUsage(totals: UsageTotals | null | undefined) {
   const byVendor = totals?.byVendor;
   if (!byVendor || typeof byVendor !== 'object') return false;
@@ -905,8 +815,6 @@ export function hasMultiVendorUsage(totals: UsageTotals | null | undefined) {
   return vendors.length === 1 && vendors[0] !== 'claude';
 }
 
-// One short clause, wherever a number is deliberately Claude-only, so a smaller figure next to a
-// multi-vendor total does not read as an inconsistency.
 export const CLAUDE_ONLY_HINT = 'Claude only';
 
 export function claudeOnlyHint(totals: UsageTotals | null | undefined) {
@@ -914,13 +822,6 @@ export function claudeOnlyHint(totals: UsageTotals | null | undefined) {
   return CLAUDE_ONLY_HINT;
 }
 
-// ── Official plan limits ──
-// The rate limits Claude Code publishes through its statusLine payload: the same numbers `/usage`
-// shows, for the whole account rather than one session. When they are present they REPLACE the
-// largest-completed-block heuristic, which only ever existed because nothing official was reachable.
-
-// A snapshot older than this is still shown, labelled with its age, because a stale official number
-// beats no number and beats silently falling back to an estimate the operator did not ask for.
 export const PLAN_LIMIT_STALE_MS = 60 * 60 * 1000;
 
 export interface PlanWindow {
@@ -930,7 +831,7 @@ export interface PlanWindow {
 
 export interface PlanLimits {
   ts?: unknown;
-  // The statusline lane reports a window it never saw as null, and that null rides the wire.
+
   fiveHour?: PlanWindow | null;
   sevenDay?: PlanWindow | null;
 }
@@ -957,19 +858,12 @@ export function officialFiveHourPct(planLimits: PlanLimits | null | undefined) {
   return planWindowOf(planLimits, 'fiveHour')?.pct ?? null;
 }
 
-// An estimate presented as a plan limit would be a claim Glissa cannot make, so every percentage on the
-// page is rendered next to the name of the thing it came from.
 export function provenanceLabel(source: unknown) {
   if (source === 'official') return 'official, from Claude Code';
   if (source === 'estimated') return 'estimated from the largest completed block';
   return '';
 }
 
-/*
- * One judge of whether usage is alarming. Official five-hour usage wins outright when it exists; only
- * without it does this fall back to the heuristic, which takes the worse of where the block IS and where
- * its burn rate lands it (a purely reactive alarm fires after the tokens are already spent).
- */
 export function blockAttentionTone(report: UsageReport | null | undefined, planLimits: PlanLimits | null = null) {
   const official = officialFiveHourPct(planLimits);
   if (official !== null) return tokenLimitTone(official);
@@ -978,11 +872,6 @@ export function blockAttentionTone(report: UsageReport | null | undefined, planL
   return tokenLimitTone(projectedLimitPct(report?.activeBlock?.projection, report?.tokenLimit));
 }
 
-// What the Usage dot is acknowledged against: which arbiters fire, at a COARSE bucket each. A flagged
-// anomaly counts on its own (it is the one usage fact that appears without any threshold being crossed),
-// and a budget is the operator's OWN ceiling, independent of the plan limit and the anomaly check. The
-// buckets are deliberately coarse so a percentage drifting 91 to 92 does not re-light a dot the operator
-// just cleared, while warn to crit (or near-budget to over-budget) does.
 export function usageAttentionSignature(report: UsageReport | null | undefined, planLimits: PlanLimits | null = null) {
   const parts: string[] = [];
   const tone = blockAttentionTone(report, planLimits);
@@ -1008,7 +897,6 @@ export function planWindowUsedText(window: PlanWindow | null | undefined) {
   return `${formatPercent(pct)} used`;
 }
 
-// Counts DOWN, so it is repainted by the shared tick rather than being written once at build time.
 export function resetCountdownText(resetsAtMs: unknown, now = Date.now()) {
   const resetsAt = finiteNumber(resetsAtMs);
   if (resetsAt === null || resetsAt <= 0) return '';
@@ -1030,8 +918,6 @@ export function isPlanLimitStale(ts: unknown, now = Date.now()) {
   return now - stamped > PLAN_LIMIT_STALE_MS;
 }
 
-// The degradation line, matching what `/usage` itself does with a stale read: keep showing the numbers
-// and say how old they are.
 export function planLimitStaleNote(ts: unknown, now = Date.now()) {
   if (!isPlanLimitStale(ts, now)) return '';
   const age = planLimitAgeText(ts, now);
@@ -1059,8 +945,6 @@ export function missingPricingLine(missing: unknown) {
   return `No price for ${models.length} ${noun}: ${models.join(', ')}. Their cost counts as zero here.`;
 }
 
-// scan.dirs is an ARRAY of resolved transcript directories on the wire, so a count is taken rather
-// than assuming a number and silently dropping the clause.
 function countOf(value: unknown) {
   if (Array.isArray(value)) return value.length;
   const numeric = Number(value);
@@ -1082,9 +966,6 @@ export function scanLine(scan: UsageScan | null | undefined) {
   return `${head} Some files were skipped this pass and will be re-read on the next one.`;
 }
 
-// ── Unavailable reports ──
-// An error report carries no totals, so rendering the normal sections against it prints a confident
-// zero for a lane that is off or blind. These say which it is instead.
 export function usageErrorLine(report: UsageReport | null | undefined) {
   const error = typeof report?.error === 'string' ? report.error.trim() : '';
   return error;
@@ -1103,7 +984,7 @@ export function isUsageUnavailable(report: UsageReport | null | undefined) {
 export function shouldApplyUsageReport(msg: unknown, latestRequestId: unknown) {
   if (!msg || typeof msg !== 'object') return false;
   const id = (msg as { requestId?: unknown }).requestId;
-  // A connect-time replay and a broadcast carry no id; only a reply to a request we superseded is stale.
+
   if (id == null) return true;
   return id === latestRequestId;
 }
@@ -1120,8 +1001,6 @@ export function isGlissaSessionRow(row: UsageWireRow | null | undefined) {
   return typeof row?.id === 'string' && row.id !== '';
 }
 
-// A Glissa-managed session wears its card name; anything not managed is identified by the project it
-// ran in, because a raw transcript directory name means nothing to an operator.
 export function sessionRowLabel(row: UsageWireRow | null | undefined) {
   const label = typeof row?.label === 'string' ? row.label.trim() : '';
   if (isGlissaSessionRow(row) && label) return label;
@@ -1131,7 +1010,6 @@ export function sessionRowLabel(row: UsageWireRow | null | undefined) {
   return 'unknown project';
 }
 
-// A null model is what the scanner reports for a synthetic transcript entry, not a bug to hide.
 export function modelLabel(row: unknown) {
   const model = typeof row === 'string' ? row : (row as { model?: unknown } | null | undefined)?.model;
   const text = typeof model === 'string' ? model.trim() : '';
@@ -1152,7 +1030,6 @@ function sortValueOf(row: UsageWireRow, key: string, labelOf: (row: UsageWireRow
   return labelOf(row);
 }
 
-// One comparator for every usage table, so a column header and the default order cannot disagree.
 export function sortUsageRows(
   rows: unknown,
   key: string,
@@ -1233,8 +1110,6 @@ export function dailyRowForDay(daily: unknown, day: unknown): UsageWireRow | nul
   return list.find((row) => String(row?.day ?? '') === String(day ?? '')) || null;
 }
 
-// Newest first, gaps dropped: a gap block is the absence of work, and a row of zeros for it would read
-// as a quiet block rather than no block at all.
 export function blockHistoryRows(blocks: unknown, limit = 8) {
   const rows: UsageBlock[] = Array.isArray(blocks) ? blocks : [];
   const list = rows.filter((block) => block && block.isGap !== true);
@@ -1247,9 +1122,6 @@ export function blockHistoryRows(blocks: unknown, limit = 8) {
   }));
 }
 
-// Claude's own cumulative figure for this conversation when a statusLine callback has reported one,
-// otherwise the scanner's list-price arithmetic. Official is preferred because it is the same number
-// Claude Code shows the operator, and the chip's title says which one is on screen.
 export function sessionChipCost(usage: UsageSessionUsage | null | undefined): { costUSD: number | null; source: string | null } {
   const official = finiteNumber(usage?.officialCostUSD);
   if (official !== null && official > 0) return { costUSD: official, source: 'official' };
@@ -1258,7 +1130,6 @@ export function sessionChipCost(usage: UsageSessionUsage | null | undefined): { 
   return { costUSD: null, source: null };
 }
 
-// The per-card chip: tokens plus cost for the conversation the card is currently in.
 export function sessionChipText(usage: UsageSessionUsage | null | undefined) {
   const tokens = Number(usage?.tokens);
   if (!Number.isFinite(tokens) || tokens <= 0) return '';

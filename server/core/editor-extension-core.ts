@@ -1,6 +1,3 @@
-// Pure decisions for `glissa visions install`. Every VS Code fork exposes the same install CLI, so one
-// candidate table covers them all.
-
 export interface EditorCandidate {
   command: string;
   label: string;
@@ -28,8 +25,6 @@ const EDITOR_CANDIDATES: EditorCandidate[] = [
   { command: 'windsurf', label: 'Windsurf' },
 ];
 
-// EVERY detected editor is a target: nothing here can know which one the operator will open the file
-// in, and installing into the other one looks exactly like an extension that never ran.
 function decideEditorTargets({
   requested = null,
   resolvedByCommand = {},
@@ -58,8 +53,6 @@ function relayStamp(relayPath: string): string {
   return `${JSON.stringify({ relayPath }, null, 2)}\n`;
 }
 
-// The relay path is STAMPED and the framing module COPIED because an installed extension lives outside
-// this package and can resolve nothing inside it.
 function visionsExtensionFiles({
   manifestJson,
   extensionJs,

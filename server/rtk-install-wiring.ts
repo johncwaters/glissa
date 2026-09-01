@@ -31,8 +31,6 @@ interface RtkInstallWiring {
   getStatus(): RtkInstallStatus;
 }
 
-// One-shot lane, not a poller: the only triggers are boot and a settings save, so there is no timer to
-// own. getRtkPath memoizes successes only, so a fresh install is picked up by the next call with no bust.
 function createRtkInstallWiring({
   config,
   homeDir = os.homedir(),

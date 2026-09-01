@@ -1,5 +1,3 @@
-// M15 of docs/plan-visions-3.md: the memory-distill lane's IO half. Every decision is in the pure core.
-
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -27,24 +25,13 @@ import type { createMemoryStore } from './memory-store.ts';
 const LANE_NAME = 'memory-distill';
 const RESULT_FILE = 'memory-distill-result.json';
 const PROMPT_FILE = 'memory-distill-prompt.txt';
-// Linux caps one argv string at MAX_ARG_STRLEN (128 KiB), and a full delta prompt runs past it, so the
-// prompt travels as a file the way the visions and pack lanes already send theirs (2026-08-27).
+
 const BOOTSTRAP_PROMPT = 'Read memory-distill-prompt.txt and follow all instructions in that file';
-// A stable prefix, not decoration: it is what ingest-agent-core recognizes as this lane's throwaway cwd.
+
 const WORK_DIR_PREFIX = 'glissa-memory-distill-';
-// The delta never renders to nothing, however much of the budget the standing claims already took.
+
 const MIN_DELTA_CHARS = 4000;
 
-/*
- * The prompt embeds remembered text, so this session gets the least capability that still lets it write
- * its result file: no --dangerously-skip-permissions, no allow list at all, every dangerous verb denied,
- * and `defaultMode: acceptEdits` over a throwaway cwd, which is what actually confines the writes (see
- * server/core/lane-permissions-core.ts for the probes behind every clause of that).
- *
- * `Read` is deliberately NOT denied here, though a lane wants it to be: a bare Read deny refuses the
- * Write tool as well, so it and the result-file contract cannot both exist. Reads go nowhere instead,
- * because there is no shell, no network tool, and the only writable directory is the throwaway one.
- */
 const MEMORY_DISTILL_DENY_TOOLS = Object.freeze([
   'Bash', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task', 'Bash(git push:*)', 'Bash(gh:*)',
 ]);
@@ -128,20 +115,15 @@ function writeStandaloneDenySettings(permissions: unknown): { args: string[]; cl
   fs.writeFileSync(settingsPath, JSON.stringify({ permissions }, null, 2), 'utf8');
   return {
     args: ['--settings', settingsPath],
-    cleanup() { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ } },
+    cleanup() { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {  } },
   };
 }
 
-// Lazy, like the pack distiller's: a dry run must not resolve Claude on PATH at module load.
 const requireFromHere = createRequire(import.meta.url);
 function loadSessionConstructor() {
   return (requireFromHere('../session/sessions.ts') as typeof import('../session/sessions.ts')).Session;
 }
 
-/**
- * The real spawn: one ephemeral headless session registered under this lane's name, which both excludes
- * its own transcript from ingestion and puts a `memory-distill` row on the usage ledger.
- */
 function createMemoryDistillSpawn({
   sessions = new Map(), closeSessionDataClients = () => {}, hookRouter = null, getHookPort = null,
   spawnGate = null, replayBufferKB = undefined, recordLane = null,
@@ -189,10 +171,6 @@ function makeMemoryDistillWorkDir(): Promise<string> {
   return fsPromises.mkdtemp(path.join(os.tmpdir(), `${WORK_DIR_PREFIX}work-`));
 }
 
-/**
- * `store` is the memory store; every other side effect (the spawn, the work dir, the clock, the timers)
- * is injected so the lane is testable with no Claude on PATH.
- */
 function createMemoryDistiller(deps: MemoryDistillerOptions = {}) {
   const {
     store = null,
@@ -201,7 +179,7 @@ function createMemoryDistiller(deps: MemoryDistillerOptions = {}) {
     readResult = readDistillResultFile,
     makeWorkDir = makeMemoryDistillWorkDir,
     writePrompt = (promptPath: string, content: string) => fsPromises.writeFile(promptPath, content, 'utf8'),
-    removeWorkDir = async (dir: string) => { try { await fsPromises.rm(dir, { recursive: true, force: true }); } catch { /* best-effort */ } },
+    removeWorkDir = async (dir: string) => { try { await fsPromises.rm(dir, { recursive: true, force: true }); } catch {  } },
     now = () => Date.now(),
     logger = console,
     debug = false,
@@ -267,7 +245,6 @@ function createMemoryDistiller(deps: MemoryDistillerOptions = {}) {
     };
   }
 
-  // Fallback bullets are raw records, not standing claims the incremental prompt may reuse.
   async function readPublished(memoryStore: MemoryStore): Promise<PublishedView> {
     const manifest = await memoryStore.readPublishedManifest();
     const documents = await memoryStore.readPublishedDocuments(manifest);
@@ -280,7 +257,6 @@ function createMemoryDistiller(deps: MemoryDistillerOptions = {}) {
     };
   }
 
-  // The cursor advances only after published bytes are re-read, leaving failed deltas available again.
   async function noteOutcome(
     memoryStore: MemoryStore,
     { advanced, cursor, failures }: { advanced: boolean; cursor: number; failures: number },
@@ -293,7 +269,6 @@ function createMemoryDistiller(deps: MemoryDistillerOptions = {}) {
     if (failures > 0) await memoryStore.setDistillFailures(0);
   }
 
-  // A verdict is a claim; the published bytes are the evidence, so the stamp is re-read off what landed.
   async function verifyPublished(
     memoryStore: MemoryStore,
     watermark: CanonWatermark,
@@ -356,7 +331,6 @@ function createMemoryDistiller(deps: MemoryDistillerOptions = {}) {
   }): Promise<DistillReport> {
     const built = filesFor(merged.claims, valid);
     if (merged.lockedTouched.length > 0) {
-      // The held build renders what the run PROPOSED, which is the only place an operator can see it.
       const pending = await memoryStore.publishPending({ ...filesFor(proposed || merged.claims, valid), watermark });
       await noteOutcome(memoryStore, { advanced: false, cursor, failures });
       log.warn(`a distilled projection changed ${merged.lockedTouched.length} locked record(s): it was queued for review, not published`);
@@ -394,7 +368,6 @@ function createMemoryDistiller(deps: MemoryDistillerOptions = {}) {
     });
   }
 
-  // A full project re-distill is the only operation that can shrink that project's claim set.
   async function compact({
     memoryStore, valid, watermark, published, project, failures,
   }: {
@@ -440,7 +413,7 @@ function createMemoryDistiller(deps: MemoryDistillerOptions = {}) {
       await noteOutcome(memoryStore, { advanced: false, cursor: 0, failures });
       return report({ status: 'error', reason: `compaction returned ${checked.claims.length} claim(s), no smaller than the ${shrank.before} it replaced`, mode: 'full' });
     }
-    // Full re-distills rewrite standing ground, so their shrink gate replaces the net-new cap.
+
     const replaced = distillCore.replaceProjectClaims(published.claims, checked.claims, project);
     const merged = distillCore.finalizeMergedClaims(replaced, {
       records: valid,
@@ -452,7 +425,7 @@ function createMemoryDistiller(deps: MemoryDistillerOptions = {}) {
       await noteOutcome(memoryStore, { advanced: false, cursor: 0, failures });
       return report({ status: 'error', reason: `${merged.reason}: ${merged.detail}`, mode: 'full' });
     }
-    // A compaction read every record of one project, not the delta, so the cursor is not its to move.
+
     return publishMerged({
       memoryStore,
       merged,
@@ -467,7 +440,6 @@ function createMemoryDistiller(deps: MemoryDistillerOptions = {}) {
     });
   }
 
-  // A supersession or forget can prune claims mechanically without a model run.
   async function reconcile({
     memoryStore, valid, watermark, published, cursor, failures,
   }: {
@@ -522,7 +494,6 @@ function createMemoryDistiller(deps: MemoryDistillerOptions = {}) {
       return report({ status: 'error', reason: `${checked.reason}: ${checked.detail}`, mode: 'incremental', delta: delta.records.length });
     }
     if (checked.verdict !== 'DISTILLED') {
-      // The delta was read and said nothing new, so re-reading it could only say nothing new twice.
       await noteOutcome(memoryStore, { advanced: true, cursor, failures });
       return report({
         status: 'current', verdict: checked.verdict, mode: 'incremental', cursor, delta: delta.records.length,
@@ -554,7 +525,6 @@ function createMemoryDistiller(deps: MemoryDistillerOptions = {}) {
     return { ...outcome, delta: delta.records.length, remaining: delta.remaining };
   }
 
-  /** One pass. Never throws: the lane reports a reason and leaves the published build untouched. */
   async function runOnce({ dryRun = false, force = false }: { dryRun?: boolean; force?: boolean } = {}): Promise<DistillReport> {
     if (!store) return report({ status: 'disabled', reason: 'no memory store' });
     const memoryStore = store;
@@ -565,7 +535,7 @@ function createMemoryDistiller(deps: MemoryDistillerOptions = {}) {
       const watermark = memoryStore.watermark();
       const failures = memoryStore.distillFailures();
       const published = await readPublished(memoryStore);
-      // A fallback publish drops standing claims, so the cursor resets to avoid resuming mid-canon.
+
       const cursor = published.distilled ? memoryStore.distillCursorSeq() : 0;
       const standing = distillCore.renderPublishedForPrompt(published.claims).length;
       const delta = distillCore.selectDeltaForPrompt(valid, {
@@ -616,7 +586,6 @@ function createMemoryDistiller(deps: MemoryDistillerOptions = {}) {
         memoryStore, valid, watermark, published, delta, failures,
       });
     } catch (error) {
-      // Reported as `locked` because that is what the operator is being told: another writer holds it.
       if (isBusyError(error)) return report({ status: 'locked', reason: 'the memory database is busy' });
       return report({ status: 'error', reason: firstLine(errorMessage(error)) });
     } finally {

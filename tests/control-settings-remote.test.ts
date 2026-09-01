@@ -1,10 +1,3 @@
-// Remote mode must be UNREACHABLE from the control WebSocket. That channel is unauthenticated on
-// localhost by design, so if a settings save could write config.remote, any local process (or a
-// browser page that got a socket) could turn on remote access, mint itself a listener and widen the
-// trust boundary from inside. The only paths in are the config file and the CLI.
-//
-// These tests drive the REAL config store over a temp config.json (never ~/.glissa).
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -28,7 +21,7 @@ function harness(config: GlissaConfig, store: ConfigStore): ControlConnection<Se
     applySettingsReload: (fresh) => store.applySettings(fresh),
   }));
   const connection = connectControl<SettingsFrame>(server);
-  connection.sent.length = 0; // drop the connect preamble
+  connection.sent.length = 0;
   return connection;
 }
 

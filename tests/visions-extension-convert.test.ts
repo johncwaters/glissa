@@ -4,8 +4,6 @@ import { createRequire } from 'node:module';
 
 import vscode from './helpers/vscode-stub.ts';
 
-// lsp-convert.ts stays CommonJS so visions-setup can strip its types and pack it under the .js name the
-// extension host requires, so its surface is declared here rather than imported.
 type StubApi = typeof vscode;
 type StubWorkspaceEdit = InstanceType<StubApi['WorkspaceEdit']>;
 type StubDiagnostic = InstanceType<StubApi['Diagnostic']> & { code?: unknown; source?: string };

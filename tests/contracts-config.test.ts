@@ -28,9 +28,6 @@ test('the persisted mill measurement block keeps its retention setting', () => {
   assert.deepEqual(Config.parse(config).millMetrics, { retainDays: 90 });
 });
 
-// The config contract gates the LOAD, and the load exits on error, so NOTHING under `hooks` may cost
-// the boot: not a record missing a field, not a stray string in the list, not a paste of Claude Code's
-// own event-keyed object. session/core/user-hooks-core.ts judges the value at read time instead.
 test('any hooks value parses, so one hand edit cannot cost the boot', () => {
   const cases: unknown[] = [
     [{ id: 'x' }],

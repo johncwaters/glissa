@@ -1,21 +1,13 @@
-// The touch key strip's DOM. A soft keyboard gives xterm printable characters only, so Esc / Tab /
-// Ctrl+C / arrows have no other way in; byte catalog in ../mobile-keys.mjs.
-
 import { el } from '../dom-helpers.ts';
 import type { MobileKey } from '../mobile-keys.ts';
 import { isClipboardKey, isUploadKey, mobileKeyBytes, MOBILE_KEYS } from '../mobile-keys.ts';
 import { showErrorToast } from '../session-card/toast.ts';
 
-// send(data) writes into the currently shown session; getSessionId() names that session for the
-// upload endpoint (the image travels over HTTP, not the data WS). The caller owns resolving both, so
-// the strip itself holds no session state and survives every session swap unchanged.
 export function createMobileKeyStrip({ send, getSessionId }: { send: (data: string | null | undefined) => void; getSessionId?: () => string | null | undefined }) {
   const strip = el('div', 'phone-key-strip');
   strip.setAttribute('role', 'toolbar');
   strip.setAttribute('aria-label', 'Terminal keys');
 
-  // Built on first use and kept in the strip so it stays in the document: a detached input's picker is
-  // ignored by some mobile engines. The operator never sees it.
   let filePicker: HTMLInputElement | null = null;
   let pickingButton: HTMLButtonElement | null = null;
 
@@ -24,9 +16,7 @@ export function createMobileKeyStrip({ send, getSessionId }: { send: (data: stri
     btn.type = 'button';
     btn.dataset.key = key.id;
     btn.title = key.title;
-    // A press must not move DOM focus off xterm's hidden textarea, or the soft keyboard closes on every
-    // Esc or arrow tap; preventing the default on pointerdown blocks the focus change while leaving the
-    // click that actually sends the bytes.
+
     btn.addEventListener('pointerdown', (event) => event.preventDefault());
     btn.addEventListener('click', () => pressKey(key, btn));
     strip.appendChild(btn);
@@ -41,7 +31,7 @@ export function createMobileKeyStrip({ send, getSessionId }: { send: (data: stri
       pasteFromClipboard(send);
       return;
     }
-    // Through the tested accessor, so the unit-tested mapping is the one production ships.
+
     send(mobileKeyBytes(key.id));
   }
 
@@ -62,7 +52,7 @@ export function createMobileKeyStrip({ send, getSessionId }: { send: (data: stri
     const picker = filePicker;
     if (!picker) return;
     const file = picker.files ? picker.files[0] : null;
-    // Cleared immediately: re-picking the SAME photo fires no change event while its value is still set.
+
     picker.value = '';
     if (!file) return;
     const sessionId = getSessionId?.();
@@ -73,12 +63,7 @@ export function createMobileKeyStrip({ send, getSessionId }: { send: (data: stri
     uploadImage(sessionId, file, pickingButton);
   }
 
-  // Same-origin relative URL (dev and prod serve this app off the same Express instance), and fetch's
-  // default credentials carry the pairing cookie a remote phone needs. The server saves the bytes and
-  // pastes the saved path into the session's terminal; nothing is echoed here.
   async function uploadImage(sessionId: string, file: File, btn: HTMLButtonElement | null) {
-    // The label is constant and no spinner goes inside the button: the control just refuses a second
-    // pick until this one lands.
     if (btn) btn.disabled = true;
     try {
       const res = await fetch(`/upload/${encodeURIComponent(sessionId)}`, {
@@ -102,16 +87,11 @@ async function uploadErrorText(res: Response) {
     const body = (await res.json()) as { error?: unknown } | null;
     if (body && typeof body.error === 'string') return `Image upload failed: ${body.error}`;
   } catch {
-    // A non-JSON error body (a proxy's HTML page) carries nothing worth showing.
   }
   return 'Image upload failed';
 }
 
 function pasteFromClipboard(send: (data: string) => void) {
-  // Reading the clipboard needs an explicit permission on most engines and is absent entirely in an
-  // insecure context. A denial can arrive either way - some engines throw NotAllowedError
-  // synchronously instead of rejecting - so both shapes are caught and both surface as a notice
-  // rather than a silently dead button.
   let read: Promise<string> | null | undefined = null;
   try {
     read = navigator.clipboard?.readText?.();

@@ -1,7 +1,3 @@
-// End-to-end for the bundled editor extension: the real relay, a fake daemon, and the vscode stub the
-// extension host would otherwise supply. The extension is the only Visions component the daemon's own
-// tests never exercised, and it is the one that has to be right for a file edit to reach the lane.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -16,8 +12,6 @@ import { ACTIVITY_METHOD } from '../server/core/ingest-editor-core.ts';
 
 const requireFromHere = createRequire(import.meta.url);
 
-// The framing module is COPIED beside the extension when the vsix is packed (server/visions-setup.ts), so
-// in the repo it resolves only from the one place that owns it.
 const LSP_CORE_PATH = requireFromHere.resolve('../server/core/visions-lsp-core.ts');
 const CONVERT_PATH = requireFromHere.resolve('../tools/vscode-visions/lsp-convert.ts');
 const RELAY_PATH = path.join(import.meta.dirname, '..', 'session', 'visions-relay.ts');
@@ -32,8 +26,6 @@ interface LoaderInternals {
   _resolveFilename: ModuleResolve;
 }
 
-// The extension is authored CommonJS so the extension host can require it, so its surface is declared
-// here rather than imported.
 interface ExtensionModule {
   activate(context: { subscriptions: { dispose?: () => void }[] }): void;
   relayArgs(relayPath: string, port: number): string[];
@@ -75,7 +67,6 @@ function isCodeActionProvider(value: unknown): value is CodeActionProvider {
   return isRecord(value) && typeof value.provideCodeActions === 'function';
 }
 
-// A frame's params walked by path, so an assertion states the field it means in one line.
 function paramAt(message: DaemonMessage, dottedPath: string): unknown {
   let cursor: unknown = message.params;
   for (const key of dottedPath.split('.')) {
@@ -85,9 +76,6 @@ function paramAt(message: DaemonMessage, dottedPath: string): unknown {
   return cursor;
 }
 
-// The stub is an ES module now, so a resolve-time redirect would hand the extension's CommonJS
-// `require('vscode')` the namespace wrapper instead of the namespace itself. Intercepting the load is
-// what puts the stub object in its hands.
 const loader: LoaderInternals = requireFromHere('node:module');
 const originalLoad = loader._load;
 loader._load = function loadWithVscodeStub(this: unknown, request: string, ...rest: unknown[]): unknown {
@@ -283,7 +271,7 @@ test('a non-markdown buffer reports a marker instead of its text', async (t) => 
 
   const opened = await marker('textDocument/didOpen');
   assert.equal(paramAt(opened, 'uri'), 'file:///tmp/app.js');
-  // The whole point of the marker: the buffer this lane never sweeps does not ride the wire.
+
   assert.equal(JSON.stringify(opened).includes('const a = 1'), false);
 
   await marker('textDocument/didSave');
@@ -323,8 +311,6 @@ test('an absent relay reports itself instead of spawning anything', () => {
   assert.match(String(vscode.__test.state.errors[0]), /glissa visions install/);
 });
 
-// The extension is packed into a .vsix and cannot require anything inside this package, so its copy of
-// the wire constant is pinned here instead.
 test('the packed extension names the same activity method the daemon answers', () => {
   const source = fs.readFileSync(path.join(import.meta.dirname, '..', 'tools', 'vscode-visions', 'extension.ts'), 'utf8');
   assert.match(source, new RegExp(`const ACTIVITY_METHOD = '${ACTIVITY_METHOD}';`));

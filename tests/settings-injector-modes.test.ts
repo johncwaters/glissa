@@ -1,8 +1,3 @@
-// The per-session settings file carries a live hook bearer token and lives in the SHARED system temp
-// dir on POSIX hosts. Written with default modes, any other user on a multi-user box could read every
-// live token and forge hook callbacks; a pre-created directory (or a symlink standing in for one)
-// turned the spawn-time write into an arbitrary-file write as the server account.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -56,8 +51,6 @@ test('a settings file left behind by an earlier run does not keep its old mode',
   }
 });
 
-// The symlink case is the one that mattered most: /tmp/glissa-hooks pointed at somewhere else turns
-// every session spawn into a write the attacker chose the destination of.
 test('a base path that is a symlink rather than a real directory is refused', { skip: POSIX ? false : 'symlink creation needs privileges on Windows' }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-hook-symlink-'));
   const target = path.join(root, 'elsewhere');

@@ -1,20 +1,3 @@
-// OSC-0 title source: the DEGRADED fallback status signal.
-//
-// The framing and the state latching here are agent-NEUTRAL; WHICH leading glyph means working or
-// idle is the adapter's title profile (session/adapters/claude-code.js), moved out of here in M1 of
-// docs/plan-agent-adapters.md. A source constructed without one gets the Claude Code profile.
-//
-// CONTRACT (honest fallback): this source emits `working` / `ready` / `unknown`, and
-// `awaiting-input` ONLY for a profile whose agent writes an explicit awaiting-input title STATE
-// (codex's blinking "[ ! ] Action Required"). Claude Code has none, so its titles can never tell
-// "needs input" from "finished" and WAITING stays the hook source's job there. An unrecognized
-// leading glyph is reported as `unknown` (with a one-time warning), never silently treated as `ready`.
-//
-// Generic window titles are ignored where the profile says so. Claude ALWAYS leads its activity
-// title with a pictographic glyph (all > U+007F), so a title leading with a plain ASCII character is
-// a window title set by the spawn shell or OS (e.g. `cmd.exe /c claude` setting "C:\...\cmd.exe").
-// Such titles carry no status and are dropped silently, never flagged as `unknown`, since `unknown`
-// is reserved for genuine new-glyph candidates worth triaging.
 
 import { EventEmitter } from 'node:events';
 
@@ -26,14 +9,10 @@ const OSC_START = '\x1b]0;';
 const BEL = '\x07';
 const ST = '\x1b\\';
 
-// What the profile needs about the session whose titles it is reading (codex compares the idle title
-// against the cwd basename).
 export interface TitleContext {
   cwdBasename?: string | null;
 }
 
-// Method shorthand on purpose: an adapter's profile is a plain JS object whose predicates are inferred,
-// and bivariant parameter checking is what lets all three adapters satisfy one type.
 export interface TitleProfile {
   classifyTitle?(title: string, context: TitleContext): string;
   isSpinnerChar?(char: string): boolean;
@@ -42,7 +21,6 @@ export interface TitleProfile {
   unknownGlyphHint?: string;
 }
 
-// What the 'signal' event carries.
 export interface TitleSignal {
   signal: string;
   char: string | null;
@@ -56,8 +34,6 @@ export interface OscTitleSourceOptions {
   titleProfile?: TitleProfile;
 }
 
-// Locate the next OSC-0 title in `buffer` at/after `fromIndex`.
-// Returns { start, end, next, title } or null when no complete title is present.
 function findOscTitle(buffer: string, fromIndex: number) {
   const start = buffer.indexOf(OSC_START, fromIndex);
   if (start === -1) return null;
@@ -87,11 +63,9 @@ class OscTitleSource extends EventEmitter {
     super();
     this._stabilizationMs = stabilizationMs;
     this._profile = titleProfile;
-    // What the profile needs about THIS session to read a title (codex compares the idle title
-    // against the cwd basename). Set by the session at every spawn, since a worktree changes it.
     this._context = {};
     this._hasSeenSpinner = false;
-    this._lastKind = null; // 'working' | 'idle-pending' | 'ready' | 'awaiting-input' | 'unknown' | null
+    this._lastKind = null;
     this._lastChar = null;
     this._stabilizationTimer = null;
     this._pending = '';
@@ -114,10 +88,6 @@ class OscTitleSource extends EventEmitter {
     if (cursor > 0) this._pending = this._pending.slice(cursor);
   }
 
-  // Which of working / ready / awaiting-input / ignore / unknown this title means. A profile may
-  // classify the WHOLE title (codex, whose idle and awaiting-input titles both lead with plain
-  // ASCII); one that only knows leading glyphs (Claude Code) is classified here from its predicates,
-  // in the order the pre-profile source applied them.
   _classifyTitle(trimmed: string, char: string): string {
     const profile = this._profile;
     if (profile.classifyTitle) return profile.classifyTitle(trimmed, this._context);
@@ -129,7 +99,7 @@ class OscTitleSource extends EventEmitter {
 
   _processTitle(title: string): void {
     const trimmed = title.replace(/^[\s\x00-\x1f]+/, '');
-    if (!trimmed) return; // cleared/empty title, ignore
+    if (!trimmed) return;
     const char = String.fromCodePoint(trimmed.codePointAt(0) ?? 0);
     const kind = this._classifyTitle(trimmed, char);
 
@@ -147,8 +117,6 @@ class OscTitleSource extends EventEmitter {
     }
 
     if (kind === 'awaiting-input') {
-      // An explicit state the agent wrote, so it needs no stabilization and no spinner first; it
-      // also cancels a pending idle, which by definition described the moment before the prompt.
       this._lastChar = char;
       this._clearStabilization();
       if (this._lastKind !== 'awaiting-input') {
@@ -160,8 +128,6 @@ class OscTitleSource extends EventEmitter {
 
     if (kind === 'ready') {
       this._lastChar = char;
-      // Only arm `ready` after we have actually seen the session work. A session
-      // that opens directly on the idle glyph (never spun) must not report ready.
       if (this._hasSeenSpinner && this._lastKind !== 'ready') {
         this._lastKind = 'idle-pending';
         this._armStabilization(char);
@@ -169,8 +135,6 @@ class OscTitleSource extends EventEmitter {
       return;
     }
 
-    // Unrecognized non-ASCII glyph: could be a NEW Claude idle/activity glyph from
-    // a future version. NEVER treat as ready. Report once so it can be triaged.
     this._lastChar = char;
     if (this._lastKind !== 'unknown') {
       this._lastKind = 'unknown';
@@ -192,7 +156,7 @@ class OscTitleSource extends EventEmitter {
     this._stabilizationTimer = setTimeout(() => {
       this._stabilizationTimer = null;
       if (this._destroyed) return;
-      if (this._lastKind !== 'idle-pending') return; // a spinner re-armed since
+      if (this._lastKind !== 'idle-pending') return;
       this._lastKind = 'ready';
       this._emit('ready', char);
     }, this._stabilizationMs);
@@ -215,20 +179,12 @@ class OscTitleSource extends EventEmitter {
     }
   }
 
-  // Re-open the working-kind dedup latch so the NEXT spinner frame re-emits `working`.
-  // Called by the session wrapper when the state machine enters a quiescent state
-  // (IDLE/COMPLETE): if the PTY is in fact still spinning (a premature hook `ready`),
-  // the next real frame re-wakes the card instead of being swallowed by the edge
-  // trigger in _processTitle. Strictly weaker than reset(): preserves _hasSeenSpinner
-  // and _lastChar, and touches nothing unless the latched kind is `working` (no
-  // stabilization timer can be armed in that state - every spinner frame clears it).
   resyncWorkingLatch(): void {
     if (this._destroyed) return;
     if (this._lastKind !== 'working') return;
     this._lastKind = null;
   }
 
-  // Merged, not replaced: a caller that knows one field must not blank the others.
   setContext(context: TitleContext | null | undefined): void {
     if (this._destroyed || !context) return;
     this._context = { ...this._context, ...context };
@@ -263,7 +219,6 @@ function createOscTitleSource(opts?: OscTitleSourceOptions): OscTitleSource {
   return new OscTitleSource(opts);
 }
 
-// The glyph predicates moved to the Claude Code adapter; re-exported here for the pre-adapter pins.
 const { isBrailleChar, isSpinnerChar, isKnownIdleChar } = claudeCode;
 
 export { createOscTitleSource, isBrailleChar, isSpinnerChar, isKnownIdleChar };

@@ -1,7 +1,3 @@
-// Tests for the post-turn checker runner (server/post-turn-checker.ts). The runner's
-// git + fs IO is injected (deps) so the core is tested without real git, plus one
-// guarded real-git smoke test. NO literal em/en dash or ellipsis in this file.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -19,7 +15,6 @@ interface FakeRepoOptions {
   raceFiles?: string[];
 }
 
-// In-memory fake repo. files: { relPosixPath: content }.
 function makeDeps(files: Record<string, string>, opts: FakeRepoOptions = {}) {
   const root = path.join(os.tmpdir(), 'pt-fake-root');
   const toRel = (abs: string) => path.relative(root, abs).split(path.sep).join('/');
@@ -39,7 +34,7 @@ function makeDeps(files: Record<string, string>, opts: FakeRepoOptions = {}) {
       const rel = toRel(abs);
       statCalls[rel] = (statCalls[rel] ?? 0) + 1;
       const size = Buffer.byteLength(files[rel] ?? '', 'utf8');
-      // Race simulation: a file listed in opts.raceFiles changes mtime each stat.
+
       const mtimeMs = opts.raceFiles?.includes(rel) ? statCalls[rel] : 7;
       return { mtimeMs, size };
     },
@@ -126,8 +121,6 @@ test('mtime race: a file changed between read and write is skipped, not clobbere
 });
 
 test('slop rule (enabled) flags a code file but never rewrites it, even in fix mode', async () => {
-  // Clean file except for slop (final newline present, no trailing ws/dash/bom), so the
-  // only possible write would come from the slop rule, which must be report-only.
   const files = { 'a.js': `console.log(1)${NL}` };
   const { deps, writes } = makeDeps(files);
   const cfg = resolveCheckConfig({ mode: 'fix', rules: { slop: true } });
@@ -185,7 +178,7 @@ test('real git: fixes a dirty file in a temp repo', { skip: !gitAvailable() }, a
     fs.writeFileSync(file, 'seed\n');
     run(['add', '.']);
     run(['commit', '-m', 'seed']);
-    // Now dirty it: trailing space + no final newline.
+
     fs.writeFileSync(file, 'hello world  ');
 
     const report = await runPostTurnChecks({ cwd: dir, config: fixCfg });

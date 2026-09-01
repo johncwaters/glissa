@@ -1,7 +1,3 @@
-// The memory tenant of the machine-wide database (docs/plan-visions-3.md, M12b): an idempotent schema,
-// the bounded bookkeeping tables that replaced tail-state.json and the in-memory echo set, and the
-// derived FTS5 index that is rebuilt rather than repaired.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -27,7 +23,6 @@ function openDb(dbPath: string): MemoryDb {
   return db;
 }
 
-// A pragma answers one column of one row, typed as wide as sqlite's own value union.
 function pragmaValue(db: DatabaseSync, pragma: string, column: string): unknown {
   const row = db.prepare(`PRAGMA ${pragma}`).get();
   return row ? row[column] : undefined;
@@ -41,7 +36,7 @@ test.afterEach(() => {
   for (const db of opened.splice(0)) {
     try {
       db.close();
-    } catch { /* already closed by the test itself */ }
+    } catch {  }
   }
 });
 
@@ -119,7 +114,6 @@ test('the search index is derived, so a count that disagrees with the canon is r
   assert.equal(db.ensureSearchIndex(), 0, 'a consistent index is left alone');
 });
 
-// The three parts of the HIGH forget-residue fix, at the substrate seam: the pragma, the scrub, the checkpoint.
 test('an expunged row leaves no readable trace once the index is scrubbed and the log reclaimed', () => {
   const dbPath = tempDbPath();
   const db = openDb(dbPath);
@@ -141,7 +135,6 @@ test('an expunged row leaves no readable trace once the index is scrubbed and th
   assert.deepEqual(db.searchIds(['poller'], 10), ['m-0000000000000002'], 'the surviving row is still indexed');
 });
 
-// Per CONNECTION, not stored in the file, so it is asserted on the handle the opener hands back.
 test('secure_delete is on, which is what makes a freed row unreadable rather than merely unlinked', () => {
   const dbPath = tempDbPath();
   const db = openDatabase(dbPath);
@@ -258,7 +251,7 @@ test('an append ordinal never goes backwards, not even after the newest record i
   db.transaction(() => db.deleteRecord('m-0000000000000002'));
   assert.equal(db.insertRecord(record({ id: 'm-0000000000000003', text: 'the third fact' })), 3);
   db.close();
-  // A reopen re-reads the high water mark rather than re-deriving it from the rows that survived.
+
   const reopened = openDb(dbPath);
   assert.equal(reopened.insertRecord(record({ id: 'm-0000000000000004', text: 'the fourth fact' })), 4);
 });

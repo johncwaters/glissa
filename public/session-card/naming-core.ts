@@ -1,10 +1,3 @@
-// Pure session-name helpers. The sessionUIs-backed wrappers
-// (countSessionsByName / suggestSessionName) live in naming.js and pass the list
-// of current display names into these functions.
-
-// True when `name` is exactly `baseName` or matches `baseName (N)` where N is a
-// positive integer suffix produced by nextSuggestedName. Excludes unrelated
-// parenthetical names like `Foo (legacy)`.
 export function isAutoNameOf(name: string, baseName: string) {
   if (name === baseName) return true;
   const prefix = `${baseName} (`;
@@ -13,7 +6,6 @@ export function isAutoNameOf(name: string, baseName: string) {
   return /^\d+$/.test(inner);
 }
 
-// Count names that are `baseName` or `baseName (N)`.
 export function countAutoNames(baseName: string, names: readonly string[]) {
   let n = 0;
   for (const name of names) {
@@ -22,9 +14,6 @@ export function countAutoNames(baseName: string, names: readonly string[]) {
   return n;
 }
 
-// First free name in the sequence `baseName`, `baseName (2)`, `baseName (3)`, ...
-// `names` is the set of existing display names. Bounded by 999 to keep the suffix
-// within the 64-char server name limit; falls back to a timestamped suffix.
 export function nextSuggestedName(baseName: string, names: readonly string[]) {
   const taken = new Set(names);
   if (!taken.has(baseName)) return baseName;

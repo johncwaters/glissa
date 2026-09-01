@@ -6,8 +6,6 @@ import {
   buildResyncCommand, firstGitErrorLine,
 } from '../server/core/branch-sync-core.ts';
 
-// --- parseLeftRightCount: "<behind><TAB><ahead>" per `git rev-list --left-right --count U...B` ---
-
 test('parseLeftRightCount reads "behind<TAB>ahead" in that order', () => {
   assert.deepEqual(parseLeftRightCount('1\t2'), { behind: 1, ahead: 2 });
 });
@@ -39,8 +37,6 @@ test('parseLeftRightCount returns null for malformed git output', () => {
   assert.equal(parseLeftRightCount('-1\t2'), null);
 });
 
-// --- decideBranchSyncState ---
-
 test('decideBranchSyncState: no upstream wins regardless of counts', () => {
   assert.equal(decideBranchSyncState({ hasUpstream: false, ahead: 5, behind: 5 }), 'no-upstream');
   assert.equal(decideBranchSyncState({ hasUpstream: false, ahead: 0, behind: 0 }), 'no-upstream');
@@ -68,8 +64,6 @@ test('decideBranchSyncState: upstream with unparseable counts is unknown, not no
   assert.equal(decideBranchSyncState({ hasUpstream: true, ahead: 1.5, behind: 0 }), 'unknown');
 });
 
-// --- parseRemoteFromUpstream ---
-
 test('parseRemoteFromUpstream reads the segment before the first slash', () => {
   assert.equal(parseRemoteFromUpstream('origin/develop'), 'origin');
   assert.equal(parseRemoteFromUpstream('upstream/feature/nested'), 'upstream');
@@ -81,8 +75,6 @@ test('parseRemoteFromUpstream defaults to origin for a slash-less or empty value
   assert.equal(parseRemoteFromUpstream(null), 'origin');
   assert.equal(parseRemoteFromUpstream(undefined), 'origin');
 });
-
-// --- decideResyncAction: the resync decision table (state x checked-out -> action) ---
 
 test('decideResyncAction: behind + checked out -> ff-merge (advances the working tree too)', () => {
   assert.equal(decideResyncAction('behind', true), 'ff-merge');
@@ -126,8 +118,6 @@ test('buildResyncCommand shares the fast-forward and plain-push command shapes',
     successAction: 'pushed',
   });
 });
-
-// --- firstGitErrorLine ---
 
 test('firstGitErrorLine strips the "Command failed: ..." echo and keeps the git complaint', () => {
   const err = new Error('Command failed: git merge --ff-only origin/develop\nmerge: origin/develop - not something we can merge\n');

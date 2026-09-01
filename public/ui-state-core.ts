@@ -1,8 +1,3 @@
-// The one home for dashboard state that CROSSES panel boundaries. A panel's own view state (sorts,
-// filters, scroll offsets, DOM refs) stays in the panel; only a value a second surface reads or writes
-// belongs here, because a second copy of a shared value is how the desktop and phone layouts drift.
-// Pure: no DOM, no timers, no storage, so node:test can drive it directly.
-
 export interface UiState {
   layout: string;
   activeView: string;
@@ -26,8 +21,6 @@ export const INITIAL_UI_STATE: Readonly<UiState> = Object.freeze({
 
 const asId = (value: string | null | undefined): string | null => value || null;
 
-// Every write goes through one of these, so the set of things that can move is readable in one place
-// and a typo lands as a thrown unknown-action rather than a silent new field.
 export const UI_ACTIONS = Object.freeze({
   setLayout: (layout: string): UiStatePatch => ({ layout }),
   setActiveView: (activeView: string): UiStatePatch => ({ activeView }),
@@ -72,8 +65,7 @@ export function createUiStateStore(initialState?: UiStatePatch) {
     const previousState = state;
     state = Object.freeze({ ...state, ...patch });
     for (const notify of subscribers) {
-      // One throwing subscriber must never strand the rest of a layout flip half-applied.
-      try { notify(state, changedKeys, previousState); } catch { /* ignore */ }
+      try { notify(state, changedKeys, previousState); } catch {  }
     }
     return state;
   }

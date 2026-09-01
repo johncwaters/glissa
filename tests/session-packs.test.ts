@@ -1,7 +1,3 @@
-// Spawn-time context-pack delivery: a built pack becomes an --add-dir plus the CLAUDE.md env flag and
-// a snapshot version stamp, an unbuilt one is skipped into the decision trace, and a session with no
-// packs spawns exactly as before. Uses the injected ptySpawn fake, so no real process is launched.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
@@ -24,8 +20,7 @@ interface PacksDeliveredPayload {
   ts: number;
 }
 const CLAUDE_MD_ENV = 'CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD';
-// The absence assertions below read the spawn env, which inherits process.env; a stray ambient value
-// would make them meaningless.
+
 delete process.env[CLAUDE_MD_ENV];
 
 function toPosix(value: string) {
@@ -388,8 +383,6 @@ test('packs: "house-rules" (not an array) is ignored entirely', async () => {
     s.destroy();
   }
 });
-
-// ---- Per-project variants: this project's flattened pack, with the group as the fallback ----
 
 const SLUG = 'glissa-12345678';
 

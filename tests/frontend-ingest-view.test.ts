@@ -1,19 +1,12 @@
-// The activity feed's pure half (docs/plan-ingestion.md, M6): what a wire event normalizes to, how a
-// batched delta merges into the standing list, how a snapshot replaces it, and the bound that keeps the
-// rendered list from growing for as long as a tab is left open.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import type { ActivityEvent } from '../public/visions-view-core.ts';
 
-// visions-view-core is a browser module; dynamic-import it so the suite drives the shipped source.
 const importCore = () => import('../public/visions-view-core.ts');
 
 const NOW = 1700000000000;
 
-// The WIRE shape, which is what normalizeActivityEvent flattens: scope is nested here and split into
-// root/sessionId on the row.
 interface WireActivityEvent {
   source?: unknown;
   kind?: unknown;

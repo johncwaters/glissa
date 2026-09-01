@@ -1,20 +1,3 @@
-/*
- * Visions tier 3 dispatch: the IO half of docs/archive/plan-navigator.md M4.
- *
- * Permissions posture, live-probed against the real CLI (2.x):
- *   - NO --dangerously-skip-permissions. The prompt file embeds arbitrary buffer text, so the session gets
- *     the least capability that still lets it write its result file.
- *   - There is NO allow list. A bare `Write` allow is what unbounds the writes, and no narrower allow
- *     grants the tool at all: both `Write(<dir>/**)` and `Edit(<dir>/**)` were probed and neither
- *     authorizes a Write. What confines them is `defaultMode: acceptEdits` over the throwaway cwd this
- *     module hands the session, which auto-accepts edits there and refuses them anywhere else.
- *   - The deny list below is the guard on top of that. Read is deliberately NOT denied: a bare `Read`
- *     deny refuses the Write tool too (probed), so denying reads and keeping the result contract are
- *     mutually exclusive with this plumbing.
- *   - Re-probed against 2.1.250; every clause and its counter-example is in
- *     server/core/lane-permissions-core.ts.
- */
-
 import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
@@ -47,11 +30,8 @@ const RESULT_FILE = VISIONS_RESULT_FILE;
 const PROMPT_FILE = 'visions-prompt.txt';
 const VISIONS_BOOTSTRAP_PROMPT = 'Read visions-prompt.txt and follow all instructions in that file';
 
-
-// Verbs a visions never needs: no shell, no editing, no network, no sub-agents.
 const VISIONS_DENY_TOOLS = Object.freeze(['Bash', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task']);
-// The whole built-in set this lane gets: read the prompt file, write the result file. The deny list
-// above stays as the guard, since an allow list that grows by one entry must not silently grant a verb.
+
 const VISIONS_ALLOW_TOOLS = Object.freeze(['Read', 'Write']);
 
 type VisionsSpawn = (options: {
@@ -90,8 +70,7 @@ interface VisionsDispatcherOptions {
   model?: string | null;
   logger?: Console;
   nowFn?: () => number;
-  // The narrow call shape raceWithAbort declares, not `typeof setTimeout`: the global's __promisify__
-  // member makes that type unimplementable by a hand-fired test timer.
+
   setTimeoutFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
   clearTimeoutFn?: (handle: NodeJS.Timeout) => void;
   makeWorkDir?: () => Promise<string>;
@@ -118,19 +97,12 @@ function visionsPermissions() {
   return buildLanePermissions({ denyTools: VISIONS_DENY_TOOLS, allowTools: VISIONS_ALLOW_TOOLS });
 }
 
-// `errorSource` is what the lane's health counter reads: everything here is a transport or spawn
-// failure except the one verdict the session itself authored, which proves the CLI ran.
 function errorResult(reason: string | null, errorSource: string = ERROR_SOURCE_TRANSPORT): DispatchResult {
   return {
     verdict: 'ERROR', comments: [], diagnostics: [], intent: null, hand: null, outOfRange: 0, errorSource, reason,
   };
 }
 
-/**
- * The result contract, read once. `onBytesRead` reports what the session actually wrote, so the caller
- * can log a size without a second stat of a file this already has in hand; it rides the options bag
- * rather than the returned shape, which several callers compare field for field.
- */
 async function readCommentsResult(
   resultPath: string,
   { lineCount = 0, onBytesRead = null }: {
@@ -142,8 +114,6 @@ async function readCommentsResult(
   try {
     raw = await fs.readFile(resultPath, 'utf8');
   } catch {
-    // Stays transport: four dispatches died against an account rate limit before the CLI ran at all on
-    // 2026-08-27, and NO file is exactly that signature, which the lane backoff exists to catch.
     return errorResult('no readable result file');
   }
   if (typeof onBytesRead === 'function') onBytesRead(Buffer.byteLength(raw));
@@ -151,8 +121,6 @@ async function readCommentsResult(
   try {
     parsed = JSON.parse(raw);
   } catch {
-    // Its own try, because a file that EXISTS proves the session ran and wrote it: sharing the catch
-    // above let buffer text that steers the session into unparsable output reach the lane-wide backoff.
     return errorResult('result file is not JSON', ERROR_SOURCE_SESSION);
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -163,8 +131,7 @@ async function readCommentsResult(
     return errorResult('invalid verdict in result file', ERROR_SOURCE_SESSION);
   }
   if (verdict === 'ERROR') return errorResult('session reported an error verdict', ERROR_SOURCE_SESSION);
-  // Optional: a string advances the active thread, { thread, text } names one or opens one, and anything
-  // else is simply not an updated belief, dropped rather than clearing the standing statement.
+
   const intent = readIntentProposal(parsed.intent);
   const hand = sanitizeIntentText(parsed.hand, { maxChars: MAX_HAND_CHARS }) || null;
   const diagnosticsResult = sanitizeCommentsWithDrops(parsed.diagnostics, { lineCount });
@@ -187,17 +154,11 @@ async function readCommentsResult(
   };
 }
 
-// Loaded here, not at module load: an inert lane must not pay for resolving `claude` on PATH.
 const requireFromHere = createRequire(import.meta.url);
 function loadSessionConstructor() {
   return (requireFromHere('../session/sessions.ts') as typeof import('../session/sessions.ts')).Session;
 }
 
-/**
- * The real spawn: one ephemeral headless session registered through the shared seam, which is what
- * puts a `visions` row on the Usage tab's lane ledger with no ledger code of its own. Never
- * rejects on an abort; the caller has already resolved that race.
- */
 function createVisionsSpawn({
   sessions = new Map(), closeSessionDataClients = () => {}, hookRouter = null, getHookPort = null,
   spawnGate = null, replayBufferKB = undefined, recordLane = null,
@@ -231,11 +192,6 @@ function makeVisionsWorkDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'glissa-visions-'));
 }
 
-/**
- * One dispatch, end to end: a throwaway cwd, the prompt, the spawn, the timeout race, the result
- * file. Returns { verdict, comments, reason } and never throws, so the wiring's gate logic has a
- * single shape to handle.
- */
 function createVisionsDispatcher({
   spawnSession,
   timeoutSeconds = DEFAULT_TIMEOUT_SECONDS,
@@ -245,7 +201,7 @@ function createVisionsDispatcher({
   setTimeoutFn = (fn, ms) => setTimeout(fn, ms),
   clearTimeoutFn = clearTimeout,
   makeWorkDir = makeVisionsWorkDir,
-  removeWorkDir = async (dir: string) => { try { await fs.rm(dir, { recursive: true, force: true }); } catch { /* best-effort */ } },
+  removeWorkDir = async (dir: string) => { try { await fs.rm(dir, { recursive: true, force: true }); } catch {  } },
   readResult = readCommentsResult,
   idFor = (uri: string) => `visions:${uri}:${Date.now()}`,
 }: VisionsDispatcherOptions = {}) {
@@ -287,12 +243,11 @@ function createVisionsDispatcher({
             note(`dispatch for ${uri} was aborted after ${elapsed()}ms`);
             return undefined;
           }
-          // Zero whenever the read never got that far, or an injected reader does not report it.
+
           let bytesRead = 0;
           const result = await readDispatchResult(resultPath, { lineCount, onBytesRead: (bytes) => { bytesRead = bytes; } });
           note(`dispatch result for ${uri}: ${result.verdict} (${bytesRead} bytes, ${elapsed()}ms)`);
-          // Never silent: an off-buffer line means the session numbered against something that is not
-          // this buffer, so the entries that DID land are suspect rather than merely fewer.
+
           if (result.outOfRange > 0) warn(`dispatch for ${uri} reported ${result.outOfRange} line(s) past the ${lineCount}-line buffer; the entries it kept may be anchored wrong`);
           return result;
         })
@@ -328,7 +283,6 @@ function createVisionsDispatcher({
     } catch (error) {
       return errorResult(firstLine(errorMessage(error)));
     } finally {
-      // A timeout resolves the verdict while the killed session still holds this dir as its cwd, and removing it under a live process leaks it on Windows.
       await drainPending(pendingSpawn);
       await removeWorkDir(workDir);
     }

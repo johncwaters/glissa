@@ -1,7 +1,3 @@
-// `glissa memory` reporting. Two rules, both about not lying to the operator: a write the database
-// refused must not read as an empty search, and a backfill that never ran must say so rather than report
-// a clean pass. The refusal is a busy database now (M12b), not the file-era canon lock.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -33,8 +29,6 @@ interface StopCounter {
 
 const QUIET = { log() {}, warn() {} };
 
-// A REAL store, so the CLI's reads of distDir/pendingDir/projectionPath are the paths a store mints,
-// with only the one call each test is about replaced on the instance.
 function storeWithForget(t: TestContext, result: ForgetResult): MemoryStore & StopCounter {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memory-cli-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -180,8 +174,6 @@ test('a backfill that hit its byte budget says it can be run again', async (t) =
   assert.equal(code, 0);
   assert.ok(logged.some((line) => /run it again/.test(line)));
 });
-
-// --- distill -------------------------------------------------------------
 
 function distillReport(overrides: Partial<DistillReport>): DistillReport {
   return {

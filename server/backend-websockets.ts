@@ -14,14 +14,8 @@ import { classifyUpgradePath, dataSessionIdFromUrl, upgradeTokenFromUrl } from '
 import { isApplicableViewerSize, pickSizeAfterDeparture } from './core/viewer-size-core.ts';
 import { createWsSender } from './ws-sender.ts';
 
-/**
- * A control-plane broadcast. Messages are JSON frames keyed by `type`, so the parameter is the
- * string-keyed record the sender stamps and serializes, not a bare `object`.
- */
 type ControlBroadcast = (message: ControlMessageRecord) => void;
 
-// The trust a control socket was accepted under, stamped by handleUpgrade so a local-only broadcast
-// can skip the remote clients.
 type ControlSocket = WebSocket & { glissaTrust?: RequestTrust };
 
 type UpgradeSocket = Duplex & { localPort?: number };
@@ -96,7 +90,6 @@ function createBackendWebSockets(dependencies: BackendWebSocketDependencies): Ba
   const sessionDataClients = new Map<string, Map<WebSocket, ViewerSizeRecord | null>>();
   let nextViewerResizeSeq = 0;
 
-  // The trust stamp handleUpgrade wrote lives on the socket, so reading it back is one narrowing here.
   function controlClients(): Iterable<ControlSocket> {
     return controlWss.clients as Set<ControlSocket>;
   }

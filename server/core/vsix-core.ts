@@ -1,6 +1,3 @@
-// A .vsix is the only install shape a VS Code family CLI accepts, so a directory copy plus an
-// extensions.json edit is not an option (`--install-extension` takes a file or a marketplace id).
-
 const CRC_TABLE = buildCrcTable();
 const LOCAL_HEADER_SIG = 0x04034b50;
 const CENTRAL_HEADER_SIG = 0x02014b50;
@@ -8,7 +5,7 @@ const END_OF_CENTRAL_SIG = 0x06054b50;
 const STORED = 0;
 const ZIP_VERSION = 20;
 const UTF8_FLAG = 0x0800;
-// Constant, so a rebuild of unchanged sources is byte-identical.
+
 const DOS_TIME = 0;
 const DOS_DATE = 0x21;
 

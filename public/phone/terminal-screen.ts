@@ -1,15 +1,3 @@
-// The phone Terminal screen: one session's live terminal, full bleed, the way the phone actually wants
-// it. The terminal is the product, so it gets the whole screen between a thin top bar and the touch key
-// strip; there is no rail and no docked panel competing with it.
-//
-// Nothing here duplicates a card affordance. The session's real card is borrowed through the shared
-// card-host seam, and the card's own action cluster (the kebab holding Rename / Restart / Resume /
-// Remove, plus the debug button) is ADOPTED into the top bar, so every action the desktop card offers
-// is reachable here with the wiring it already had. Two desktop mechanisms have no touch meaning and
-// are replaced rather than left dead: double-click-to-rename becomes the kebab's Rename (retargeted at
-// the top bar's name, since the card header does not render on this screen), and the hover-revealed
-// remove "x" is the kebab's Remove.
-
 import { STATES } from '#shared/states.ts';
 import { borrowCard, getBorrowedCardId, releaseCard } from '../card-host.ts';
 import { adoptElement, el, queryTag, releaseElement, stateChip } from '../dom-helpers.ts';
@@ -21,9 +9,8 @@ import { activateTerminalViewer, sendTerminalInput } from '../session-card/termi
 import { showErrorToast } from '../session-card/toast.ts';
 import { createMobileKeyStrip } from './mobile-key-strip.ts';
 
-const BACK_GLYPH = String.fromCharCode(0x2039); // single left-pointing angle quotation mark
+const BACK_GLYPH = String.fromCharCode(0x2039);
 
-// createTerminalScreen({ onBack }) -> { el, show, clear, refresh, getSessionId }
 export function createTerminalScreen({ onBack }: { onBack?: () => void }) {
   const screen = el('div', 'phone-terminal');
 
@@ -44,7 +31,6 @@ export function createTerminalScreen({ onBack }: { onBack?: () => void }) {
   const elapsedEl = queryTag(badgeEl, '.phone-terminal-elapsed', 'span');
   identity.append(nameEl, badgeEl);
 
-  // Where the card's adopted action cluster lands. Empty (and collapsed) with no session shown.
   const actionSlot = el('div', 'phone-terminal-actions');
 
   topBar.append(backBtn, identity, actionSlot);
@@ -60,16 +46,10 @@ export function createTerminalScreen({ onBack }: { onBack?: () => void }) {
   screen.append(topBar, cardSlot, emptyEl, keyStrip);
 
   let shownId: string | null = null;
-  // The card action cluster currently adopted into the top bar, and the ui whose Rename we retargeted.
-  // Tracked as their own references (not derived from shownId) so a card REBUILT under the same id
-  // cannot leave either one dangling.
+
   let adoptedActions: HTMLDivElement | null = null;
   let renameTargetUi: SessionUi | null = null;
 
-  // Bytes from the key strip go to whichever session this screen is showing, over the same data WS
-  // xterm's own keystrokes use. The strip never takes DOM focus (mobile-key-strip.js), so the keyboard
-  // survives an Esc or arrow press. A refused send (socket down and the replay queue full) is reported -
-  // a Ctrl+C tap that silently vanishes reads as a wedged session.
   function sendToShownTerminal(data: string | null | undefined) {
     const ui = shownId ? sessionUIs.get(shownId) : null;
     if (!ui) return;
@@ -77,10 +57,6 @@ export function createTerminalScreen({ onBack }: { onBack?: () => void }) {
     showErrorToast('Session is not connected; key press was dropped');
   }
 
-  // Typing on a phone goes through xterm's hidden 0x0 helper textarea, and its own synthetic focus on
-  // mousedown does not reliably raise a soft keyboard, so the tap focuses the terminal explicitly. Click
-  // rather than pointerdown: a scroll drag fires no click, and a click still counts as the user gesture
-  // iOS demands before it will open the keyboard.
   function focusShownTerminal() {
     const ui = shownId ? sessionUIs.get(shownId) : null;
     if (!ui?.term) return;
@@ -102,11 +78,7 @@ export function createTerminalScreen({ onBack }: { onBack?: () => void }) {
     }
     const state = ui.currentState || STATES.DORMANT;
     topBar.dataset.state = state;
-    // NEVER overwrite the name while the inline rename field is open inside it. This element IS the
-    // rename target (ui.renameTargetEl), and paint runs on every board refresh - a state change on ANY
-    // session, a snapshot, a merge-status delta - so an unguarded write would replace the focused input
-    // mid-edit and lose what the operator typed. The predicate belongs to the rename seam that owns the
-    // field's lifecycle (card-dom.js), not to a class name spelled out again here.
+
     if (!isRenameInProgress(nameEl)) nameEl.textContent = ui.card?.dataset.session || shownId;
     const { glyph, label } = stateChip(state);
     glyphEl.textContent = glyph;
@@ -114,22 +86,16 @@ export function createTerminalScreen({ onBack }: { onBack?: () => void }) {
     elapsedEl.textContent = sessionElapsedText(ui);
   }
 
-  // Hand the card's action cluster back to its header and stop retargeting Rename. Called before
-  // showing a different session and on clear, so exactly one card is ever borrowed from.
   function releaseBorrowedChrome() {
     if (renameTargetUi) {
       delete renameTargetUi.renameTargetEl;
       renameTargetUi = null;
     }
-    // An open rename field belongs to the session being let go of, so it goes with it. This is what
-    // keeps the paint guard honest: an orphaned input left in this element would make isRenameInProgress
-    // true forever and permanently pin a stale name. Abandoning the edit is the right outcome here - the
-    // session is being swapped out or removed, so committing its half-typed name would be worse.
+
     nameEl.replaceChildren();
     if (!adoptedActions) return;
     releaseElement(adoptedActions);
-    // A card rebuilt while its actions were up here leaves an orphan whose home no longer exists, so
-    // releaseElement has nowhere to put it. Drop it rather than stacking it behind the new cluster.
+
     if (adoptedActions.parentElement === actionSlot) adoptedActions.remove();
     adoptedActions = null;
   }
@@ -149,15 +115,12 @@ export function createTerminalScreen({ onBack }: { onBack?: () => void }) {
     borrowCard(ui, sessionId, cardSlot, { className: 'phone-centered' });
     adoptedActions = queryTag(ui.card, '.session-actions', 'div');
     adoptElement(adoptedActions, actionSlot);
-    // The card header does not render on this screen, so the inline rename must edit the name the
-    // operator can actually see. card-dom.js reads this seam and falls back to ui.nameEl.
+
     ui.renameTargetEl = nameEl;
     renameTargetUi = ui;
     paint();
   }
 
-  // Give the card and its actions back. Used when the screen loses its session (removed, or the layout
-  // flipped back to desktop and the Focus center wants the card).
   function clear() {
     releaseBorrowedChrome();
     if (getBorrowedCardId() === shownId) releaseCard();
@@ -165,11 +128,6 @@ export function createTerminalScreen({ onBack }: { onBack?: () => void }) {
     paint();
   }
 
-  // Re-paint from the live registry (a state change, a rename, a removal, a rebuild). A session that
-  // vanished drops the screen back to its empty state rather than showing a stale name over a dead
-  // terminal; a session whose card was REBUILT under the same id (the DORMANT close-out and the
-  // session-modified round trip both replace the element) is re-borrowed, exactly as the Focus center
-  // re-borrows a displaced card on its own refresh.
   function refresh() {
     if (!shownId) {
       paint();
@@ -187,9 +145,6 @@ export function createTerminalScreen({ onBack }: { onBack?: () => void }) {
     paint();
   }
 
-  // The screen was navigated away from. The card stays borrowed (its bytes keep flowing) but it is no
-  // longer on screen, so it stops speaking for the PTY's size and a desktop watching the same session
-  // gets its own dimensions back. reveal() re-asserts on the way in.
   function unview() {
     const ui = shownId ? sessionUIs.get(shownId) : null;
     ui?._unviewTerminal?.();
@@ -202,9 +157,6 @@ export function createTerminalScreen({ onBack }: { onBack?: () => void }) {
     const ui = sessionUIs.get(currentId);
     if (!ui) return;
     activateTerminalViewer(ui, currentId);
-    // Deliberately NOT focusing the terminal here: focus raises the soft keyboard, and entering this
-    // screen is usually READING, not typing. The keyboard comes up on an explicit tap on the terminal
-    // (the cardSlot click handler), which is also the gesture iOS requires anyway.
   }
 
   onSessionTick(() => {

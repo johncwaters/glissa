@@ -1,7 +1,3 @@
-// Tests for the pure cross-tab notification claim (public/notify-dedupe-core.ts).
-// Two open dashboard tabs both receive every `notify` broadcast; the localStorage
-// claim lets exactly one construct the (re-alerting) Notification.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 

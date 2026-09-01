@@ -71,7 +71,6 @@ function parseCodexUsageLine(
 }
 
 function codexDedupIdentity(entry: DedupIdentityEntry | null | undefined): string | null {
-  // Codex token_count entries have no message id, so timestamp plus session and counters define identity.
   if (!entry) return null;
   return [
     entry.vendor,

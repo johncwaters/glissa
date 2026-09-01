@@ -1,15 +1,3 @@
-/*
- * M12 of docs/plan-visions-3.md, on the M12b substrate: the thin IO shell around
- * server/core/memory-core.ts. Every decision it makes comes from that core; this file only reads,
- * appends, projects and drains.
- *
- * The canon lives in the machine-wide database (server/memory-db.ts), which is what retired the O_EXCL
- * lockfile and the fs.watch reload: SQLite arbitrates the CLI-vs-server race itself, and a write another
- * connection committed is noticed by `PRAGMA data_version` rather than by watching a directory. The
- * PROJECTION is still plain markdown on disk, published by the one mill-style versioned writer below.
- *
- * PRIVACY: remembered text never reaches a log line here. Counts, ids, paths and verdicts do.
- */
 
 import nodeCrypto from 'node:crypto';
 import nodeFs from 'node:fs';
@@ -36,7 +24,6 @@ const HMAC_KEY_BYTES = 32;
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
 const MAX_DELIVERED_HASHES = 2000;
-// The index narrows the field; the pure rules still rank it, so the candidate set is wider than the answer.
 const SEARCH_CANDIDATE_FACTOR = 10;
 const SEARCH_CANDIDATE_FLOOR = 100;
 
@@ -199,7 +186,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
     db = openDb({ dbPath, busyTimeoutMs });
   } catch (error) {
-    // Never softened into a silent lane-off: the guard fires only in a test, where it must be loud.
     if (error && errorCode(error) === HOME_DB_REFUSED_CODE) throw error;
     log.warn(`the memory lane stays off: ${errorMessage(error)}`);
     return null;
@@ -207,8 +193,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
   if (!db) return null;
   const openedDb = db;
 
-  // POSIX only: Windows reports no uid and no meaningful mode, so a planted key cannot be told apart
-  // from a minted one there.
   function keyFileWasMintedHere(keyPath: string): boolean {
     if (typeof process.getuid !== 'function') return true;
     try {
@@ -220,8 +204,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     }
   }
 
-  // Adopting whatever key file is already there hands the signing secret to whichever local process
-  // planted it first, and that key mints operator/locked records.
   function readOrMintSigningKey(): string {
     const keyPath = hmacKeyPath;
     let existing = '';
@@ -236,7 +218,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     return minted;
   }
 
-  // A row is trusted exactly as far as a canon LINE was: shape-checked, then verified or demoted.
   function verifiedRecord(raw: unknown): { record: MemoryRecord; demoted: boolean } | null {
     const shape = core.validateMemoryRecord(raw, { maxChars: config.maxRecordChars });
     if (!shape.valid) return null;
@@ -258,7 +239,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
   function canonicalProjectPathSync(project: unknown): string | null {
     const lookup = canonicalProjectLookupPlan(project, resolveProjectPathSync);
     if (!lookup || lookup.canonical !== null || !resolveProjectPathSync) return lookup?.canonical ?? null;
-    // The only plan with a null canonical carries a non-empty tag, so this narrowing never fires.
     if (!lookup.normalized) return lookup.configured ?? null;
     const normalizedTag = lookup.normalized;
     try {
@@ -315,11 +295,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     };
   }
 
-  /*
-   * The version is sampled BEFORE the read, never after: a commit landing between the two would
-   * otherwise be stamped as already-loaded and swallowed forever. Sampling first can only cost a
-   * redundant reload, which is the safe direction.
-   */
   function refreshFromDb() {
     cachedDataVersion = openedDb.dataVersion();
     const assembled = assembleRecords(openedDb.listRecords());
@@ -327,11 +302,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     return assembled;
   }
 
-  /*
-   * The whole cross-process story after the lockfile. `PRAGMA data_version` moves only when ANOTHER
-   * connection commits, so a `glissa memory forget` run against a live server is noticed on the next
-   * read instead of being watched for, and this store can never serve text another process expunged.
-   */
   function currentRecords(): MemoryRecord[] {
     if (stopped) return records;
     try {
@@ -344,7 +314,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     return records;
   }
 
-  // Boot only, a one-shot cold path: the whole canon is read once before the server serves anything.
   function load(): void {
     signingKey = readOrMintSigningKey();
     const projectTagMigration = openedDb.migrateProjectTags((record) => {
@@ -416,7 +385,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     }
   }
 
-  // manifest.json is as writable as any other file here, so its paths are treated as untrusted input.
   function isContainedRelPath(relPath: unknown): relPath is string {
     if (typeof relPath !== 'string' || !relPath) return false;
     if (path.isAbsolute(relPath) || /^[A-Za-z]:/.test(relPath)) return false;
@@ -437,11 +405,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     return documents;
   }
 
-  /*
-   * The mill's publish, on the projection: tmp sibling, rotate current to previous, rename in. An
-   * unchanged version rewrites manifest.json alone, so a build whose bytes did not move still records
-   * the watermark it was measured at instead of re-running on every tick.
-   */
   async function publishProjection({
     files, source = 'trivial', verdict = null, distilledAt = null, recordCount = 0, claimCount = null,
     watermark = null,
@@ -478,7 +441,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     return { published: true, unchanged: false, version: plan.version, manifest: plan.manifest };
   }
 
-  // The locked-diff holding pen: never rotated and never read by a delivery, so an operator reviews it.
   async function publishPending({ files, watermark = null, recordCount = 0, claimCount = null }: {
     files: ProjectionFile[];
     watermark?: { hash?: unknown } | null;
@@ -505,11 +467,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     return files;
   }
 
-  /*
-   * The day-one renderer, and now the FALLBACK: once the distill lane has published, its build owns
-   * dist/ and an append must not overwrite it with raw records. A forget forces its way through, since
-   * expunged text may not survive in a published file until the next distill run.
-   */
   async function writeProjection({ force = false }: { force?: boolean } = {}): Promise<PublishOutcome> {
     projectionDirty = false;
     const valid = core.selectValidRecords(currentRecords(), { now: now() });
@@ -538,8 +495,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     if (projectionTimer && typeof projectionTimer.unref === 'function') projectionTimer.unref();
   }
 
-  // A supersession must carry its ancestry or the core refuses it; the store is the only place that can
-  // resolve the superseded record's own rank, so a caller cannot skip the lineage cap by omission.
   function withResolvedAncestors(input: unknown): Record<string, unknown> {
     const raw = (input && typeof input === 'object' && !Array.isArray(input) ? input : {}) as Record<string, unknown>;
     const supersedes = typeof raw.supersedes === 'string' ? raw.supersedes.trim() : '';
@@ -549,7 +504,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     return { ...raw, ancestorLineages: [core.effectiveRank(target)] };
   }
 
-  // Trust fields come from the CALLING path, never from the remembered text.
   function buildForAppend(input: unknown): MemoryRecord | null {
     const built = core.buildMemoryRecord(withResolvedAncestors(input), {
       now: now(), maxChars: config.maxRecordChars, retainDays: config.retainDays,
@@ -561,15 +515,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     return core.withSignature(built.record, signingKey);
   }
 
-  /*
-   * One transaction per batch, because the M14 consumer hands this whole ticks' worth of records at once
-   * and every session on this machine shares the event loop the commit runs on. The id is the moment plus
-   * the text, so a re-read of the same transcript bytes is idempotent: the INSERT is ignored.
-   *
-   * `refused` separates a SUBSTRATE refusal from the gates refusing every record: they look identical in
-   * the returned array, and a caller that reads them as the same advances its durable offset past a range
-   * nothing remembered.
-   */
   async function appendMany(inputs: unknown): Promise<{ records: (MemoryRecord | null)[]; refused: boolean }> {
     const outcome = await queue(async () => {
       const list = Array.isArray(inputs) ? inputs : [];
@@ -597,7 +542,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
             written.push(stamped);
           }
           if (written.length > 0) openedDb.setLastAppendAt(now());
-          // Sampled under the write lock, so no other connection can commit between here and our COMMIT.
           observedInside = openedDb.dataVersion();
           return out;
         });
@@ -606,7 +550,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
         log.warn('the memory database is busy: nothing was appended');
         return { records: list.map(() => null), refused: true };
       }
-      // A commit that landed between our last read and the transaction is one we never loaded.
       if (observedInside !== observedBefore) refreshFromDb();
       if (observedInside === observedBefore && written.length > 0) {
         records = core.applySupersessions([...records, ...written]);
@@ -625,12 +568,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     return appendMany([input]).then((outcome) => outcome.records[0] || null);
   }
 
-  /*
-   * The one sanctioned rewrite of an append-only canon, and ONE transaction: the redactions, the removals
-   * and the audit tombstone land together or not at all, so a concurrent append cannot interleave with a
-   * half-applied expunge. Every survivor is re-signed from its VERIFIED (so possibly demoted) self, so an
-   * unsigned forgery cannot be laundered into a signed operator record by an operator running forget.
-   */
   function runForget(matcher: core.ForgetMatcher): ForgetOutcome | null {
     const removedIds: string[] = [];
     const redactedIds: string[] = [];
@@ -638,7 +575,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     let droppedRows = 0;
     for (const raw of openedDb.listRecords()) {
       const checked = verifiedRecord(raw);
-      // A row too malformed to become a record still holds its bytes, so the expunge judges it RAW.
       if (!checked) {
         if (!core.matchesForgetPattern(JSON.stringify(raw), matcher)) continue;
         openedDb.deleteRecord(raw.id);
@@ -670,7 +606,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
       tombstoneId = built.record.id;
       openedDb.setLastAppendAt(now());
     }
-    // Last inside the transaction: a deleted row's words survive in the index's segments until this runs.
     openedDb.scrubSearchIndex();
     return {
       removedIds,
@@ -682,11 +617,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     };
   }
 
-  /*
-   * The forget's own publish rotates the PRE-forget build into previous/, and a dist-pending/ build
-   * predates the expunge by construction, so both hold the text that was just expunged. Neither is
-   * delivered from, so dropping them costs a rollback slot and a review copy, not a projection.
-   */
   async function discardSupersededBuilds(): Promise<void> {
     for (const target of [previousDir, pendingDir]) {
       await fsPromises.rm(target, { recursive: true, force: true })
@@ -706,13 +636,11 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
         outcome = openedDb.transaction(() => runForget(matcher));
       } catch (error) {
         if (!isBusyError(error)) throw error;
-        // Reported as `locked` because that is what the operator is being told: another writer holds it.
         log.warn('the memory database is busy: nothing was forgotten');
         return { ...nothing, reason: 'locked' };
       }
       if (!outcome) return nothing;
       if (!outcome.tombstoneId) log.warn(`tombstone rejected: ${outcome.tombstoneReason || 'not written'}`);
-      // The committed expunge is still readable in the write-ahead log until the frames are reclaimed.
       if (!openedDb.checkpoint()) log.debugNote(() => 'wal checkpoint refused: expunged frames linger until close');
       refreshFromDb();
       cachedLastAppendAt = openedDb.lastAppendAt();
@@ -742,7 +670,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     });
   }
 
-  // Latched BEFORE the drain, so a write racing shutdown is refused rather than queued behind it.
   async function stop(): Promise<void> {
     if (stopped) return;
     stopped = true;
@@ -758,10 +685,8 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     }
   }
 
-  // One object rather than one per ingested event: this is read on the consumer's hot path.
   const deliveredView = { has: (hash: string) => openedDb.deliveredHas(hash) };
 
-  // Echo suppression's delivery half: M16 registers what it hands out, the ingest consumer drops those lines.
   function noteDelivered(text: unknown): number {
     const hashes = core.deliveredLineHashes(text);
     if (hashes.length === 0) return openedDb.deliveredCount();
@@ -774,8 +699,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     }
   }
 
-  // The index narrows the candidates; the pure rules gate and rank them, so an unavailable index costs
-  // relevance and never an answer.
   function searchMatches(terms: string[], limit: number): string[] | null {
     if (terms.length === 0) return null;
     try {
@@ -793,10 +716,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     return core.retrieveMemories(list, { now: now(), ...options, matchedIds });
   }
 
-  /*
-   * A refused offset write costs a re-read of that range, never the range itself, so nothing here throws:
-   * this runs inside the ingest source's drain, and an unwritable offset must not cost the records.
-   */
   function saveTailOffset(entry: TailEntry, options?: { maxEntries?: number }): boolean {
     try {
       openedDb.saveTailOffset(entry, options);
@@ -829,7 +748,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
   return {
     append,
     appendMany,
-    // The third write of an expunge, exposed because a rebuild after one leaves fresh frames in the log.
     checkpoint: () => openedDb.checkpoint(),
     currentDir,
     dbPath,
@@ -849,7 +767,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     noteDelivered,
     pendingDir,
     projectionPath: path.join(currentDir, core.GLOBAL_PROJECTION_FILE),
-    // Queued like every other write, so a distill publish and a fallback render can never interleave.
     publishPending: (args: Parameters<typeof publishPending>[0]) => queue(() => publishPending(args)),
     publishProjection: (args: Parameters<typeof publishProjection>[0]) => queue(() => publishProjection(args)),
     readPublishedDocuments,
@@ -858,7 +775,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     records: () => currentRecords().slice(),
     retrieve,
     saveTailOffset,
-    // Queued with the writes: a cursor advance may not interleave with the publish it is a receipt for.
     setDistillCursorSeq: (seq: number) => queue(async () => openedDb.setDistillCursorSeq(seq)),
     setDistillFailures: (count: number) => queue(async () => openedDb.setDistillFailures(count)),
     search: (query: unknown, { limit = SEARCH_CANDIDATE_FLOOR }: { limit?: number } = {}) => searchMatches(core.tokenizeQuery(query), limit),

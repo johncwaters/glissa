@@ -1,9 +1,3 @@
-// Unit tests for session/core/conversation-history.ts: the cross-worktree Claude conversation
-// discovery used by the per-card "Resume conversation" picker. Exercises the project-dir encoding,
-// the worktree-set walk (injected git), title extraction, newest-first ordering, and id de-dup.
-// Uses a real temp projects dir (so the bounded head-read + stat path is exercised) with an injected
-// git runner that returns a porcelain worktree listing.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -29,9 +23,9 @@ test('encodeProjectDir matches Claude\'s scheme (every non-alnum -> dash, case p
     encodeProjectDir('C:\\Users\\johnw\\Projects\\.glissa-worktrees\\glissa-hROPKt'),
     'C--Users-johnw-Projects--glissa-worktrees-glissa-hROPKt',
   );
-  // A forward-slash path (as `git worktree list` prints on Windows) encodes identically to backslash.
+
   assert.equal(encodeProjectDir('C:/Users/johnw/Projects/glissa'), encodeProjectDir('C:\\Users\\johnw\\Projects\\glissa'));
-  // Lowercase drive letter is preserved (only non-alnum is replaced).
+
   assert.equal(encodeProjectDir('c:/x'), 'c--x');
 });
 
@@ -74,7 +68,7 @@ test('listRepoConversations walks the repo worktree set, newest-first, with extr
   writeTranscript(dirMain, '11111111-1111-1111-1111-111111111111', { title: 'oldest in main', cwd: wtMain, branch: 'refs/heads/main', mtimeMs: 1000 });
   writeTranscript(dirMain, '22222222-2222-2222-2222-222222222222', { title: '<command-args>middle one</command-args>', cwd: wtMain, branch: 'refs/heads/main', mtimeMs: 3000 });
   writeTranscript(dirFeat, '33333333-3333-3333-3333-333333333333', { title: 'newest in feature', cwd: wtFeat, branch: 'refs/heads/feature/x', mtimeMs: 5000 });
-  // A non-jsonl sibling must be ignored.
+
   fs.writeFileSync(path.join(dirMain, 'notes.txt'), 'ignore me');
 
   const convs = await listRepoConversations({ repoPath: wtMain, projectsDir, git: gitFake, fsMod: fs });

@@ -1,16 +1,3 @@
-/*
- * The memory ingest consumer (docs/plan-visions-3.md, M14) against real temp transcripts: the live tap on
- * the agent-log source, its own durable offsets, and the budgeted cold-start backfill.
- *
- * The resumability test uses the REAL store rather than a fake one, because the property it pins is a
- * store property: an observed record derives its id from the moment plus the text, so a pass that is cut
- * short by the byte budget and run again writes the rest instead of writing everything twice.
- *
- * SAFETY: every root is a throwaway temp directory injected through CLAUDE_CONFIG_DIR, CODEX_HOME and
- * GROK_HOME, and the store writes into a temp directory of its own, so nothing here reads or writes the
- * operator's real transcripts or memory.
- */
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -38,8 +25,6 @@ interface HomesContext extends Homes {
   cleanups: (() => unknown)[];
 }
 
-// What the consumer hands the substrate. Every field the assertions read is stated; the record shape
-// itself is the store's business.
 interface AppendedInput {
   kind?: string;
   text?: string;
@@ -56,8 +41,6 @@ interface TailRow {
   ts: number;
 }
 
-// The fake substrate: it accepts everything, remembers what it was handed, and answers the six members
-// the consumer reads.
 interface FakeStore extends MemoryIngestStore {
   appended: AppendedInput[];
   delivered: Set<string>;
@@ -87,8 +70,6 @@ function makeHomes(): Homes {
   };
 }
 
-// A timer seam that never fires: these suites drive the source by hand. The handles are REAL unref'd
-// timers, because the seams they stand in for are typed against NodeJS.Timeout.
 function inertTimers() {
   const park = (): NodeJS.Timeout => {
     const handle = setTimeout(() => {}, 2 ** 30);
@@ -103,7 +84,6 @@ function inertTimers() {
   };
 }
 
-// The record the fake substrate mints for an accepted input: the consumer reads only that one landed.
 function fakeRecord(id: string): MemoryRecord {
   return {
     id,
@@ -228,8 +208,6 @@ function realStore(memoryDir: string, extra: Partial<MemoryStoreOptions> = {}): 
   return store;
 }
 
-// --- The live tap ---------------------------------------------------------
-
 test('an assistant turn tapped off the source reaches the store as a reported knowledge record', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
   const store = fakeStore(memoryDir);
   const ingest = createMemoryIngest({ store, env });
@@ -311,8 +289,6 @@ test('a store that rejects a write costs a count, never the drain', withHomes(as
   assert.equal(warnings.join('\n').includes('still tailing'), false, 'remembered text never reaches a log line');
 }));
 
-// M12b: the offsets are rows in the same database the records land in, so a crash cannot leave one
-// ahead of the other.
 test('the tapped offset lands in the store beside the canon', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
   const store = realStore(memoryDir);
   cleanups.push(() => store.stop());
@@ -330,8 +306,6 @@ test('the tapped offset lands in the store beside the canon', withHomes(async ({
   assert.equal(store.tailState().files[filePath].offset, fs.statSync(filePath).size);
   assert.equal(fs.existsSync(path.join(memoryDir, 'tail-state.json')), false, 'no file-era state file is written');
 }));
-
-// --- Backfill -------------------------------------------------------------
 
 test('the backfill reads a transcript written while nothing was tailing', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
   seedTranscript(projects, {
@@ -407,7 +381,6 @@ test('a backfill cut short by its byte budget resumes without writing anything t
   const afterFirst = store.records().length;
   assert.ok(afterFirst > 0 && afterFirst < 6, `a partial pass wrote ${afterFirst} of 6`);
 
-  // A second shell, so the offsets genuinely come off disk rather than out of the first one's memory.
   const second = createMemoryIngest({ store, env });
   cleanups.push(() => second.stop());
   await second.backfill();
@@ -428,10 +401,6 @@ test('re-running a completed backfill writes nothing new', withHomes(async ({ pr
   assert.equal(store.records().length, 1);
 }));
 
-/*
- * M12b: the pre-database refusal is gone. Two shells over one store read the same durable offsets and
- * write disjoint rows, so a CLI backfill beside a live server's own pass now just works.
- */
 test('a second backfill beside a live one runs instead of refusing, and remembers nothing twice', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
   seedTranscript(projects, {
     lines: [
@@ -454,13 +423,6 @@ test('a second backfill beside a live one runs instead of refusing, and remember
   assert.deepEqual(texts.sort(), ['claude: first turn', 'claude: second turn']);
 }));
 
-// --- The tail-state write race --------------------------------------------
-
-/*
- * Security review, 2026-08-23 (MEDIUM): a SQLITE_BUSY returned all-nulls, which reads exactly like the
- * write gates refusing every record, so the offsets advanced past a range nothing remembered and no later
- * pass ever re-read it. A substrate refusal now freezes that transcript's offsets for the process.
- */
 test('a batch the substrate refused freezes that transcript offset instead of stepping over it', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
   const store = fakeStore(memoryDir);
   fs.mkdirSync(memoryDir, { recursive: true });
@@ -482,7 +444,6 @@ test('a batch the substrate refused freezes that transcript offset instead of st
   assert.equal(ingest.stats().refused, 1);
   assert.equal(warnings.some((line) => line.includes('a refused turn')), false, 'the text never reaches a log line');
 
-  // The database recovers, but this transcript's offsets stay frozen: a later one would step over the hole.
   store.refuseAppends = false;
   fs.appendFileSync(filePath, claudeAssistant({ text: 'a later turn that lands' }), 'utf8');
   await source.poll();
@@ -491,7 +452,6 @@ test('a batch the substrate refused freezes that transcript offset instead of st
   assert.equal(store.tails.size, 0, 'and the durable offset still points before the lost range');
 }));
 
-// A refused offset write costs a re-read of that range, never the range itself.
 test('an offset write the store refuses is skipped, and the record still lands', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
   const store = fakeStore(memoryDir);
   fs.mkdirSync(memoryDir, { recursive: true });
@@ -511,8 +471,6 @@ test('an offset write the store refuses is skipped, and the record still lands',
   assert.ok(ingest.stats().offsetsSkipped > 0);
   assert.equal(store.tails.size, 0);
 }));
-
-// --- Backfill bounds and the lane floor -----------------------------------
 
 test('the file cap is enforced inside a directory, not only between directories', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
   const dir = path.join(projects, 'C--repo');
@@ -586,13 +544,6 @@ test('a lane worktree caught by shape is excluded from the backfill too', withHo
   assert.deepEqual(store.records(), [], 'the lane must never remember what the lane itself said');
 }));
 
-// --- The pre-scrub cut ----------------------------------------------------
-
-/*
- * The 4000-char pre-cut used to run AHEAD of every scrub, and on a single unbroken line it cut mid-value:
- * the quoted alternative then went unmatched and the bare-token one took only the first WORD, so the rest
- * of the secret published as innocent words. The whole line now reaches the scrub, which cuts after.
- */
 test('a secret past the old pre-cut is scrubbed rather than split mid-value', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
   const store = realStore(memoryDir, { config: { ...resolveMemoryConfig(null), enabled: true, maxRecordChars: 12000 } });
   cleanups.push(() => store.stop());
@@ -603,7 +554,7 @@ test('a secret past the old pre-cut is scrubbed rather than split mid-value', wi
 
   const filePath = seedTranscript(projects, { lines: [] });
   await source.start();
-  // One unbroken line whose assignment sits past 4000 characters, which is where the old cut landed.
+
   const padding = 'a lot of ordinary prose. '.repeat(220);
   fs.appendFileSync(filePath, claudeAssistant({
     text: `${padding} export API_TOKEN="s3cret-value-nobody-should-remember"`,

@@ -1,9 +1,3 @@
-// IO shell around server/core/pack-core.ts: find spec files, walk their source globs, read the files,
-// hand everything to the pure planner, and write the result atomically under <packsRoot>/built/<name>/.
-//
-// Specs and shared sources are version-controlled inside the install (packs/), built output is runtime
-// state under ~/.glissa (writable even when the install dir is not). Fully async: this is a cold path,
-// but every session shares one event loop and a pack can span a large docs tree.
 
 import crypto from 'node:crypto';
 import fsp from 'node:fs/promises';
@@ -39,8 +33,6 @@ import {
 import type { PackInputFile, PackManifest, PackSkill, PackSource, PackSpec, PackVariant } from './core/pack-core.ts';
 
 const SPEC_SUFFIX = '.pack.json';
-// Source patterns resolve against packs/, so a shared spec reads the same whether it runs from a repo
-// checkout or a global install.
 const DEFAULT_PACKS_DIR = packsDir;
 const SKIP_DIRS = new Set(['.git', 'node_modules']);
 const TMP_PREFIX = 'tmp-';
@@ -94,8 +86,6 @@ interface BuildReport {
   warnings: string[];
 }
 
-// The parsed manifest.json, intersected with the plain-record view every consumer of a resolved pack
-// reads it through.
 type ReadManifest = (PackManifest & Record<string, unknown>) | null;
 
 interface ResolvedCurrentDirectory {
@@ -135,13 +125,6 @@ function defaultBuiltRoot(): string {
   return path.join(glissaHomeDir(), 'packs', 'built');
 }
 
-/*
- * The one runtime path a version-controlled spec may name: `{{glissaHome}}` is the directory config.json
- * lives in (docs/plan-visions-3.md, M16), which is where the memory projection and every other config
- * sibling sits. THE single derivation, used by the server and the CLI alike: bin/glissa.js bridges
- * --config into GLISSA_CONFIG before dispatching a pack command, so both resolve the same file. Lazy,
- * so a spec that never names the placeholder never asks where the config is.
- */
 function defaultGlissaHome(): string {
   return path.dirname(resolveConfigPath());
 }
@@ -152,7 +135,6 @@ function expandPlaceholders(pattern: string, glissaHome: string | null, projectS
     const home = toPosix(path.resolve(glissaHome || defaultGlissaHome()));
     expanded = expanded.split(GLISSA_HOME_PLACEHOLDER).join(home);
   }
-  // Resolved once per DERIVED pack, so a built pack dir holds no placeholder and no delivery-time lookup.
   if (projectSlug) expanded = expanded.split(PROJECT_SLUG_PLACEHOLDER).join(projectSlug);
   return expanded;
 }
@@ -168,21 +150,14 @@ function resolvePattern(
   return toPosix(path.resolve(baseDir, pattern));
 }
 
-/*
- * The resolved-path re-check under the placeholder, the same shape distillOutputPath applies to a
- * distill output: spec validation already refuses a `..` segment, and this is the layer that holds
- * whatever the resolution actually produced.
- */
 function assertInsideGlissaHome(rawPattern: string, resolved: string, glissaHome: string | null): void {
   if (!rawPattern.includes(GLISSA_HOME_PLACEHOLDER)) return;
   const home = path.resolve(glissaHome || defaultGlissaHome());
-  // An empty relative path is the config dir itself, which is inside it.
   const relative = path.relative(home, resolved.replace(/\/+$/, ''));
   if (!relative.startsWith('..') && !path.isAbsolute(relative)) return;
   throw new Error(`source pattern "${rawPattern}" resolves outside the Glissa config directory`);
 }
 
-/** The deepest glob-free prefix of a pattern: where the walk starts, and whether there is a glob at all. */
 function literalRoot(resolvedPattern: string): { root: string; isLiteral: boolean } {
   const segments = resolvedPattern.split('/');
   const literal: string[] = [];
@@ -193,11 +168,6 @@ function literalRoot(resolvedPattern: string): { root: string; isLiteral: boolea
   return { root: literal.join('/'), isLiteral: literal.length === segments.length };
 }
 
-/*
- * Where a data file's delivered path is measured from: the pattern's glob-free root, or its parent when
- * that root IS the one file matched. Never displayPath, whose fallback for a file outside packs/ is the
- * absolute path, which would print the operator's home directory into the pack and the manifest.
- */
 function dataBaseDir(resolvedPattern: string, isLiteral: boolean, matched: string[]): string {
   const rootPosix = toPosix(path.resolve(literalRoot(resolvedPattern).root));
   if (isLiteral && matched.length === 1 && matched[0] === rootPosix) return path.dirname(rootPosix);
@@ -217,8 +187,6 @@ async function walkFiles(
   found: string[] = [],
   visitedRealDirs: Set<string> = new Set(),
 ): Promise<string[]> {
-  // Dirent.isSymbolicLink does not flag Windows junctions on every Node version, so the resolved-path
-  // set is the loop guard that always holds; a pack build must terminate unattended.
   let realDir: string;
   try {
     realDir = await fsp.realpath(rootDir);
@@ -266,7 +234,6 @@ function specRootPatterns(spec: unknown, { includeDistill = false } = {}): strin
   return patterns.filter((pattern): pattern is string => typeof pattern === 'string' && pattern.length > 0);
 }
 
-// A per-project pattern is watched as a WILDCARD: a slug-shaped literal would watch nothing when that one project's file is absent.
 async function packWatchRoots(
   spec: unknown,
   { baseDir = DEFAULT_PACKS_DIR, glissaHome = null }: { baseDir?: string; glissaHome?: string | null } = {},
@@ -283,7 +250,6 @@ async function packWatchRoots(
   return [...roots].sort();
 }
 
-// Distill sources count: a distill is still a copy of what it read.
 function packSourceRoots(
   spec: unknown,
   { baseDir = DEFAULT_PACKS_DIR, glissaHome = null }: { baseDir?: string; glissaHome?: string | null } = {},
@@ -296,7 +262,6 @@ function packSourceRoots(
   return [...roots].sort();
 }
 
-// Packs-relative (even climbing out of packs/) so the manifest ships no absolute path; glissaHome roots dropped.
 function manifestSourceRoots(
   spec: unknown,
   { baseDir = DEFAULT_PACKS_DIR, glissaHome = null }: { baseDir?: string; glissaHome?: string | null } = {},
@@ -311,7 +276,6 @@ function manifestSourceRoots(
   return [...recorded].sort();
 }
 
-/** Display path for the manifest: relative to packs/ when the file lives under it, else the full path. */
 function displayPath(fullPosix: string, baseDir: string): string {
   const relative = path.relative(baseDir, fullPosix);
   if (relative.startsWith('..') || path.isAbsolute(relative)) return fullPosix;
@@ -354,7 +318,6 @@ async function readFilesForSource(
       content: await fsp.readFile(full, 'utf8'),
       sourceIndex,
     };
-    // Only the distiller asks for this; a build's file records stay the shape planPackBuild documents.
     if (keepFullPath) file.fullPath = full;
     files.push(file);
   }
@@ -380,10 +343,6 @@ async function readFilesForSkill(
   return files;
 }
 
-/**
- * Absolute path of a distill entry's output, or null when lexical escape or an existing symlink could
- * redirect the lane's write outside the packs directory.
- */
 async function distillOutputPath(
   output: unknown,
   { baseDir = DEFAULT_PACKS_DIR }: { baseDir?: string } = {},
@@ -408,13 +367,6 @@ async function distillOutputPath(
   return full;
 }
 
-/**
- * Content hashes of one distill entry's sources, walked and hashed through the SAME reader and the
- * same sha256 a build uses, so a drift check and a build can never disagree about what a source says.
- * `path` is the stamped identity (relative to the install root when the file lives inside it, so a
- * stamp committed on one machine still reads as current on another); `fullPath` is what the distill
- * session is told to read. Sorted and deduped.
- */
 async function distillSourceHashes(
   entry: { sources?: unknown },
   { baseDir = DEFAULT_PACKS_DIR }: { baseDir?: string } = {},
@@ -660,7 +612,6 @@ async function garbageCollectVersions(packDir: string, pointedVersion: string): 
   }
 }
 
-// A plain pointer file works on Windows and Linux without symlink privileges.
 async function publishBuild(
   builtRoot: string,
   name: string,
@@ -714,7 +665,6 @@ async function loadPackSpec(specPath: string): Promise<unknown> {
   return JSON.parse(raw);
 }
 
-/** Every `<name>.pack.json` in the specs dir, sorted by name. */
 async function listPackSpecs({ specsDir = defaultSpecsDir() }: { specsDir?: string } = {}): Promise<SpecListing[]> {
   let entries: Dirent[];
   try {
@@ -732,7 +682,6 @@ async function listPackSpecs({ specsDir = defaultSpecsDir() }: { specsDir?: stri
   return specs;
 }
 
-/** The one owner of the build-report shape; success and failure differ only in their overrides. */
 function buildReport(name: string, specPath: string, overrides: Partial<BuildReport>): BuildReport {
   return {
     ok: false,
@@ -744,9 +693,7 @@ function buildReport(name: string, specPath: string, overrides: Partial<BuildRep
     tokenEstimate: 0,
     budgetTokens: null,
     currentDir: null,
-    // True when the planned version already matched the published one, so nothing was written.
     unchanged: false,
-    // Derived per-project packs this spec also built (see planPackVariants); empty for a plain spec.
     variants: [],
     warnings: [],
     ...overrides,
@@ -807,10 +754,6 @@ async function readBuiltManifest(
   return manifest;
 }
 
-/**
- * Delivery view of one pack: its pointed immutable version dir plus the version it is running, or a
- * skip reason. Never throws and never guesses: an unbuilt or unreadable pack resolves to dir null.
- */
 async function resolveBuiltPack(
   name: unknown,
   { builtRoot = defaultBuiltRoot() }: { builtRoot?: string } = {},
@@ -819,8 +762,6 @@ async function resolveBuiltPack(
   const skip = (reason: string | null): ResolvedBuiltPack => ({
     name: packName, dir: null, version: null, reason, manifest: null, perProjectVariants: false, group: null,
   });
-  // A pack name comes from config.json and becomes a path segment here, so it is re-checked even
-  // though the caller normalizes: a `..` segment would resolve outside the built root.
   if (typeof name !== 'string' || !PACK_NAME_RE.test(name)) return skip('not a valid pack name');
 
   const current = await resolveCurrentDirectory(name, builtRoot);
@@ -840,7 +781,6 @@ async function resolveBuiltPack(
   };
 }
 
-// One pack's read-plan-publish, run once per entry planPackVariants produced.
 async function buildOnePack(
   entry: { name: string; spec: PackSpec; variant: PackVariant | null },
   { specPath, baseDir, builtRoot, glissaHome, now }: {
@@ -883,9 +823,6 @@ async function buildOnePack(
     currentDir: packVersionDirectory(path.join(builtRoot, entry.name), manifest.version),
   });
 
-  // Publish only a version the built dir does not already carry. The watch loop rebuilds on any write
-  // under a source root, and Claude Code hot-reloads skills from a delivered pack dir, so rewriting
-  // identical bytes would poke every live session for nothing.
   const published = await readBuiltManifest(entry.name, { builtRoot });
   if (published && published.version === manifest.version) return { ...report, unchanged: true };
 
@@ -897,7 +834,6 @@ async function buildOnePack(
   return report;
 }
 
-/** Build one pack from its spec file. */
 async function buildPack({
   specPath,
   baseDir = DEFAULT_PACKS_DIR,
@@ -930,8 +866,6 @@ async function buildPack({
     return failure(fallbackName, specPath, [`spec name "${validSpec.name}" does not match its filename`]);
   }
 
-  // A plain spec plans exactly one build of itself; a perProjectVariants group plans its base plus one
-  // derived pack per consuming project, each an independent top-level pack with its own version.
   const plan = planPackVariants(validSpec, projects);
   const reports: BuildReport[] = [];
   for (const entry of plan.builds) {
@@ -941,7 +875,6 @@ async function buildPack({
   return { ...base, variants, warnings: plan.warnings };
 }
 
-/** Build every spec, or just the named one. Reports per pack; never throws. */
 async function buildPacks({
   name = null,
   specsDir = defaultSpecsDir(),
@@ -968,8 +901,6 @@ async function buildPacks({
   for (const spec of wanted) {
     try {
       const report = await buildPack({ specPath: spec.specPath, baseDir, builtRoot, glissaHome, projects, now });
-      // Derived packs are reported beside their group: each one is its own pack, so a caller listing
-      // build results lists them rather than hiding them inside the group's row.
       reports.push(report, ...report.variants);
     } catch (err) {
       reports.push(failure(spec.name, spec.specPath, [`build crashed: ${errorMessage(err)}`]));
@@ -978,7 +909,6 @@ async function buildPacks({
   return reports;
 }
 
-/** Load-and-validate summary of one spec file for listings; never throws. */
 async function describePackSpec(specPath: string): Promise<{
   valid: boolean;
   sourceCount: number;

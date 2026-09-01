@@ -1,18 +1,5 @@
-// Pure Host-header policy. Defense in depth against DNS rebinding, NOT the missing lock: the upgrade
-// path already runs the Origin check unconditionally on both listeners, so a rebound page carrying
-// "Origin: http://evil.com" loses its WebSocket regardless. What is left is HTTP only (static assets
-// and the two token-gated write ingresses), and this closes that.
-//
-// An ABSENT Host is allowed. Rebinding works by pointing a name at 127.0.0.1 and letting the browser
-// send that name, so an attack always carries one; refusing an absent header would only break
-// HTTP/1.0 clients that cannot be the attacker.
-
-// A Host header always brackets an IPv6 literal (RFC 7230), which is also the only form the port
-// split below can read back unambiguously, so the bare "::1" spelling is deliberately absent.
 const LOOPBACK_HOST_RE = /^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\]|\[::ffff:127(?:\.\d{1,3}){3}\])$/;
 
-// "box.ts.net:8443" -> "box.ts.net". IPv6 literals keep their brackets, which is also how a Host
-// header carries them, so the loopback pattern above matches "[::1]" directly.
 function hostOnly(value: unknown): string {
   const trimmed = String(value == null ? '' : value).trim().toLowerCase();
   if (trimmed === '') return '';
@@ -26,8 +13,6 @@ function hostOnly(value: unknown): string {
   return trimmed.slice(0, colon);
 }
 
-// Same host-label wildcard the origin allow-list uses ("*.ts.net" matches "box.ts.net", never the
-// apex), so one configured entry means the same thing to both checks.
 function hostMatches(allowed: string, candidate: string): boolean {
   if (allowed === '') return false;
   if (allowed === candidate) return true;
@@ -36,9 +21,6 @@ function hostMatches(allowed: string, candidate: string): boolean {
   return candidate.endsWith(suffix) && candidate.length > suffix.length;
 }
 
-/**
- * `allowedHosts` carries extra hostnames (remote.publicHost, allow-listed origin hosts).
- */
 function decideHostAllowed(hostHeader: string | undefined | null, allowedHosts: string[] | string = []): boolean {
   if (hostHeader == null || hostHeader === '') return true;
   const host = hostOnly(hostHeader);

@@ -1,11 +1,3 @@
-// carryWorktreeAcrossRecreate: a config modify (path/permission change) replaces the Session object
-// via _modifyChangedSessions, but destroy() leaves the old instance's worktree checked out on the
-// session branch. The carry-over must hand the worktree to the new Session (same path) or settle it
-// (path changed) so the recreated session never trips branch-in-use against its own surviving branch
-// and silently runs in place. Driven directly with real Sessions whose worktree seams are replaced
-// (module-level export, same pattern as decideWasActiveFlip / runAutoResume in
-// backend-auto-resume.test.ts).
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -37,9 +29,6 @@ function sessionAt(id: string, projectPath: string): Session {
   return new Session({ id, name: id, path: projectPath, ptySpawn: () => fakePty() });
 }
 
-// `unmergedWork` names WHY the tree still holds work - 'dirty' (uncommitted changes) or 'committed'
-// (a clean tree whose branch is ahead of the integration branch, the shape that used to be discarded
-// with its commits) - and null means there is nothing to keep.
 function fakeOldSession({ path: projectPath = 'C:/proj', worktreeDir = 'C:/wts/proj-abc', workspace, killReap, unmergedWork = null }: {
   path?: string;
   worktreeDir?: string | null;
@@ -57,8 +46,7 @@ function fakeOldSession({ path: projectPath = 'C:/proj', worktreeDir = 'C:/wts/p
     if (!worktreeDir || !carry) return null;
     return { worktreeDir, branch: carry.branch, base: carry.base };
   };
-  // Mirrors Session.discardWorktreeIfClean's contract: any unmerged work -> kept (false), an empty
-  // worktree -> discarded (true).
+
   session.discardWorktreeIfClean = async () => {
     calls.settleChecks += 1;
     if (unmergedWork) return false;
@@ -111,9 +99,6 @@ test('path changed + dirty worktree: left on disk untouched (no data loss)', asy
   assert.equal(oldSess.calls.discard, 0, 'unmerged work is never destroyed');
 });
 
-// The committed-but-clean shape: the session committed, so `git status --porcelain` is empty, but the
-// branch is ahead of the integration branch. Discarding here deletes the branch and with it the only
-// ref to those commits, so the carry-over must keep the worktree exactly as the dirty case does.
 test('path changed + committed-but-clean worktree: kept on disk (commits are work too)', async () => {
   const oldSess = fakeOldSession({ path: 'C:/old-proj', unmergedWork: 'committed' });
   const newSess = fakeNewSession('C:/new-proj');
@@ -149,11 +134,6 @@ test('path changed: a rejecting kill reap still settles the carry without throwi
   await assert.doesNotReject(() => Promise.resolve(carryWorktreeAcrossRecreate(oldSess.session, newSess.session)));
   assert.equal(oldSess.calls.discard, 1, 'reap rejection is swallowed, discard still runs');
 });
-
-// -- shouldStartAfterModify --
-// A config reload that replaced a session's record decides here whether to (re)start it. Ticking a Mill
-// tab checkbox goes through the same reload, so a DORMANT card must come back dormant rather than
-// spawning a Claude session (with that project's dangerouslySkipPermissions) nobody asked for.
 
 test('a DORMANT session is recreated without being started', () => {
   assert.equal(shouldStartAfterModify(STATES.DORMANT), false);

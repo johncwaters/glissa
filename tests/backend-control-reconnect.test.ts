@@ -1,16 +1,3 @@
-// The dashboard's in-page reconnect, through the REAL upgrade path.
-//
-// public/control-ws.ts reconnects with '/control?since=<lastSeq>' once it has processed a single
-// message, so every reconnect after the first carries a query string. The upgrade router used to match
-// the control path by exact equality against req.url (query string included), which put every one of
-// those reconnects in the unknown-path bucket: destroyed remotely, stranded locally. Only a full page
-// reload ever reconnected. The existing replay tests (control-dispatch.test.js) emit 'connection' on a
-// fake emitter and never touch handleUpgrade, which is why the bug survived them - so this suite goes
-// through a real http server and a real ws client.
-//
-// SAFETY: temp GLISSA_CONFIG with a single project pointing at the temp dir (never a real repo): boot
-// reconcile removes glissa/session/* worktrees, so a real project path here could delete live work.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -24,13 +11,9 @@ import type { DashboardClient } from './helpers/dashboard-ws.ts';
 import { boundPort, closeServer, listenOnLoopback } from './helpers/http-server.ts';
 
 const SESSION_ID = 'reconnect-test-session';
-// Over the 16384-char input cap the data-WS handler enforces, so the server answers with a
-// `session-error` broadcast: a replayable message type, stamped with a seq, and reachable without ever
-// starting a PTY (the size check returns before the write).
+
 const OVERSIZED_INPUT = 'x'.repeat(20000);
 
-// The frames this suite reads off the control channel. Every field beyond `type` belongs to one
-// message kind, so the reads below happen only after a match on that kind.
 interface ControlFrame {
   type: string;
   id?: string;
@@ -53,8 +36,7 @@ function withBackend(fn: (client: DashboardClient) => Promise<void>) {
     const backend = createBackend(server, { staticDir: null });
     server.on('request', backend.app);
     await listenOnLoopback(server);
-    // The dashboard channels require a browser Origin and the page token; the client helper is the
-    // one place that handshake lives.
+
     const client = await dashboardClient(boundPort(server));
 
     try {
@@ -77,8 +59,6 @@ test('a control reconnect carrying a replay cursor connects and gets snapshot th
   const snapshot = await waitForMessage(first.received, (m) => m.type === 'snapshot', 'the snapshot');
   assert.deepEqual(snapshot.sessions?.map((s) => s.id), [SESSION_ID]);
 
-  // A query string on the data route must route AND not leak into the session id: the broadcast below
-  // is only reachable through a socket that resolved to this exact session.
   const dataConnection = await openSocket(client, `/terminals/${SESSION_ID}?probe=1`);
   const dataCloseCode = new Promise<number>((resolve) => { dataConnection.once('close', (code: number) => resolve(code)); });
 
@@ -97,7 +77,6 @@ test('a control reconnect carrying a replay cursor connects and gets snapshot th
 
   await closeSocket(first.ws);
 
-  // The reconnect the old exact-match router dropped on the floor.
   const reconnected = await openRecordingSocket<ControlFrame>(client, `/control?since=${cursorSeq}`);
   const replayedError = await waitForMessage(reconnected.received, isSessionError, 'the replayed session-error');
   assert.equal(reconnected.received[0].type, 'snapshot', 'the snapshot is still the first frame of a reconnect');

@@ -7,9 +7,6 @@
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <title>Glissa</title>
   <style>
-    /* Inline critical styles render before JS modules load. Colors here are the Phyrexian
-       (default theme) values; theme.js repaints to the saved theme on connect. A brief flash
-       for users on a non-default theme is an accepted fast-first-paint tradeoff. */
     html, body {
       margin: 0;
       padding: 0;
@@ -19,11 +16,9 @@
       font-family: 'Segoe UI', system-ui, sans-serif;
     }
 
-    /* Hide app shell until ready; phone excluded since style.css's @layer components rule can't outrank this inline one. */
     .app-shell { display: none; }
     html:not([data-layout="phone"]) .app-ready .app-shell { display: contents; }
 
-    /* Loading screen */
     .loading-screen {
       position: fixed;
       inset: 0;
@@ -59,7 +54,6 @@
     .loading-status {
       font-family: 'Cascadia Code', 'Fira Code', 'Consolas', 'Menlo', monospace;
       font-size: 12px;
-      /* [P3] Lifted from #6a5e90 (~4.1:1) to #8276b0 (≥4.5:1) for pre-theme paint */
       color: #8276b0;
       letter-spacing: 0.04em;
     }
@@ -77,7 +71,6 @@
       to { transform: rotate(360deg); }
     }
 
-    /* Shutdown overlay - hidden until triggered */
     .shutdown-screen {
       position: fixed;
       inset: 0;
@@ -104,7 +97,6 @@
     .shutdown-status {
       font-family: 'Cascadia Code', 'Fira Code', 'Consolas', 'Menlo', monospace;
       font-size: 12px;
-      /* [P3] Lifted to ≥4.5:1 on pre-theme bg */
       color: #8276b0;
       letter-spacing: 0.04em;
       transition: color 300ms ease;
@@ -123,26 +115,18 @@
   </style>
 </head>
 <body>
-  <!-- Loading screen - visible immediately, removed on WS connect -->
   <div class="loading-screen" id="loading-screen">
     <div class="loading-title">Glissa</div>
     <div class="loading-spinner"></div>
     <div class="loading-status" id="loading-status">Connecting to server...</div>
   </div>
 
-  <!-- Shutdown overlay - hidden until triggered -->
   <div class="shutdown-screen" id="shutdown-screen">
     <div class="loading-title">Glissa</div>
     <div class="loading-spinner"></div>
     <div class="shutdown-status" id="shutdown-status">Shutting down sessions...</div>
   </div>
 
-  <!-- App shell - hidden until CSS loads and WS connects -->
-  <!-- [P3] Tailwind utility duplicates stripped - semantic classes in style.css are authoritative -->
-  <!-- This is the DESKTOP layout. Under [data-layout="phone"] the whole shell is display:none and the
-       phone shell (public/phone/phone-shell.js) renders instead, borrowing the header controls, the
-       review sidebar, the Radar and PRs panels and the focused session's card out of here. Sessions cards stay
-       parented in #sessions-container either way: it is their one canonical home. -->
   <div class="app-shell">
     <header class="header">
       <div class="header-inner">
@@ -182,7 +166,6 @@
         </div>
       </div>
     </header>
-    <!-- Startup update notice: populated by app.js on an `update-available` control message. -->
     <div class="update-banner" id="update-banner" role="status" hidden>
       <span class="update-banner-text" id="update-banner-text"></span>
       <a class="update-banner-link" id="update-banner-link" target="_blank" rel="noopener noreferrer" hidden>View changes</a>
@@ -190,41 +173,25 @@
       <button class="update-banner-copy" id="update-banner-copy" type="button">Copy</button>
       <button class="update-banner-dismiss" id="update-banner-dismiss" type="button" aria-label="Dismiss update notice">&times;</button>
     </div>
-    <!-- Body row: main views on the left, the review sidebar docked right. Always docked here; on the
-         phone layout the same element is re-parented into the Review screen. -->
     <div class="app-body" id="app-body">
       <main class="app-main" id="app-main">
-        <!-- Off-screen card home: every session card lives here; Focus borrows cards from it into the
-             center. No longer a navigable view (the Sessions tab was removed); always hidden via CSS. -->
         <section class="sessions" id="sessions-container">
-          <!-- Session cards injected here by app.js -->
         </section>
-        <!-- Radar view: PostHog issue status, mounted by radar-panel.js -->
         <section class="radar-view" id="view-radar" role="tabpanel" aria-labelledby="tab-radar" hidden></section>
-        <!-- PRs view: GitHub PR auto-review status, mounted by pr-panel.js -->
         <section class="pr-view" id="view-prs" role="tabpanel" aria-labelledby="tab-prs" hidden></section>
-        <!-- Usage view: token and estimated-cost roll-up, mounted by usage-panel.js -->
         <section class="usage-view" id="view-usage" role="tabpanel" aria-labelledby="tab-usage" hidden></section>
-        <!-- Mill view: context-pack build, budget, delivery and drift status, mounted by mill-panel.js -->
         <section class="mill-view" id="view-mill" role="tabpanel" aria-labelledby="tab-mill" hidden></section>
-        <!-- Visions view: live findings from the editor buffers the visions lane mirrors, mounted by visions-panel.js -->
         <section class="visions-view" id="view-visions" role="tabpanel" aria-labelledby="tab-visions" hidden></section>
-        <!-- Hooks view: operator-defined Claude Code hooks injected at spawn, mounted by hooks-panel.js -->
         <section class="hooks-view" id="view-hooks" role="tabpanel" aria-labelledby="tab-hooks" hidden></section>
         <section class="settings-view" id="view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden></section>
-        <!-- Focus view (default): roster rail + single-focus center, mounted by focus-view.js -->
         <section class="focus-view" id="view-focus" role="tabpanel" aria-labelledby="tab-focus" hidden>
           <nav class="focus-rail" id="focus-rail" role="listbox" aria-label="Session roster" aria-keyshortcuts="ArrowUp ArrowDown Alt+ArrowUp Alt+ArrowDown"></nav>
-          <!-- Drag handle: resizes the rail (pointer drag, Arrow keys when focused, double-click resets). -->
           <div class="focus-rail-resizer" id="focus-rail-resizer" role="separator" aria-orientation="vertical" aria-label="Resize session rail" tabindex="0"></div>
           <div class="focus-center" id="focus-center"></div>
         </section>
       </main>
-      <!-- Right review sidebar: the single home for the worktree review gate; built by review-sidebar.js.
-           The phone Review screen re-parents this exact element rather than building a second one. -->
       <aside class="app-sidebar" id="review-sidebar" aria-label="Session review"></aside>
     </div>
-    <!-- Health monitor footer injected by health-monitor.js -->
     <div id="health-footer-mount"></div>
   </div>
   <script type="module" src="/app.ts"></script>

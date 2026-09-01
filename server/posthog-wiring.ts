@@ -1,14 +1,3 @@
-/*
- * PostHog monitoring wiring - the IO shell that binds server/posthog-poller.ts (IO-free) to real
- * Sessions, the PostHog REST client, Telegram, the dashboard broadcast, and the on-disk state file.
- *
- * Same shape as server/pr-review-wiring.ts: createBackend calls createPosthogWiring once with its
- * live locals and gets back the three verbs it needs (start the poller at boot, restart it when the
- * posthog/telegram config actually changed, stop it on shutdown). The pure pieces at the top (prompt
- * builder, result reader, start gate, config key) are exported directly for unit tests.
- *
- * The lane is opt-in and inert unless config.posthog.enabled AND config.telegram are both set.
- */
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -38,9 +27,6 @@ import { DEFAULT_POSTHOG_REPORT_DIR } from './posthog-report.ts';
 import { sendPosthogPing } from './posthog-telegram.ts';
 import { configuredIntegrationBranch } from './core/integration-branch-core.js';
 
-// Belt-and-suspenders deny-list for the headless investigation sessions (they run under
-// --dangerously-skip-permissions, so this is a guard, not the guard). v1 is READ-ONLY against
-// PostHog and must not touch the repo it reads: an investigator diagnoses, it never ships.
 const POSTHOG_DENY = {
   deny: [
     'Bash(gh pr merge:*)',
@@ -53,15 +39,6 @@ const POSTHOG_DENY = {
   ],
 };
 
-/*
- * Deny-list for the AUTO-FIX sessions. A fix job may COMMIT, and that is the whole extent of its
- * reach: `git push` and every `gh` invocation are denied, because a prefix deny-list cannot constrain
- * a push TARGET (`git push origin HEAD:main`, a `+HEAD:main` refspec, a `:main` delete) or a gh API
- * call (`gh api --method PUT .../pulls/N/merge`), so allowing either would have made the lane's
- * "never merges" property a matter of the agent's cooperation. The branch is pushed and the pull
- * request opened by the SERVER (pushFixBranch below), where both are server-built arguments. The
- * merge/force-push/workflow entries stay for defense in depth.
- */
 const FIX_DENY = {
   deny: [
     'Bash(git push:*)',
@@ -79,11 +56,7 @@ const FIX_DENY = {
 };
 
 const REPORT_DIR = DEFAULT_POSTHOG_REPORT_DIR;
-// Fallback cwd for an investigation with no repo to read: a per-issue scratch directory. Never the
-// operator's home, which is the one directory where a confused agent can do the most damage.
 const WORK_DIR = path.join(glissaHomeDir(), 'posthog-work');
-// Reports are keyed by issue id, so this is a per-issue cap in practice; it bounds an unbounded
-// directory the way the recorder bounds its own (newest-N, swept async, best-effort).
 const REPORT_RETAIN_FILES = 20;
 const FORCE_TICK_DEBOUNCE_MS = 3000;
 
@@ -175,10 +148,6 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-// PostHog issue ids reach the filesystem, a git branch name and the prompt, so they are reduced to a
-// conservative charset first. A run of dots goes too: git refuses a ref containing `..`, and no
-// surviving id should be able to read as a parent-directory segment anywhere it lands. Everything
-// else the API returns is free text and never reaches any of those.
 function safeIssueId(issueId: unknown): string {
   return String(issueId).replace(/[^\w.-]+/g, '-').replace(/\.{2,}/g, '-');
 }
@@ -187,40 +156,19 @@ function reportPathFor(issueId: unknown): string {
   return path.join(REPORT_DIR, `${safeIssueId(issueId)}.html`);
 }
 
-// The dashboard page of one issue, built from SCRUBBED ids rather than from core.issueUrl's raw
-// output: this string is interpolated into a prompt, so the ids inside it are held to the same
-// charset as every other id that reaches one.
 function promptIssueUrl(host: unknown, projectId: unknown, issueId: unknown): string {
   const base = String(host || '').replace(/\/+$/, '');
   return `${base}/project/${safeIssueId(projectId)}/error_tracking/${safeIssueId(issueId)}`;
 }
 
-// The job's result file, in a private directory of its own (createJobResultFile explains why a
-// predictable name in shared temp is not safe). Ids reach a filesystem path, so both are scrubbed.
 function createResultFileFor(kind: string, projectId: unknown, issueId: unknown): Promise<JobResultFile> {
   return createJobResultFile(`glissa-posthog-${kind}${safeIssueId(projectId)}-${safeIssueId(issueId)}`);
 }
 
-/*
- * A dispatch-unique suffix for the fix branch. A deterministic `glissa/radar-fix/<project>-<issue>`
- * name collides with the REMOTE branch a previous fix for the same issue already pushed, and every
- * later push then fails as non-fast-forward, burning the whole fix timeout on a legitimate
- * redispatch (a regression after a fix is exactly when a second fix runs).
- */
 function newFixDiscriminator(): string {
   return `${Date.now().toString(36)}${crypto.randomBytes(2).toString('hex')}`;
 }
 
-/*
- * The seed prompt for one headless investigation. Pure string building. The verdict travels back
- * through a result FILE, not stdout, mirroring the PR lane.
- *
- * NOTHING API-DERIVED BUT IDS GOES IN HERE. An issue title is the error message of the monitored
- * application, i.e. text an end user can often steer, and this prompt seeds a session running under
- * --dangerously-skip-permissions: interpolating it verbatim handed any visitor of the monitored app a
- * write primitive into that session's instructions. The agent fetches the details itself, behind the
- * untrusted-data fence below, where the same text arrives as tool output rather than as its own task.
- */
 function buildInvestigationPrompt(
   { issueId, projectId, host, resultPath, repoPath }: {
     issueId: unknown;
@@ -284,21 +232,6 @@ function buildInvestigationPrompt(
   return lines.join('\n');
 }
 
-/*
- * The seed prompt for one headless AUTO-FIX job, dispatched instead of an investigation when a MAJOR
- * issue lands and config.posthog.autoFix is on. Same injection fence as buildInvestigationPrompt, for
- * the same reason: an issue title is the monitored application's error message, i.e. text an end user
- * can often steer, so only IDS are interpolated and everything the agent fetches arrives as data.
- *
- * The job is reproduce-first on purpose. A patch written from a stack trace alone is a guess, and a
- * guess that ships is worse than no fix at all; a failing test that turns green is the only evidence
- * this lane can hand a carbon unit that the defect is actually gone. When reproduction is genuinely
- * impossible the agent says so in the result rather than pretending, and the PR body carries that
- * admission to the reviewer.
- *
- * The agent COMMITS and stops. It never pushes and never touches gh: see FIX_DENY for why the push
- * and the pull request are the server's job (pushFixBranch), not a rule the prompt asks for.
- */
 function buildFixPrompt(
   { issueId, projectId, host, resultPath, repoPath, branch, baseBranch }: {
     issueId: unknown;
@@ -374,8 +307,6 @@ function buildFixPrompt(
   return lines.join('\n');
 }
 
-// Keep the newest REPORT_RETAIN_FILES reports and drop the rest. Fire-and-forget and best-effort, on
-// the recorder's precedent: this runs on the one-shot spawn path, so it must never block or throw.
 async function sweepReports(dir: string = REPORT_DIR, retain: number = REPORT_RETAIN_FILES): Promise<void> {
   try {
     const names = (await fs.promises.readdir(dir)).filter((n) => n.endsWith('.html'));
@@ -391,7 +322,7 @@ async function sweepReports(dir: string = REPORT_DIR, retain: number = REPORT_RE
     for (const victim of ordered.slice(retain)) {
       await fs.promises.rm(victim.full, { force: true }).catch(() => {});
     }
-  } catch { /* best-effort: a missing or locked dir is not worth a retry */ }
+  } catch {  }
 }
 
 const INVESTIGATION_VERDICTS = new Set(['ROOT_CAUSE', 'NEEDS_HUMAN', 'TRANSIENT', 'ERROR']);
@@ -401,9 +332,6 @@ function readInvestigationResult(resultPath: string): ResultFileOutcome {
   return readResultFile(resultPath, INVESTIGATION_VERDICTS);
 }
 
-// The agent reports what it did and what the pull request should say; it never reports a pull request
-// url or a branch, because it can create neither. Both texts are normalized before they can reach a
-// `gh pr create` argument.
 function readFixResult(resultPath: string): ResultFileOutcome {
   return readResultFile(resultPath, FIX_RESULT_VERDICTS, (obj) => ({
     reproduced: obj.reproduced === true,
@@ -412,8 +340,6 @@ function readFixResult(resultPath: string): ResultFileOutcome {
   }));
 }
 
-// One normalized {ok,out,err} shell-out, through child-process-safe like server/pr-gh.ts. Never
-// throws, so the handoff below branches on ok instead of try/catch at each step.
 async function runCli(cmd: string, args: string[], cwd: string): Promise<CliResult> {
   try {
     const { stdout } = await execFileAsync(cmd, args, { cwd, encoding: 'utf8', timeout: 120000 });
@@ -434,16 +360,6 @@ function handoffFailure(
   return { verdict: 'ERROR', prUrl: null, summary: `fix handoff failed while ${step}${why ? ` (${why})` : ''}; ${where}` };
 }
 
-/*
- * The server half of the fix handoff: everything the agent is denied.
- *
- * A prefix deny-list cannot constrain a push TARGET or a `gh api` call, so the agent commits and this
- * function does the rest with arguments Glissa built: the branch name is the one Glissa created, the
- * base is the one the worktree forked from, and the only agent-written values are the pull request
- * title and body, already normalized. Refuses the push outright for a diff touching
- * `.github/workflows/` or a FIXED verdict with nothing committed (core.decideFixHandoff), and names
- * the step plus the honest branch state on any failure. Never throws.
- */
 async function pushFixBranch(
   { run = runCli, repoPath, workspace, prTitle, prBody }: {
     run?: (cmd: string, args: string[], cwd: string) => Promise<CliResult>;
@@ -480,12 +396,9 @@ async function pushFixBranch(
 
   const prUrl = core.normalizePrUrl(created.out);
   if (prUrl) return { verdict: 'FIXED', prUrl, summary: null };
-  // The pull request exists; only its url was unreadable, which is not a failed fix.
   return { verdict: 'FIXED', prUrl: null, summary: `pull request opened for ${branch}, its url was not readable` };
 }
 
-// The pull request text when the agent wrote none. Server-authored, so a FIXED verdict always has
-// something honest on the pull request rather than an empty title gh would refuse.
 function fallbackPrTitle(issueId: string): string {
   return `fix: PostHog issue ${issueId}`;
 }
@@ -501,9 +414,6 @@ function fallbackPrBody(
   ].join('\n');
 }
 
-// Pure gate for the opt-in poller: start only when enabled AND reachable AND telegram is configured
-// (pings must be deliverable). A plain "disabled" reports no reason (silent); a misconfiguration
-// reports one (warned).
 function posthogShouldStart(cfg: PosthogWiringConfig): LaneRunnerGate {
   const p = cfg.posthog;
   if (!p || !p.enabled) return { start: false, reason: null };
@@ -516,23 +426,14 @@ function posthogShouldStart(cfg: PosthogWiringConfig): LaneRunnerGate {
   return { start: true, reason: null };
 }
 
-// Identity of the poller-relevant config, recomputed on every settings reload and compared against
-// the key recorded at the last startPoller() invocation. A settings save that touches neither
-// posthog nor telegram must never restart a poller that may have an investigation in flight.
 function posthogCfgKey(cfg: PosthogWiringConfig): string {
   return JSON.stringify({ posthog: cfg.posthog || null, telegram: cfg.telegram || null });
 }
 
-// Context packs this lane delivers to its investigation sessions (config.posthog.packs), normalized
-// the same defensive way a project's list is, so a hand-edited entry costs that entry and never the
-// investigation. Absent key means an empty list, i.e. a spawn identical to before packs existed.
 function posthogPackNames(cfg: PosthogWiringConfig): string[] {
   return normalizePackNames(cfg.posthog ? cfg.posthog.packs : null).names;
 }
 
-// `projects: 'all'` walks every organization the personal API key can see; an explicit array is
-// taken verbatim, with display names from config.posthog.projectMap when present. Top-level (not a
-// closure of createPosthogWiring) so the naming rules are unit-testable with a fake api.
 function makeResolveProjects(api: PosthogApi, config: PosthogWiringConfig): () => Promise<ResolvedProject[]> {
   return async function resolveProjects() {
     const configured = config.posthog?.projects;
@@ -553,8 +454,6 @@ function makeResolveProjects(api: PosthogApi, config: PosthogWiringConfig): () =
       const body = res.body as { results?: unknown } | null;
       const rows = (Array.isArray(res.body) ? res.body : (body?.results || [])) as { id: string | number; name?: string }[];
       for (const project of rows) {
-        // PostHog names every org's initial project "Default project"; with one org per app that
-        // stock name identifies nothing, so the org name is the honest label for it.
         const isStockName = !project.name || project.name === 'Default project';
         const fallbackName = (isStockName && org.name) || project.name || String(project.id);
         out.push({ projectId: project.id, name: projectMap[String(project.id)] || fallbackName });
@@ -566,17 +465,10 @@ function makeResolveProjects(api: PosthogApi, config: PosthogWiringConfig): () =
 
 function createPosthogWiring({
   config, investigationSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate,
-  // Only ever used by the auto-fix job, which must run in an isolated worktree; absent (or a repo the
-  // create call refuses) means the lane falls back to a diagnose-only investigation.
   gitWorkspace = null,
-  // The git/gh shell-outs of the fix handoff, injected so a test can drive a failing push or a
-  // refused pull request without a repository or a GitHub account.
   runCommand = runCli,
   broadcast = () => {},
-  // Lane attribution: names this lane on the ledger when its headless session reports a Claude session id.
   recordLane = null,
-  // Session constructor seam, mirroring runCommand/broadcast: a test records the options this lane
-  // builds without spawning anything.
   makeSession = (options: SessionOptions) => new Session(options),
 }: PosthogWiringOptions) {
   function activePosthogConfig(): PosthogLaneConfig & { host: string; apiKey: string } {
@@ -587,8 +479,6 @@ function createPosthogWiring({
     return { ...posthogConfig, host: posthogConfig.host, apiKey: posthogConfig.apiKey };
   }
 
-  // Build one headless (claude -p) investigation session, registered in investigationSessions and
-  // auto-removed on exit. Not surfaced as a card (a -p session has no watchable TUI).
   function makeInvestigationSession(
     { id, name, path: cwd, initialPrompt, spawnEnv, permissions = POSTHOG_DENY }: {
       id: string;
@@ -620,17 +510,6 @@ function createPosthogWiring({
     return sess;
   }
 
-  /*
-   * Where one dispatched job runs, and which repo (if any) it may read. The fix job takes the same
-   * answer and demands more of it: a null repoPath is exactly why a fix downgrades to a diagnosis.
-   *
-   * The old default was os.homedir(), which pointed a --dangerously-skip-permissions session at every
-   * dotfile, key and repo the operator owns. Preference order instead: the source this PostHog project
-   * maps to (config.posthog.projectMap entry, when it names an existing absolute directory), then the
-   * lane-wide config.posthog.repoPath, then a per-issue scratch directory with nothing in it. Only a
-   * resolved repo is named to the agent as readable source; the scratch case reports no repoPath, so
-   * the prompt drops its cross-reference step.
-   */
   function resolveRepoPath(projectId: string | number): string | null {
     const posthogConfig = activePosthogConfig();
     const mapped = posthogConfig.projectMap?.[String(projectId)];
@@ -639,7 +518,7 @@ function createPosthogWiring({
       if (!path.isAbsolute(candidate)) continue;
       try {
         if (fs.statSync(candidate).isDirectory()) return candidate;
-      } catch { /* not a usable path, fall through to the next candidate */ }
+      } catch {  }
     }
     return null;
   }
@@ -651,32 +530,16 @@ function createPosthogWiring({
     const repoPath = resolveRepoPath(projectId);
     if (repoPath) return { cwd: repoPath, repoPath };
     const scratch = path.join(WORK_DIR, issueId);
-    try { fs.mkdirSync(scratch, { recursive: true }); } catch { /* exists */ }
+    try { fs.mkdirSync(scratch, { recursive: true }); } catch {  }
     return { cwd: scratch, repoPath: null };
   }
 
-  // Where a fix job's throwaway worktree lands: the same `.glissa-worktrees` sibling the PR lane and
-  // the session lane use, so one operator setting governs every isolated checkout on the machine.
   function worktreeBaseFor(repoPath: string): string {
     return config.worktreeRoot || path.join(path.dirname(path.resolve(repoPath)), '.glissa-worktrees');
   }
 
-  // The shared half of both dispatch paths.
   const waitForExit = (sess: Session, signal: AbortSignal | null | undefined) => awaitSessionExit(sess, { signal, spawnGate });
 
-  /*
-   * The auto-fix job: reproduce, repair, COMMIT. Returns null when there is nothing to fix IN, which
-   * is the whole downgrade rule: the lane's scratch directory holds no repository, and a
-   * `gitWorkspace.create` that reports `isGit: false` (not a checkout, no commits, branch already
-   * checked out elsewhere) is the same answer, as is a create that failed outright. The caller then
-   * runs the diagnose-only investigation instead, so a misconfigured repoPath costs the fix, never
-   * the tick.
-   *
-   * The push and the pull request happen HERE, after the session is gone, from server-built
-   * arguments (pushFixBranch). The worktree is discarded on EVERY exit path, inside the promise the
-   * poller tracks, so a restart or a shutdown drains the discard even when the job timed out; the
-   * pushed branch and its pull request are the durable output.
-   */
   async function posthogFixSpawn(
     { issue, projectId, projectName, url, signal }: {
       issue: PosthogIssue;
@@ -704,8 +567,6 @@ function createPosthogWiring({
     if (!workspace || !workspace.isGit) return null;
 
     const promptUrl = promptIssueUrl(posthogConfig.host, projectId, issue.issueId);
-    // Created INSIDE the try: a throw between minting the directory and entering the guarded region
-    // would strand it, and the finally below is the only thing that removes it.
     let resultFile: JobResultFile | null = null;
     try {
       resultFile = await createResultFileFor('fix-', projectId, issueId);
@@ -727,8 +588,6 @@ function createPosthogWiring({
       });
       await waitForExit(sess, signal);
       const result = readFixResult(resultFile.path);
-      // A timed-out job is already an ERROR to the poller, and its half-written FIXED must not open a
-      // pull request nothing recorded. The worktree still goes in the finally below.
       if (signal?.aborted) {
         return { verdict: 'ERROR', summary: 'fix aborted before the branch was pushed', reproduced: false, prUrl: null, url, mode: core.JOB_MODES.fix };
       }
@@ -769,9 +628,6 @@ function createPosthogWiring({
     }
   }
 
-  // The real spawnInvestigation the poller injects: seed a headless session, run it through the
-  // spawn gate, and resolve the file-borne verdict on exit. Honors an AbortSignal (the poller's hard
-  // timeout) by destroying the session. Never rejects: any failure resolves to an ERROR verdict.
   async function posthogInvestigationSpawn(
     { issue, projectId, projectName, url, mode, signal }: SpawnInvestigationArgs,
   ) {
@@ -781,10 +637,8 @@ function createPosthogWiring({
       if (fixed) return fixed;
     }
     const issueId = safeIssueId(issue.issueId);
-    try { fs.mkdirSync(REPORT_DIR, { recursive: true }); } catch { /* exists */ }
+    try { fs.mkdirSync(REPORT_DIR, { recursive: true }); } catch {  }
     void sweepReports();
-    // Same rule as the fix path: nothing between the mkdtemp and the guarded region, so the workspace
-    // resolution, the prompt builder and the Session constructor cannot strand the directory either.
     let resultFile: JobResultFile | null = null;
     try {
       resultFile = await createResultFileFor('', projectId, issueId);
@@ -815,14 +669,11 @@ function createPosthogWiring({
     }
   }
 
-  // State lives in one cross-project file under the user config dir, written atomically (tmp+rename).
   const posthogStatePath = path.join(glissaHomeDir(), 'posthog-state.json');
   async function readPosthogState(): Promise<PosthogState> {
     try { return JSON.parse(fs.readFileSync(posthogStatePath, 'utf8')); }
     catch { return {}; }
   }
-  // ASYNC for the same reason as the PR lane's state write: a recurring write on the one shared event
-  // loop must not be synchronous. The tick loop's persist chain already serializes it.
   async function writePosthogState(state: PosthogState): Promise<void> {
     await writeJsonAtomic(posthogStatePath, state, { mkdir: true });
   }
@@ -845,9 +696,6 @@ function createPosthogWiring({
     if (typeof forcedTickTimer.unref === 'function') forcedTickTimer.unref();
   }
 
-  // Started at boot and re-evaluated on every settings reload whose posthog/telegram key changed, so
-  // toggling the lane hot-applies without a server restart. The restart serialization and the cached
-  // last status live in server/lane-runner.ts.
   const runner = createLaneRunner({
     tag: 'posthog-poller',
     gate: () => {
@@ -879,7 +727,6 @@ function createPosthogWiring({
         intervalMinutes: posthogConfig.intervalMinutes || 15,
         maxConcurrentInvestigations: posthogConfig.maxConcurrentInvestigations || 2,
         investigationTimeoutSeconds: posthogConfig.investigationTimeoutSeconds || 900,
-        // Opt-in, like every automation lane: absent means the lane only ever diagnoses.
         autoFix: posthogConfig.autoFix === true,
         fixTimeoutSeconds: posthogConfig.fixTimeoutSeconds || 1800,
         minUsersToInvestigate: posthogConfig.minUsersToInvestigate,
@@ -897,13 +744,6 @@ function createPosthogWiring({
     },
   });
 
-  /*
-   * Operator-driven issue status change (Radar's resolve/suppress). The lane's own ticks stay
-   * read-only; this is the one write, and it is gated on the poller actually running so an action
-   * cannot fire against a half-configured lane. The immediate tick is what makes the row disappear
-   * after the debounce instead of at the next interval: a resolved/suppressed issue drops out of the
-   * active query and reconcileVanished retires its entry.
-   */
   async function setIssueStatus(
     { projectId, issueId, action }: { projectId: string; issueId: string; action: unknown },
   ) {
@@ -913,20 +753,11 @@ function createPosthogWiring({
     const posthogConfig = activePosthogConfig();
     const api = createPosthogApi({ host: posthogConfig.host, apiKey: posthogConfig.apiKey });
     const res = await api.updateIssueStatus(projectId, issueId, decision.status);
-    // The error string can carry an HTTP status but never a credential: request() builds it from the
-    // status code alone, and the key lives only in the Authorization header.
     if (!res.ok) return { ok: false, error: `PostHog refused the change (${res.error || 'unknown error'})` };
     queueForcedTick();
     return { ok: true, status: decision.status };
   }
 
-  /*
-   * Archive one investigations-inbox record. Deliberately NOT a forced tick: archiving edits one
-   * boolean in the state file and changes nothing a poll would discover, so the cached status is
-   * patched in place and rebroadcast. A tick would re-query PostHog (and could re-spawn work) for
-   * what is a list edit. lastStatus can still be null here (archiving from a client that connected
-   * before the first tick), so the patch seeds a minimal payload rather than dropping the update.
-   */
   async function archiveInvestigation({ id }: { id?: string } = {}) {
     const poller = runner.getPoller();
     if (!poller || !('archiveInvestigation' in poller) || typeof poller.archiveInvestigation !== 'function') {
@@ -945,11 +776,7 @@ function createPosthogWiring({
     getStatus: runner.getStatus,
     setIssueStatus,
     archiveInvestigation,
-    // Exposed for tests only (the pack-service `_watcherCount` precedent): the session factory is the
-    // one place the lane's Session options are assembled, and pinning them needs no live poller.
     _makeInvestigationSession: makeInvestigationSession,
-    // Exposed for tests only: the mode dispatch, the worktree isolation and the downgrade rule all
-    // live on this path and none of them needs a live poller to exercise.
     _investigationSpawn: posthogInvestigationSpawn,
   };
 }

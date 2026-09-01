@@ -1,7 +1,3 @@
-// Payload-shape tests for channels/web-notification.js. The channel is a dumb
-// delivery pipe: it takes a broadcast function and, per call, emits exactly
-// one control-WS `notify` message with a fixed field set.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 

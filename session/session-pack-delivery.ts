@@ -10,7 +10,6 @@ interface DeliveredPack {
   tokenEstimate?: number | null;
 }
 
-// A delivery that actually resolved: only these reach the adapter's pack carrier, which needs the dir.
 interface ResolvedDelivery {
   name: string;
   version: string;

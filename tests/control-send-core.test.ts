@@ -1,7 +1,3 @@
-// Control-stream backpressure (2026-08 review, section 1). The data WS has gone through ws-sender
-// since it was written; control broadcasts called client.send raw, so a suspended dashboard
-// accumulated health, usage, ingest and lane frames in server memory without limit.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -21,8 +17,7 @@ test('past the high-water mark only the periodic pushes drop', () => {
   const bufferedAmount = DEFAULT_HIGH_WATER_MARK;
   assert.equal(decideControlSend({ bufferedAmount, type: 'health-snapshot' }).action, 'drop');
   assert.equal(decideControlSend({ bufferedAmount, type: 'usage-sessions' }).action, 'drop');
-  // usage-report is deliberately NOT here: it is a per-connection reply to request-usage-report, sent
-  // through ws.send directly, so it never reaches this policy and listing it was dead classification.
+
   assert.equal(decideControlSend({ bufferedAmount, type: 'usage-report' }).action, 'send');
   assert.equal(decideControlSend({ bufferedAmount, type: 'notify' }).action, 'send');
   assert.equal(decideControlSend({ bufferedAmount, type: 'session-error' }).action, 'send');
@@ -38,8 +33,6 @@ test('past the hard ceiling the socket is closed rather than fed', () => {
   }
 });
 
-// The whole point of the replay log is that these survive a gap; dropping one on a busy socket would
-// lose it with nothing to replay it from, since the client never knew it existed.
 test('no replayable type is ever classified as droppable', () => {
   for (const type of REPLAYABLE_EXACT) {
     assert.equal(classifyControlMessage(type), 'critical', type);

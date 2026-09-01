@@ -20,7 +20,6 @@ import {
 const RELAY_PATH = path.join(import.meta.dirname, '..', 'session', 'visions-relay.ts');
 const TEST_TIMEOUT_MS = 6000;
 
-// Every LSP/daemon frame this file reads back is asserted field by field, so one indexable shape covers them.
 type LspRecord = Record<string, unknown>;
 
 interface RelayScenario {
@@ -384,8 +383,6 @@ test('unknown request returns MethodNotFound', async () => {
   });
 });
 
-// --- The request path in both directions (docs/archive/plan-navigator-2.md, M6) ---
-
 const CODE_ACTION_PARAMS = {
   textDocument: { uri: 'file:///note.md' },
   range: { start: { line: 2, character: 12 }, end: { line: 2, character: 16 } },
@@ -471,7 +468,6 @@ test('an editor that errors on an applyEdit is reported to the daemon as a refus
     }));
     const request = await relay.stdoutMessages.next('applyEdit not forwarded to the editor');
 
-    // A response for an id the relay never minted is consumed and dropped, not routed anywhere.
     writeLsp(relay.child, { jsonrpc: '2.0', id: 'not-a-relay-id', result: { applied: true } });
     writeLsp(relay.child, { jsonrpc: '2.0', id: request.id, error: { code: -32603, message: 'no' } });
 
@@ -512,11 +508,9 @@ test('shutdown and exit terminate the relay cleanly', async () => {
 });
 
 test('the port plan puts the daemon\'s configured port ahead of the defaults', () => {
-  // An explicit flag or env is a fixed answer: the operator named the daemon, so nothing else is tried.
   assert.deepEqual(resolvePortPlan(['--port', '4100'], {}, 3000), { ports: [4100], isFixed: true });
   assert.deepEqual(resolvePortPlan([], { GLISSA_PORT: '4100' }, 3000), { ports: [4100], isFixed: true });
 
-  // A configured port leads but does not exclude: a dev daemon answers on Vite's port with 3000 on disk.
   assert.deepEqual(resolvePortPlan([], {}, 4100), { ports: [4100, 5173, 3000], isFixed: false });
   assert.deepEqual(resolvePortPlan([], {}, 3000), { ports: [3000, 5173], isFixed: false });
   assert.deepEqual(resolvePortPlan([], {}, null), { ports: [5173, 3000], isFixed: false });

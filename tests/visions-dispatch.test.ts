@@ -1,7 +1,3 @@
-// The visions dispatch shell: the result-file contract, the hard timeout, the throwaway work dir,
-// and the permissions posture the lane spawns under. The spawn itself is injected, so NOTHING here
-// starts a real claude session.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -34,13 +30,10 @@ const EMPTY_RESULT = {
   reason: null,
 };
 
-// A holder rather than a let: the deadline is assigned inside the timer seam, and TypeScript narrows a
-// captured let to its initializer at every later read.
 function deadlineHolder(): { fire: (() => void) | null } {
   return { fire: null };
 }
 
-// A hand-fired deadline: the handle is a real unref-ed timer that never runs its own callback.
 function heldTimer(): NodeJS.Timeout {
   const handle = setTimeout(() => {}, 2 ** 30);
   handle.unref();
@@ -62,8 +55,6 @@ function tempFile(contents: string | null) {
   if (contents != null) fs.writeFileSync(file, contents, 'utf8');
   return { file, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
-
-// --- Reading what a session claimed ---
 
 test('a COMMENTS result is believed for the entries that pass validation', async (t) => {
   const { file, cleanup } = tempFile(JSON.stringify({
@@ -114,7 +105,6 @@ test('a missing, unparsable, non-object or unknown-verdict file is an ERROR, nev
   t.after(bad.cleanup);
   assert.equal((await readCommentsResult(bad.file)).verdict, 'ERROR');
 
-  // A file that exists proves the session ran, so an unparsable one is its output, never lane evidence.
   const unparsable = await readCommentsResult(bad.file);
   assert.equal(unparsable.errorSource, 'session');
   assert.equal(unparsable.reason, 'result file is not JSON');
@@ -159,7 +149,6 @@ test('an ERROR verdict cannot carry result surfaces', async (t) => {
   });
 });
 
-// The size the caller logs comes from the read this already did, never from a second stat of the file.
 test('onBytesRead reports what was read without changing the result shape', async (t) => {
   const content = JSON.stringify({ verdict: 'NONE', comments: [] });
   const { file, cleanup } = tempFile(content);
@@ -171,14 +160,11 @@ test('onBytesRead reports what was read without changing the result shape', asyn
   });
   assert.deepEqual(sizes, [Buffer.byteLength(content)]);
 
-  // A file that could not be read reports nothing at all, so the caller's count stays 0.
   const missing = path.join(os.tmpdir(), `glissa-visions-absent-${process.pid}.json`);
   const missed: number[] = [];
   assert.equal((await readCommentsResult(missing, { onBytesRead: (bytes) => missed.push(bytes) })).verdict, 'ERROR');
   assert.deepEqual(missed, []);
 });
-
-// --- The optional intent field (docs/archive/plan-navigator.md, M5) ---
 
 test('an intent claim is read, trimmed and capped, whatever the verdict says', async (t) => {
   const withComments = tempFile(JSON.stringify({
@@ -189,7 +175,6 @@ test('an intent claim is read, trimmed and capped, whatever the verdict says', a
   t.after(withComments.cleanup);
   assert.deepEqual((await readCommentsResult(withComments.file, { lineCount: 4 })).intent, { thread: null, text: 'a plan doc for the visions intent model' });
 
-  // A session with nothing to comment on can still have moved its belief.
   const quiet = tempFile(JSON.stringify({ verdict: 'NONE', comments: [], intent: 'a quieter belief' }));
   t.after(quiet.cleanup);
   assert.deepEqual((await readCommentsResult(quiet.file, { lineCount: 4 })).intent, { thread: null, text: 'a quieter belief' });
@@ -208,8 +193,6 @@ test('an invalid intent claim is ignored rather than believed or thrown over', a
     assert.equal(result.verdict, 'NONE', 'and it never invalidates the rest of the result');
   }
 });
-
-// --- The optional raised-hand field (docs/archive/plan-navigator-2.md, M7) ---
 
 test('a hand claim is read, trimmed and capped, whatever the verdict says', async (t) => {
   const withComments = tempFile(JSON.stringify({
@@ -266,10 +249,6 @@ test('absent or non-array diagnostics read as empty', async (t) => {
   }
 });
 
-// --- One dispatch, end to end, with the spawn injected ---
-
-// Ref'd on purpose: the timeout test injects every timer the dispatcher arms, so an unref'd handle
-// would be the only thing left in the loop and node exits before it can fire.
 function eventLoopTurn(): Promise<void> {
   return new Promise((resolve) => { setImmediate(resolve); });
 }
@@ -430,7 +409,6 @@ test('a hung session is aborted at the hard timeout and resolves ERROR, so the l
   assert.equal(timeoutMs, 12000, 'dispatchTimeoutSeconds is seconds on the wire, milliseconds on the timer');
   assert.equal(aborted, false, 'nothing is aborted while the session still has time');
 
-  // The injected timer never fires on its own; firing it here IS the hard timeout.
   fireDeadline();
   assert.deepEqual(await pending, {
     verdict: 'ERROR', comments: [], diagnostics: [], intent: null, hand: null, outOfRange: 0, errorSource: 'transport', reason: 'dispatch timed out',
@@ -441,12 +419,10 @@ test('a hung session is aborted at the hard timeout and resolves ERROR, so the l
   await waitUntil(() => !fs.existsSync(workDirs[0]));
 });
 
-// The work dir is the killed session's own cwd: removing it under a live process leaks it on Windows and yanks it from a POSIX process still writing.
 test('a timed-out dispatch waits for the killed session before removing its work dir', async () => {
   const deadline = deadlineHolder();
   const spawnRelease: { resolve: (() => void) | null } = { resolve: null };
-  // The removal is observed through the injected dep, not through existsSync: a real rm lands some
-  // ticks later either way, so only the CALL says whether it waited for the session.
+
   const removals: string[] = [];
   const { dispatch, workDirs } = dispatcherWithSpawn(
     () => new Promise<void>((resolve) => { spawnRelease.resolve = resolve; }),
@@ -486,14 +462,6 @@ test('a dispatcher with no spawn injected refuses to be built', () => {
   assert.throws(() => createVisionsDispatcher({}), /requires spawnSession/);
 });
 
-// --- The permissions posture, pinned ---
-
-/*
- * Probed against the real CLI (2.1.241) via the stream-json tool_result: neither `Write(<dir>/**)` nor
- * `Edit(<dir>/**)` in an allow list grants the Write tool, a path deny does not refuse one, and a bare
- * `Read` deny does. What bounds the writes is acceptEdits over the throwaway cwd. Changing any of it is
- * a security decision, so it costs a test edit.
- */
 test('the lane bounds its writes with acceptEdits over its cwd, no allow list, no skip-permissions', () => {
   const posture = visionsPermissions();
   assert.equal(posture.permissions.defaultMode, 'acceptEdits');
@@ -504,8 +472,6 @@ test('the lane bounds its writes with acceptEdits over its cwd, no allow list, n
   }
 });
 
-// --- Intent threads in the result contract (docs/plan-visions-4-focus.md, M20) ---
-
 test('the object intent form survives with its thread, and a bad thread value is dropped', async (t) => {
   const named = tempFile(JSON.stringify({ verdict: 'NONE', comments: [], intent: { thread: 't-716d49b4', text: '  story A, refined  ' } }));
   t.after(named.cleanup);
@@ -515,7 +481,6 @@ test('the object intent form survives with its thread, and a bad thread value is
   t.after(opened.cleanup);
   assert.deepEqual((await readCommentsResult(opened.file, { lineCount: 4 })).intent, { thread: 'new', text: 'story B' });
 
-  // A null thread is the parsed form of a plain string, so it reads back as an advance of the active one.
   const active = tempFile(JSON.stringify({ verdict: 'NONE', comments: [], intent: { thread: null, text: 'story C' } }));
   t.after(active.cleanup);
   assert.deepEqual((await readCommentsResult(active.file, { lineCount: 4 })).intent, { thread: null, text: 'story C' });

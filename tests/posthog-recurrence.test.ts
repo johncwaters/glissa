@@ -24,8 +24,6 @@ import {
 const DAY_MS = 86400000;
 const NOW = 10 * DAY_MS;
 
-// The incident this feature exists for: one crawler failing to lazy-load a chunk, two issue ids hours
-// apart, the asset hash different in each because a deploy landed between them.
 const CHUNK_TITLE_A = 'TypeError: Failed to fetch dynamically imported module: https://shop.example.com/assets/maplibre-gl-B3nQ.js';
 const CHUNK_TITLE_B = 'TypeError: Failed to fetch dynamically imported module: https://shop.example.com/assets/maplibre-gl-Zk91.js';
 
@@ -72,8 +70,6 @@ function stateWithPrior(over = {}) {
 
 const OPTS = { now: NOW, recurrenceWindowDays: DEFAULT_RECURRENCE_WINDOW_DAYS, transientRecurrenceLimit: DEFAULT_TRANSIENT_RECURRENCE_LIMIT };
 
-// --- tokenizing: what counts as distinctive ---
-
 test('distinctiveTokens lowercases, splits on punctuation, and dedupes', () => {
   assert.deepEqual(distinctiveTokens('Checkout-Widget: checkout WIDGET boom'), ['checkout', 'widget', 'boom']);
 });
@@ -92,8 +88,6 @@ test('jaccard is union-based, so a subset never scores a free 1.0', () => {
   assert.equal(jaccard(['a'], ['a', 'b', 'c']), 1 / 3);
   assert.equal(jaccard([], ['a']), 0);
 });
-
-// --- scoring: the conservative rules ---
 
 test('scoreAgainstPrior matches the same non-event across a deploy that changed the asset hash', () => {
   const scored = scoreAgainstPrior(distinctiveTokens(CHUNK_TITLE_B), { title: CHUNK_TITLE_A });
@@ -135,8 +129,6 @@ test('a prior summary sharing distinctive tokens lowers the threshold, never the
   assert.equal(corroborated.matched, true);
   assert.equal(corroborated.threshold, 0.5);
 });
-
-// --- finding a prior in state ---
 
 test('findRecurrenceMatch finds the prior transient of the same project', () => {
   const matchOrNull = findRecurrenceMatch(
@@ -190,8 +182,6 @@ test('findRecurrenceMatch picks the highest score, then the most recent, determi
   assert.equal(matchOrNull?.record.issueId, 'iss-recent', 'equal scores break toward the fresher cluster');
 });
 
-// --- escalation triggers ---
-
 test('escalationReason: the configured repeat escalates, the one before it does not', () => {
   const change = makeChange();
   assert.equal(escalationReason(change, 2, OPTS), null);
@@ -212,8 +202,6 @@ test('escalationReason: a zero or missing limit falls back to the default rather
   assert.equal(escalationReason(makeChange(), 1, { transientRecurrenceLimit: 0 }), null);
   assert.equal(escalationReason(makeChange(), 3, {}), 'limit');
 });
-
-// --- the decision ---
 
 test('decideRecurrence: a confident match against a fresh transient dedupes', () => {
   const decision = decideRecurrence(makeChange(), stateWithPrior(), OPTS);
@@ -286,8 +274,6 @@ test('decideRecurrence: an unrelated error with a prior in state still spawns', 
   assert.equal(decideRecurrence(change, stateWithPrior(), OPTS).action, 'spawn');
 });
 
-// --- planning: the one call the poller makes ---
-
 test('planIssueActions splits a plan into spawns and dedupes and drops what earns no attention', () => {
   const changes = [
     makeChange(),
@@ -311,8 +297,6 @@ test('planIssueActions carries the escalation decision alongside the change', ()
   assert.equal(plan.investigate[0].recurrence.action, 'escalate');
   assert.equal(plan.investigate[0].recurrence.ordinal, 3);
 });
-
-// --- the registry itself ---
 
 test('recordTransientSignature opens a cluster and normalizes it', () => {
   const registry = recordTransientSignature({}, {
@@ -392,8 +376,6 @@ test('pruneSignatures drops clusters past the window and caps the rest', () => {
 test('pruneSignatures on a missing registry returns an empty object', () => {
   assert.deepEqual(pruneSignatures({}, NOW, OPTS), {});
 });
-
-// --- the strings that reach the operator ---
 
 test('recurrenceSummaryLine names the prior issue it reused', () => {
   assert.equal(

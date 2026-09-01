@@ -1,9 +1,3 @@
-// The abort-vs-reap race the 2026-08 review recorded alongside the shutdown coordinator: a lane's hard
-// timeout resolved the job promise the instant it fired, so the caller's finally discarded the job's
-// worktree while the session it had just killed was still dying. On Windows a surviving
-// claude/cmd/conhost holding a handle in that directory makes the discard fail, leaking the checkout
-// and the branch.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -28,8 +22,6 @@ interface LaneVerdict {
   summary: string;
 }
 
-// A real Session that never spawns, whose destroy() parks an in-flight reap on _killReap exactly as
-// sessions.ts does on win32.
 function abortableSession(reap: Promise<void> | null = null): Session {
   const session = plainSession('ephemeral-abort');
   session.start = () => new Promise<void>(() => {});
@@ -98,7 +90,6 @@ test('a timeout still frees the slot at once, and the cleanup waits for the dyin
   });
   assert.equal(verdict.summary, 'timed out', 'the concurrency slot frees the moment the deadline hits');
 
-  // What the caller does in its finally: drain first, discard second.
   const draining = drainPending(pendingStarts[0], { capMs: 5000 }).then(() => cleanup.push('discard worktree'));
   await tick();
   assert.deepEqual(cleanup, [], 'the worktree is not discarded under a session that is still dying');

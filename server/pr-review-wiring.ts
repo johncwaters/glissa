@@ -1,15 +1,3 @@
-/*
- * GitHub PR auto-review wiring - the IO shell that binds server/pr-poller.ts (IO-free) to real
- * Sessions, gh/git, Telegram, and the on-disk state file.
- *
- * createBackend calls createPrReviewWiring once with its live locals; it returns the three verbs
- * the backend needs (start the poller at boot, restart it when the prReview/telegram config
- * actually changed, stop it on shutdown). The pure pieces at the top (prompt builder, result
- * reader, start gate, config key) are exported directly for unit tests.
- *
- * The lane is opt-in and inert unless config.prReview.enabled AND config.telegram are both set;
- * see AGENTS.md, "GitHub PR Auto-Review".
- */
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -32,10 +20,6 @@ import { createPrPoller } from './pr-poller.ts';
 import type { PrGitWorkspace, PrState, SpawnReviewArgs } from './pr-poller.ts';
 import { sendPrPing } from './pr-telegram.ts';
 
-// Belt-and-suspenders deny-list for the headless PR-review sessions (they run under
-// --dangerously-skip-permissions, so this is a guard, not the guard). Blocks the destructive/
-// outward verbs the reviewer must never take: the poller merges (never the agent), and workflow
-// files are never edited or merged automatically.
 const PR_REVIEW_DENY = {
   deny: [
     'Bash(gh pr merge:*)',
@@ -79,10 +63,6 @@ interface PrReviewWiringOptions {
   makeSession?: (options: SessionOptions) => Session;
 }
 
-// The seed prompt for one headless PR review. Pure string building (unit-coverable via the poller's
-// integration path). The verdict travels back through a result FILE, not stdout, mirroring the teams
-// file-handoff convention. Self-review via `gh pr review` is impossible on your own PR, so findings go
-// out as a `gh pr comment`; the poller (never the agent) merges once checks are green.
 function buildReviewPrompt(
   { slug, number, baseRefName, conflicting, resultPath }: {
     slug: string;
@@ -141,8 +121,6 @@ function readReviewResult(resultPath: string): ResultFileOutcome {
   return readResultFile(resultPath, REVIEW_VERDICTS);
 }
 
-// Pure gate for the opt-in poller: start only when enabled AND telegram is configured (pings must be
-// deliverable). A plain "disabled" reports no reason (silent); a misconfiguration reports one (warned).
 function prPollerShouldStart(cfg: PrReviewWiringConfig): LaneRunnerGate {
   if (!cfg.prReview || !cfg.prReview.enabled) return { start: false, reason: null };
   const t = cfg.telegram;
@@ -152,17 +130,10 @@ function prPollerShouldStart(cfg: PrReviewWiringConfig): LaneRunnerGate {
   return { start: true, reason: null };
 }
 
-// Identity of the poller-relevant config, recomputed on every settings reload and compared against the
-// key recorded at the last startPoller() invocation. A settings save that touches neither prReview
-// nor telegram (cursorBlink, etc.) must never restart a poller that may have a review in flight.
 function prReviewCfgKey(cfg: PrReviewWiringConfig): string {
   return JSON.stringify({ prReview: cfg.prReview || null, telegram: cfg.telegram || null });
 }
 
-// Context packs this lane delivers to its review sessions (config.prReview.packs). A review session is
-// exactly the consumer packs were built for. The list is normalized the same defensive way a project's
-// is, so a hand-edited entry costs that entry and never the review. Absent key means an empty list,
-// i.e. a spawn identical to before packs existed.
 function prReviewPackNames(cfg: PrReviewWiringConfig): string[] {
   return normalizePackNames(cfg.prReview ? cfg.prReview.packs : null).names;
 }
@@ -171,14 +142,9 @@ function createPrReviewWiring({
   config, reviewSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate, gitWorkspace,
   getProjectPathById, getProjectNameById = () => null,
   broadcast = () => {},
-  // Lane attribution: names this lane on the ledger when its headless session reports a Claude session id.
   recordLane = null,
-  // Session constructor seam, mirroring broadcast: a test records the options this lane builds
-  // without spawning anything.
   makeSession = (options: SessionOptions) => new Session(options),
 }: PrReviewWiringOptions) {
-  // Build one headless (claude -p) PR-review session, registered in reviewSessions and auto-removed on
-  // exit. Mirrors makeStageSession; not surfaced as a card (a -p session has no watchable TUI).
   function makeReviewSession(
     { id, name, path: cwd, initialPrompt }: { id: string; name: string; path: string; initialPrompt: string },
   ): Session {
@@ -200,15 +166,8 @@ function createPrReviewWiring({
     return sess;
   }
 
-  // The real spawnReview the poller injects: seed a headless review, run it through the spawn gate,
-  // and resolve the file-borne verdict on exit. Honors an AbortSignal (the poller's hard timeout) by
-  // destroying the session; the poller has already resolved ERROR in that case, so the returned value
-  // is ignored. Never rejects: any failure resolves to an ERROR verdict.
   async function prReviewSpawn({ cwd, pr, slug, conflicting, signal }: SpawnReviewArgs) {
     const safeSlug = String(slug).replace(/[^\w.-]+/g, '-');
-    // Everything after the result directory exists runs INSIDE the try, so a throw from the prompt
-    // builder or the Session constructor cannot strand it, and the "never rejects" contract above holds
-    // for those two as well.
     let resultFile: JobResultFile | null = null;
     try {
       resultFile = await createJobResultFile(`glissa-pr-${safeSlug}-${pr.number}-${pr.headRefOid}`);
@@ -227,24 +186,15 @@ function createPrReviewWiring({
     }
   }
 
-  // State lives in one cross-project file under the user config dir, written atomically (tmp+rename).
   const prStatePath = path.join(glissaHomeDir(), 'pr-review-state.json');
   async function readPrState(): Promise<PrState> {
     try { return JSON.parse(fs.readFileSync(prStatePath, 'utf8')); }
     catch { return {}; }
   }
-  // ASYNC on purpose: this is a recurring path (every tick that changes a PR's phase), and all
-  // sessions share one event loop, so a synchronous whole-file write here stalls hook replies, PTY
-  // streaming and control traffic for its duration. Serialization is the tick loop's persist chain
-  // (server/lane-runner.ts), which already awaits this, so ordering is unchanged.
   async function writePrState(state: PrState): Promise<void> {
     await writeJsonAtomic(prStatePath, state, { mkdir: true });
   }
 
-  // Started at boot and re-evaluated on every settings reload whose prReview/telegram key changed
-  // (restartIfConfigChanged, gated by prReviewCfgKey), so toggling config.prReview / config.telegram
-  // via the Settings dialog or a config.json hand-edit hot-applies without a server restart. The
-  // restart serialization and the cached last status live in server/lane-runner.ts.
   const runner = createLaneRunner({
     tag: 'pr-poller',
     gate: () => {
@@ -284,8 +234,6 @@ function createPrReviewWiring({
     },
   });
 
-  // Exposed for tests only (the pack-service `_watcherCount` precedent): the session factory is the
-  // one place the lane's Session options are assembled, and pinning them needs no live poller.
   return {
     startPoller: runner.startPoller,
     restartIfConfigChanged: runner.restartIfConfigChanged,

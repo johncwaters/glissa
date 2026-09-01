@@ -1,11 +1,3 @@
-// Connect-time replay of a cached startup update-check result. A control client connecting AFTER the
-// check resolved must receive one 'update-available' frame; the accessor is guarded so a caller that
-// registers handlers WITHOUT getUpdateStatus never throws on connection. The same cached-snapshot
-// replay covers the two background lanes (posthog-status, pr-status).
-//
-// The dedupe that decides WHETHER a frame is broadcast lives in createBackendUpdateCheck, so it is
-// driven there directly rather than through a booted backend and a real socket.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -88,8 +80,6 @@ test('surfaceUpdate broadcasts once for a version and again for a newer version'
   );
 });
 
-// The mocked interval fires synchronously inside tick(); the check it starts settles on the
-// microtask queue, which a bare await does not drain past the .then chain in runAndSurfaceUpdate.
 function settle(): Promise<void> {
   return new Promise((resolve) => { queueMicrotask(() => queueMicrotask(() => resolve())); });
 }
@@ -115,8 +105,6 @@ test('a recheck is skipped while no control client is connected', async (t) => {
 
   assert.equal(checksRun, 1, 'only the startup check ran: nobody is listening for the result');
 });
-
-// --- Connect-time replay of the cached lane snapshots (PostHog, PR auto-review) ---
 
 const PR_STATUS = {
   type: 'pr-status',

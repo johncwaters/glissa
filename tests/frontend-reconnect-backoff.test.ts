@@ -1,7 +1,3 @@
-// Tests for the shared WebSocket reconnect delay (public/reconnect-backoff.ts), used by both the
-// control-WS client and each card's data-WS client. `random` is injected, so jitter is pinned rather
-// than sampled.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 

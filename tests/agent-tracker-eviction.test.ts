@@ -1,5 +1,3 @@
-// Unit tests for agent-tracker.evictDepartedTeammateNames (the departed-teammate-name
-// eviction that drains the completion gate when a declared teammate id disappears).
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -25,7 +23,6 @@ test('one teammate departs: evicts the single oldest idle name', () => {
     ['bob', 200],
   ]);
   const declaredIds = new Set(['t1', 't2']);
-  // t2 is gone from this snapshot -> one departure -> evict the oldest (alice, inserted first).
   const entries = [{ id: 't1', type: 'teammate' }];
   const next = evictDepartedTeammateNames(idleNames, declaredIds, entries);
   assert.deepEqual([...idleNames.keys()], ['bob']);
@@ -35,7 +32,6 @@ test('one teammate departs: evicts the single oldest idle name', () => {
 test('multiple departures evict that many oldest names, stopping once the idle map is empty', () => {
   const idleNames = new Map([['alice', 100]]);
   const declaredIds = new Set(['t1', 't2', 't3']);
-  // t1, t2, t3 all gone -> 3 departures, but only one idle name exists to evict.
   const entries: DeclaredEntry[] = [];
   const next = evictDepartedTeammateNames(idleNames, declaredIds, entries);
   assert.deepEqual([...idleNames.keys()], []);
@@ -48,7 +44,7 @@ test('non-teammate and id-less entries are excluded from the current-teammate-id
   const entries = [
     { id: 't1', type: 'teammate' },
     { id: 's1', type: 'shell' },
-    { type: 'teammate' }, // no id: ignored
+    { type: 'teammate' },
   ];
   const next = evictDepartedTeammateNames(idleNames, declaredIds, entries);
   assert.deepEqual(next, new Set(['t1']));

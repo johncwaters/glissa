@@ -41,15 +41,12 @@ test('normalizePathname decodes once, drops the query, and flags every dot segme
   assert.equal(normalizePathname('/pair/%2e%2e/index.html').suspicious, true);
   assert.equal(normalizePathname('/pair/../index.html').suspicious, true);
   assert.equal(normalizePathname('/pair/./index.html').suspicious, true);
-  // Encoded twice: the decode leaves a live %2e behind, which is not a path anyone legitimately asks for.
+
   assert.equal(normalizePathname('/pair/%252e%252e/index.html').suspicious, true);
-  // A lone % throws in decodeURIComponent; that is a refusal, not an exception.
+
   assert.equal(normalizePathname('/pair/%').suspicious, true);
 });
 
-// The reviewer's reproduction: express.static decodes and resolves dot segments, so an un-normalized
-// prefix check read "/pair/%2e%2e/index.html" as the pair page while express served the dashboard
-// bundle to an unpaired remote device.
 test('a traversal dressed as a pair path is not a pair path', () => {
   assert.equal(isPairPath('/pair/%2e%2e/index.html'), false);
   assert.equal(isPairPath('/pair/../index.html'), false);
@@ -62,7 +59,6 @@ test('a traversal dressed as a pair path is not a pair path', () => {
   );
 });
 
-// Full matrix: remoteEnabled x trust x authenticated x path.
 const PATHS = ['/', '/hook/abc/Stop', '/app.js', '/pair/tok'];
 
 test('with remote disabled every request is allowed on both listeners, whatever the path', () => {
@@ -158,9 +154,6 @@ test('upgrade: the local listener never needs a cookie even with remote enabled'
   );
 });
 
-// The dashboard-only rules (2026-08 security pass). control and data carry them; every other route
-// (the Visions editor relay) keeps the pre-existing shape, which is what lets a non-browser client
-// still open one.
 test('upgrade: a dashboard route needs an Origin and the page token', () => {
   const base = {
     remoteEnabled: false, trust: 'local', allowedOrigins: [], listenerPorts: [3000], dashboardRoute: true,
@@ -177,7 +170,7 @@ test('upgrade: a dashboard route needs an Origin and the page token', () => {
     decideUpgradeAccess({ ...base, origin: undefined, tokenOk: true }),
     { allow: false, reason: 'origin' }
   );
-  // tokenOk must be strictly true, like authenticated.
+
   assert.deepEqual(
     decideUpgradeAccess({ ...base, origin: 'http://localhost:3000', tokenOk: 'yes' }),
     { allow: false, reason: 'token' }

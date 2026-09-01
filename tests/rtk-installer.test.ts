@@ -26,7 +26,6 @@ async function makeTempHome(t: TestContext): Promise<string> {
   return dir;
 }
 
-// A real tar.gz holding a nested dummy rtk, so the extract path is exercised end to end.
 async function buildFixture(
   t: TestContext,
   { nested = true, symlink = false }: { nested?: boolean; symlink?: boolean } = {},
@@ -44,8 +43,6 @@ async function buildFixture(
   return { bytes, sha256: crypto.createHash('sha256').update(bytes).digest('hex') };
 }
 
-// A real Response, so the installer's stream read, status check and header probe run against the shape
-// globalThis.fetch actually hands it.
 function fakeFetch(
   bytes: Buffer,
   { status = 200, contentLength = null }: { status?: number; contentLength?: number | null } = {},

@@ -138,8 +138,6 @@ test('planInvestigations: an entry already inFlight is skipped', () => {
   assert.deepEqual(planInvestigations([change], { k1: makeEntry({ inFlight: true }) }, {}), []);
 });
 
-// A spike classification repeats for as long as the spike endpoint names the issue, so an
-// unconditional re-investigation was one Claude session per interval, forever, per issue.
 test('planInvestigations: an already diagnosed spiking issue is not re-investigated', () => {
   const change = { key: 'k1', change: 'spiking', issue: makeIssue({ users: 8 }) };
   const state = { k1: makeEntry({ verdict: 'ROOT_CAUSE', investigatedUsers: 8 }) };
@@ -157,8 +155,6 @@ test('planInvestigations: a spiking issue with no verdict yet is always investig
   const state = { k1: makeEntry({ verdict: null }) };
   assert.deepEqual(planInvestigations([change], state, { userEscalationThreshold: 25 }), [change]);
 });
-
-// --- decideVanishedEntry: absence from one top-50 query is not death ---
 
 const DAY_MS = 86400000;
 
@@ -184,8 +180,6 @@ test('decideVanishedEntry: past the retention window it is pruned', () => {
 test('decideVanishedEntry: a missing entry is prunable', () => {
   assert.equal(decideVanishedEntry(undefined, 1000, {}), 'prune');
 });
-
-// --- isMajorIssue / decideJobMode: which issues earn the auto-fix dispatch ---
 
 test('isMajorIssue: spiking and regressed are major regardless of blast radius', () => {
   assert.equal(isMajorIssue('spiking'), true);
@@ -236,15 +230,11 @@ test('normalizeJobMode: anything unrecognized reads as an investigation', () => 
   assert.equal(normalizeJobMode(undefined), 'investigate');
 });
 
-// The value arrives from an agent's result JSON and from a hand-editable state file, so a prototype
-// key must not read as a mode (an unguarded lookup returns the Function constructor for it).
 test('normalizeJobMode: a prototype key is not a mode', () => {
   assert.equal(normalizeJobMode('__proto__'), 'investigate');
   assert.equal(normalizeJobMode('constructor'), 'investigate');
   assert.equal(normalizeJobMode('toString'), 'investigate');
 });
-
-// --- decideFixHandoff: what the SERVER refuses to push, whatever the agent claimed ---
 
 test('decideFixHandoff: an ordinary diff with commits behind it is pushable', () => {
   assert.deepEqual(decideFixHandoff({ changedFiles: ['src/app.js'], commitsAhead: 1 }), { ok: true });
@@ -270,8 +260,6 @@ test('decideFixHandoff: a FIXED verdict with nothing committed is an ERROR, not 
 test('decideFixHandoff: the workflow refusal outranks the empty-commit one', () => {
   assert.equal(decideFixHandoff({ changedFiles: ['.github/workflows/ci.yml'], commitsAhead: 0 }).verdict, 'NEEDS_HUMAN');
 });
-
-// --- The pull request fields: one from gh's own stdout, two from the agent ---
 
 test('normalizePrUrl: the last https line wins, and nothing else is a url', () => {
   assert.equal(normalizePrUrl('Warning: x\nhttps://github.com/o/r/pull/4'), 'https://github.com/o/r/pull/4');
@@ -326,8 +314,6 @@ test('pingFor: each pinging kind renders its own label', () => {
   assert.match(pingFor('new_issue', PING_CTX) as string, /^\[glissa\/posthog\] NEW ISSUE web$/m);
 });
 
-// A title is an end-user error message reaching Telegram verbatim, so it is flattened (a newline
-// could otherwise forge the lane-tag header line) and capped.
 test('displayTitle flattens whitespace and caps the length', () => {
   assert.equal(displayTitle('  Type\nError:   boom  '), 'Type Error: boom');
   const long = displayTitle('x'.repeat(1000));
@@ -397,7 +383,7 @@ test('nextState: a fix verdict folds the attempt onto the entry', () => {
     fix: { verdict: 'FIXED', reproduced: true, prUrl: 'https://github.com/o/r/pull/9' },
   });
   assert.equal(entry.verdict, 'FIXED');
-  // No branch field: the server picks and pushes the branch, and the pull request already states it.
+
   assert.deepEqual(entry.fix, {
     at: 5000,
     verdict: 'FIXED',
@@ -487,8 +473,6 @@ test('nextState appends history only when an observation timestamp is passed', (
   const verdictOnly = nextState(observed, makeIssue({ occurrences: 400 }), { verdict: 'ROOT_CAUSE', at: 2000 });
   assert.deepEqual(verdictOnly.history, observed.history);
 });
-
-// --- Phase 2: the pure decisions behind the three per-issue Radar actions ---
 
 import {
   validateIssueRef,
@@ -618,8 +602,6 @@ test('buildIssueSessionPrompt is deterministic and survives a missing issue', ()
   assert.match(empty, /title: \(untitled\)/);
   assert.match(empty, /0 occurrences across 0 users/);
 });
-
-// --- Investigations inbox (the persisted log behind Radar's review section) ---
 
 import {
   investigationId,
@@ -795,8 +777,6 @@ test('validateInvestigationId enforces the id shape', () => {
   assert.equal(validateInvestigationId('../etc@1700').ok, false);
   assert.equal(validateInvestigationId('iss-1@later').ok, false);
 });
-
-// --- Auto-creating the Glissa project a Radar row wants when none is mapped ---
 
 import {
   slugKey,

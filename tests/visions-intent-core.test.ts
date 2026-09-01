@@ -1,6 +1,3 @@
-// Intent threads (docs/plan-visions-4-focus.md, M20): several live statements per project, bound to the
-// uris they were advanced on, retiring on read, with a legacy slot file lifting into one thread each.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -118,7 +115,6 @@ test('the object form names a thread to advance or opens a new one, and an unkno
   assert.equal(readIntentProposal({ text: 'x' }), null, 'an object naming no thread at all is not a proposal');
 });
 
-// The lane reads a proposal twice: once off the result file, once again in the wiring that merges it.
 test('an already-parsed proposal reads back as itself, an explicit null thread meaning the active one', () => {
   assert.deepEqual(readIntentProposal(readIntentProposal('  a plain string  ')), { thread: null, text: 'a plain string' });
   assert.deepEqual(readIntentProposal({ thread: null, text: 'the active thread' }), { thread: null, text: 'the active thread' });

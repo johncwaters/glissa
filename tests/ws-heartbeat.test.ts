@@ -1,11 +1,3 @@
-// Protocol ping/pong and the zombie reaper (2026-08 review, section 1).
-//
-// THE ACCEPTANCE TEST is the last one here: a half-open socket used to sit in the presence count
-// until the OS timeout, and while it did, the Telegram zero-connections gate stayed shut. That gate
-// is the channel of last resort, it exists precisely for when nobody is looking at a dashboard, so
-// a connection nobody is on silently disabled the one notification that would have reached the
-// operator.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
@@ -22,8 +14,6 @@ type FakeSocket = EventEmitter & {
   terminate: () => void;
 };
 
-// A socket that answers pings, or does not. terminate() emits 'close' the way ws does, which is what
-// the presence bookkeeping listens to.
 function fakeSocket({ answersPings = true }: { answersPings?: boolean } = {}): FakeSocket {
   const emitter = new EventEmitter();
   const ws: FakeSocket = Object.assign(emitter, {
@@ -137,14 +127,12 @@ test('start and stop own exactly one interval', () => {
   assert.deepEqual(cleared, intervals);
 });
 
-// The one that matters: presence drains and the phone channel opens.
 test('a zombie connection stops blocking the Telegram gate once the heartbeat reaps it', () => {
   let clock = 1000;
   const presence = createClientPresence();
   const zombie = fakeSocket({ answersPings: false });
   const heartbeat = createHeartbeat({ servers: [fakeServer([zombie])], now: () => clock });
 
-  // Exactly what backend.ts wires: presence on connect, presence off on close, heartbeat tracking.
   presence.connect(zombie);
   zombie.on('close', () => presence.disconnect(zombie));
   heartbeat.track(zombie);

@@ -1,9 +1,3 @@
-// Control-WS dispatch for the Mill tab's one write: set-project-packs delivers (or stops delivering) ONE
-// context pack to one project. What is pinned here is that a REFUSAL changes nothing, that the delta is
-// applied to the list read INSIDE the write rather than to whatever the client was rendered from, that a
-// newly delivered pack is BUILT before the reload that recreates the session, and that the requester is
-// answered before the reload can throw.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -37,8 +31,7 @@ function harness(config: GlissaConfig, options: PacksHarnessOptions = {}) {
   const broadcasts: ControlMessageRecord[] = [];
   const saveCalls: number[] = [];
   const reloads: GlissaConfig[] = [];
-  // One ordered log, because the invariant under test is an ORDER: the build has to land before the
-  // reload that recreates the session which resolves its packs at spawn.
+
   const events: string[] = [];
   const builds: string[] = [];
 
@@ -62,7 +55,7 @@ function harness(config: GlissaConfig, options: PacksHarnessOptions = {}) {
   }));
 
   const connection = connectControl<PacksFrame>(server);
-  connection.sent.length = 0; // drop the connect preamble
+  connection.sent.length = 0;
   return {
     send: connection.send,
     sent: connection.sent,
@@ -94,8 +87,6 @@ test('delivering a pack persists it on the project record and reloads like a han
   assert.deepEqual(broadcast?.packs, ['crew-rules']);
 });
 
-// MAJOR: consumer gating guarantees a newly delivered pack has NEVER been built, and a session resolves
-// its packs at spawn. A build that waits for the reload arrives after the spawn it exists for.
 test('a newly delivered pack is built BEFORE the reload that recreates the session', async () => {
   const config: GlissaConfig = { projects: [project()] };
   const h = harness(config);
@@ -133,7 +124,6 @@ test('a removal builds nothing: there is no new delivery to prepare', async () =
   assert.deepEqual(h.builds, []);
 });
 
-// The whole reason the wire format is a delta: each client was rendered from its own snapshot.
 test('the delta is applied to the list read inside the write, not to a client snapshot', async () => {
   const config: GlissaConfig = { projects: [project({ packs: ['house-rules'] })] };
   const h = harness(config);
@@ -148,7 +138,6 @@ test('a project already naming a deleted spec can still be edited', async () => 
   const config: GlissaConfig = { projects: [project({ packs: ['ghost'] })] };
   const h = harness(config);
 
-  // Only the name being ADDED is checked against the specs, so the ghost does not freeze the list.
   await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'crew-rules', deliver: true });
   assert.deepEqual(config.projects[0].packs, ['ghost', 'crew-rules']);
   assert.equal(resultOf(h)?.ok, true);
@@ -169,8 +158,6 @@ test('delivering a pack twice is idempotent rather than a duplicate entry', asyn
   assert.equal(resultOf(h)?.ok, true);
 });
 
-// Delivery is addressed per PROJECT, and a project is a path: "glissa" and "glissa (2)" are two cards
-// on one checkout, and a tick on either has to move both or the tab offers a delivery it cannot keep.
 test('a delta on one card moves every card sharing that checkout', async () => {
   const config: GlissaConfig = {
     projects: [project(), project({ id: 'p2', name: 'glissa (2)' }), project({ id: 'p3', name: 'other', path: 'C:/other' })],
@@ -237,7 +224,6 @@ test('codex cards on one checkout share fan-out and the strictest sibling cap', 
   assert.equal(resultOf(h)?.ok, true);
 });
 
-// A blank path is what projectPathKey treats as "no checkout": such a record is its own sibling set.
 test('a record with no path is alone: nothing marks another record as its sibling', async () => {
   const config: GlissaConfig = { projects: [project({ path: '' }), project({ id: 'p2', name: 'other', path: '' })] };
   const h = harness(config);
@@ -262,7 +248,7 @@ test('an unknown project changes nothing', async () => {
 
 test('a project that vanished between the check and the write is refused, never reported ok', async () => {
   const config: GlissaConfig = { projects: [project()] };
-  // The fresh read no longer holds the project: the mutator's verdict has to reach the requester.
+
   const h = harness(config, { saveTarget: { projects: [] } });
 
   await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'crew-rules', deliver: true });
@@ -334,14 +320,10 @@ test('a failed config write is reported and never reloaded', async () => {
   assert.equal(resultOf(h)?.ok, false);
 });
 
-// The write has already landed by then, so a throw downstream must not cost the requester its frame and
-// leave the checkbox disabled forever.
 test('the requester is answered before the reload, so a throwing reload cannot strand it', async () => {
   const config: GlissaConfig = { projects: [project()] };
   const h = harness(config, { onReload: () => { throw new Error('reload exploded'); } });
 
-  // The dispatcher swallows an async handler's rejection (it must not become an unhandledRejection),
-  // so what matters is that the requester already has its frame by the time the reload blows up.
   await h.send({ type: 'set-project-packs', projectId: 'p1', pack: 'crew-rules', deliver: true });
 
   const result = resultOf(h);

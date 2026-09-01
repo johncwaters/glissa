@@ -83,8 +83,6 @@ test('applyDidChange rejects missing or nonnumeric versions', () => {
   assert.equal(getDoc(store, 'file:///a.md')?.text, 'fresh');
 });
 
-// --- Incremental sync: LSP ranges spliced into the mirrored buffer ---
-
 function range(startLine: number, startCharacter: number, endLine: number, endCharacter: number) {
   return {
     start: { line: startLine, character: startCharacter },
@@ -92,7 +90,6 @@ function range(startLine: number, startCharacter: number, endLine: number, endCh
   };
 }
 
-// One didChange carrying whatever changes the test names, at the next version.
 function change(store: DocStore, uri: string, contentChanges: unknown[], version = 2) {
   return applyDidChange(store, { textDocument: { uri, version }, contentChanges });
 }
@@ -159,7 +156,7 @@ test('detectBlankLineBoundary rejects edits that are not typed blank-line bounda
 
 test('changes in one batch apply in order, each against the text the previous one left', () => {
   const store = createDocStore();
-  // The second range only names the right characters once the first insert has already landed.
+
   const { result, text } = textAfter(store, 'file:///a.md', [
     { range: range(0, 5, 0, 5), text: 'BIG ' },
     { range: range(0, 0, 0, 9), text: 'a ' },
@@ -185,10 +182,6 @@ test('CRLF line breaks do not shift the offsets by their carriage returns', () =
   assert.equal(text, 'first\r\nsecond\r\nTHIRD\r\n');
 });
 
-/*
- * VS Code's document model splits on \r\n, a lone \r, or a lone \n. Counting only \n would leave every
- * line after a lone \r shifted, and the splice would land at the wrong offset while reporting success.
- */
 test('a lone carriage return ends a line, so later lines keep their numbers', () => {
   const store = createDocStore();
   const { result, text } = textAfter(store, 'file:///a.md', [
@@ -206,7 +199,6 @@ test('a CR-only document addresses its lines like any other', () => {
   assert.equal(text, 'aaa\rBBB\rccc', 'the edit replaced line 1 rather than appending at the end');
 });
 
-// The \r\n step-back in the clamp: without it an over-long character lands BETWEEN the \r and the \n.
 test('a character past the end of a CRLF line clamps before the carriage return', () => {
   const store = createDocStore();
   const { text } = textAfter(store, 'file:///a.md', [
@@ -217,7 +209,7 @@ test('a character past the end of a CRLF line clamps before the carriage return'
 
 test('a surrogate pair before the edit counts as the two UTF-16 units LSP says it is', () => {
   const store = createDocStore();
-  // One astral character, two code units, so the word after it starts at character 2.
+
   const astral = String.fromCodePoint(0x1f600);
   const { text } = textAfter(store, 'file:///a.md', [
     { range: range(0, 2, 0, 6), text: 'moon' },
@@ -227,7 +219,7 @@ test('a surrogate pair before the edit counts as the two UTF-16 units LSP says i
 
 test('an end position at the line length is clamped rather than refused', () => {
   const store = createDocStore();
-  // VS Code legitimately sends an end at the line's length, which is one past its last character.
+
   const { result, text } = textAfter(store, 'file:///a.md', [
     { range: range(0, 0, 0, 5), text: 'bye' },
   ], 'hello\nworld\n');
@@ -308,7 +300,6 @@ test('a full text change after a ranged one in the same batch replaces everythin
   assert.equal(text, '# Wholesale\n');
 });
 
-// Coercing a missing text to '' would turn "replace this range" into "delete this range" silently.
 test('a ranged change with no string to splice is refused, never applied as a deletion', () => {
   const store = createDocStore();
   openDoc(store, 'file:///a.md', 'hello world\n');
@@ -321,7 +312,6 @@ test('a ranged change with no string to splice is refused, never applied as a de
   }
   assert.equal(getDoc(store, 'file:///a.md')?.text, 'hello world\n');
 
-  // The whole-buffer path keeps its long-standing tolerance, since there is no range to mis-delete.
   const full = change(store, 'file:///a.md', [{ text: undefined }]);
   assert.equal(full.applied, true);
   assert.equal(getDoc(store, 'file:///a.md')?.text, '');
@@ -347,7 +337,6 @@ test('applyDidClose removes documents and reports unknown uris', () => {
   });
 });
 
-// lineOfOffset is the inverse of offsetOfPosition, so the two live together and are pinned together.
 test('lineOfOffset names the 1-based line an offset falls on, across every break style', () => {
   const text = 'first\nsecond\r\nthird\rfourth';
   const starts = lineStartOffsets(text);

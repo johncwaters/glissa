@@ -1,11 +1,3 @@
-// reconcileSessionWorktrees: the boot pass over the on-disk glissa/session/* worktrees a prior run left
-// behind. Its whole job is deciding, per worktree, between adopt / keep / remove without ever destroying
-// work or stranding a resumable session - including the survive-shutdown case, where a CLEAN worktree
-// whose session is still tracked must be handed back to that session (auto-resume then re-enters the same
-// tree) instead of removed. Driven directly with fakes (module-level export, same pattern as
-// carryWorktreeAcrossRecreate / decideWasActiveFlip): booting createBackend to reach the real pass would
-// delete the checkout's own session worktrees.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -37,7 +29,6 @@ interface FakeEngine {
   removeWorktreeByPath(args: WorktreeArgs): void;
 }
 
-// A throwaway repo checked out on the integration branch, the shape the boot reconcile expects.
 function initRepoOnDevelop(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-reconcile-repo-'));
   try { git(['init', '-b', 'main'], dir); } catch { git(['init'], dir); }
@@ -60,7 +51,6 @@ function fakeSession(name: string, sessionProjectPath = 'C:/proj'): SessionFixtu
   return { session, adopted };
 }
 
-// Mirrors the shape gitWorkspaceSync.listSessionWorktrees yields per worktree (server/git-workspace.ts).
 function worktreeEntry({ id, hasWork = false, integrationBranch = null }: {
   id: string;
   hasWork?: boolean;
@@ -236,13 +226,6 @@ test('a mixed repo resolves every worktree independently in one pass', () => {
   assert.deepEqual(engine.removed.map((r) => r.branch), ['glissa/session/orphan-clean']);
 });
 
-// The fakes above prove the DECISIONS; this proves the pass is actually WIRED INTO BOOT (it was inline in
-// createBackend before the extraction, so a broken hand-off would silently leak every worktree forever).
-// Observable at boot without reaching into createBackend: an unclaimed clean worktree is removed from disk
-// while an unclaimed dirty one survives.
-// SAFETY: pointed at a THROWAWAY temp repo via GLISSA_CONFIG, never the real config. The boot reconcile
-// deletes glissa/session/* worktrees, and this checkout is itself one (memory:
-// backend-boot-reconcile-worktree-hazard). Keep the only project in this config a temp repo.
 test('boot wiring: createBackend runs the reconcile (clean orphan removed, dirty orphan kept)', { skip: !GIT }, async () => {
   const repo = initRepoOnDevelop();
   const worktreeBase = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-reconcile-wts-'));
@@ -256,7 +239,7 @@ test('boot wiring: createBackend runs the reconcile (clean orphan removed, dirty
     fs.writeFileSync(path.join(dirtyWorktree.cwd, 'wip.js'), 'work in progress\n', 'utf8');
 
     const cfgPath = path.join(cfgDir, 'config.json');
-    // The project id claims NEITHER worktree, so both are orphans and no Session spawns at boot.
+
     fs.writeFileSync(cfgPath, JSON.stringify({
       projects: [{ id: 'claims-neither-worktree', name: 'temp-repo', path: repo }],
       teams: [], repoRoots: [], integrationBranch: 'develop', checkForUpdates: false,

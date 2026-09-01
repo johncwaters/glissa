@@ -1,16 +1,3 @@
-/*
- * The shell-history ingest source against REAL temp directories (docs/plan-ingestion.md, M10): synthetic
- * PSReadLine and fish history files written to disk and driven end to end into the rings, the EOF start,
- * the rewrite re-baseline, the lazy discovery of a file that did not exist yet, and both degradations.
- *
- * The EOF start is the rule this file exists for. A real ConsoleHost_history.txt holds thousands of
- * commands going back months, so a source that read from byte zero would fill its whole ring with a
- * machine's history on every daemon start, then spend the Visions lane's movement signal announcing it.
- *
- * SAFETY: every path is a throwaway temp directory injected through APPDATA, HOME and XDG_DATA_HOME, and
- * `platform` is passed explicitly, so no test here ever reads the operator's real shell history.
- */
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -38,8 +25,6 @@ interface HomeContext extends Home {
   build: (overrides?: Partial<ShellHistoryOptions>) => ShellHistoryIngest;
 }
 
-// --- Harness --------------------------------------------------------------
-
 function makeHome(): Home {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-shellhist-'));
   const appData = path.join(tmpDir, 'AppData', 'Roaming');
@@ -60,7 +45,6 @@ function makeHome(): Home {
   };
 }
 
-// A real unref'd timer that never runs a callback of its own: the seams are typed against NodeJS.Timeout.
 function parkedTimer(): NodeJS.Timeout {
   const handle = setTimeout(() => {}, 2 ** 30);
   handle.unref();
@@ -81,8 +65,6 @@ interface RecordingTimers extends Partial<ShellHistoryOptions> {
   timeoutDelays: number[];
 }
 
-// Records the delays the adapter asks for, which is how the timing tests read the 2s stat backstop and
-// the two watch debounces without waiting on any of them.
 function recordingTimers(): RecordingTimers {
   const intervalDelays: number[] = [];
   const timeoutDelays: number[] = [];
@@ -96,9 +78,6 @@ function recordingTimers(): RecordingTimers {
   };
 }
 
-// Holds the drain open inside its first open(), so a test can call stop() with a read genuinely in
-// flight rather than hoping to hit the window. Armed after start(), whose discovery reads each file's
-// head sample and would otherwise be the read that gets held.
 function gatedFs() {
   const held: { gate: Promise<void> | null; release: (() => void) | null } = { gate: null, release: null };
   return {
@@ -167,13 +146,10 @@ function summaries(events: ShellIngestEvent[]): string[] {
   return events.map((event) => event.summary);
 }
 
-// lane.shellHistory is null when the source is off; every case reading it has it on.
 function shellHistoryOf(lane: ReturnType<typeof createIngestLane>) {
   if (!lane.shellHistory) throw new Error('the shell-history source is off on this lane');
   return lane.shellHistory;
 }
-
-// --- EOF start and the happy path -----------------------------------------
 
 test('a command accepted after start publishes, and the history before it never does', withHome(async ({ psDir, events, build }) => {
   const filePath = seedPsReadLine(psDir, { lines: ['npm install', 'git push', 'npx vite build'] });
@@ -203,8 +179,7 @@ test('a backtick-continued command reaches the ring as ONE event', withHome(asyn
   await adapter.poll();
 
   assert.equal(events.length, 1, 'four physical lines are one command');
-  // Raw at the adapter boundary: the lane's normalizeEvent scrubs before it folds, so the source must
-  // not fold first. The folded ring form is asserted where it happens, further down this file.
+
   assert.equal(events[0].summary, 'powershell: git branch -vv |\n  ForEach-Object {\n    git branch -d $_\n  }');
   assert.equal(events[0].detail.lines, 4);
 }));
@@ -247,14 +222,12 @@ test('two PSReadLine hosts in one directory are two tails, and neither is tailed
   append(consoleFile, 'git commit -m "a"\n');
   append(codeFile, 'git commit -m "b"\n');
   await adapter.poll();
-  // A second discovery must not re-seed either tail, or the same append would publish twice.
+
   await adapter.discover();
   await adapter.poll();
 
   assert.deepEqual(summaries(events).sort(), ['powershell: git commit -m "a"', 'powershell: git commit -m "b"']);
 }));
-
-// --- Noise rules -----------------------------------------------------------
 
 test('a repeated command and a bare navigation command never reach the ring', withHome(async ({ psDir, events, build }) => {
   const filePath = seedPsReadLine(psDir, { lines: ['npm test'] });
@@ -280,15 +253,11 @@ test('the duplicate gate survives across reads, so an up-arrow rerun on the next
   assert.deepEqual(summaries(events), ['powershell: npm run dev']);
 }));
 
-// --- Rotation, truncation and catch-up -------------------------------------
-
 test('a PSReadLine trim rewrite RE-BASELINES instead of replaying the whole file into the ring', withHome(async ({ psDir, events, build }) => {
   const filePath = seedPsReadLine(psDir, { lines: Array.from({ length: 40 }, (_, index) => `command-${index}`) });
   const adapter = build();
   await adapter.start();
 
-  // Exactly what PSReadLine does at MaximumHistoryCount: the file shrinks and is rewritten with the
-  // retained history, none of which is new.
   fs.writeFileSync(filePath, Array.from({ length: 10 }, (_, index) => `command-${index + 30}\n`).join(''), 'utf8');
   await adapter.poll();
   assert.deepEqual(events, [], 'a rewrite is old history, not new commands');
@@ -327,12 +296,6 @@ test('a catch-up past the read bound publishes the newest commands and says how 
   assert.ok(!events[4].summary.includes('dropped'), 'the note rides the first surviving event only');
 }));
 
-/*
- * The drain bound applies to what SURVIVED the noise pipeline, never to the parsed lines ahead of it.
- * Slicing first left `context.previous` describing a command the drain had already dropped, so a survivor
- * identical to the one above it published as new: this fixture reported one lone `npm run watch` and
- * called the nine real commands before it dropped.
- */
 test('the dup collapse sees every parsed command, so the drain bound cannot resurrect a repeat', withHome(async ({ psDir, events, build }) => {
   const filePath = seedPsReadLine(psDir, { lines: ['npm test'] });
   const adapter = build();
@@ -351,8 +314,6 @@ test('the dup collapse sees every parsed command, so the drain bound cannot resu
   }
   assert.ok(!published.some((line) => line.includes('earlier commands dropped')), 'nothing publishable was dropped');
 }));
-
-// --- Discovery -------------------------------------------------------------
 
 test('a shell with no history directory at all is silently absent, never an error', withHome(async ({ events, warnings, build }) => {
   const adapter = build();
@@ -396,8 +357,6 @@ test('a deleted history file stops being tailed, but a vanished directory keeps 
     ['ConsoleHost_history.txt', 'fish_history'],
   );
 
-  // A directory the sweep could not read says nothing about the files that were in it, so its tail
-  // survives a temporarily unavailable path rather than being thrown away and re-baselined.
   fs.rmSync(fishDir, { recursive: true, force: true });
   await adapter.discover();
   assert.equal(adapter.trackedCount, 2);
@@ -417,8 +376,6 @@ test('the tracked set is bounded, dropping the least recently written files firs
     ['Host3_history.txt', 'Host4_history.txt', 'Host5_history.txt'],
   );
 }));
-
-// --- Timing and watching ---------------------------------------------------
 
 test('the stat backstop interval comes from the resolved source config, not a constructor override', withHome(async ({ build }) => {
   const timers = recordingTimers();
@@ -467,8 +424,6 @@ test('a watcher that cannot be installed costs one warning and leaves the stat p
   assert.deepEqual(summaries(events), ['powershell: npm run dev']);
 }));
 
-// --- Lifecycle -------------------------------------------------------------
-
 test('stop() lands mid-read without publishing, and nothing in flight repopulates the state', withHome(async ({ psDir, events, build }) => {
   const filePath = seedPsReadLine(psDir, { lines: ['npm test'] });
   const adapter = build();
@@ -501,8 +456,6 @@ test('a publish after stop() is impossible, because stop() forgets every tail', 
   assert.deepEqual(events, []);
   assert.equal(adapter.watchCount, 0);
 }));
-
-// --- Through the lane ------------------------------------------------------
 
 test('the lane builds no shell-history adapter unless the source is explicitly enabled', () => {
   const laneOff = createIngestLane({ config: resolveIngestConfig({ enabled: true, sources: { terminal: { enabled: true } } }) });
@@ -537,7 +490,7 @@ test('a command reaches the rings and the digest labelled as machine scope', wit
     const digest = lane.buildDigest({});
     assert.ok(digest.includes('npm run deploy'), digest);
     assert.ok(digest.includes('(machine scope)'), digest);
-    // A project filter must never hide it: the command belongs to no project, so it belongs to all.
+
     assert.ok(lane.buildDigest({ scopes: ['C:\\some\\repo'] }).includes('npm run deploy'));
   } finally {
     lane.stop();
@@ -567,13 +520,6 @@ test('a secret-shaped command is scrubbed before it ever sits in a ring', withHo
   }
 }));
 
-/*
- * The scrub-ordering regression, pinned at ring level against the real path. The source must hand its
- * command on RAW so normalizeEvent can scrub before it folds and slices. When the source sliced first,
- * a quoted secret sitting past the slice point lost its closing quote, the scrub's quoted alternative
- * stopped matching, and its bare-token alternative took only the first WORD of the value: this exact
- * fixture stored `--password [scrubbed] two three four five` in the ring.
- */
 test('a secret past a long prefix is scrubbed whole, never down to its first word', withHome(async ({ psDir, env }) => {
   const filePath = seedPsReadLine(psDir, { lines: ['npm test'] });
   const lane = laneWithShellHistory(env);
@@ -599,7 +545,7 @@ test('the ring is where a multi-line command is folded to one line and bounded',
   try {
     await shellHistoryOf(lane).start();
     append(filePath, 'git branch -vv |`\n  ForEach-Object {`\n  }\n');
-    // Long enough that only the ring's own 400-char bound can cut it.
+
     append(filePath, `git commit -m "${'x'.repeat(600)}"\n`);
     await shellHistoryOf(lane).poll();
 

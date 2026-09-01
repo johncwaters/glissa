@@ -1,15 +1,3 @@
-// The statusline event on the ONE write ingress, POST /hook/:glissaId/:event. Three things this pins:
-// the token gate is the same one every other hook event goes through, an accepted callback stores the
-// official plan limits, and the reply stays the plain ok JSON (the additionalContext injection shape is
-// UserPromptSubmit-only, and a telemetry channel must never become a second injection point).
-//
-// It also pins that statusline is NOT a detection signal: it must not move the session's state machine.
-//
-// SAFETY: createBackend runs a boot worktree reconcile over the configured projects, so GLISSA_CONFIG
-// points at a throwaway temp config whose single project path is an empty NON-GIT temp dir (memory:
-// booting the backend against the real config once destroyed an active worktree). No wasActive, so boot
-// auto-resume never spawns a real claude PTY.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -99,8 +87,7 @@ test.before(async () => {
 
   const session = backend.getSession(SESSION_ID);
   assert.ok(session, 'the boot loop created the configured session');
-  // Registers the bearer token with the shared HookRouter without spawning a PTY: exactly what the
-  // spawn path does, minus node-pty.
+
   session._hooks.inject();
   const token = session._hooks.token();
   assert.ok(token, 'hook injection produced a token');
@@ -156,8 +143,7 @@ test('an accepted callback stores the plan limits and answers the plain ok JSON'
   const res = await postStatusline(payload({ five: 21.5 }));
   assert.equal(res.status, 200);
   const body = await res.json();
-  // Byte-identical to what the route answers for any other non-signal event: no hookSpecificOutput,
-  // no additionalContext, nothing that could inject into the turn.
+
   assert.deepEqual(Object.keys(body).sort(), ['ok', 'reason']);
   assert.equal(body.ok, true);
   assert.equal(body.reason, 'ignored-event', 'statusline is telemetry, so it maps to no detection signal');
@@ -171,21 +157,10 @@ test('an accepted callback stores the plan limits and answers the plain ok JSON'
   assert.equal(stored.fiveHour.pct, 21.5);
   assert.equal(stored.sevenDay.pct, 68.4);
   assert.equal(stored.fiveHour.resetsAtMs, 1_900_003_600_000, 'seconds became ms');
-  // Telemetry must not move the state machine.
+
   assert.equal(session.state, stateBefore);
 });
 
-/*
- * Regression pin, and not only for this lane. The route accumulates the request body into a `body`
- * string, and commit 78dbc0b introduced a `const body` for the RESPONSE in the same block: that put the
- * string in the temporal dead zone for the whole callback, so JSON.parse threw a ReferenceError which
- * the surrounding tolerate-catch swallowed, and every hook payload arrived as {}. Nothing failed loudly,
- * it just silently disabled every payload-dependent behavior (session_id capture and therefore boot
- * auto-resume, the background_tasks gate, Notification subtypes, PostToolUse tool names).
- *
- * Notification is the sharpest probe available: its ROUTING depends on a payload field, so `reason` can
- * only be 'ok' if the payload survived the trip.
- */
 test('the request payload reaches the router, not an empty object', async () => {
   const { base, token } = ctx();
   const res = await fetch(`${base}/hook/${SESSION_ID}/notification?t=${encodeURIComponent(token)}`, {
@@ -196,7 +171,7 @@ test('the request payload reaches the router, not an empty object', async () => 
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.ok, true);
-  // An empty payload maps to no signal at all ('ignored-event'); this subtype maps to awaiting-input.
+
   assert.equal(body.reason, 'ok', 'the notification subtype was visible to the mapper');
 });
 

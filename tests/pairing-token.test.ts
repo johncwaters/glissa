@@ -7,7 +7,6 @@ import {
   deviceNameFromUserAgent, DEFAULT_TOKEN_TTL_MS, DEFAULT_DEVICE_MAX_AGE_MS,
 } from '../server/core/pairing-token.ts';
 
-// Deterministic entropy so token/id/secret shapes are assertable without a real RNG.
 function fakeRandomBytes(fill: number) {
   return (n: number) => Buffer.alloc(n, fill);
 }

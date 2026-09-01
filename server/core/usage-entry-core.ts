@@ -46,8 +46,6 @@ export interface UsageEntryLike extends TokenCountsSource {
   iterations?: unknown[];
 }
 
-// Everything a parsed entry always carries: the loose shape above is what partial rows (a warehouse
-// record, a report's model row) satisfy.
 export interface UsageEntry extends UsageEntryLike {
   input: number;
   output: number;
@@ -208,7 +206,6 @@ function identityFromRelPath(relPath: unknown): { project: string | null; sessio
 function dedupKeys(
   entry: { messageId?: string | null; requestId?: string | null } | null | undefined,
 ): { primary: string | null; collision: string | null } {
-  // Caller contract: a primary hit always dedups; a collision hit dedups only when either entry isSidechain.
   if (!entry || !entry.messageId) return { primary: null, collision: null };
   const primary = entry.requestId ? `${entry.messageId}:${entry.requestId}` : entry.messageId;
   return { primary, collision: entry.messageId };

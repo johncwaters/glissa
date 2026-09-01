@@ -25,8 +25,6 @@ interface ReadReportResult {
   message?: string;
 }
 
-// Same traversal guard as control-handlers.ts confinePath: resolve under the base dir and refuse a
-// result that escapes it. Kept locally because control-handlers exports only its registration entry.
 function confinePath(baseDir: string, ...segments: string[]): string | null {
   const abs = path.resolve(baseDir, ...segments);
   const rel = path.relative(baseDir, abs);
@@ -75,8 +73,7 @@ async function readPosthogReport(
       return { ok: true, found: true, issueId: resolved.issueId, format: candidate.format, content };
     } catch (err) {
       if ((err as { code?: unknown } | null)?.code === 'ENOENT') continue;
-      // Generic message on purpose: fs error strings carry the absolute server path, which does not
-      // belong on a paired remote client.
+
       return { ok: false, found: false, issueId: resolved.issueId, error: 'Could not read report' };
     }
   }

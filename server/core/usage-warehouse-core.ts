@@ -92,7 +92,7 @@ function pruneWarehouse(
   const normalized = (records || [])
     .map(normalizeRecord)
     .filter((record): record is WarehouseRecord => record !== null);
-  // An uncomputable cutoff must fail safe: dropping durable history is the one unrecoverable outcome.
+
   if (!cutoffDay) return normalized.sort(compareRecords);
   return normalized.filter((record) => record.day >= cutoffDay).sort(compareRecords);
 }
@@ -149,7 +149,6 @@ function cutoffDayKey(todayKey: unknown, retainDays: unknown): string | null {
 }
 
 function addRecordToDailyBucket(bucket: WarehouseDailyBucket, record: WarehouseRecord): void {
-  // A stored record carries its own token total, so it is passed rather than re-derived from the counts.
   addEntryToTotals(bucket, record, record.tokens);
   bucket.models.push({
     key: record.model,

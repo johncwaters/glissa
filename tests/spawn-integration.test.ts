@@ -1,10 +1,3 @@
-// Integration test: Session.start() wires buildSpawnCommand's {file, args} into the
-// PTY spawner correctly. A fake spawner is injected so we assert the real start()
-// path deterministically WITHOUT launching node/claude (which would keep the PTY
-// alive and hang the test runner). The .exe-direct decision is Windows-specific, so
-// these are gated to win32; the cross-platform builder logic is covered by
-// tests/spawn-command.test.js.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Session } from '../session/sessions.ts';
@@ -14,7 +7,7 @@ interface ArgvCall {
   file: string;
   args: string[];
 }
-// Stub PTY handle. A non-existent pid keeps Session.kill()'s taskkill a harmless no-op.
+
 function fakePty(pid = 2147483646) {
   return {
     pid,
@@ -27,7 +20,7 @@ function fakePty(pid = 2147483646) {
 }
 
 test('start() spawns the injected exe directly (no cmd.exe layer)', { skip: process.platform !== 'win32' }, async () => {
-  const calls: ArgvCall[] = []; 
+  const calls: ArgvCall[] = [];
   const s = new Session({
     id: 'spawn-int',
     name: 'spawn-int',
@@ -48,7 +41,7 @@ test('start() spawns the injected exe directly (no cmd.exe layer)', { skip: proc
 });
 
 test('start() routes a .cmd shim command through cmd.exe /c claude', { skip: process.platform !== 'win32' }, async () => {
-  const calls: ArgvCall[] = []; 
+  const calls: ArgvCall[] = [];
   const s = new Session({
     id: 'spawn-shim',
     name: 'spawn-shim',

@@ -1,6 +1,3 @@
-// Pure roster + picker for the flying nyan easter egg's animal menagerie.
-// No DOM access: public/nyan-cat.js applies the sprite/trail classes.
-
 export const ANIMALS = [
   { sprite: 'is-cat', trail: 'is-rainbow' },
   { sprite: 'is-unicorn', trail: 'is-sparkles' },
@@ -22,7 +19,6 @@ export const ANIMALS = [
   { sprite: 'is-giraffe', trail: 'is-acacia' },
 ];
 
-// prevIndex < 0 (or out of range) means any index is eligible.
 export function pickAnimalIndex(rng: () => number = Math.random, prevIndex = -1): number {
   const n = ANIMALS.length;
   const isValidPrev = prevIndex >= 0 && prevIndex < n;

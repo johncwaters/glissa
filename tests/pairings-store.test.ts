@@ -1,5 +1,3 @@
-// Round-trips the pairings file in a temp dir. Never touches ~/.glissa.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -28,8 +26,6 @@ interface StoreScope {
   warnings: string[];
 }
 
-// mintPending answers null when the file is unwritable, and redeem answers a device only on success, so
-// the happy-path tests state that once here rather than at every call.
 function mintedToken(store: PairingsStore, name?: string): { token: string; expiresAt: number } {
   const minted = store.mintPending(name === undefined ? {} : { name });
   if (!minted) throw new Error('the mint was refused');
@@ -185,7 +181,7 @@ test('prunePending drops expired and used records, keeping live ones', () => {
     const stale = mintedToken(store, 'stale');
     clockValue = stale.expiresAt + 1;
     const fresh = mintedToken(store, 'fresh');
-    // The mint itself already prunes; assert the explicit call is idempotent and correct.
+
     assert.equal(store.prunePending(), 0);
     const doc = readDoc(filePath);
     assert.equal(doc.pending.length, 1);
@@ -228,7 +224,6 @@ test('save re-reads before writing, so a concurrent revocation is not clobbered 
   withTempStore(({ store, filePath }) => {
     const paired = redeemedDevice(store, mintedToken(store, 'phone').token);
 
-    // Simulate the CLI revoking while the server holds an older snapshot in memory.
     const onDisk = readDoc(filePath);
     const stored = onDisk.devices[0];
     assert.ok(stored, 'the redeemed device was persisted');
@@ -262,8 +257,6 @@ test('watch refreshes the snapshot after an external write and the closer stops 
   }
 });
 
-// Auth reads only ever see the in-memory snapshot, so a watcher that never installed (no inotify, an
-// exhausted watch limit) or was silently dropped would keep honoring a revoked cookie until restart.
 test('a periodic reload bounds revocation propagation even with no working watcher', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pairings-interval-'));
   const filePath = path.join(dir, 'pairings.json');
@@ -272,8 +265,7 @@ test('a periodic reload bounds revocation propagation even with no working watch
     const paired = redeemedDevice(writer, mintedToken(writer, 'phone').token);
 
     const reader = createPairingsStore({ filePath });
-    // Stopping the watcher reproduces the failure mode: the fast path is gone and the periodic
-    // reload is the only thing left. The next test pins that the interval really is wired to load().
+
     const stop = reader.watch(() => {});
     stop();
 
@@ -290,14 +282,9 @@ test('watch installs one reload interval at SNAPSHOT_RELOAD_MS, unref-ed and cle
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pairings-timers-'));
   const filePath = path.join(dir, 'pairings.json');
   const intervals: InstalledInterval[] = [];
-  const realSetInterval = globalThis.setInterval;
-  const realClearInterval = globalThis.clearInterval;
-  // The one cast in this suite: globalThis.setInterval carries both the DOM overload (returns number) and
-  // the Node one (returns Timeout), so no single function satisfies the declared type. The delegate below
-  // is behaviourally the real thing, and the store's interval is not injectable.
-  globalThis.setInterval = ((callback: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
-    const handle = realSetInterval(callback, ms, ...args);
-    const entry: InstalledInterval = { ms, handle, callback: () => callback(...args), unrefCalled: false, cleared: false };
+  const setIntervalFn = (callback: () => void, ms: number): NodeJS.Timeout => {
+    const handle = setInterval(callback, ms);
+    const entry: InstalledInterval = { ms, handle, callback, unrefCalled: false, cleared: false };
     const realUnref = handle.unref.bind(handle);
     handle.unref = () => {
       entry.unrefCalled = true;
@@ -305,17 +292,17 @@ test('watch installs one reload interval at SNAPSHOT_RELOAD_MS, unref-ed and cle
     };
     intervals.push(entry);
     return handle;
-  }) as typeof globalThis.setInterval;
-  globalThis.clearInterval = (handle?: NodeJS.Timeout | string | number) => {
+  };
+  const clearIntervalFn = (handle: NodeJS.Timeout): void => {
     const entry = intervals.find((candidate) => candidate.handle === handle);
     if (entry) entry.cleared = true;
-    realClearInterval(handle);
+    clearInterval(handle);
   };
   try {
     const writer = createPairingsStore({ filePath });
     const paired = redeemedDevice(writer, mintedToken(writer, 'phone').token);
 
-    const reader = createPairingsStore({ filePath });
+    const reader = createPairingsStore({ filePath, setIntervalFn, clearIntervalFn });
     const stop = reader.watch(() => {});
     assert.equal(intervals.length, 1, 'exactly one reload interval');
     const installed = intervals[0];
@@ -323,7 +310,6 @@ test('watch installs one reload interval at SNAPSHOT_RELOAD_MS, unref-ed and cle
     assert.equal(installed.ms, SNAPSHOT_RELOAD_MS);
     assert.equal(installed.unrefCalled, true, 'unref-ed so it never holds the process open');
 
-    // Fire the interval body directly instead of waiting 30 seconds for it.
     writer.revokeDevice(paired.id);
     installed.callback();
     assert.equal(typeof device(reader, paired.id).revokedAt, 'number', 'the interval refreshes the snapshot');
@@ -331,8 +317,6 @@ test('watch installs one reload interval at SNAPSHOT_RELOAD_MS, unref-ed and cle
     stop();
     assert.equal(installed.cleared, true);
   } finally {
-    globalThis.setInterval = realSetInterval;
-    globalThis.clearInterval = realClearInterval;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -354,7 +338,6 @@ test('pairingsSignature ignores formatting and key order, tracks auth-relevant f
   assert.equal(pairingsSignature(null), pairingsSignature(undefined), 'garbage coerces to the empty doc');
 });
 
-// An idle server used to announce a change on every 30s tick, writing ~2880 identical log lines a day.
 test('an unchanged reload refreshes the snapshot but does NOT report a change', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pairings-quiet-'));
   const filePath = path.join(dir, 'pairings.json');
@@ -366,7 +349,6 @@ test('an unchanged reload refreshes the snapshot but does NOT report a change', 
     let changes = 0;
     const stop = reader.watch(() => { changes += 1; });
     try {
-      // A byte-identical rewrite of the same content, exactly what an interval tick sees.
       const raw = fs.readFileSync(filePath, 'utf8');
       fs.writeFileSync(filePath, raw, 'utf8');
       await new Promise((resolve) => setTimeout(resolve, 400));
@@ -384,8 +366,6 @@ test('an unchanged reload refreshes the snapshot but does NOT report a change', 
   }
 });
 
-// The sibling pairings-seen.json (display-only telemetry) is written from the request path and shares
-// the directory being watched; on inotify its writes surface as events on that directory.
 test('a write to a sibling file in the watched directory reports no change', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pairings-sibling-'));
   const filePath = path.join(dir, 'pairings.json');
@@ -419,7 +399,6 @@ test('a write refuses rather than racing while another process holds the lock', 
     const paired = redeemedDevice(store, mintedToken(store, 'phone').token);
     const before = fs.readFileSync(filePath, 'utf8');
 
-    // Exactly what a concurrent CLI would leave behind mid-write.
     fs.writeFileSync(`${filePath}.lock`, '', 'utf8');
     try {
       assert.deepEqual(store.revokeDevice(paired.id), { ok: false, reason: 'write-failed' });

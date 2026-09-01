@@ -1,9 +1,3 @@
-// Pure normalization of the Claude Code statusLine payload, which is the ONLY channel that publishes
-// the official `/usage` plan limits to anything outside Claude Code. Every field it carries is
-// conditional (live-probed, 2.1.235): rate_limits is absent on the startup invocation and on
-// non-subscription plans, and each window can be absent on its own. The matrix below is what keeps
-// "absent" from silently becoming "0% used".
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -16,7 +10,6 @@ import {
 
 const NOW = 1_800_000_000_000;
 
-// A realistic post-API-response invocation, trimmed to the fields Glissa reads.
 function fullPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     session_id: 'c1c1c1c1-2222-4333-8444-555555555555',
@@ -53,7 +46,7 @@ test('normalize: the full payload, with percentages rounded and reset times in m
   assert.equal(snap?.ts, NOW);
   assert.equal(snap?.claudeSessionId, 'c1c1c1c1-2222-4333-8444-555555555555');
   assert.equal(snap?.sessionCostUSD, 1.2345);
-  // Binary-float noise is rounded away, which is also what makes the broadcast throttle stable.
+
   assert.equal(snap?.contextPct, 42);
   assert.deepEqual(snap?.rateLimits?.fiveHour, { pct: 12, resetsAtMs: 1_800_003_600_000 });
   assert.deepEqual(snap?.rateLimits?.sevenDay, { pct: 68.4, resetsAtMs: 1_800_400_000_000 });
@@ -67,7 +60,6 @@ test('normalize: rejects anything that is not an object', () => {
   assert.equal(normalizeStatuslinePayload([], NOW), null);
 });
 
-// The startup invocation. Everything else still has to normalize so the session cost lands.
 test('normalize: absent rate_limits yields null limits, not zeroed windows', () => {
   const payload = fullPayload();
   delete payload.rate_limits;
@@ -90,7 +82,6 @@ test('normalize: each window is independently optional', () => {
   assert.equal(onlySeven?.rateLimits?.fiveHour, null);
   assert.deepEqual(onlySeven?.rateLimits?.sevenDay, { pct: 5, resetsAtMs: 1_800_003_600_000 });
 
-  // A rate_limits object with nothing usable in it is the same as not having one.
   assert.equal(normalizeStatuslinePayload(fullPayload({ rate_limits: {} }), NOW)?.rateLimits, null);
   assert.equal(normalizeStatuslinePayload(fullPayload({ rate_limits: { five_hour: {} } }), NOW)?.rateLimits, null);
   assert.equal(normalizeStatuslinePayload(fullPayload({ rate_limits: 'nope' }), NOW)?.rateLimits, null);
@@ -120,7 +111,6 @@ test('normalize: absent, null and non-numeric cost or context stay null', () => 
   assert.equal(bad?.sessionCostUSD, null);
   assert.equal(bad?.contextPct, null);
 
-  // A genuinely free session reports 0, which is a fact and must survive.
   const zero = normalizeStatuslinePayload(fullPayload({ cost: { total_cost_usd: 0 } }), NOW);
   assert.equal(zero?.sessionCostUSD, 0);
 });
@@ -137,12 +127,12 @@ test('normalize: reset times are seconds, and a value already in ms is not multi
     rate_limits: { five_hour: { used_percentage: 1, resets_at: 1_800_003_600 } },
   }), NOW);
   assert.equal(seconds?.rateLimits?.fiveHour?.resetsAtMs, 1_800_003_600_000);
-  // Defensive: a future unit change degrades to a correct countdown instead of a year-3000 one.
+
   const millis = normalizeStatuslinePayload(fullPayload({
     rate_limits: { five_hour: { used_percentage: 1, resets_at: 1_800_003_600_000 } },
   }), NOW);
   assert.equal(millis?.rateLimits?.fiveHour?.resetsAtMs, 1_800_003_600_000);
-  // Zero and negative are not times.
+
   const zero = normalizeStatuslinePayload(fullPayload({
     rate_limits: { five_hour: { used_percentage: 1, resets_at: 0 } },
   }), NOW);
@@ -156,15 +146,13 @@ test('normalize: a negative percentage clamps to zero rather than rendering a ba
   assert.equal(snap?.rateLimits?.fiveHour?.pct, 0);
 });
 
-// The throttle. statusLine fires per assistant and tool step with a ~300ms floor; the plan percentages
-// move far more slowly, so an unchanged snapshot must never reach the wire.
 test('shouldBroadcastPlanLimits: only a moved percentage or reset time broadcasts', () => {
   const first = normalizeStatuslinePayload(fullPayload(), NOW);
   assert.equal(shouldBroadcastPlanLimits(null, first), true);
-  // Identical numbers, a later callback: silent.
+
   const same = normalizeStatuslinePayload(fullPayload(), NOW + 300);
   assert.equal(shouldBroadcastPlanLimits(first, same), false);
-  // Noise below the rounding threshold is also silent, which is the point of rounding first.
+
   const noise = normalizeStatuslinePayload(fullPayload({
     rate_limits: {
       five_hour: { used_percentage: 12.0000000001, resets_at: 1_800_003_600 },
@@ -189,7 +177,6 @@ test('shouldBroadcastPlanLimits: only a moved percentage or reset time broadcast
   }), NOW + 1200);
   assert.equal(shouldBroadcastPlanLimits(first, movedReset), true);
 
-  // A window appearing or disappearing is a change too.
   const droppedSeven = normalizeStatuslinePayload(fullPayload({
     rate_limits: { five_hour: { used_percentage: 12, resets_at: 1_800_003_600 } },
   }), NOW + 1500);
@@ -200,7 +187,7 @@ test('shouldBroadcastPlanLimits: a snapshot with no rate limits never broadcasts
   const startup = normalizeStatuslinePayload({ session_id: 'x', cost: { total_cost_usd: 0.1 } }, NOW);
   assert.equal(shouldBroadcastPlanLimits(null, startup), false);
   const withLimits = normalizeStatuslinePayload(fullPayload(), NOW);
-  // A later payload that lost its limits must not blank a good snapshot on the wire.
+
   assert.equal(shouldBroadcastPlanLimits(withLimits, startup), false);
   assert.equal(shouldBroadcastPlanLimits(null, null), false);
   assert.equal(planLimitsSignature(startup), null);
@@ -219,8 +206,6 @@ test('buildPlanLimitsMessage: the wire shape, or null with nothing to say', () =
   assert.equal(buildPlanLimitsMessage({ rateLimits: null }), null);
 });
 
-// Nothing from the payload beyond these five fields is kept: it also carries transcript_path, cwd and
-// prompt_id, and none of that is worth retaining to draw two progress bars.
 test('normalize: the snapshot carries no transcript path, cwd or prompt id', () => {
   const snap = normalizeStatuslinePayload(fullPayload(), NOW);
   assert.ok(snap);

@@ -1,6 +1,3 @@
-// One precedence, three consumers (the seeding resolver, `glissa doctor`, the standalone relay), so the
-// rules live here rather than in three replicas that drift.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';

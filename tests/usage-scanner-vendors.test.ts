@@ -1,9 +1,3 @@
-// Multi-vendor scanning: Codex CLI and Grok CLI transcripts read alongside Claude's, through the SAME
-// incremental machinery. The line-level parsing is covered by tests/usage-codex-core.test.js and
-// tests/usage-grok-core.test.js; this covers the wiring around them, which is where the vendor-specific
-// hazards live: which directories are walked, per-file cumulative state across an append, per-vendor
-// dedup identity, and the surfaces that stay Claude-only.
-
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -45,8 +39,6 @@ async function writeLines(file: string, lines: string[]): Promise<void> {
   await fs.writeFile(file, `${lines.join('\n')}\n`);
 }
 
-// ── Fixture lines, shaped like the real transcripts ──
-
 function codexTurnContext(model: string): string {
   return JSON.stringify({
     timestamp: '2026-07-08T22:50:21.513Z',
@@ -55,7 +47,6 @@ function codexTurnContext(model: string): string {
   });
 }
 
-// Codex reports CUMULATIVE totals per turn, which is what makes the per-file carry load-bearing.
 interface CodexUsage {
   input_tokens: number;
   cached_input_tokens: number;
@@ -138,15 +129,13 @@ function claudeLine({ messageId, input = 100, output = 10 }: { messageId: string
   });
 }
 
-// ── Codex ──
-
 test('codex: sessions/ is walked, and the home root itself is not (it holds non-usage jsonl)', async () => {
   const root = await makeTempRoot();
   await writeLines(path.join(root, '.codex', 'sessions', '2026', '07', '08', 'rollout-2026-07-08T16-47-47-019f43ea-76ac-7041-bd4b-6362e85f6630.jsonl'), [
     codexTurnContext('gpt-5.5'),
     codexTokenCount({ total: codexUsage({ input: 1000, cached: 400, output: 50 }) }),
   ]);
-  // Real ~/.codex also holds history.jsonl and plugin fixtures. Reading them would invent usage.
+
   await writeLines(path.join(root, '.codex', 'history.jsonl'), [JSON.stringify({ session_id: 'x', ts: 1 })]);
   await writeLines(path.join(root, '.codex', '.tmp', 'plugins', 'responses.jsonl'), [
     codexTurnContext('gpt-5.5'),
@@ -159,7 +148,7 @@ test('codex: sessions/ is walked, and the home root itself is not (it holds non-
   const report = scanner.buildReport({});
   const models = report.models.map((row) => `${row.vendor}/${row.model}`);
   assert.deepEqual(models, ['codex/gpt-5.5']);
-  // 1000 input of which 400 cached: the core reports uncached input plus the cache read.
+
   assert.equal(report.models[0].input, 600);
   assert.equal(report.models[0].cacheRead, 400);
   assert.equal(report.models[0].output, 50);
@@ -179,7 +168,7 @@ test('codex: an archived copy of the same rollout does not double count, and the
   const root = await makeTempRoot();
   const name = 'rollout-2026-07-08T16-47-47-019f43ea-76ac-7041-bd4b-6362e85f6630.jsonl';
   const active = [codexTurnContext('gpt-5.5'), codexTokenCount({ total: codexUsage({ input: 1000, output: 100 }) })];
-  // The archived copy is a shorter prefix: it is the one that stopped being appended to.
+
   const archived = [codexTurnContext('gpt-5.5'), codexTokenCount({ total: codexUsage({ input: 500, output: 50 }) })];
   await writeLines(path.join(root, '.codex', 'sessions', '2026', '07', '08', name), active);
   await writeLines(path.join(root, '.codex', 'archived_sessions', name), archived);
@@ -192,8 +181,6 @@ test('codex: an archived copy of the same rollout does not double count, and the
   assert.equal(report.models[0].output, 100, 'the active copy is the one read');
 });
 
-// The cumulative-totals hazard: without per-file carry of the last snapshot, an appended read would
-// treat the new cumulative total as a fresh delta and count the whole session twice.
 test('codex: an append continues the cumulative snapshot instead of re-counting the session', async () => {
   const root = await makeTempRoot();
   const file = path.join(root, '.codex', 'sessions', '2026', '07', '08', 'rollout-a-019f43ea-76ac-7041-bd4b-6362e85f6630.jsonl');
@@ -206,7 +193,6 @@ test('codex: an append continues the cumulative snapshot instead of re-counting 
   const first = scanner.buildReport({});
   assert.equal(first.totals.output, 100);
 
-  // A second turn: cumulative output is now 250, so the delta is 150.
   await fs.appendFile(file, `${codexTokenCount({ total: codexUsage({ input: 2500, output: 250 }), timestamp: '2026-07-08T22:55:00.000Z' })}\n`);
   const second = await scanner.runPass();
   assert.equal(second.newEntries, 1);
@@ -222,18 +208,16 @@ test('codex: entries are priced from the gpt table and never reported as missing
     codexTokenCount({ total: codexUsage({ input: 1000, cached: 0, output: 100 }) }),
   ]);
   const report = await scanOnce(makeScanner(root));
-  // 1000 input at 5e-6 plus 100 output at 3e-5 = 0.005 + 0.003.
+
   assert.ok(Math.abs(report.totals.costUSD - 0.008) < 1e-9, `priced from the table: ${report.totals.costUSD}`);
   assert.deepEqual(report.pricing.missing, []);
 });
-
-// ── Grok ──
 
 test('grok: only sessions/**/updates.jsonl is read, and the transcript cost is kept', async () => {
   const root = await makeTempRoot();
   const sessionDir = path.join(root, '.grok', 'sessions', 'C%3A%5Crepo', '019fde0f-453b-72a3-bf55-d1fd726cb2ad');
   await writeLines(path.join(sessionDir, 'updates.jsonl'), [grokLine({ promptId: 'prompt-1' })]);
-  // Everything else in a Grok session dir is transcript detail Glissa never reads.
+
   await writeLines(path.join(sessionDir, 'messages.jsonl'), [grokLine({ promptId: 'prompt-ignored', ticks: 990000000000 })]);
 
   const scanner = makeScanner(root);
@@ -243,7 +227,7 @@ test('grok: only sessions/**/updates.jsonl is read, and the transcript cost is k
   assert.equal(report.models.length, 1);
   assert.equal(report.models[0].vendor, 'grok');
   assert.equal(report.models[0].model, 'grok-4.6');
-  // 1680640000 ticks / 1e10 = 0.168064, from the transcript rather than any price table.
+
   assert.ok(Math.abs(report.totals.costUSD - 0.168064) < 1e-9, `ticks became dollars: ${report.totals.costUSD}`);
 });
 
@@ -263,12 +247,10 @@ test('grok: prompt_id dedups a line seen twice across passes', async () => {
   await writeLines(file, [grokLine({ promptId: 'prompt-1' })]);
   const scanner = makeScanner(root);
   await scanner.runPass();
-  // A forced pass re-reads every byte from zero; identity has to hold or totals would double.
+
   const forced = await scanner.runPass({ force: true });
   assert.equal(forced.entries, 1);
 });
-
-// ── All three together ──
 
 test('three vendors in one report: split totals, tagged models, and Claude-only block surfaces', async () => {
   const root = await makeTempRoot();
@@ -295,22 +277,13 @@ test('three vendors in one report: split totals, tagged models, and Claude-only 
   assert.equal(byModel.get('gpt-5.5'), 'codex');
   assert.equal(byModel.get('grok-4.6'), 'grok');
 
-  // Every session row names its vendor; a session belongs to exactly one.
   for (const row of report.sessions) assert.ok(['claude', 'codex', 'grok'].includes(row.vendor), `session vendor: ${row.vendor}`);
-  // A day can span vendors, so the daily row carries the set.
+
   assert.ok(report.daily.every((day) => Array.isArray(day.vendors)));
 
-  /*
-   * Blocks, the burn rate and the token-limit reference are a Claude subscription concept, so they must
-   * count Claude tokens ONLY. A block total equal to the grand total would silently present another
-   * vendor's spend as part of a Claude plan window.
-   */
   const blockTokens = report.blocks.reduce((sum, block) => sum + block.tokens, 0);
   assert.equal(blockTokens, 1100, 'blocks are Claude-only');
 
-  // Per-card chips are joined by the card's own session id, whatever its vendor (M5): a supervised codex
-  // or grok card reaches its own chip from its own transcript, keyed by the id that is also its
-  // resumeSessionId. Claude is keyed by the in-line transcript session id, the vendors by their session id.
   const totals = await scannerSessionTotals(root);
   assert.deepEqual(
     [...totals.keys()].sort(),
@@ -346,14 +319,12 @@ test('a machine with no vendor homes reports exactly one vendor and one root', a
     claudeLine({ messageId: 'message-a' }),
   ]);
   const report = await scanOnce(makeScanner(root));
-  // A missing vendor home is silently absent, never an error (unlike CLAUDE_CONFIG_DIR).
+
   assert.equal(report.scan.resolutionError, null);
   assert.deepEqual(Object.keys(report.totals.byVendor), ['claude']);
   assert.equal(report.scan.dirs.length, 1);
 });
 
-// Each vendor core puts its vendor name in the first segment of the key it returns, which is what makes a
-// shared entry store safe. Asserted directly rather than trusted.
 test('dedup identities cannot collide across vendors', async () => {
   const codexKey = codexDedupIdentity({ vendor: 'codex', sessionId: 's', timestampMs: 1, model: 'm', input: 1, output: 1, cacheCreate: 0, cacheRead: 0 });
   const grokKey = grokDedupIdentity({ vendor: 'grok', sessionId: 's', messageId: 'p' });

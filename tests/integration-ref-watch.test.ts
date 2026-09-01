@@ -1,8 +1,3 @@
-// detection/integration-ref-watch.js - the fs.watch accelerator over an integration branch's reflog
-// (logs/refs/heads/<branch>) in a shared commonGitDir. Driven against a real temp reflog dir so the
-// debounced, leaf-filtered fs.watch round-trip is real. This is the event-driven replacement for the
-// old 10s poll's "did the integration branch move out from under this worktree" job.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -14,7 +9,6 @@ import { SHORT_NAMES_AVAILABLE, shortPathOf } from './helpers/short-path.ts';
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// A fake commonGitDir with a reflog dir we can append to, to drive fs.watch.
 function fakeCommonGitDir(branches = ['develop']) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-irw-'));
   const logsHeads = path.join(dir, 'logs', 'refs', 'heads');
@@ -35,7 +29,7 @@ test('fires (debounced, coalesced) when the integration branch reflog is appende
   try {
     assert.equal(w.start(), true, 'started over a real reflog dir');
     assert.equal(w.active, true);
-    // A burst (a merge appends a couple of reflog lines) within the debounce window.
+
     for (let i = 0; i < 4; i++) fx.append('develop', `move ${i}`);
     await wait(300);
     assert.equal(calls, 1, 'the burst coalesced into exactly one onChange');
@@ -55,7 +49,7 @@ test('ignores a sibling branch reflog (leaf filter)', async () => {
   const w = createIntegrationRefWatcher({ commonGitDir: fx.dir, branch: 'develop', onChange: () => { calls++; }, debounceMs: 50 });
   try {
     w.start();
-    fx.append('feature', 'a sibling commit'); // not our integration branch
+    fx.append('feature', 'a sibling commit');
     await wait(250);
     assert.equal(calls, 0, 'a sibling branch move does not fire the integration watcher');
     fx.append('develop', 'our move');
@@ -82,8 +76,6 @@ test('handles a nested integration branch (release/x)', async () => {
   }
 });
 
-// Regression: an 8.3 segment in the watched dir (a CI runner's short %TEMP%) used to abort the whole
-// process via libuv (see canonicalizePath in shared/paths.js); start() must canonicalize first.
 test('the watcher survives a commonGitDir under an 8.3 short parent', { skip: !SHORT_NAMES_AVAILABLE }, async () => {
   const outer = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-irw-shortbase-'));
   const dir = shortPathOf(outer);

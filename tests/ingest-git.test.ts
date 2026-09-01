@@ -1,16 +1,3 @@
-/*
- * The git ingest source, IO shell (docs/plan-ingestion.md, M8), in two halves.
- *
- * REAL repos, initialized in temp directories, carry the event content: a commit arriving with its branch
- * and subject, a branch switch, working-tree dedupe, a fresh repo with no commits, a detached HEAD, and a
- * linked worktree read as a checkout of its own rather than folded into the repo it came from.
- *
- * INJECTED git carries the cost rules, which no repo can demonstrate: that a trigger storm costs ONE
- * status read, that the poll pokes the same debounce rather than reading in parallel, that the second
- * spawn happens only when HEAD moved, and that stop() mid-debounce and mid-read leaks neither a timer nor
- * an event. Those are the rules that decide whether this source is cheap on a busy machine, and a real
- * repo would only prove them by accident.
- */
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -66,9 +53,7 @@ interface FakeWatchers {
   factory: () => WatchDebounce;
 }
 
-// --- Harness --------------------------------------------------------------
 
-// A real unref'd timer that never runs a callback of its own: the seams are typed against NodeJS.Timeout.
 function parkedTimer(): NodeJS.Timeout {
   const handle = setTimeout(() => {}, 2 ** 30);
   handle.unref();
@@ -105,8 +90,6 @@ function fakeTimers(): FakeTimers {
   };
 }
 
-// A watcher that installs and never fires: the tests drive triggers directly, because an fs.watch event
-// on a temp directory is a race, not a fixture. The real watch path is covered by watchCount below.
 function fakeWatchers(): FakeWatchers {
   const watched: string[] = [];
   const stopped = { count: 0 };
@@ -143,7 +126,6 @@ function refusingWatchers(): FakeWatchers {
   };
 }
 
-// lane.git is null when the source is off; every case reading it has it on.
 function gitOf(lane: ReturnType<typeof createIngestLane>) {
   if (!lane.git) throw new Error('the git source is off on this lane');
   return lane.git;
@@ -158,10 +140,6 @@ function logLine(sha: string, subject: string): string {
   return `${[sha, 'Glissa Test', '1699999999', subject].join(LOG_FIELD_SEPARATOR)}\n`;
 }
 
-/**
- * A recording git. `hold()` parks every subsequent call on a promise the test releases, which is the only
- * way to observe a stop() that lands while a read is in flight.
- */
 function fakeGit({ status, log = () => logLine(SHA, 'init'), layoutFor = null }: {
   status: () => string;
   log?: () => string;
@@ -169,7 +147,6 @@ function fakeGit({ status, log = () => logLine(SHA, 'init'), layoutFor = null }:
 }): FakeGit {
   const calls: { args: readonly string[]; cwd: string | undefined }[] = [];
   const held: { gate: Promise<void> | null } = { gate: null };
-  // One repo per candidate directory by default; `layoutFor` overrides for the multi-repo cases.
   const layout = layoutFor || ((cwd: string | undefined) => ({
     toplevel: String(cwd), gitDir: `${String(cwd)}/.git`, commonDir: `${String(cwd)}/.git`,
   }));
@@ -200,8 +177,6 @@ function fakeGit({ status, log = () => logLine(SHA, 'init'), layoutFor = null }:
   };
 }
 
-// Timing is CONFIG, never a constructor argument (docs/plan-ingestion.md resolves it in the pure config
-// resolver), so the injected half sets it exactly where the lane would.
 const INJECTED_TIMING = { debounceMs: 1000, pollMs: 60000 };
 
 interface InjectedSourceOptions {
@@ -219,8 +194,6 @@ function injectedSource({ fake, watchers, timers, published, overrides = {} }: I
     reposProvider: () => ['/repo'],
     execFileFn: fake.runner,
     createWatch: watchers.factory,
-    // The temp-path realpath collapse is shared/paths.ts's contract, not this source's; skipping it here
-    // keeps the injected half free of any filesystem at all.
     canonicalize: (dir) => dir,
     logger: { warn: () => {} },
     setIntervalFn: timers.setIntervalFn,
@@ -256,12 +229,9 @@ function cleanup(dir: string): void {
   try {
     fs.rmSync(dir, { recursive: true, force: true });
   } catch {
-    // A Windows git process can still hold the directory; a leaked temp dir is not a failed test.
   }
 }
 
-// Real repos still run on injected timers: the point is the event a settled read produces, not whether a
-// 1000ms setTimeout elapsed.
 async function realSource({ dirs, published, timers, overrides = {} }: {
   dirs: string[];
   published: GitIngestEvent[];
@@ -283,20 +253,16 @@ async function realSource({ dirs, published, timers, overrides = {} }: {
   return source;
 }
 
-// Lets the promise chain advance one turn, which is how a test observes the difference between a read
-// that is QUEUED and one that is already running inside git.
 function tick(): Promise<void> {
   return new Promise((resolve) => { setImmediate(resolve); });
 }
 
-// One settled read driven the way a watcher would drive it: through the debounce, then the chain.
 async function settleThroughDebounce(source: ReturnType<typeof createGitIngest>, timers: FakeTimers): Promise<void> {
   for (const key of source.repoKeys) source.trigger(key);
   timers.runTimeouts();
   await source.settle();
 }
 
-// --- Real repos -----------------------------------------------------------
 
 test('a commit publishes one commit event with its branch and subject', { skip: !GIT }, async (t) => {
   const dir = initRepoWithCommit('glissa-ingest-git-commit-');
@@ -342,7 +308,6 @@ test('touching gitdir files without changing anything publishes nothing', { skip
     }
     for (const key of source.repoKeys) source.trigger(key);
   }
-  // Twenty-five triggers, one armed debounce: the storm collapses before any git runs at all.
   assert.equal(source.pendingTimerCount, 1);
   timers.runTimeouts();
   await source.settle();
@@ -435,21 +400,12 @@ test('two candidate directories inside one checkout are one repo, and a subdirec
   t.after(() => source.stop());
 
   assert.equal(source.repoCount, 1, 'one gitdir is one repo no matter how many sessions name it');
-  // The scope is the checkout's toplevel, never whichever subdirectory a session happened to sit in.
   fs.writeFileSync(path.join(dir, 'note.txt'), 'hello\n', 'utf8');
   await settleThroughDebounce(source, timers);
   assert.equal(published.length, 1);
   assert.equal(published[0].scope.root, dir);
 });
 
-/*
- * The watch-set rule, and the answer to what a pr-review worktree does to it. A linked worktree keeps its
- * own HEAD and index under `<common>/worktrees/<name>`, so a commit made in one moves nothing the repo it
- * forked from can see. That cuts both ways: a worktree the provider NAMES is a checkout of its own and
- * publishes its own commits, and a worktree the provider does not name (every ephemeral lane's, since
- * those sessions never enter the map backend.js derives the set from) is invisible, and cannot even leak
- * in sideways as a spurious event on the repo whose refs it shares.
- */
 test('a linked worktree is its own checkout, and an unnamed one is invisible', { skip: !GIT }, async (t) => {
   const dir = initRepoWithCommit('glissa-ingest-git-worktree-');
   const worktreeDir = path.join(path.dirname(dir), `${path.basename(dir)}-wt`);
@@ -488,7 +444,6 @@ test('the lane publishes git events through the normalizer, and builds them into
   t.after(() => cleanup(dir));
   const timers = fakeTimers();
   const lane = createIngestLane({
-    // Timing travels as CONFIG, the whole way down from the resolver: nothing else may set it.
     config: resolveIngestConfig({
       enabled: true, sources: { git: { enabled: true, debounceMs: 1, pollMs: 600000 } },
     }),
@@ -514,7 +469,6 @@ test('the lane publishes git events through the normalizer, and builds them into
   assert.match(lane.buildDigest({ scopes: [dir] }), /- git .*: commit [0-9a-f]{7} on main: ship the git source/);
 });
 
-// --- Injected git ---------------------------------------------------------
 
 test('a trigger storm inside one debounce window costs exactly one status read', async () => {
   const published: GitIngestEvent[] = [];
@@ -573,7 +527,6 @@ test('the poll pokes the same debounce rather than reading in parallel', async (
   assert.equal(fake.statusCalls, afterStart, 'the poll arms the debounce and reads nothing itself');
   assert.equal(source.pendingTimerCount, 1);
 
-  // A watcher hit landing inside the poll's own window must not become a second read.
   source.trigger(source.repoKeys[0]);
   assert.equal(source.pendingTimerCount, 1);
   timers.runTimeouts();
@@ -595,7 +548,6 @@ test('a read still running when the next trigger lands queues exactly one more, 
   source.trigger(source.repoKeys[0]);
   timers.runTimeouts();
   await tick();
-  // The read is now parked inside git. Three more settles pile up behind it and collapse into one.
   for (let hit = 0; hit < 3; hit += 1) {
     source.trigger(source.repoKeys[0]);
     timers.runTimeouts();
@@ -645,7 +597,6 @@ test('stop() landing mid-read publishes nothing the read was about to say', asyn
   const release = fake.hold();
   source.trigger(source.repoKeys[0]);
   timers.runTimeouts();
-  // The status that WOULD have published a change is in flight when the daemon shuts down.
   const stopped = source.stop();
   release();
   await stopped;
@@ -731,8 +682,6 @@ test('a candidate directory is resolved by rev-parse once, however often the set
   await source.start();
   assert.equal(fake.revParseCalls, 1);
 
-  // What the 60s poll and every worktree-ready poke do. A layout only changes when the checkout does, so
-  // re-resolving here would be one spawn per directory per poke for an answer that never moved.
   await source.reconcile();
   await source.poll();
   await source.reconcile();
@@ -771,7 +720,6 @@ test('a directory the provider drops leaves both caches, and is re-resolved if i
   await source.reconcile();
   assert.equal(source.repoCount, 0);
 
-  // Both caches let go with the repo, so long-uptime churn cannot saturate them into uselessness.
   dirs = ['/repo'];
   await source.reconcile();
   assert.equal(source.repoCount, 1);
@@ -792,13 +740,6 @@ test('a poke landing mid-reconcile earns one trailing re-run, not one per poke',
   await source.start();
   assert.equal(source.repoCount, 1);
 
-  /*
-   * The first pass must genuinely still be running when the worktree appears, and only an UNCACHED
-   * directory in its snapshot can hold it there: /repo was resolved at start and costs no spawn, so a
-   * pass over /repo alone drains before the poke lands and the poke's own snapshot would already contain
-   * the worktree. /repo-b is what parks the first pass inside git, exactly as a real boot reconcile of
-   * several projects is parked when a worktree-ready poke arrives.
-   */
   dirs = ['/repo', '/repo-b'];
   const release = fake.hold();
   const inFlight = source.reconcile();
@@ -808,13 +749,11 @@ test('a poke landing mid-reconcile earns one trailing re-run, not one per poke',
   release();
   await Promise.all([inFlight, ...pokes]);
 
-  // Three with the trailing re-run, two without it: the held pass can only ever see the two it snapshotted.
   assert.equal(source.repoCount, 3, 'the late worktree is picked up without waiting for the poll');
   assert.deepEqual(
     source.repoKeys.sort(),
     [path.resolve('/repo/.git'), path.resolve('/repo-b/.git'), path.resolve('/repo-wt/.git')].sort(),
   );
-  // Three pokes, ONE trailing pass: each directory is resolved once and never re-resolved.
   assert.deepEqual(fake.revParseCwds(), ['/repo', '/repo-b', '/repo-wt']);
   await source.stop();
 });
@@ -825,7 +764,6 @@ test('the repo cap counts distinct repos, not candidate directories, and says wh
   const watchers = fakeWatchers();
   const warnings: string[] = [];
   const fake = fakeGit({ status: () => porcelain({}) });
-  // Two worktree sessions: four directories, three distinct checkouts, because both name the same project.
   let dirs = ['/repo', '/repo-wt-a', '/repo', '/repo-wt-b'];
   const source = injectedSource({
     fake,
@@ -848,7 +786,6 @@ test('the repo cap counts distinct repos, not candidate directories, and says wh
   assert.equal(warnings.length, 1, 'an overflow is never silent');
   assert.match(warnings[0], /watch set is full at 3 repos, so .*repo-wt-c/);
 
-  // Once per dropped key: a set that stays full must not fill the log with the same line every poll.
   await source.reconcile();
   await source.poll();
   assert.equal(warnings.length, 1);
@@ -864,7 +801,6 @@ test('the lane builds no git adapter when the source is off', () => {
   assert.equal(off.gitEnabled, false);
   assert.equal(off.git, null);
   assert.equal(off.sources.includes('git'), false);
-  // noteRepos is safe to call unconditionally, so backend.js never has to ask whether the source exists.
   off.noteRepos();
   off.stop();
 

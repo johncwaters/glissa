@@ -3,7 +3,6 @@ import path from 'node:path';
 import { resolvePathCommandMatches } from './spawn-command.ts';
 import type { PathLookupExec } from './spawn-command.ts';
 
-// The stat seam, injected so this core reads no filesystem of its own.
 interface StatApi {
   statSync: (path: string) => { isFile: () => boolean };
 }
@@ -25,7 +24,6 @@ function firstExistingFile(candidates: readonly string[], fsApi: StatApi): strin
     try {
       if (fsApi.statSync(candidate).isFile()) return path.resolve(candidate);
     } catch {
-      // existence probe: any stat failure just means try the next candidate
     }
   }
   return null;
@@ -56,7 +54,6 @@ function toForwardSlashes(commandPath: string): string {
 }
 
 function buildRtkHookEntry(rtkPath: string): RtkHookEntry {
-  // Forward slashes: Claude Code executes command hooks via git-bash, which eats backslashes.
   const command = `${quoteCommandPath(toForwardSlashes(rtkPath))} hook claude`;
   return {
     matcher: 'Bash',

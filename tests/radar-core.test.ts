@@ -142,7 +142,6 @@ test('summarizeIssues: malformed entries never throw', () => {
   assert.deepEqual(summarizeIssues([null, undefined, {}]), { active: 3, spiking: 0, needsHuman: 0 });
 });
 
-// ── Quiet vs loud projects ───────────────────────────────────
 const NOW = 1_700_000_000_000;
 const FIFTEEN_MIN_MS = 15 * 60 * 1000;
 const quietProject = (over = {}) => ({ projectId: 1, name: 'web', host: 'https://ph.test', lastTickAt: NOW, issues: [], ...over });
@@ -250,8 +249,6 @@ test('sparklinePoints: two points span the full width', () => {
   assert.equal(sparklinePoints([1, 3], 64, 16), '0,16 64,0');
 });
 
-// ── Ops section ──────────────────────────────────────────────
-
 test('healthAnomalyRows: only live anomalies produce rows', () => {
   const snapshot = { anomalies: { listenerMismatch: true, orphanPty: false, destroyedReachable: true } };
   assert.deepEqual(healthAnomalyRows(snapshot).map((r) => r.key), ['listenerMismatch', 'destroyedReachable']);
@@ -328,8 +325,6 @@ test('opsRows: nothing to say renders no rows at all', () => {
   assert.deepEqual(opsRows({ health: { anomalies: { orphanPty: false } } }), []);
 });
 
-// ── Pull requests section ────────────────────────────────────
-
 test('needsActionPrRows: keeps only attention-worthy PRs, flattened across projects', () => {
   const rows = needsActionPrRows({
     projects: [
@@ -386,8 +381,6 @@ test('needsActionPrRows: malformed entries fall back rather than throwing', () =
     reason: '',
   }]);
 });
-
-// ── Attention count ──────────────────────────────────────────
 
 const posthogWith = (issues: { change?: string; verdict?: string }[]) => ({ projects: [{ projectId: 'ph', issues }] });
 
@@ -460,8 +453,6 @@ test('radarAttentionSignature: an issue with no id still counts, keyed by title 
   assert.equal(radarAttentionSignature({ posthog }), 'issue:ph/#1:spiking|issue:ph/Cannot read length:spiking');
 });
 
-// --- Investigations inbox rows ---
-
 const investigationRecord = (over = {}) => ({
   id: 'iss-1@1700',
   key: 'ph.test/1#iss-1',
@@ -496,8 +487,6 @@ test('investigationRows: drops archived records and orders newest first', () => 
 });
 
 test('investigationRows: a locally archived id stays gone even when the payload still carries it', () => {
-  // Exactly the shape a cached/replayed snapshot has: the server built it before the archive, so the
-  // record is present and unarchived. The row must not come back.
   const snapshot = {
     investigations: [
       investigationRecord({ id: 'a@100', at: 100 }),
@@ -584,8 +573,6 @@ test('investigationRows: a fix record carries its mode and its pull request link
   assert.equal(row.prUrl, 'https://github.com/o/r/pull/4');
 });
 
-// The url is rendered as an href, so anything that is not plainly https is dropped here rather than
-// handed to the DOM.
 test('investigationRows: a non-https prUrl is dropped', () => {
   for (const prUrl of ['javascript:alert(1)', 'http://insecure/pr/1', 'https://x/1 with space', 42]) {
     const [row] = investigationRows({ investigations: [investigationRecord({ prUrl })] });

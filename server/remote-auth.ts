@@ -1,13 +1,3 @@
-// IO shell for remote-mode authentication. Every decision it makes comes from a pure core
-// (request-trust, cookie, pairing-token, origin-policy); this file only does crypto compares, HTTP
-// plumbing, and the pairing-store lookups.
-//
-// THREAT MODEL, stated once: a valid device cookie is equivalent to a shell on this machine. The
-// control WebSocket accepts an arbitrary project path plus dangerouslySkipPermissions, so anyone who
-// reaches the dashboard can run code as the server account. That is why the pairing URL is treated as
-// a password (single use, 10 minute TTL, never logged, never echoed back into an error page) and why
-// the remote listener refuses everything except /pair/* until a cookie proves prior pairing.
-
 import crypto from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 
@@ -64,8 +54,6 @@ function escapeHtml(str: unknown): string {
     .replace(/"/g, '&quot;');
 }
 
-// Self-contained: the remote listener refuses static assets to an unpaired device, so an error page
-// that referenced a stylesheet would render bare anyway.
 function htmlPage(title: string, message: string): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -81,8 +69,6 @@ p { margin:0; color:#a0a0b2; }
 <body><main><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p></main></body></html>`;
 }
 
-// Constant-time compare of two hex digests. Length is checked first because timingSafeEqual throws on
-// a mismatch; both operands are sha256 hex here, so unequal length only happens with a corrupt record.
 function hashesMatch(a: unknown, b: unknown): boolean {
   if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
   try {
@@ -105,7 +91,6 @@ function createRemoteAuth({
     log('[remote] pairings.json changed - device list reloaded');
   });
 
-  /** Cookie -> device record. Snapshot-only, so this never touches the disk. */
   function authenticate(req: IncomingMessage): AuthOutcome {
     const parsed = readDeviceCookie(req.headers?.cookie, COOKIE_NAME);
     if (!parsed) return { ok: false, reason: 'no-cookie', device: null };
@@ -127,11 +112,9 @@ function createRemoteAuth({
 
   function httpMiddleware(req: Request, res: Response, next: NextFunction): void {
     const trust = trustOf(req);
-    // The crypto compare only runs for remote-classified sockets; the local listener keeps its
-    // existing zero-overhead path.
+
     const authenticated = trust === 'remote' ? authenticate(req).ok : false;
-    // The DECODED pathname, so the /pair/* exemption is judged on the same string express.static will
-    // resolve; a traversal that survives the decode comes back suspicious and can never read as /pair/.
+
     const decision = decideRequestAccess({
       remoteEnabled: Boolean(remote?.enabled),
       trust,
@@ -157,7 +140,6 @@ function createRemoteAuth({
         fallbackName: deviceNameFromUserAgent(req.headers['user-agent']),
       });
       if (!outcome.ok) {
-        // The token is deliberately absent from the response and from every log line.
         log(`[remote] pairing rejected (${outcome.reason})`);
         res.status(403)
           .type('html')

@@ -1,6 +1,3 @@
-// The pure assembly stage of the context mill: spec validation, the glob matcher the walker drives,
-// the token heuristic, and the build plan (outputs, manifest, hard budget gates, deterministic version).
-
 import test from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -55,10 +52,6 @@ function sourceFile(relPath: string, content: string, sourceIndex = 0) {
 function outputByPath(plan: { outputs: { relPath: string; content: string }[] }, relPath: string) {
   return plan.outputs.find((file) => file.relPath === relPath) as { relPath: string; content: string };
 }
-
-// ---------------------------------------------------------------------------
-// validatePackSpec
-// ---------------------------------------------------------------------------
 
 test('a well-formed spec validates', () => {
   assert.deepEqual(validatePackSpec(validSpec()), { ok: true, errors: [] });
@@ -121,10 +114,6 @@ test('skill directories apply relative-path and placeholder validation', () => {
   assert.equal(validatePackSpec(validSpec({ skills: [{ dir: '{{glissaHome}}/memory/dist/current' }] })).ok, true);
 });
 
-// ---------------------------------------------------------------------------
-// matchesGlob
-// ---------------------------------------------------------------------------
-
 test('a star stays inside one path segment', () => {
   assert.equal(matchesGlob('docs/*.md', 'docs/plan.md'), true);
   assert.equal(matchesGlob('docs/*.md', 'docs/archive/plan.md'), false);
@@ -168,10 +157,6 @@ test('non-string input never matches', () => {
   assert.equal(matchesGlob('docs/*.md', undefined), false);
 });
 
-// ---------------------------------------------------------------------------
-// estimateTokens and sourceSlug
-// ---------------------------------------------------------------------------
-
 test('estimateTokens rounds the chars-per-4 heuristic up', () => {
   assert.equal(estimateTokens(''), 0);
   assert.equal(estimateTokens('abc'), 1);
@@ -213,10 +198,6 @@ test('pack artifact ownership parses publisher temp dirs and reclaims only dead 
   }), true);
 });
 
-// ---------------------------------------------------------------------------
-// planPackBuild
-// ---------------------------------------------------------------------------
-
 test('a build emits a thin index, one rules file per source group, and a manifest', () => {
   const plan = planPackBuild(validSpec(), [
     sourceFile('sources/demo/b.md', '# B\n\nbeta\n'),
@@ -238,7 +219,7 @@ test('a build emits a thin index, one rules file per source group, and a manifes
   const rules = outputByPath(plan, '.claude/rules/01-demo.md').content;
   assert.match(rules, /alpha/);
   assert.match(rules, /beta/);
-  // Sorted by relPath, so a.md leads regardless of the order the walker reported.
+
   assert.ok(rules.indexOf('alpha') < rules.indexOf('beta'));
 });
 
@@ -448,10 +429,6 @@ test('normalizePackNames caps the per-session pack count', () => {
   assert.ok(result.warnings.every((w) => w.includes('cap')));
 });
 
-// ---------------------------------------------------------------------------
-// optional sources and the distill spec field (M5)
-// ---------------------------------------------------------------------------
-
 test('a source may declare optional, and only as a boolean', () => {
   assert.equal(validatePackSpec(validSpec({ sources: [{ path: 'derived/brief.md', optional: true }] })).ok, true);
   const wrongType = validatePackSpec(validSpec({ sources: [{ path: 'a.md', optional: 'yes' }] }));
@@ -552,10 +529,6 @@ test('isPackRelativePath accepts a plain relative path and nothing that escapes'
   }
 });
 
-// ── consumedPackNames ──
-// What the mill's watchers and sweep are gated on: a pack nothing here names is one no spawn would
-// ever be handed, so building it publishes bytes nobody reads.
-
 test('consumedPackNames unions the projects and both ephemeral lanes, deduped and sorted', () => {
   assert.deepEqual(consumedPackNames({
     projects: [{ packs: ['zeta', 'alpha'] }, { packs: ['alpha'] }, {}],
@@ -577,10 +550,6 @@ test('a config naming no packs at all consumes nothing', () => {
     assert.deepEqual(consumedPackNames(config), []);
   }
 });
-
-// ── packConsumerSources ──
-// THE enumeration of every config key that names packs. The build gate and the Mill tab both derive
-// from it, so a third key added here reaches both at once and can never reach only one.
 
 test('packConsumerSources lists one row per project plus one per lane', () => {
   const sources = packConsumerSources({
@@ -604,10 +573,6 @@ test('consumedPackNames is derived from that one enumeration', () => {
   }
   assert.deepEqual(consumedPackNames(config), [...union].sort());
 });
-
-// ── packConsumerGroups ──
-// The same enumeration addressed per PROJECT: two config records may share one checkout, and a
-// delivery target is the checkout, never the card.
 
 function projectRows(config: Record<string, unknown>) {
   return packConsumerGroups(config).filter((row) => row.kind === 'project');
@@ -670,8 +635,6 @@ test('sameProjectRecords names every card on one checkout, and only itself witho
   assert.deepEqual(sameProjectRecords(records, records[3]).map((r) => r.id), ['p4']);
 });
 
-// ── applyPackDelta ──
-
 test('a delta adds and removes against the list it is given', () => {
   assert.deepEqual(applyPackDelta(['a'], 'b', true), { ok: true, packs: ['a', 'b'] });
   assert.deepEqual(applyPackDelta(['a', 'b'], 'b', false), { ok: true, packs: ['a'] });
@@ -688,12 +651,11 @@ test('a delta past the cap is REFUSED, never silently dropped', () => {
   const result = applyPackDelta(full, 'e', true);
   assert.equal(result.ok, false);
   assert.match(result.error as string, /at most 4 packs/);
-  // Removing still works at the cap, which is how an operator gets out of it.
+
   assert.deepEqual(applyPackDelta(full, 'a', false), { ok: true, packs: ['b', 'c', 'd'] });
 });
 
 test('a delta keeps an over-cap hand-edited list intact when removing from it', () => {
-  // normalizePackNames would drop the 5th entry; the delta must not silently delete what it did not touch.
   assert.deepEqual(applyPackDelta(['a', 'b', 'c', 'd', 'e'], 'a', false), { ok: true, packs: ['b', 'c', 'd', 'e'] });
 });
 
@@ -701,17 +663,12 @@ test('a delta drops only what is genuinely unusable from the current list', () =
   assert.deepEqual(applyPackDelta(['a', '../escape', 'a', 'b'], 'c', true), { ok: true, packs: ['a', 'b', 'c'] });
 });
 
-// ── normalizePackNames bounds ──
-
 test('an oversized list is judged entry by entry and capped at the per-session limit', () => {
   const oversized = Array.from({ length: 12 }, (_unused, i) => `p${i}`);
   const result = normalizePackNames(oversized);
   assert.equal(result.names.length, MAX_PACKS_PER_SESSION);
   assert.ok(result.warnings.length > 1);
 });
-
-// M16 of docs/plan-visions-3.md: the memory pack carrier. A runtime source is DATA by construction, and
-// the build refuses to publish when one of its bytes reaches an instruction-tier file.
 
 function dataSpec(overrides = {}) {
   return validSpec({
@@ -822,8 +779,6 @@ test('the shipped memory spec is a valid spec named after its file', () => {
   assert.equal(spec.sources.every((source: { data?: unknown }) => source.data === true), true);
 });
 
-// ---- Per-project variants: flattened into independent top-level packs, PostHog's context-mill shape ----
-
 function shippedMemorySpec() {
   const specPath = path.join(import.meta.dirname, '..', 'packs', 'specs', 'memory.pack.json');
   return JSON.parse(fs.readFileSync(specPath, 'utf8'));
@@ -931,7 +886,6 @@ test('a group plans its base plus one flattened pack per CONSUMING project', () 
   const slugB = projectVariantSlug('/repos/b/other');
   assert.deepEqual(plan.builds.map((build) => build.name), ['demo', `demo-${slugA}`, `demo-${slugB}`]);
 
-  // The base carries the global layer only, so nothing project-scoped rides into every consumer.
   assert.equal(plan.builds[0].spec.sources.length, 1);
   assert.equal(plan.builds[0].spec.perProjectVariants, undefined);
   assert.equal(plan.builds[0].variant?.isGroupBase, true);
@@ -979,7 +933,6 @@ test('a variant carrying another project layer fails the build, publishing nothi
   assert.deepEqual(plan.outputs, []);
   assert.equal(plan.errors.some((error) => error.includes(String(slugB))), true);
 
-  // The same source with only its own project's layer publishes exactly as it always did.
   assert.equal(planPackBuild(spec, [ours], { builtAt: BUILT_AT, variant }).ok, true);
 });
 
@@ -1041,8 +994,6 @@ test('a plain build is byte-identical to the pre-variant one: no variant fields,
   assert.equal(plan.manifest?.projectSlug, undefined);
   assert.equal(plan.manifest?.version, planPackBuild(spec, files, { builtAt: BUILT_AT, variant: null }).manifest?.version);
 });
-
-// ── Delivery gates: a pack that built fine, refused for THIS consumer ──
 
 function builtManifest(extra = {}) {
   return { name: 'demo', version: 'v1', sources: [{ pattern: 'sources/demo/*.md', files: [{ relPath: 'a.md' }] }], rules: [], skills: [], ...extra };

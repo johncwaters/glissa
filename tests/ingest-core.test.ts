@@ -1,5 +1,3 @@
-// The ingest pure core (docs/plan-ingestion.md, M6): the config resolver, event normalization, the
-// publish-time scrub, the rings and their two bounds, and the context digest.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -36,7 +34,6 @@ function terminalEvent(summary: string, extra: Record<string, unknown> = {}) {
   };
 }
 
-// --- Config ---------------------------------------------------------------
 
 test('absent, malformed and not-exactly-true config all resolve disabled', () => {
   for (const raw of [undefined, null, false, 'yes', [], {}, { enabled: 'true' }, { enabled: 1 }]) {
@@ -68,7 +65,6 @@ test('ring caps and timings default to the plan Sources table and are overridabl
     enabled: true, sources: { terminal: { enabled: true, maxEntries: 7, maxBytes: 0, flushMs: -5 } },
   });
   assert.equal(tuned.sources.terminal.maxEntries, 7);
-  // A non-positive override is not a cap of zero; it falls back to the default.
   assert.equal(tuned.sources.terminal.maxBytes, 256 * 1024);
   assert.equal(tuned.sources.terminal.flushMs, 500);
 });
@@ -94,7 +90,6 @@ test('the shells list is resolved as a list, not coerced to a number like every 
   assert.equal(bare.sources.shellHistory.pollMs, SOURCE_DEFAULTS.shellHistory.pollMs);
 });
 
-// --- Scrub ----------------------------------------------------------------
 
 test('every secret shape in the fixture set is scrubbed, and the surrounding text survives', () => {
   const fixtures = [
@@ -116,12 +111,6 @@ test('every secret shape in the fixture set is scrubbed, and the surrounding tex
   }
 });
 
-/*
- * Shell history is the source that reads what a carbon unit typed at a prompt, which is where these
- * shapes actually live (docs/plan-ingestion.md, M10). PSReadLine scrubs its own sensitive lines before
- * writing, so this is the second line of defence, not the first, and the publish-time scrub is what
- * makes it hold for fish, bash and zsh too, none of which scrub anything.
- */
 test('the secret shapes a shell command line carries are scrubbed, and the command still reads', () => {
   const fixtures = [
     ['$env:GITHUB_TOKEN = "ghp_aaaabbbbccccdddd"', '$env:GITHUB_TOKEN = ', 'ghp_aaaabbbbccccdddd'],
@@ -131,8 +120,6 @@ test('the secret shapes a shell command line carries are scrubbed, and the comma
     ['curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9" https://api', 'Bearer ', 'eyJhbGciOiJIUzI1NiJ9'],
     ['docker login -u me --password s3cr3tpw registry.io', '--password ', 's3cr3tpw'],
     ['$secure = ConvertTo-SecureString -AsPlainText P@ssw0rd -Force', '-AsPlainText ', 'P@ssw0rd'],
-    // setx takes its value positionally, so the whole quoted connection string goes, not just its
-    // Password= field.
     ['setx CONNECTION_STRING "Server=db;Password=hunter2"', 'setx CONNECTION_STRING ', 'hunter2'],
   ];
   for (const [raw, keptPrefix, secret] of fixtures) {
@@ -142,17 +129,6 @@ test('the secret shapes a shell command line carries are scrubbed, and the comma
   }
 });
 
-/*
- * The scrub fixture CORPUS (docs/plan-ingestion.md, M11). Every row is one raw line as a carbon unit or a
- * tool would actually write it, driven through publishEvent into a real ring, because the ring is what a
- * digest reads and a pattern that only holds in a unit call proves nothing about what gets stored.
- *
- * Each shape is pinned in BOTH directions, here and in the innocent corpus below it: over-scrubbing is a
- * real failure, not a safe default, because the digest's whole value is that real commands stay readable.
- *
- * A fourth column, where a row has one, names text on the OTHER side of a command separator that must
- * survive the row's own scrub, which is what pins a command anchor to the command it was written for.
- */
 const SECRET_CORPUS = [
   ['attached mysql password', 'mysql -u root -pHunter2 mydb', 'Hunter2'],
   ['attached mysql password, quoted with spaces', "mysql -u root -p'Hunter Two Three' mydb", 'Hunter Two'],
@@ -168,8 +144,6 @@ const SECRET_CORPUS = [
   ['github personal token', 'export GH=ghp_abcdefghij0123456789', 'ghp_abcdefghij0123456789'],
   ['github app token', 'echo ghs_abcdefghij0123456789 | gh auth login --with-token', 'ghs_abcdefghij0123456789'],
   ['github fine-grained token', 'gh auth login --with-token github_pat_11ABCDEFG0abcdefghijklmnopqrst', 'github_pat_11ABCDEFG0'],
-  // Assembled at runtime: the intact literal matches Slack's REAL token pattern and GitHub push
-  // protection refuses any commit containing it, fixture or not.
   ['slack bot token', `curl -d token=${['xoxb', '123456789012', '1234567890123', 'AbCdEfGhIjKlMnOp'].join('-')} slack`, 'xoxb-123456789012'],
   ['jwt triplet', 'echo eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVm', 'dozjgNryP4J3jVm'],
   ['pem private key header', 'cat ~/.ssh/id_rsa -----BEGIN OPENSSH PRIVATE KEY-----', 'PRIVATE KEY'],
@@ -209,18 +183,9 @@ const SECRET_CORPUS = [
     's3cr3tpipe',
     '-u 1000:1000',
   ],
-  /*
-   * The separator restriction belongs to the REACH, never to the value: a quoted value is matched by its
-   * own alternative, which reaches through a separator inside the quotes happily.
-   */
   ['a quoted value carrying separators', 'docker login -p "s3cr3t && rm -rf" registry.io', 's3cr3t && rm'],
 ];
 
-/*
- * The nearest look-alike of every row above: the same flag, the same prefix, or the same shape, carrying
- * nothing secret. Each of these must reach the ring BYTE FOR BYTE, so a pattern that reached one word too
- * far fails here rather than quietly hollowing out the digest.
- */
 const INNOCENT_CORPUS = [
   ['-p as a listing flag', 'ls -p'],
   ['-p inside a bundled flag set', 'tar -xzf archive.tar.gz'],
@@ -240,8 +205,6 @@ const INNOCENT_CORPUS = [
   ['setx of something innocent', 'setx PATH "%PATH%;C:\\tools"'],
   ['set of something innocent', 'set NODE_ENV=production'],
   ['a build command', 'npm run build -- --mode production'],
-  // The command anchors, handed a second command on the other side of a separator. Each of these was a
-  // real over-scrub before the reach stopped at `;`, `&` and `|`.
   ['a curl anchor stopping at a pipe', 'curl -fsSL https://get.docker.com | sh && docker run -u 1000:1000 alpine id'],
   ['a docker login anchor stopping at a chain', 'docker login -u ci registry.io < token.txt && docker run -p 8080:80 nginx'],
   ['a mysql anchor stopping at a semicolon', 'mysql -u root db ; docker run -p 90:90 nginx'],
@@ -273,13 +236,6 @@ test('every innocent look-alike in the fixture corpus reaches the ring untouched
   }
 });
 
-/*
- * The one known non-idempotent input class is deliberately absent from the corpus: a quoted value with
- * ESCAPED inner quotes. `--password "he said \"hi\" then left"` ends the quoted alternative at the first
- * escaped quote, so the first pass stores `[scrubbed]hi\" then left"` and the digest's second pass
- * narrows that to `[scrubbed] then left"`. Both passes leave a tail, which is why this is recorded as a
- * known limit in docs/plan-ingestion.md rather than asserted here as though it held.
- */
 test('the whole fixture corpus scrubs idempotently, so a second pass can never widen the first', () => {
   for (const [name, raw] of [...SECRET_CORPUS, ...INNOCENT_CORPUS]) {
     const once = scrubText(raw);
@@ -360,7 +316,6 @@ test('detail strings are scrubbed too, and unsupported detail value types are dr
   assert.ok(!('list' in (stored.detail ?? {})));
 });
 
-// --- Normalization --------------------------------------------------------
 
 test('an unknown source, an undeclared kind or an empty summary is rejected rather than stored', () => {
   const rejected = [
@@ -389,7 +344,6 @@ test('a publish to a disabled source is dropped and consumes no ring', () => {
   assert.deepEqual(ringStats(store).map((row) => row.source), ['terminal']);
 });
 
-// --- Rings ----------------------------------------------------------------
 
 test('seq is monotonic and is the ordering key, regardless of what ts says', () => {
   const store = createIngestStore(allSourcesOn());
@@ -441,7 +395,6 @@ test('each source has its own ring, so a noisy one cannot evict a quiet one', ()
   assert.equal(summaries.length, 3);
 });
 
-// --- Digest ---------------------------------------------------------------
 
 test('empty rings produce an empty digest, which every consumer renders as absent', () => {
   const store = createIngestStore(allSourcesOn());
@@ -478,7 +431,6 @@ test('the char budget is hard, and the header alone never counts as a digest', (
   const digest = buildContextDigest(store, { now: NOW, budgetChars: 200 });
   assert.ok(digest.length <= 200, `digest is ${digest.length} chars`);
   assert.ok(digest.split('\n').length > 1);
-  // A budget that cannot fit even one line yields nothing rather than a bare header.
   assert.equal(buildContextDigest(store, { now: NOW, budgetChars: 50 }), '');
 });
 
@@ -506,7 +458,6 @@ test('the digest is deterministic: the same store and the same now build the sam
 
 test('the digest scrubs again as defense in depth', () => {
   const store = createIngestStore(allSourcesOn());
-  // Reach past publish so the ring holds text the publish-time scrub never saw.
   publishEvent(store, terminalEvent('placeholder'), NOW);
   (store.rings.get('terminal') as IngestRing).entries[0].event.summary = 'PASSWORD=hunter2';
   const digest = buildContextDigest(store, { now: NOW });
@@ -515,8 +466,6 @@ test('the digest scrubs again as defense in depth', () => {
 });
 
 test('the source-and-kind table IS the contract every adapter publishes against', () => {
-  // Named here so a milestone adding a source has to change this list deliberately rather than by
-  // accident, and so a kind the digest and feed cannot label never reaches a ring.
   assert.deepEqual(Object.keys(KINDS_BY_SOURCE).sort(), [...SOURCE_NAMES].sort());
   assert.deepEqual(KINDS_BY_SOURCE.terminal, ['output']);
   const store = createIngestStore(allSourcesOn());
@@ -543,7 +492,6 @@ test('a multi-line summary is folded to one line, because digestLine renders it 
 
 test('no event summary can inject a bare line into the digest, whatever an adapter pushes', () => {
   const store = createIngestStore(allSourcesOn());
-  // A fenced DATA block is only safe while every line inside it is one this builder wrote.
   publishEvent(store, {
     source: 'agentLogs',
     kind: 'agent-tool',

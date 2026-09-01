@@ -1,8 +1,3 @@
-// Turning Visions on wires every editor found on the machine, because an advisor that needs a manual
-// paste per editor is one nobody has running. Files glissa owns are written whole; a file the operator
-// maintains is touched only through the marked block or the single key naming our server, and it is
-// backed up once before the first edit.
-
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -85,8 +80,6 @@ function onPath(command: string, { platform, exec }: { platform: NodeJS.Platform
   return resolvePathCommandMatches(command, { platform, exec }).length > 0;
 }
 
-// An editor's own settings file is safe to CREATE; a startup script like init.el is not, so Emacs is
-// wired only into an init file that already exists.
 function editorTargets({ homeDir = os.homedir(), platform = process.platform, env = process.env, exec = execSync }: EditorDetection = {}): EditorTarget[] {
   const nvimDir = neovimConfigDir(homeDir, platform, env);
   const helixDir = helixConfigDir(homeDir, platform, env);
@@ -128,8 +121,6 @@ function readIfPresent(filePath: string): string | null {
   }
 }
 
-// One backup per file, taken before glissa's first edit to it and never overwritten afterwards: the
-// point is the state the operator had before any of this ran.
 function backupOnce(filePath: string, existingText: string | null): string | null {
   const backupPath = `${filePath}.glissa.bak`;
   if (existingText === null || exists(backupPath)) return null;
@@ -148,7 +139,6 @@ function planFor(target: EditorTarget, existingText: string | null, invocation: 
 }
 
 function unwirePlanFor(target: EditorTarget, existingText: string | null): EditorPlan {
-  // Glissa owns the whole file, so unwiring it is a delete rather than an edit.
   if (target.owned) return { text: null, changed: existingText !== null, reason: existingText === null ? 'unchanged' : 'deleted' };
   if (target.unmerge) return target.unmerge(existingText);
   return jsonSettingsRemove(existingText ?? '', target.json({ command: '', args: [] }));

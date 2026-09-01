@@ -1,7 +1,3 @@
-// `glissa memory` - the cold-path operator commands over the long-term memory store.
-//
-// Lives in server/ for the same reason server/pack-cli.ts does: package.json "files" whitelists bin
-// entries one by one but ships server/ wholesale.
 
 import { loadConfigFile, resolveConfigPath } from './config-store.ts';
 import { resolveMemoryConfig } from './core/memory-core.ts';
@@ -24,8 +20,6 @@ const USAGE = [
 ].join('\n');
 
 type MemoryStore = NonNullable<ReturnType<typeof createMemoryStore>>;
-// The seams answer only the members these commands report from, so a stand-in owes the CLI what the
-// CLI reads rather than a whole lane.
 type MemoryCliIngest = Pick<ReturnType<typeof createMemoryIngest>, 'backfill' | 'statePath' | 'stats' | 'stop'>;
 type MemoryCliDistiller = Pick<ReturnType<typeof createMemoryDistiller>, 'runOnce' | 'stop'>;
 type MakeStore = () => MemoryStore | null;
@@ -41,10 +35,7 @@ function defaultMakeStore(): MemoryStore | null {
   const gitWorkspaceSync = createGitWorkspaceSync();
   return createMemoryStore({
     dir: configSiblingPath(configPath, 'memory'),
-    // The same machine-wide database the server opens, so a CLI pass beside it is one connection more.
     dbPath: dbPathForConfig(configPath),
-    // An operator running this command IS the authorization, exactly like `glissa pack distill`; the
-    // enabled flag gates the automatic lane, not a deliberate expunge.
     config: { ...resolved, enabled: true },
     knownProjects,
     resolveProjectPath: gitWorkspace.resolveProjectPath,
@@ -52,7 +43,6 @@ function defaultMakeStore(): MemoryStore | null {
   });
 }
 
-// The store is null when node:sqlite is unavailable, which is the one way the whole lane stays off.
 function reportNoStore(): number {
   console.error('The memory store could not be opened: this Node build has no node:sqlite (needs 22.16+).');
   return 1;
@@ -67,8 +57,6 @@ async function runForget(needle: string | undefined, makeStore: MakeStore): Prom
   if (!store) return reportNoStore();
   try {
     const result = await store.forget(needle);
-    // A busy database is not an empty search; reporting "nothing matched" told the operator their
-    // secret was absent when it is still on disk.
     if (result && result.reason === 'locked') {
       console.error('The memory database was busy for the whole timeout. Nothing was written: retry in a moment.');
       return 1;
@@ -86,8 +74,6 @@ async function runForget(needle: string | undefined, makeStore: MakeStore): Prom
   }
 }
 
-// The lane ledger is loaded before the pass, not during it: an ephemeral lane's transcript must be
-// excluded on the FIRST file this reads, not once an async load happens to land.
 async function defaultMakeIngest(store: MemoryStore) {
   const configPath = resolveConfigPath();
   const loaded = loadConfigFile(configPath, { exitOnError: false });
@@ -127,8 +113,6 @@ async function runBackfill(makeStore: MakeStore, makeIngest: MakeIngest): Promis
   }
 }
 
-// An operator running this command IS the authorization, so the lane's own enabled flag is bypassed
-// exactly the way `glissa pack distill` bypasses config.packDistiller.
 function defaultMakeDistiller(store: MemoryStore) {
   const loaded = loadConfigFile(resolveConfigPath(), { exitOnError: false });
   const raw = loaded?.config?.memory ? loaded.config.memory.distill : null;

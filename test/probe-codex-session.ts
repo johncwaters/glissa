@@ -1,8 +1,3 @@
-// Live verification of Codex pack delivery, run by hand against a
-// REAL codex binary: node test/probe-codex-session.ts
-//
-// It boots the real backend against a throwaway config, delivers one pack through the adapter's
-// developer_instructions carrier, asks for a sentinel, resumes the same session, and asks again.
 
 import fs from 'node:fs';
 import http from 'node:http';
@@ -13,10 +8,7 @@ import { createBackend } from '../server/backend.ts';
 import type { HookPayload } from '../shared/contracts/index.ts';
 import type { Session } from '../session/sessions.ts';
 
-// _packsBuiltRoot and _hookToken are no longer Session fields; the probe still names them, so the
-// shape it writes and reads is declared here rather than pretended into the class.
 interface ProbeSession extends Session {
-  _packsBuiltRoot?: string;
   _hookToken?: string;
 }
 
@@ -42,8 +34,6 @@ function check(label: string, condition: boolean): void {
 
 function delay(ms: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
-// Resolve when the session reaches one of `states`, or reject on the step timeout. Transitions are
-// read off the session's own 'state-change' event, so the probe asserts the shipped state machine.
 function waitForState(session: Session, states: string[], label: string): Promise<string> {
   const wanted = new Set(states);
   if (wanted.has(session.state)) return Promise.resolve(session.state);
@@ -62,15 +52,6 @@ function waitForState(session: Session, states: string[], label: string): Promis
   });
 }
 
-/*
- * The probe runs codex against a THROWAWAY CODEX_HOME so it can pre-trust its own temp project
- * directory (codex blocks on an interactive "do you trust this directory?" prompt otherwise, and that
- * trust is only readable from a config FILE, never from a `-c` override). auth.json is SYMLINKED
- * rather than copied, so the operator's credentials stay in one place and this probe leaves nothing
- * behind in ~/.codex. Probe-only: a supervised session in production uses the operator's real codex
- * home, and answers that trust prompt once, by hand, exactly as a Claude Code session answers its
- * workspace-trust dialog.
- */
 function makeProbeCodexHome(tmpDir: string, projectDir: string): string {
   const codexHome = path.join(tmpDir, 'codex-home');
   fs.mkdirSync(codexHome);
@@ -111,7 +92,6 @@ function writeProbeConfig(configPath: string, projectDir: string): void {
     packsAutoRebuild: false,
     autoResume: false,
     worktreeAutoRebase: false,
-    // A full capture, so the recording carries the raw OSC titles the replay fixture is cut from.
     capture: { enabled: true },
   }, null, 2), 'utf8');
 }
@@ -217,7 +197,6 @@ async function main(): Promise<void> {
     session.kill();
     await waitForState(session, ['DONE', 'FAILED'], 'the killed PTY to be reaped');
     hookEvents.length = 0;
-    // restart() is the dashboard's own path out of DONE, and it re-spawns with `codex resume <id>`.
     check('restart re-spawned the session', session.restart());
     await waitForState(session, ['RUNNING', 'IDLE'], 'the resumed session');
     await delay(6000);
@@ -235,22 +214,16 @@ async function main(): Promise<void> {
     check('both spawns carried developer_instructions', spawnCalls.length === 2 && spawnCalls.every((call) => call.args.some((arg) => arg.startsWith('developer_instructions='))));
     check('the second spawn used codex resume', !!capturedId && !!spawnCalls[1]?.args.includes('resume') && spawnCalls[1].args.includes(capturedId));
 
-    // Copied out before the cleanup below removes the temp tree; this is what a fixture is cut from.
-    // A full capture is the session's whole PTY stream, so it goes into a private directory (mkdtemp
-    // creates 0700, with no window at a wider mode) and the file itself is 0600. Modes are advisory on
-    // Windows, where the ACL of a per-user temp dir is what carries this.
     const keptRecording = copySanitizedRecording(tmpDir) || '(none written)';
     console.log(`\nRecording: ${keptRecording}`);
     console.log(`Hook events seen: ${[...new Set(hookEvents)].join(', ') || '(none)'}`);
     console.log(`Title signals seen: ${[...new Set(titleSignals)].join(', ') || '(none)'}`);
   } finally {
-    try { session.kill(); } catch { /* the process is exiting either way */ }
+    try { session.kill(); } catch {  }
     await delay(1500);
     backend.shutdown();
     server.closeAllConnections();
     await new Promise<void>((resolve) => { server.close(() => resolve()); });
-    // The temp tree holds a link to the operator's auth.json and a full PTY recording; neither may
-    // outlive the probe in a world-readable /tmp.
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 

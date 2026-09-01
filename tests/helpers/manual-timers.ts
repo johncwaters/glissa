@@ -1,8 +1,3 @@
-// A timer seam a suite fires by hand, so "the deadline expired" is a decision the test makes rather
-// than a wall-clock race. The handle handed back is a REAL unref'd timer that never runs its own
-// callback: the seams these fakes replace are typed against NodeJS.Timeout, and a handle minted here
-// holds nothing open even if a suite forgets to clear it.
-
 interface ManualTimer {
   fn: () => void;
   ms: number;

@@ -1,8 +1,3 @@
-// Session resume wiring: a resumeSessionId becomes `--resume <id>` on the spawn command line, is
-// absent when unset, and is settable/clearable live via setResumeConversation (reflected in
-// toSnapshot). The PTY spawner is faked so start() runs without launching claude. Mirrors the
-// fake-spawner approach in spawn-integration.test.js.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Session } from '../session/sessions.ts';

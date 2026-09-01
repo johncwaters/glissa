@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-// naming-core is ESM (.mjs); dynamic-import it so the suite drives the shipped module.
 const importCore = () => import('../public/session-card/naming-core.ts');
 
 test('isAutoNameOf: exact match, numbered suffix, and non-matches', async () => {

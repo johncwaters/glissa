@@ -1,7 +1,3 @@
-// Unit tests for the pure manual-merge handoff prompt builder (session/core/merge-prompt.js).
-// Locks the content contract the parked-merge handoff relies on: the prompt names the branch, the
-// integration target, the conflicting files, and the rebase-then-resolve steps, and degrades safely.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildMergePrompt } from '../session/core/merge-prompt.ts';
@@ -17,7 +13,7 @@ test('buildMergePrompt (rebase-conflict): names branch, target, conflicting file
   assert.match(p, /manual merge/i);
   assert.match(p, /glissa\/session\/abc/);
   assert.match(p, /develop/);
-  assert.match(p, /overlap/i); // the rebase-conflict "why"
+  assert.match(p, /overlap/i);
   assert.ok(p.includes('Conflicting files:'));
   assert.ok(p.includes('- src/a.js') && p.includes('- src/b.js'));
   assert.ok(p.includes('git rebase develop'));
@@ -41,5 +37,5 @@ test('buildMergePrompt: missing branch/target/worktree use safe generic phrasing
   const p = buildMergePrompt({});
   assert.ok(p.includes('the integration branch'));
   assert.ok(p.includes("this session's branch"));
-  assert.equal(/from this worktree \(\)/i.test(p), false); // no empty "()" when worktreeDir is absent
+  assert.equal(/from this worktree \(\)/i.test(p), false);
 });

@@ -1,10 +1,3 @@
-// Memory is opt-in and file-only (docs/plan-visions-3.md, M12). Off must construct NOTHING: no store
-// object, no timer, no directory beside the config file. And on, it must be unreachable from the
-// unauthenticated control WebSocket, so no settable key list may carry it.
-//
-// SAFETY: createBackend runs a boot worktree reconcile against the configured projects, so every boot
-// here points at a throwaway temp config with ZERO projects via GLISSA_CONFIG.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -32,7 +25,7 @@ async function bootWithConfig(memory?: Record<string, unknown>): Promise<BootedB
   fs.writeFileSync(configPath, JSON.stringify(memory === undefined ? base : { ...base, memory }, null, 2), 'utf8');
   const previousConfig = process.env.GLISSA_CONFIG;
   process.env.GLISSA_CONFIG = configPath;
-  // memory.enabled implies the agent-log source, so the vendor homes go somewhere empty first.
+
   const restoreHomes = isolateTranscriptHomes(dir);
   const server = http.createServer();
   const backend = createBackend(server, { staticDir: null });

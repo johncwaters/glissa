@@ -1,6 +1,3 @@
-// Visions is one switch: turning it on wires every editor on the machine and turning it off unwires
-// them, because a lane whose input needs a per-editor setup chore is a lane nobody has running.
-
 import fs from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import os from 'node:os';
@@ -27,8 +24,7 @@ import { bundled, cliPath, extensionDir, packageRoot, relayPath } from './runtim
 
 const EXTENSION_DIR = extensionDir;
 const RELAY_PATH = relayPath('visions-relay');
-// Bundled, the extension's three files are already built CJS beside its manifest; from a checkout they
-// are the .ts sources this module strips at pack time.
+
 const LSP_CORE_PATH = bundled
   ? path.join(EXTENSION_DIR, 'visions-lsp-core.js')
   : path.join(packageRoot, 'server', 'core', 'visions-lsp-core.ts');
@@ -77,13 +73,10 @@ function commandFailureDetail(error: unknown): string | undefined {
   return String(failure.stderr || failure.message || error).trim().split('\n').pop();
 }
 
-// The extension host is CommonJS with no type stripping of its own, so every packed source is its
-// types erased. The extension's own files are authored CommonJS-style and need nothing more.
 function packedSource(filePath: string): string {
   return stripTypeScriptTypes(fs.readFileSync(filePath, 'utf8'), { mode: 'strip' });
 }
 
-// The core is the one packed file authored as an ES module, so its single export is rewritten too.
 function packedLspCore(filePath: string): string {
   return packedSource(filePath).replace(/^export \{([^}]*)\};/m, 'module.exports = {$1};');
 }
@@ -240,15 +233,12 @@ async function unwireEverything(): Promise<{
   return { extensions, files };
 }
 
-// One run per transition of `visions.enabled`, and failure is a log line: an editor that could not be
-// wired must never be able to stop the lane it was for.
 function createVisionsSetup({
   getConfig = () => ({}), configStore = null, logger = console, debug = false, env = process.env,
   onConfigChanged = null, wire = wireEverything, unwire = unwireEverything,
 }: VisionsSetupOptions = {}) {
   const { note, warn } = createLaneLog({ prefix: '[visions-setup]', logger, debugFlag: debug });
-  // False rather than null, so a boot with Visions OFF is not a transition and unwires nothing the
-  // operator installed by hand; a boot with it ON is one, which is what keeps a wiring current.
+
   let appliedState: boolean | null = false;
   let inFlight: Promise<unknown> | null = null;
 
@@ -273,12 +263,10 @@ function createVisionsSetup({
     void Promise.resolve().then(onConfigChanged).catch((error: unknown) => warn(`lane rebuild failed: ${errorMessage(error)}`));
   }
 
-  // A test booting with Visions on must not install extensions into the operator's real editors.
   function isEditorWiringRefused(): boolean {
     return underTestRunner(env) && wire === wireEverything && unwire === unwireEverything;
   }
 
-  // Nor may it write the operator's own config, the hazard db-path-guard refuses a home database for.
   function isConfigWriteRefused(): boolean {
     if (!underTestRunner(env)) return false;
     const configPath = configStore?.configPath;
@@ -286,13 +274,10 @@ function createVisionsSetup({
     return isUnder(configPath, os.homedir()) && !isUnder(configPath, os.tmpdir());
   }
 
-  // The live config is mutated beside the file, since configStore.save only writes disk: without it the
-  // lanes would compare against a config that still says off and rebuild nothing until the next boot.
   function writeImpliedDefaults() {
     if (!configStore || isConfigWriteRefused()) return null;
     if (decideImpliedDefaults(getConfig()).changes.length === 0) return null;
-    // The DISK decision is the authority, and the live object then gets exactly what was written: the
-    // file may have moved under this process, and two lists would let the lanes rebuild against neither.
+
     const written: ImpliedChange[] = [];
     const saved = configStore.save((freshConfig) => {
       const changes = decideImpliedDefaults(freshConfig).changes;

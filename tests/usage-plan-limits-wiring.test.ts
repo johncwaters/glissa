@@ -1,9 +1,3 @@
-// The plan-limit half of the usage lane, driven through createUsageWiring with every side effect
-// injected (the pr-poller pattern): the statusLine ingest, the broadcast throttle, the machine-wide
-// snapshot, the kill switch, and the officialCostUSD stamp on the per-card push.
-//
-// No scanner, no fs, no network: ingestStatusline is on the hot path of every live turn of every
-// session, so it is tested for exactly what it is, an O(1) normalize plus two map writes.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -61,7 +55,6 @@ function harness({ usage = {} }: { usage?: Record<string, unknown> } = {}) {
   const scanner = {
     runPass: async () => ({ files: 1, entries: 1, newEntries: 1, partial: false, durationMs: 0 }),
     sessionTotals: () => new Map([[CLAUDE_ID, { tokens: 1200, costUSD: 0.42, lastTs: now }]]),
-    // Only requestReport reads this, and no test here asks for a report.
     buildReport: (): never => { throw new Error('this suite never builds a report'); },
     stats: () => ({ dirs: [], files: 0, entries: 0, lastScanMs: 0, resolutionError: null }),
     budgetSpend: () => ({ todayKey: '2027-01-15', monthKey: '2027-01', todayUsd: 0, monthUsd: 0 }),
@@ -74,7 +67,6 @@ function harness({ usage = {} }: { usage?: Record<string, unknown> } = {}) {
     createScanner: () => scanner,
     loadPricingFn: async () => ({ table: new Map(), source: 'snapshot', fetchedAt: null }),
     nowFn: () => now,
-    // An inert handle: the lane owns a timer it never gets to fire, so no scan pass runs behind a test.
     setIntervalFn: () => {
       const handle = setTimeout(() => {}, 0);
       handle.unref();
@@ -105,7 +97,6 @@ test('planLimits defaults on, and rides the usage config resolver', () => {
   assert.equal(resolveUsageConfig(undefined).planLimits, true);
   assert.equal(resolveUsageConfig({}).planLimits, true);
   assert.equal(resolveUsageConfig({ planLimits: false }).planLimits, false);
-  // Defensive like every other key here: a hand-edited non-boolean falls back rather than throwing.
   assert.equal(resolveUsageConfig({ planLimits: 'no' }).planLimits, true);
 });
 
@@ -121,7 +112,6 @@ test('a first payload with rate limits broadcasts once and becomes the snapshot'
   assert.deepEqual(lane.wiring.getPlanLimitsMessage(), message);
 });
 
-// The whole reason for the throttle: this fires several times inside one turn, ~300ms apart.
 test('repeat payloads with unchanged numbers never reach the wire', () => {
   const lane = harness();
   lane.wiring.ingestStatusline(statuslinePayload());
@@ -144,7 +134,6 @@ test('the startup payload (no rate_limits) neither broadcasts nor blanks a good 
 
   lane.wiring.ingestStatusline(statuslinePayload());
   assert.equal(lane.planMessages().length, 1);
-  // A later limitless payload must not erase what the account already reported.
   lane.wiring.ingestStatusline({ session_id: CLAUDE_ID, cost: { total_cost_usd: 0.3 } });
   assert.equal(lane.planMessages().length, 1);
   assert.equal(lane.wiring.getPlanLimitsMessage()?.fiveHour?.pct, 12);
@@ -171,7 +160,6 @@ test('officialCostUSD rides the per-card push, keyed by the Claude session id', 
   await lane.wiring.start();
   const before = lastSessionRow(lane.sessionMessages());
   assert.equal(before.id, GLISSA_ID);
-  // Nothing official reported yet: null, distinct from a zero cost.
   assert.equal(before.officialCostUSD, null);
   assert.equal(before.costUSD, 0.42, 'the scanner estimate is untouched');
 

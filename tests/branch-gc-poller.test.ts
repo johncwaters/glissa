@@ -13,8 +13,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-// onTickComplete answers the stringly lane-status shape the control plane broadcasts, so the one
-// field this suite reads is narrowed here rather than at each assertion.
 function deletionsOfFirstProject(summary: Record<string, unknown> | undefined): string[] {
   const projects = summary?.projects;
   if (!Array.isArray(projects) || !isRecord(projects[0])) throw new Error('a tick summary lists its project summaries');
@@ -23,7 +21,6 @@ function deletionsOfFirstProject(summary: Record<string, unknown> | undefined): 
   return deletions.map(String);
 }
 
-// The lane is faked out in the wiring tests below, so its workspace is never reached.
 function unreachableGitWorkspace(): BranchGcGitWorkspace {
   const refuse = () => Promise.reject(new Error('the faked poller never touches git'));
   return {

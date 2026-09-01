@@ -1,13 +1,3 @@
-/*
- * The pure decisions behind M14 transcript ingestion (docs/plan-visions-3.md): which mapped agent-log
- * event becomes which durable record, what a per-tick batch is, and where a resumed read starts.
- *
- * The load-bearing rules here are the trust stamp (nothing ingested may exceed `reported`), the
- * user-prompt tag that keeps operator text out of knowledge and preference records, and the mismatch
- * rule on the durable offsets: anything that does not still describe a prefix of the file restarts at
- * end of file rather than replaying a rotated history.
- */
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { TailState } from '../server/core/memory-ingest-core.ts';
@@ -32,8 +22,6 @@ function event(overrides = {}) {
     ...overrides,
   };
 }
-
-// --- Mapping --------------------------------------------------------------
 
 test('an assistant turn becomes an episodic knowledge record stamped reported', () => {
   const input = memoryInputFromEvent(event());
@@ -134,8 +122,6 @@ test('an observed ts derives a stable id, which is what makes a re-ingest idempo
   assert.equal(first.record?.id, second.record?.id);
 });
 
-// --- Batching -------------------------------------------------------------
-
 test('a batch takes at most the per-tick cap and leaves the rest queued', () => {
   const queued = [1, 2, 3, 4, 5];
   const batch = planIngestBatch(queued, { maxPerTick: 2 });
@@ -154,8 +140,6 @@ test('the queue is bounded oldest-first, and reports what it dropped', () => {
   assert.deepEqual(queue, [3, 4]);
   assert.equal(dropped, 2);
 });
-
-// --- Durable offsets ------------------------------------------------------
 
 test('a recorded offset round-trips through normalization', () => {
   const state = recordTailOffset(null, {
@@ -236,13 +220,6 @@ test('an exhausted budget reads nothing and stays partial', () => {
   assert.equal(plan.partial, true);
 });
 
-// --- The observed ts is untrusted input -----------------------------------
-
-/*
- * A transcript line supplies its own timestamp, and that field decides which monthly segment a record
- * lands in. A future-dated one lands in a segment expiredSegmentKeys can never prune and heads every
- * recency ranking forever, so the window is the gate.
- */
 const NOW = 1766400000000;
 const DAY = 86400000;
 

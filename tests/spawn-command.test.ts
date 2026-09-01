@@ -1,6 +1,3 @@
-// Unit tests for the pure spawn-command builder and the extension classifier.
-// These exercise every spawn branch deterministically, without spawning a PTY.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildSpawnCommand, classifyClaudeKind } from '../session/sessions.ts';
@@ -109,8 +106,6 @@ test('empty inputs default safely (no crash, posix bare claude)', () => {
   assert.deepEqual(args, []);
 });
 
-// A PATH listing ~/.local/bin twice made `which -a claude` report one install twice, and the boot
-// warning then listed the identical path twice as if two claudes were shadowing each other.
 test('dedupePathMatches collapses a path repeated by a duplicated PATH entry', () => {
   const p = '/home/jwaters/.local/bin/claude';
   assert.deepEqual(dedupePathMatches([p, p], 'linux'), [p], 'one real install, one entry');
@@ -121,8 +116,6 @@ test('dedupePathMatches collapses a path repeated by a duplicated PATH entry', (
   );
 });
 
-// Survivors come back NORMALIZED, so the form compared is the form handed to the spawn and the
-// warning. Normalization follows the platform ARGUMENT, never the OS the test happens to run on.
 test('dedupePathMatches normalizes separators, trailing slashes and surrounding space', () => {
   assert.deepEqual(
     dedupePathMatches(['/home/u/.local/bin/claude', '/home/u/.local//bin/claude', '  /home/u/.local/bin/claude  '], 'linux'),
@@ -185,8 +178,7 @@ test('classifyClaudeKind maps extensions correctly', () => {
   assert.equal(classifyClaudeKind('C:\\a\\claude.bat'), 'shim');
   assert.equal(classifyClaudeKind('C:\\a\\claude.ps1'), 'shim');
   assert.equal(classifyClaudeKind('/usr/local/bin/claude'), 'shim');
-  // Extensionless binary inside a dotted directory: the dot belongs to a path
-  // segment, not the filename, so this must NOT be mistaken for an extension.
+
   assert.equal(classifyClaudeKind('C:\\Users\\johnw\\.local\\bin\\claude'), 'shim');
   assert.equal(classifyClaudeKind('/home/u/.local/bin/claude'), 'shim');
   assert.equal(classifyClaudeKind('C:\\Program Files\\x\\claude.exe'), 'exe');

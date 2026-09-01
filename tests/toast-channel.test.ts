@@ -1,9 +1,3 @@
-// The opt-in OS toast channel is Windows-only (BurntToast, with `msg` as the fallback). config.osToast
-// is a plain boolean that travels with a config.json, so an operator who enabled it on Windows and
-// moved to Linux used to get a powershell spawn plus a warning line for EVERY notification. It degrades
-// to a no-op after one warning instead. The win32 half is deliberately not exercised here: it shells
-// powershell, which is not something a unit test should do on any host.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 

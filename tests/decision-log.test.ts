@@ -1,6 +1,3 @@
-// Pure ring semantics of the decision trace (session/core/decision-log.ts): append order, the
-// cap, and the gate-repeat collapse that keeps a re-evaluating hold from burying everything else.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 

@@ -1,12 +1,3 @@
-// ── Hooks view ────────────────────────────────────────────────
-// Operator-defined Claude Code hooks, as a surface: the records config.json holds under `hooks`, an
-// inline editor to add or change one, and the read-only list of the hooks Glissa injects itself so an
-// operator can see what is already firing before adding more.
-//
-// A PULL surface like Mill: the report (`request-hooks-report`) is fetched when the tab is looked at
-// and after every write, and a `hooks-updated` broadcast from any client only says "fetch again". The
-// panel is DOM only; every string, the ordering and the draft rules come from hooks-view-core.mjs.
-
 import { buildPanelSection, buildStatChip, el, isPanelHidden, projectsOf } from './dom-helpers.ts';
 import { openConfirmDialog } from './session-card/modal.ts';
 import { showErrorToast } from './session-card/toast.ts';
@@ -73,20 +64,19 @@ let _sendRequest: ((message: Record<string, unknown>) => void) | null = null;
 let _requestSeq = 0;
 let _latestRequestId: string | null = null;
 let _draft: HookDraft | null = null;
-// The wire shape the editor opened with, so Cancel can tell an untouched form from a dirty one.
+
 let _draftOrigin: Record<string, unknown> | null = null;
 let _editorEl: HTMLElement | null = null;
 let _editorErrorEl: HTMLElement | null = null;
 let _saving = false;
-// The requestId of the save the EDITOR sent, so a row toggle answering in the same window cannot close
-// the editor or land its error in it.
+
 let _editorRequestId: string | null = null;
 let _filter = '';
-// Rows whose preview is open survive a repaint, keyed by hook id.
+
 const _openPreviews = new Set<string>();
-// A hook whose enable toggle or delete is in flight, so the row cannot be clicked twice.
+
 const _busyIds = new Set<string>();
-// Whether the next repaint should hand focus to the add button (after the editor closes).
+
 let _focusAddOnRender = false;
 
 const buildSection = (title: string | null | undefined, hint?: string | null) => buildPanelSection('hooks', title, hint);
@@ -105,7 +95,6 @@ function buildButton(className: string, label: string, onClick: () => void, aria
   return button;
 }
 
-// The requestId the message went out with, or null when nothing was sent.
 function send(message: Record<string, unknown>): string | null {
   if (!_sendRequest) return null;
   _requestSeq += 1;
@@ -113,8 +102,6 @@ function send(message: Record<string, unknown>): string | null {
   _sendRequest({ requestId, ...message });
   return requestId;
 }
-
-// ── Editor ──
 
 function buildField(label: string, control: HTMLElement, hint: string | null) {
   const field = el('label', 'hooks-field');
@@ -306,8 +293,7 @@ function buildEditor(draft: HookDraft) {
 
 function openEditor(hook: HookRecord | null, draft: HookDraft | null = null) {
   _draft = draft || (hook ? toDraft(hook) : emptyDraft(eventsOf(_report)));
-  // What Cancel compares against: the stored record for an edit, a blank form for anything new, so a
-  // template or a duplicate counts as unsaved work the moment it opens.
+
   _draftOrigin = fromDraft(hook ? toDraft(hook) : emptyDraft(eventsOf(_report)));
   _editorEl = buildEditor(_draft);
   render({ force: true });
@@ -342,8 +328,6 @@ function submitEditor() {
   if (!_editorRequestId) _saving = false;
 }
 
-// ── Rows ──
-
 function buildPreview(hook: HookRecord) {
   const details = el('details', 'hooks-preview');
   details.open = _openPreviews.has(hook.id);
@@ -365,7 +349,7 @@ function buildRow(hook: HookRecord, { grouped = false }: { grouped?: boolean } =
   if (hook.enabled === false) row.dataset.state = 'off';
   const main = el('div', 'hooks-row-main');
   const head = el('div', 'hooks-row-head');
-  // Inside a group the heading already names the event, so the chip carries only the matcher.
+
   head.append(el('span', 'hooks-row-name', hook.name));
   const chipText = grouped ? (hook.matcher || '') : eventChipText(hook);
   if (chipText) head.append(el('span', 'hooks-row-event', chipText));
@@ -422,8 +406,6 @@ function buildBuiltinRow(entry: HookBuiltinRow) {
   row.append(main);
   return row;
 }
-
-// ── Sections ──
 
 function buildTotalsSection() {
   const section = buildSection('Hooks', HOOKS_HINT);
@@ -523,8 +505,6 @@ function render({ force = false }: { force?: boolean } = {}) {
   if (add instanceof HTMLButtonElement) add.focus();
 }
 
-// ── Public API ──
-
 export function setHooksRequestSender(send: (message: Record<string, unknown>) => void) {
   _sendRequest = send;
 }
@@ -551,9 +531,7 @@ export function applyHooksReport(msg: unknown) {
   if (!shouldApplyHooksReport(msg, _latestRequestId)) return;
   _report = msg as HooksReport;
   _busyIds.clear();
-  // A save sent while the socket was closed never gets an answer; the report that follows a reconnect
-  // (or another client's write) is the moment to let the operator submit again. The editor's requestId
-  // stays put, so a result that lands after the report still routes to the editor rather than a toast.
+
   _saving = false;
   render();
 }

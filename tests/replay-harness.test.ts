@@ -41,12 +41,10 @@ test('v2 fixture (conflict Stop+permission): awaiting-input dominates, no ready'
 });
 
 test('codex fixture (approval turn): the recorded sequence replays through the codex adapter', async () => {
-  // Cut from a real recording made by test/probe-codex-session.js against codex-cli 0.147.0: the boot
-  // spinner, one prompt, the PermissionRequest, the blinking Action Required title, and Stop.
   const { version, agent, records } = load('v2-codex-approval-turn.jsonl');
   assert.equal(version, 2);
   assert.equal(agent, 'codex');
-  // The recording was made in a directory named `project`, which is what its idle title carries.
+
   const { signals } = await replayDetection(records, { ...FAST, agent, titleContext: { cwdBasename: 'project' } });
   const order = signals.map((s) => s.signal);
   assert.ok(order.includes('resume'), 'UserPromptSubmit opens the work cycle');
@@ -59,16 +57,13 @@ test('codex fixture (approval turn): the recorded sequence replays through the c
 
 test('the same codex recording read with the Claude title glyphs loses the title tier, which is why replay is adapter-aware', async () => {
   const { records } = load('v2-codex-approval-turn.jsonl');
-  // Hooks are dropped so the comparison is the TITLE tier alone; with them in, the authoritative
-  // signal arrives first and both readings look the same.
+
   const titlesOnly = records.filter((r) => r.type === 'data');
   const titleContext = { cwdBasename: 'project' };
   const asCodex = await replayDetection(titlesOnly, { ...FAST, agent: 'codex', titleContext });
   const asClaude = await replayDetection(titlesOnly, { ...FAST, agent: 'claude-code', titleContext });
   const kinds = (r: Awaited<ReturnType<typeof replayDetection>>) => new Set(r.signals.map((s) => s.signal));
-  // Codex's idle title is the bare cwd basename and its awaiting-input title leads with '[', both of
-  // which the Claude profile drops as shell-written window titles: read with the wrong vocabulary the
-  // card sits WORKING through the approval and past the end of the turn.
+
   assert.deepEqual([...kinds(asCodex)].sort(), ['awaiting-input', 'ready', 'working']);
   assert.deepEqual([...kinds(asClaude)], ['working']);
 });
@@ -101,13 +96,10 @@ test('real v1 recordings replay cleanly and never emit awaiting-input (title hon
     const { signals } = await replayDetection(records, FAST);
     const c = summarize(signals);
     assert.equal(c['awaiting-input'] || 0, 0, `${f}: title source must never emit awaiting-input`);
-    // (no assertion on ready: real recordings may or may not contain a clean
-    //  spinner->idle sequence; the contract under test is "no false WAITING".)
   }
 });
 
 test('perf: title source processes a large output stream cheaply (hot-path budget)', () => {
-  // Build ~1 MB of mixed PTY output with occasional OSC-0 titles.
   const chunkPlain = `${'x'.repeat(900)}\r\n`;
   const spin = '\x1b]0;⠂ Claude Code\x07';
   const idle = '\x1b]0;✳ Claude Code\x07';
@@ -121,6 +113,6 @@ test('perf: title source processes a large output stream cheaply (hot-path budge
   for (const c of chunks) src.feed(c);
   const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
   src.destroy();
-  // ~1 MB of PTY output should parse in well under 100 ms (no tokenizer/assembler).
+
   assert.ok(elapsedMs < 100, `title-source feed too slow: ${elapsedMs.toFixed(1)}ms for ${totalBytes} bytes`);
 });

@@ -1,9 +1,5 @@
 import { EventEmitter } from 'node:events';
 
-// Stands in for the `vscode` module the extension host injects, so tools/vscode-visions runs under
-// node:test. Only the surface the extension actually touches exists here; `__test` is the control
-// side (recorded diagnostics, fired events, the settings the extension reads).
-
 interface StubPosition {
   line: number;
   character: number;

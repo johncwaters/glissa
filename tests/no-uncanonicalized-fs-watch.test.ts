@@ -1,5 +1,3 @@
-// Every fs.watch path must pass canonicalizePath (shared/paths.ts): a Windows 8.3 short path aborts node in native code, and the 0.21.0 fix regressed once nothing enforced the seam.
-
 import { test } from "node:test";
 import assert from "node:assert";
 import fs from "node:fs";
@@ -22,11 +20,9 @@ const SKIP_DIRS = new Set([
   ".glissa-worktrees",
 ]);
 
-// Immediate paren keeps fs.watchFile, `watchFn = fsNode.watch` defaults, and prose mentions out of the match.
 const FS_WATCH_CALL = /\b(?:fs\w*\.watch|watchFn)\(/g;
 const CANONICALIZED_ARG = /^canonicalizePath\(/;
 
-// config-store's watchDir is path.dirname() of a path canonicalizePath resolved a few lines above.
 const ALLOWED = new Map([
   [path.join(ROOT, "server", "config-store.js"), "watchDir"],
   [path.join(ROOT, "server", "config-store.ts"), "watchDir"],

@@ -1,7 +1,3 @@
-// Pure notice text for the live context-pack channel (session/core/pack-notice.ts): what a session
-// tells its next turn when a pack it spawned against has been rebuilt. The wiring that consumes this
-// lives in tests/session-pack-notice.test.js and tests/backend-pack-notice-hook.test.js.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 

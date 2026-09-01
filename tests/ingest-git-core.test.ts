@@ -1,14 +1,3 @@
-/*
- * The pure git ingest core (docs/plan-ingestion.md, M8): porcelain v2 parsing across every shape a real
- * repo produces, the working-tree signature everything downstream dedupes on, the watch-set derivation,
- * and the one-event-per-settle decision.
- *
- * The signature tests are the load-bearing ones. A signature that moved when the tree did not would make
- * every `.git` write burst and every 60s poll publish the same unchanged working tree again, and since
- * M7.5 each of those is also the Visions lane's movement signal, so it would spend dispatch budget on
- * nothing.
- */
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { GitStatus, GitStatusCounts } from '../server/core/ingest-git-core.ts';
@@ -23,8 +12,6 @@ const NOW = 1700000000000;
 const SHA = '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b';
 const OTHER_SHA = '9f8e7d6c5b4a39281706f5e4d3c2b1a098765432';
 
-// A porcelain v2 listing carrying every entry kind at once: a worktree modification, a staged one, a
-// staged rename (whose line ends `<path><tab><origPath>`), an unmerged path, and an untracked file.
 const FULL_STATUS = [
   `# branch.oid ${SHA}`,
   '# branch.head main',
@@ -59,8 +46,6 @@ function baselineState(overrides = {}) {
     initialized: true, branch: 'main', oid: SHA, signature: CLEAN_SIGNATURE, ...overrides,
   };
 }
-
-// --- Layout ---------------------------------------------------------------
 
 test('rev-parse resolves a main checkout, and a relative common dir against the cwd it ran in', () => {
   const cwd = path.resolve('/projects/glissa');
@@ -104,12 +89,10 @@ test('lock and temp churn is noise, and an unnamed watch event never is', () => 
   for (const name of ['HEAD', 'index', 'packed-refs', 'MERGE_HEAD', 'COMMIT_EDITMSG', 'refs/heads/main']) {
     assert.equal(isNoiseGitFile(name), false, `${name} should wake a read`);
   }
-  // Windows reports a null filename for some batched writes; there is nothing to judge, so it wakes.
+
   assert.equal(isNoiseGitFile(null), false);
   assert.equal(isNoiseGitFile(''), false);
 });
-
-// --- Porcelain v2 ---------------------------------------------------------
 
 test('porcelain v2 reads the branch header, every entry kind, and paths containing spaces', () => {
   const status = parsePorcelainStatus(FULL_STATUS);
@@ -153,15 +136,12 @@ test('the signature ignores entry ORDER and the branch, and moves for a real tre
   const shuffled = parsePorcelainStatus([...headers, ...[...entries].reverse()].join('\n'));
   assert.equal(shuffled.signature, parsePorcelainStatus(FULL_STATUS).signature);
 
-  // A checkout changes the branch header and nothing about the working tree; the signature must hold, or
-  // a branch switch would publish a status-change on top of its branch-change.
   const onFeature = parsePorcelainStatus(FULL_STATUS.replace('branch.head main', 'branch.head feature/x'));
   assert.equal(onFeature.signature, parsePorcelainStatus(FULL_STATUS).signature);
 
   const extraFile = parsePorcelainStatus(`${FULL_STATUS}\n? second.txt`);
   assert.notEqual(extraFile.signature, parsePorcelainStatus(FULL_STATUS).signature);
 
-  // Staging a file changes its XY without changing its path, and that is a real move.
   const staged = parsePorcelainStatus(FULL_STATUS.replace('1 .M N...', '1 M. N...'));
   assert.notEqual(staged.signature, parsePorcelainStatus(FULL_STATUS).signature);
 });
@@ -181,12 +161,9 @@ test('a log line parses into sha, author, time and subject, and anything else is
   assert.equal(commitOrNull?.committedAt, 1699999999000);
   assert.equal(commitOrNull?.subject, 'fix the gate: keep it simple');
 
-  // What an unborn branch leaves behind: git exits non-zero and the shell passes the empty stdout on.
   assert.equal(parseCommitLine(''), null);
   assert.equal(parseCommitLine('fatal: your current branch does not have any commits yet\n'), null);
 });
-
-// --- Decisions ------------------------------------------------------------
 
 test('the first read of a repo is a baseline and publishes nothing', () => {
   const status = statusOf({ signature: 'a:1' });
@@ -216,7 +193,7 @@ test('a moved HEAD on the same branch publishes one commit carrying its branch a
   assert.equal(events[0].scope.root, '/repo');
   assert.equal(events[0].summary, 'commit 9f8e7d6 on main: add the feature flag');
   assert.equal(events[0].detail.sha, OTHER_SHA);
-  // Arrival time, not the record's own, so a rebase's replayed author dates cannot age the digest line.
+
   assert.equal(events[0].ts, NOW);
   assert.equal(events[0].detail.committedAt, NOW - 5000);
 });
@@ -242,7 +219,7 @@ test('a commit wins over the status move it caused, so one action never becomes 
   });
   assert.equal(events.length, 1);
   assert.equal(events[0].kind, 'commit');
-  // The suppressed status still advances, so the NEXT edit is measured against what the commit left.
+
   assert.equal(next.signature, CLEAN_SIGNATURE);
 });
 

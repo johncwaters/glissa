@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 
 import { NO_PATH_KEY, groupRoster, visibleOrder } from '../public/focus-view/roster-groups.ts';
 
-// Minimal row shape: orderRoster yields { id, ui, ... }; grouping reads row.ui.path and row.id.
 interface RosterRow {
   id: string;
   ui: { path: string | null | undefined };
@@ -32,7 +31,6 @@ test('3. multiple sessions on one path -> flat (no headers)', () => {
 });
 
 test('4. two paths -> not flat, two groups, order A->Z by basename', () => {
-  // Input deliberately zebra-before-alpha; group order must come out alpha-before-zebra.
   const grouped = groupRoster([row('z', 'C:\\code\\zebra'), row('a', 'C:\\code\\alpha')], pathOf);
   assert.equal(grouped.flat, false);
   assert.equal(grouped.groups.length, 2);
@@ -73,7 +71,7 @@ test('8. two different paths sharing a basename -> two groups, deterministic tie
   const grouped = groupRoster([row('y', 'C:\\y\\app'), row('x', 'C:\\x\\app')], pathOf);
   assert.equal(grouped.groups.length, 2);
   assert.deepEqual(grouped.groups.map((group) => group.label), ['app', 'app']);
-  // Tie broken by full key: C:\x\app sorts before C:\y\app.
+
   assert.deepEqual(grouped.order, ['C:\\x\\app', 'C:\\y\\app']);
 });
 

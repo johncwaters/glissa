@@ -224,8 +224,6 @@ function createSessionHookLifecycle(options: SessionHookOptions): SessionHookLif
         enableProjectMcp: options.enableProjectMcp,
         rtkPath: options.rtkPath,
         planLimits: options.planLimits,
-        // Read at every inject, not at construction, so an edit in the Hooks tab reaches the next
-        // restart of a live session without the session being recreated.
         userHooks: typeof options.getUserHooks === "function" ? options.getUserHooks() : [],
       });
       settingsHandle = nextSettingsHandle;

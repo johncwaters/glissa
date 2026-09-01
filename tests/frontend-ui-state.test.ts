@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 
 import type { UiActionName, UiState, UiStateSubscriber } from '../public/ui-state-core.ts';
 
-// ui-state-core is a browser module; dynamic-import it so the suite drives the shipped source.
 const importCore = () => import('../public/ui-state-core.ts');
 
 test('a fresh store starts on the declared initial state', async () => {

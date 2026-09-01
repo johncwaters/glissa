@@ -1,9 +1,3 @@
-// Settings injector - writes a per-session Claude Code settings file containing
-// HTTP-type hooks whose URLs carry the session's glissaId + bearer token, and returns
-// the `--settings <path>` arg appended to the claude spawn. No shell command (HTTP
-// hooks) => Windows-clean. Files live under a per-session subdir of the OS temp dir
-// and are removed on session destroy; a boot-time sweep clears orphans from crashes.
-
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,13 +10,8 @@ import type { UserHook } from '../session/core/user-hooks-core.ts';
 import { safePathSegment } from '../shared/paths.ts';
 
 const DEFAULT_BASE_DIR = path.join(os.tmpdir(), 'glissa-hooks');
-const DEFAULT_TIMEOUT_SEC = 5; // short: handler returns 200 immediately; never stall Claude
+const DEFAULT_TIMEOUT_SEC = 5;
 
-// This file carries a live session's hook bearer token, and it lives in the SHARED system temp dir on
-// POSIX hosts. Written with default modes, any other user on a multi-user box could read every live
-// token and forge hook callbacks (false COMPLETE, false WAITING, draining the pack-notice channel), so
-// the directory and the file take the same 0700/0600 discipline the pairings store and uploads use.
-// No-ops on Windows, where the ACL is what matters and node ignores the mode.
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
 
@@ -71,12 +60,6 @@ export interface WriteSessionSettingsOptions extends Omit<BuildHookSettingsOptio
   baseDir?: string;
 }
 
-/**
- * A directory an attacker pre-created (or replaced with a symlink) in shared /tmp turns the spawn-time
- * write into an arbitrary-file write as the server account, so a base dir Glissa did not just create
- * has to prove it is a real directory this user owns before anything is written under it. mkdir with
- * recursive:true does not apply the mode to a path that already exists, hence the explicit chmod.
- */
 function ensureOwnedDir(dir: string, mode: number): void {
   fs.mkdirSync(dir, { recursive: true, mode });
   const stat = fs.lstatSync(dir);
@@ -87,28 +70,14 @@ function ensureOwnedDir(dir: string, mode: number): void {
   try {
     fs.chmodSync(dir, mode);
   } catch {
-    // Windows: modes are advisory and chmod on a directory is a no-op that can still throw.
   }
 }
 
-// Hook events Glissa subscribes to. Notification covers idle_prompt (=>ready) and
-// permission_prompt (=>awaiting-input); see hook-source.mapHookToSignal. SubagentStart/
-// SubagentStop are not state transitions: they track the live background sub-agent count so a
-// main-agent Stop fired while a background sub-agent is still running does not falsely COMPLETE.
-// TaskCreated/TaskCompleted/TeammateIdle are likewise tracking-only: they drain (or reactivate)
-// the declared background_tasks gate precisely, so an idle-but-alive teammate (declared
-// status:running on every Stop until shutdown) releases a gated completion immediately instead
-// of pinning the card WORKING until the TTL.
 const HOOK_EVENTS = ['SessionStart', 'SessionEnd', 'UserPromptSubmit', 'Stop', 'Notification', 'PermissionRequest', 'SubagentStart', 'SubagentStop', 'TaskCreated', 'TaskCompleted', 'TeammateIdle'];
 
-// PostToolUse is subscribed ONLY with this tool-name matcher (scheduled-revival tracking:
-// ScheduleWakeup = dynamic /loop sleep, CronCreate/CronDelete = cron tasks). The matcher is
-// essential: a matcher-less PostToolUse hook would POST on EVERY tool call. hook-source
-// re-filters by tool_name server-side as defense in depth.
 const WAKEUP_TOOL_MATCHER = 'ScheduleWakeup|CronCreate|CronDelete';
 const PACK_READ_TOOL_MATCHER = 'Read';
 
-// The managed statusLine relay, and the marker meaning "the operator had no statusLine of their own".
 const RELAY_PATH = relayPath('statusline-relay');
 const NO_CHAIN = '-';
 
@@ -116,23 +85,14 @@ function generateToken(): string {
   return crypto.randomBytes(32).toString('hex');
 }
 
-// Claude Code runs the statusLine command through git-bash on Windows, where a backslash path dies
-// silently with exit 127, so every path in the command string is forward-slashed.
 function toForwardSlashes(value: string): string {
   return String(value).replace(/\\/g, '/');
 }
 
-// Single-quote for that same shell. The relay path and the hook URL are ours, but the URL carries a
-// query string and the base64 carries + and /, so nothing goes in bare.
 function shellQuote(value: string): string {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
-/*
- * The statusLine the operator already had, read at spawn time from ~/.claude/settings.json. Best
- * effort by design: absent, unreadable or malformed all mean "nothing to chain", which is a valid
- * state, not an error. Only a command-type entry can be chained; any other type is left alone.
- */
 function readUserStatuslineCommand(settingsPath: string): string | null {
   try {
     const parsed: unknown = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
@@ -148,12 +108,6 @@ function readUserStatuslineCommand(settingsPath: string): string | null {
   }
 }
 
-/*
- * A statusLine in a per-session settings file REPLACES the global one rather than adding to it
- * (live-verified, Claude Code 2.1.235), so the operator's own command is base64'd into our argv and the
- * relay runs it. Base64 because a HUD command can contain quotes, spaces and shell metacharacters that
- * would otherwise have to survive two levels of quoting.
- */
 function buildStatuslineCommand(
   { relayPath = RELAY_PATH, postUrl, userCommand = null }:
     { relayPath?: string; postUrl: string; userCommand?: string | null },
@@ -162,12 +116,6 @@ function buildStatuslineCommand(
   return `node ${shellQuote(toForwardSlashes(relayPath))} ${shellQuote(postUrl)} ${shellQuote(encoded)}`;
 }
 
-// Build the Claude Code settings object with HTTP hooks for one session. An optional
-// `permissions` ({ deny: [...], defaultMode }) is merged in for the headless lanes - the PR-review and
-// PostHog deny-lists (efficacy under --dangerously-skip-permissions is why they are a guard, not the
-// guard), plus the `acceptEdits` mode that is the actual write boundary for the two prompt-embedding
-// lanes (server/core/lane-permissions-core.js). A lane passing neither leaves the file as it was, so
-// ordinary user sessions stay byte-identical to before.
 function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, detectPackReads = false, enableProjectMcp = false, rtkPath = null, planLimits = false, userSettingsPath = null, relayPath = RELAY_PATH, userHooks = [] }: BuildHookSettingsOptions): HookSettings {
   if (!port || !glissaId || !token) {
     throw new Error('buildHookSettings requires port, glissaId, token');
@@ -188,8 +136,6 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
   if (rtkPath) {
     hooks.PreToolUse = [buildRtkHookEntry(rtkPath)];
   }
-  // Operator hooks (the Hooks tab) go LAST under their event, so nothing above can be displaced and a
-  // session with none configured writes a file byte-identical to before.
   appendUserHooks(hooks, Array.isArray(userHooks) ? userHooks : []);
   const settings: HookSettings = { hooks };
   const denyRules = permissions && Array.isArray(permissions.deny) ? permissions.deny.slice() : [];
@@ -199,18 +145,9 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
     if (denyRules.length > 0) settings.permissions.deny = denyRules;
     if (defaultMode) settings.permissions.defaultMode = defaultMode;
   }
-  // Headless (`-p`) sessions cannot answer the interactive "trust this .mcp.json server?" prompt, so a
-  // project MCP server would otherwise never load. This flag pre-trusts every project-scoped server for
-  // the session. Added ONLY when a lane opts in, so ordinary sessions stay byte-identical.
   if (enableProjectMcp) {
     settings.enableAllProjectMcpServers = true;
   }
-  /*
-   * Official plan-limit ingestion. The statusLine payload is the only place Claude Code publishes the
-   * `/usage` rate limits to anything outside itself, and it arrives on a change signal rather than a
-   * heartbeat (zero invocations while idle). Injected only when the lane is on, so an opted-out session
-   * writes a settings file byte-identical to the pre-statusline one.
-   */
   if (planLimits) {
     const statuslinePath = userSettingsPath || path.join(os.homedir(), '.claude', 'settings.json');
     settings.statusLine = {
@@ -225,11 +162,6 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
   return settings;
 }
 
-/*
- * What buildHookSettings above writes, as rows the Hooks tab lists under "Glissa's own hooks". Derived
- * from the same two switches (and the same rtk entry builder) rather than restated, because a
- * hand-written copy of this list drifts the moment either switch changes what the file gets.
- */
 function describeBuiltinHooks(
   { detectScheduledWakeups = true, detectPackReads = false, rtkPath = null }:
     { detectScheduledWakeups?: boolean; detectPackReads?: boolean; rtkPath?: string | null } = {},
@@ -241,14 +173,12 @@ function describeBuiltinHooks(
   return rows;
 }
 
-// Write the per-session settings file. Returns { settingsPath, dir, token, cleanup }.
 function settingsDetectPackReads(settings: HookSettings): boolean {
   const postToolUse = settings.hooks?.PostToolUse;
   if (!Array.isArray(postToolUse)) return false;
   return postToolUse.some((entry) => entry?.matcher === PACK_READ_TOOL_MATCHER);
 }
 
-// Everything this does not use itself is forwarded to buildHookSettings, which owns those defaults.
 function writeSessionSettings({ glissaId, token, baseDir = DEFAULT_BASE_DIR, ...rest }: WriteSessionSettingsOptions) {
   const tok = token || generateToken();
   const dir = path.join(baseDir, safePathSegment(glissaId));
@@ -256,38 +186,31 @@ function writeSessionSettings({ glissaId, token, baseDir = DEFAULT_BASE_DIR, ...
   ensureOwnedDir(dir, DIR_MODE);
   const settingsPath = path.join(dir, 'settings.json');
   const settings = buildHookSettings({ ...rest, glissaId, token: tok });
-  // mode on writeFileSync only applies to a file it CREATES, so a settings file left behind by an
-  // earlier run keeps whatever mode it had; the chmod is what makes the 0600 claim true either way.
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), { mode: FILE_MODE });
   try {
     fs.chmodSync(settingsPath, FILE_MODE);
   } catch {
-    // Windows again: advisory, and a failure here must not cost the spawn.
   }
   return {
     settingsPath,
     dir,
     token: tok,
-    // What the file actually got, not what was asked for: the measurement lane reports a pack delivery
-    // as unmeasurable unless the Read matcher really reached this settings file.
     packReadHook: settingsDetectPackReads(settings),
     cleanup() {
       try {
         fs.rmSync(dir, { recursive: true, force: true });
       } catch {
-        /* best-effort */
       }
     },
   };
 }
 
-// Boot-time recursive delete of aged orphan dirs, so the base dir gets ensureOwnedDir's discipline non-destructively: a planted symlink or alien-owned base sweeps NOTHING (entries inside need no check, a dirent is isDirectory() only for a real directory).
 function sweepOrphans(baseDir: string = DEFAULT_BASE_DIR, maxAgeMs: number = 24 * 60 * 60 * 1000): number {
   let baseStat: fs.Stats;
   try {
     baseStat = fs.lstatSync(baseDir);
   } catch {
-    return 0; // base dir doesn't exist yet
+    return 0;
   }
   const ownedByUs = typeof process.getuid !== 'function' || baseStat.uid === process.getuid();
   if (!baseStat.isDirectory() || !ownedByUs) {
@@ -311,7 +234,6 @@ function sweepOrphans(baseDir: string = DEFAULT_BASE_DIR, maxAgeMs: number = 24 
         removed++;
       }
     } catch {
-      /* skip */
     }
   }
   return removed;

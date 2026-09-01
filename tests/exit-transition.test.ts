@@ -1,5 +1,3 @@
-// Unit tests for the pure PTY-exit decision function (session/core/exit-transition.ts).
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 

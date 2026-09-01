@@ -1,9 +1,3 @@
-/*
- * The intent model as threads (docs/plan-visions-4-focus.md, M20): several live statements per project,
- * each bound to the uris it was advanced on, decaying on read. Pure: ids are minted from content and
- * the clock the caller passes, so a revive or a replay lands the same state.
- */
-
 import crypto from 'node:crypto';
 
 import { VISIONS_THREAD_ID_PATTERN } from '../../shared/visions-intent-ids.ts';
@@ -14,7 +8,7 @@ const MODEL_SOURCE = 'model';
 const LEGACY_OPERATOR_SOURCE = 'operator';
 const MAX_THREADS_PER_PROJECT = 5;
 const DEFAULT_THREAD_TTL_MS = 72 * 3600000;
-// Built from the ONE definition every id check in the lane and in the browser reads, never restated.
+
 const THREAD_ID_PATTERN = VISIONS_THREAD_ID_PATTERN;
 const THREAD_ID_RE = new RegExp(`^${THREAD_ID_PATTERN}$`);
 const THREAD_ID_HEX_CHARS = 8;
@@ -43,8 +37,6 @@ function normalizeProjectKey(projectId: unknown): string | null {
   return typeof projectId === 'string' && projectId ? projectId : null;
 }
 
-// Strings only, and one line by construction: the text is model-authored from an untrusted buffer, so
-// an embedded break in it could otherwise read as a Glissa-authored prompt line.
 function sanitizeIntentText(raw: unknown, { maxChars = MAX_INTENT_CHARS }: { maxChars?: number } = {}): string {
   if (typeof raw !== 'string') return '';
   return sanitizeOneLine(raw, maxChars);
@@ -62,15 +54,12 @@ function mintThreadId(seed: string, taken: Set<string>): string {
   }
 }
 
-// Newest kept and each one bounded: a long-lived thread would otherwise carry every uri it was ever
-// advanced on, and every one of them rides every broadcast of that thread.
 function sanitizeUris(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   const unique = [...new Set(raw.filter((uri): uri is string => typeof uri === 'string' && uri !== '' && uri.length <= MAX_THREAD_URI_CHARS))];
   return unique.slice(-MAX_THREAD_URIS);
 }
 
-// The one uri a single advance may bind, held to the same rules as a stored list: over-long is no uri.
 function sanitizeUri(raw: unknown): string | null {
   const [uri] = sanitizeUris([raw]);
   return uri || null;
@@ -93,7 +82,6 @@ function reviveThread(raw: unknown, { maxChars = MAX_INTENT_CHARS }: { maxChars?
   };
 }
 
-// The M5 slot and the M11 per-project slot, each lifted into one thread so an upgrade keeps the statement.
 function reviveLegacySlot(
   raw: unknown,
   projectKey: string | null,
@@ -125,7 +113,6 @@ function reviveThreadList(raw: unknown, { maxChars = MAX_INTENT_CHARS }: { maxCh
   return threads.slice(0, MAX_THREADS_PER_PROJECT);
 }
 
-// Ids are the stable UUIDs ensureProjectIds assigns, so only a deletion orphans a project, never a rename.
 function pruneIntentProjects(state: IntentState | null | undefined, projectIds: unknown): IntentState {
   const current = state || createIntentState();
   if (!Array.isArray(projectIds)) return current;
@@ -189,7 +176,6 @@ function byRecency(left: IntentThread, right: IntentThread): number {
   return right.ts - left.ts || right.hits - left.hits;
 }
 
-// Live threads, newest first: the one this uri was advanced on leads whatever its age.
 function liveThreadsFor(
   state: IntentState | null | undefined,
   projectId: string | null,
@@ -202,10 +188,6 @@ function liveThreadsFor(
   return [...bound, ...rest];
 }
 
-/*
- * The thread one dispatch is about. An unowned uri reads only the unowned list and a project reads only
- * its own: the fallback the slot model had ran unowned text INTO projects, which is the leak M20 closes.
- */
 function activeThreadFor(
   state: IntentState | null | undefined,
   projectId: string | null,
@@ -221,8 +203,6 @@ function isEmptyIntent(state: IntentState | null | undefined): boolean {
   return Object.values(current.byProject || {}).every((threads) => !Array.isArray(threads) || threads.length === 0);
 }
 
-// Decay is applied on read, never by a timer: a thread nobody advanced within the ttl is retired. The
-// keys whose list shrank come back with it, so the caller broadcasts exactly those and derives nothing.
 function retireStaleThreads(
   state: IntentState | null | undefined,
   { now, ttlMs = DEFAULT_THREAD_TTL_MS }: { now?: unknown; ttlMs?: number } = {},
@@ -245,10 +225,6 @@ function retireStaleThreads(
   return { state: { byProject, unowned }, changed: true, projects };
 }
 
-/*
- * The result contract: a string advances the active thread, an object names one or asks for `new`, and
- * an explicit null thread is the parsed form of the string, so reading a proposal twice returns it.
- */
 function readIntentProposal(
   raw: unknown,
   { maxChars = MAX_INTENT_CHARS }: { maxChars?: number } = {},
@@ -285,7 +261,7 @@ function applyModelIntent(state: IntentState | null | undefined, {
   const current = state || createIntentState();
   const proposal = readIntentProposal(intent);
   if (!proposal) return { state: current, changed: false, thread: null, refused: null };
-  // Sanitized once, here: a uri the thread would refuse to store must not decide selection or change.
+
   const boundUri = sanitizeUri(uri);
   const threads = threadsOf(current, projectId);
   const target = proposal.thread === null || proposal.thread === NEW_THREAD
@@ -311,7 +287,7 @@ function applyModelIntent(state: IntentState | null | undefined, {
     ts: Number(now) || 0,
     hits: 1,
   };
-  // The oldest retires when a sixth opens, so a project can never hold more than it can read.
+
   const kept = [...threads].sort(byRecency).slice(0, MAX_THREADS_PER_PROJECT - 1);
   return { state: withThreads(current, projectId, [...kept, opened]), changed: true, thread: opened, refused: null };
 }
@@ -322,7 +298,6 @@ function threadPayload(thread: IntentThread) {
   };
 }
 
-// What one project puts on the wire: its threads with the active one first.
 function intentProjectPayload(state: IntentState | null | undefined, projectId: string | null, uri: string | null = null) {
   const threads = liveThreadsFor(state, projectId, uri).map(threadPayload);
   return { active: threads[0] || null, threads };

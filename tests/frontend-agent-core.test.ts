@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-// agent-core is ESM (.mjs); dynamic-import it so the suite drives the shipped module.
 const importCore = () => import('../public/session-card/agent-core.ts');
 
 test('agentBadgeText: the default agent renders no badge', async () => {

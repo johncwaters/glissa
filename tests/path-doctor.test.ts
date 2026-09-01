@@ -1,7 +1,3 @@
-// Unit tests for the pure PATH helpers behind `glissa doctor` and the post-install
-// PATH notice. No I/O: every function takes its environment as arguments, so the
-// behavior is deterministic and platform-independent under `node --test`.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';

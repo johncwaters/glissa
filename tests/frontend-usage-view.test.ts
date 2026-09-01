@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-// usage-view-core is ESM (.mjs); dynamic-import it so the suite drives the shipped module.
 const importCore = () => import('../public/usage-view-core.ts');
 
 test('formatUsd: cents, thousands grouping, sub-cent precision and a missing value', async () => {
@@ -10,7 +9,7 @@ test('formatUsd: cents, thousands grouping, sub-cent precision and a missing val
   assert.equal(formatUsd(1.5), '$1.50');
   assert.equal(formatUsd(1234.567), '$1,234.57');
   assert.equal(formatUsd(1234567.891), '$1,234,567.89');
-  // A per-model row can legitimately cost a fraction of a cent; rounding it to $0.00 would read as free.
+
   assert.equal(formatUsd(0.0042), '$0.0042');
   assert.equal(formatUsd(-2.5), '-$2.50');
   assert.equal(formatUsd(null), NO_VALUE);
@@ -23,7 +22,7 @@ test('formatUsd: a nonzero cost below the last decimal never prints as $0.0000',
   assert.equal(formatUsd(0.000004), '<$0.0001');
   assert.equal(formatUsd(0.00009), '<$0.0001');
   assert.equal(formatUsd(-0.000004), 'above -$0.0001');
-  // The boundary itself is representable, so it prints normally.
+
   assert.equal(formatUsd(0.0001), '$0.0001');
 });
 
@@ -36,7 +35,7 @@ test('formatTokens: plain under 1k, then k, M and B with trailing zeros trimmed'
   assert.equal(formatTokens(12345), '12.3k');
   assert.equal(formatTokens(1000000), '1M');
   assert.equal(formatTokens(1234567), '1.23M');
-  // Just below a million already rounds to 1.0M at k precision, so it must not read "1000k".
+
   assert.equal(formatTokens(999950), '1M');
   assert.equal(formatTokens(-1500), '-1.5k');
   assert.equal(formatTokens('nope'), NO_VALUE);
@@ -47,10 +46,10 @@ test('formatTokens: cache totals reach billions, so they get a B tier rather tha
   assert.equal(formatTokens(1e9), '1B');
   assert.equal(formatTokens(12.5e9), '12.5B');
   assert.equal(formatTokens(1.234e9), '1.23B');
-  // Same crossing rule one tier up: this already rounds to 1000.00M at M precision.
+
   assert.equal(formatTokens(999995000), '1B');
   assert.equal(formatTokens(999994000), '999.99M');
-  // A magnitude that rounds to zero must not carry a sign.
+
   assert.equal(formatTokens(-0.4), '0');
 });
 
@@ -90,21 +89,18 @@ test('dayLabel and dayRangeLabel: month plus day, and a range worded "to"', asyn
   assert.equal(dayLabel('not-a-day'), 'not-a-day');
   assert.equal(dayRangeLabel([]), '');
   assert.equal(dayRangeLabel(['2026-08-19']), 'Aug 19');
-  // Order-independent, and the wording is "to" because the repo has no dash characters.
+
   assert.equal(dayRangeLabel([{ day: '2026-08-19' }, { day: '2026-08-12' }]), 'Aug 12 to Aug 19');
 });
 
-// The daily buckets are keyed on the SERVER's clock, so the today tile has to be resolved in the
-// server's zone. Reading the browser's calendar day silently missed the bucket for any viewer in
-// another zone, which remote mode makes routine.
 test('reportDayKey: the report ts resolved in the report timezone, not the browser one', async () => {
   const { reportDayKey } = await importCore();
   const ts = Date.UTC(2026, 7, 19, 3, 30);
   assert.equal(reportDayKey({ ts, tz: 'UTC' }), '2026-08-19');
   assert.equal(reportDayKey({ ts, tz: 'Asia/Tokyo' }), '2026-08-19');
-  // Same instant, still the previous day in Los Angeles.
+
   assert.equal(reportDayKey({ ts, tz: 'America/Los_Angeles' }), '2026-08-18');
-  // An unresolvable zone falls back to this machine's day rather than losing the tile.
+
   assert.match(reportDayKey({ ts, tz: 'Not/AZone' }), /^\d{4}-\d{2}-\d{2}$/);
   assert.equal(reportDayKey(null), '');
   assert.equal(reportDayKey({ ts: 0, tz: 'UTC' }), '');
@@ -159,16 +155,13 @@ test('blockProgress: elapsed and remaining within the block window, clamped at b
   assert.equal(mid.totalMinutes, 300);
   assert.equal(mid.elapsedMinutes, 60);
   assert.equal(mid.remainingMinutes, 240);
-  // A clock that already passed the window end reads full, never over.
+
   assert.equal(blockProgress({ startTs: start, endTs: end }, end + 60000)?.pct, 100);
   assert.equal(blockProgress({ startTs: start, endTs: end }, start - 60000)?.pct, 0);
   assert.equal(blockProgress({ startTs: start, endTs: start }, start), null);
   assert.equal(blockProgress(null), null);
 });
 
-// The wire carries tokenLimit.pct as a RATIO (server/core/usage-blocks-core.ts builds
-// activeBlock.tokens / max, pinned by tests/usage-blocks-core.test.js). Treating it as a percentage
-// left the meter near empty, the line reading 0%, and the attention dot unable to fire at all.
 test('limitPct: the wire ratio converted to the percent every threshold works in', async () => {
   const { limitPct } = await importCore();
   assert.equal(limitPct({ max: 1000, pct: 0.8 }), 80);
@@ -207,15 +200,13 @@ test('projected limit: where the burn rate lands, not only where the block alrea
   );
   assert.equal(projectionLimitLine(null, tokenLimit), '');
 
-  // A block only a fifth of the way in but heading past the reference is the whole point: a purely
-  // reactive alarm fires after the tokens are already spent.
   const heading = { tokenLimit, activeBlock: { projection: { projectedTokens: 900 } } };
   assert.equal(blockAttentionTone(heading), 'warn');
   assert.equal(hasUsageAttention(heading), true);
   const calm = { tokenLimit, activeBlock: { projection: { projectedTokens: 300 } } };
   assert.equal(blockAttentionTone(calm), 'ok');
   assert.equal(hasUsageAttention(calm), false);
-  // Already past the threshold, regardless of where it is heading.
+
   assert.equal(blockAttentionTone({ tokenLimit: { max: 10, pct: 0.81 } }), 'warn');
   assert.equal(blockAttentionTone({ tokenLimit: { max: 10, pct: 1.4 } }), 'crit');
   assert.equal(hasUsageAttention({ tokenLimit: { max: 10, pct: 0.12 } }), false);
@@ -271,7 +262,7 @@ test('pricing and scan lines: source, staleness, missing models and a partial pa
   );
   assert.equal(pricingSourceLine({ source: 'fetched' }), 'Prices fetched from the public model price table.');
   assert.equal(pricingSourceLine({ source: 'snapshot' }), 'Prices from the price table bundled with this Glissa build.');
-  // A failed pricing load is a reported state on the wire, not an unknown one.
+
   assert.equal(
     pricingSourceLine({ source: 'unavailable' }),
     'Model prices could not be loaded, so every cost below counts as zero.',
@@ -292,8 +283,6 @@ test('pricing and scan lines: source, staleness, missing models and a partial pa
   assert.match(partial, /skipped this pass/);
 });
 
-// scan.dirs is an ARRAY of resolved directories on the wire (server/usage-scanner.js sends
-// dirs.slice()), so a finite-number check dropped the clause on every real report.
 test('scanLine: counts the dirs array the wire actually sends', async () => {
   const { scanLine } = await importCore();
   assert.match(scanLine({ dirs: ['/a', '/b'], files: 3, entries: 4 }), /^Scanned 2 transcript directories, /);
@@ -301,8 +290,6 @@ test('scanLine: counts the dirs array the wire actually sends', async () => {
   assert.match(scanLine({ dirs: [], files: 3, entries: 4 }), /^Scanned 0 transcript directories, /);
 });
 
-// An error report carries no totals, so rendering the normal sections against it printed a confident
-// zero for a lane that is switched off or cannot see its transcripts.
 test('unavailable reports: the reason is surfaced instead of a page of zeros', async () => {
   const { isUsageUnavailable, usageErrorLine, usageWarningLine } = await importCore();
   assert.equal(isUsageUnavailable({ error: 'Usage tracking is disabled' }), true);
@@ -321,7 +308,7 @@ test('unavailable reports: the reason is surfaced instead of a page of zeros', a
 
 test('shouldApplyUsageReport: an unsolicited report always lands, a superseded reply never does', async () => {
   const { shouldApplyUsageReport } = await importCore();
-  // The connect-time replay and any broadcast carry no id.
+
   assert.equal(shouldApplyUsageReport({ requestId: null }, 'usage-4'), true);
   assert.equal(shouldApplyUsageReport({}, 'usage-4'), true);
   assert.equal(shouldApplyUsageReport({ requestId: 'usage-4' }, 'usage-4'), true);
@@ -395,8 +382,6 @@ test('sortDailyRows and sortModelRows: newest day first, biggest model first', a
   assert.deepEqual(sortModelRows(null), []);
 });
 
-// The tables are sorted for whatever question the operator brought, so cost order has to be reachable:
-// the default recency order buries the expensive row.
 test('sortUsageRows: any column, either direction, with the header state helpers agreeing', async () => {
   const { sortUsageRows, sortSessionRows, nextSortState, defaultSortDir, ariaSortValue, modelLabel } = await importCore();
   const rows = [
@@ -410,15 +395,15 @@ test('sortUsageRows: any column, either direction, with the header state helpers
   assert.deepEqual(sortUsageRows(rows, 'label', 'asc').map((r) => r.id), ['a', 'b', 'c']);
   assert.deepEqual(sortUsageRows(rows, 'label', 'desc').map((r) => r.id), ['c', 'b', 'a']);
   assert.deepEqual(sortSessionRows(rows, { key: 'costUSD', dir: 'desc' }).map((r) => r.id), ['a', 'c', 'b']);
-  // A model table tie-breaks on its own label, not a session one.
+
   const models = [{ model: 'zeta', tokens: 5 }, { model: 'alpha', tokens: 5 }];
   assert.deepEqual(sortUsageRows(models, 'tokens', 'desc', modelLabel).map((r) => r.model), ['alpha', 'zeta']);
 
   assert.equal(defaultSortDir('tokens'), 'desc');
   assert.equal(defaultSortDir('label'), 'asc');
-  // A date column leads with the newest, matching DEFAULT_DAY_SORT and the section's stated default.
+
   assert.equal(defaultSortDir('day'), 'desc');
-  // Same column toggles; a new column takes its own default.
+
   assert.deepEqual(nextSortState({ key: 'tokens', dir: 'desc' }, 'tokens'), { key: 'tokens', dir: 'asc' });
   assert.deepEqual(nextSortState({ key: 'tokens', dir: 'asc' }, 'tokens'), { key: 'tokens', dir: 'desc' });
   assert.deepEqual(nextSortState({ key: 'tokens', dir: 'asc' }, 'costUSD'), { key: 'costUSD', dir: 'desc' });
@@ -436,7 +421,6 @@ test('dailyRowForDay: exact day match or null', async () => {
   assert.equal(dailyRowForDay(null, '2026-08-19'), null);
 });
 
-// A gap block is the ABSENCE of work; a row of zeros for it would read as a quiet block instead.
 test('blockHistoryRows: newest first, gaps dropped, active flagged, capped', async () => {
   const { blockHistoryRows } = await importCore();
   const blocks = [
@@ -463,8 +447,6 @@ test('sessionChipText: tokens plus cost, tokens alone, or nothing to show', asyn
   assert.equal(sessionChipText(null), '');
 });
 
-// Claude's own figure for a conversation, when a statusLine callback reported one, beats the scanner's
-// list-price arithmetic; the chip title is what keeps the two from being confused.
 test('sessionChipCost: official cost wins over the estimate, and the title says which', async () => {
   const { sessionChipCost, sessionChipText, sessionChipTitle } = await importCore();
   assert.deepEqual(sessionChipCost({ costUSD: 0.42, officialCostUSD: 2.75 }), { costUSD: 2.75, source: 'official' });
@@ -475,10 +457,6 @@ test('sessionChipCost: official cost wins over the estimate, and the title says 
   assert.match(sessionChipTitle({ costUSD: 0.42, officialCostUSD: 2.75 }), /reported by Claude Code/);
   assert.match(sessionChipTitle({ costUSD: 0.42 }), /estimated API list-price/);
 });
-
-// ── Vendors ──
-// Everything vendor-aware is additive: an all-Claude machine must render exactly as it did before, so
-// each of these is gated on a non-Claude vendor actually having data.
 
 test('vendorTotalsRows and hasMultiVendorUsage: biggest first, and silent on an all-Claude machine', async () => {
   const { vendorTotalsRows, hasMultiVendorUsage, vendorLabel } = await importCore();
@@ -492,9 +470,9 @@ test('vendorTotalsRows and hasMultiVendorUsage: biggest first, and silent on an 
   assert.deepEqual(vendorTotalsRows(totals).map((row) => row.vendor), ['codex', 'claude', 'grok']);
   assert.deepEqual(vendorTotalsRows(totals)[0], { vendor: 'codex', label: 'Codex', tokens: 3000, costUSD: 2 });
   assert.equal(hasMultiVendorUsage(totals), true);
-  // One vendor, and it is Claude: nothing to split.
+
   assert.equal(hasMultiVendorUsage({ byVendor: { claude: { tokens: 5, costUSD: 1 } } }), false);
-  // One vendor that is NOT Claude is still worth naming.
+
   assert.equal(hasMultiVendorUsage({ byVendor: { codex: { tokens: 5, costUSD: 1 } } }), true);
   assert.equal(hasMultiVendorUsage({ byVendor: {} }), false);
   assert.equal(hasMultiVendorUsage({}), false);
@@ -519,8 +497,6 @@ test('modelRowPrefix and claudeOnlyHint: only shown once another vendor is on th
   assert.equal(claudeOnlyHint(null), '');
 });
 
-// ── Official plan limits ──
-
 test('planWindowOf and hasOfficialPlanLimits: a window is absent unless it reported something', async () => {
   const { planWindowOf, hasOfficialPlanLimits, officialFiveHourPct } = await importCore();
   const limits = { fiveHour: { pct: 12, resetsAtMs: 1000 }, sevenDay: null };
@@ -528,7 +504,7 @@ test('planWindowOf and hasOfficialPlanLimits: a window is absent unless it repor
   assert.equal(planWindowOf(limits, 'sevenDay'), null);
   assert.equal(planWindowOf(null, 'fiveHour'), null);
   assert.equal(planWindowOf({ fiveHour: {} }, 'fiveHour'), null);
-  // Absent stays distinct from zero: 0% used is a fact, a missing window is not.
+
   assert.deepEqual(planWindowOf({ fiveHour: { pct: 0, resetsAtMs: null } }, 'fiveHour'), { pct: 0, resetsAtMs: null });
   assert.equal(hasOfficialPlanLimits(limits), true);
   assert.equal(hasOfficialPlanLimits({ fiveHour: null, sevenDay: null }), false);
@@ -538,22 +514,20 @@ test('planWindowOf and hasOfficialPlanLimits: a window is absent unless it repor
   assert.equal(officialFiveHourPct(null), null);
 });
 
-// The whole point of the lane: an official ceiling replaces a heuristic invented because nothing
-// official was reachable.
 test('blockAttentionTone: official five-hour usage outranks the largest-block estimate', async () => {
   const { blockAttentionTone, hasUsageAttention } = await importCore();
-  // The estimate would be calm, the official number is not: official wins.
+
   const calmEstimate = { tokenLimit: { max: 1000, pct: 0.1 }, activeBlock: { projection: { projectedTokens: 200 } } };
   assert.equal(blockAttentionTone(calmEstimate), 'ok');
   assert.equal(blockAttentionTone(calmEstimate, { fiveHour: { pct: 85 } }), 'warn');
   assert.equal(blockAttentionTone(calmEstimate, { fiveHour: { pct: 100 } }), 'crit');
   assert.equal(hasUsageAttention(calmEstimate, { fiveHour: { pct: 85 } }), true);
-  // And the reverse: an alarming estimate is overridden by an official number that says otherwise.
+
   const hotEstimate = { tokenLimit: { max: 1000, pct: 0.95 } };
   assert.equal(blockAttentionTone(hotEstimate), 'warn');
   assert.equal(blockAttentionTone(hotEstimate, { fiveHour: { pct: 4 } }), 'ok');
   assert.equal(hasUsageAttention(hotEstimate, { fiveHour: { pct: 4 } }), false);
-  // With no official data the heuristic still governs, exactly as before.
+
   assert.equal(blockAttentionTone(hotEstimate, { fiveHour: null }), 'warn');
   assert.equal(blockAttentionTone(hotEstimate, null), 'warn');
 });
@@ -575,14 +549,12 @@ test('planWindowUsedText and resetCountdownText: the pair the strip renders per 
   assert.equal(planWindowUsedText(null), NO_VALUE);
   assert.equal(resetCountdownText(now + 95 * 60000, now), 'resets in 1h 35m');
   assert.equal(resetCountdownText(now + 30000, now), 'resets in 1m');
-  // A window whose reset moment has passed says so rather than counting backwards.
+
   assert.equal(resetCountdownText(now - 1000, now), 'resetting now');
   assert.equal(resetCountdownText(null, now), '');
   assert.equal(resetCountdownText(0, now), '');
 });
 
-// The /usage degradation pattern: keep showing a stale official number, labelled with its age, rather
-// than hiding it or silently swapping in an estimate the operator did not ask for.
 test('plan limit staleness: shown with its age past the threshold, silent before it', async () => {
   const { planLimitStaleNote, isPlanLimitStale, planLimitAgeText, PLAN_LIMIT_STALE_MS } = await importCore();
   const now = 1_800_000_000_000;
@@ -594,7 +566,7 @@ test('plan limit staleness: shown with its age past the threshold, silent before
   assert.equal(planLimitAgeText(now - 5 * 60000, now), '5m old');
   assert.equal(planLimitAgeText(now, now), '0m old');
   assert.equal(planLimitAgeText(null, now), '');
-  // No timestamp at all counts as stale: it cannot be shown as current.
+
   assert.equal(isPlanLimitStale(null, now), true);
   assert.equal(planLimitStaleNote(null, now), 'showing last-known usage');
 });
@@ -610,15 +582,9 @@ test('range options: the days the server validates, plus an unbounded default', 
     assert.ok(Number.isInteger(option.days), `${option.value} days must be an integer`);
     assert.ok(option.days > 0 && option.days <= 3650, `${option.value} days must be in the server range`);
   }
-  // Exactly one unbounded entry, or the selector could not express "everything retained".
+
   assert.equal(RANGE_OPTIONS.filter((option) => option.days === null).length, 1);
 });
-
-// House rule, and the reason every builder above is worded the way it is: no em dash, en dash or
-// ellipsis character may reach the DOM from this module.
-// ── Savings ──
-// Two independent halves: either can be absent without hiding the other, and neither may read as a zero
-// when it is simply unavailable.
 
 const RTK_SAVINGS = Object.freeze({
   available: true,
@@ -638,7 +604,7 @@ test('hasSavings: true once either half has something, false when neither does',
   assert.equal(hasSavings({ rtk: { available: false }, cache: null }), false);
   assert.equal(hasSavings(null), false);
   assert.equal(hasSavings(undefined), false);
-  // An rtk half that forgot its flag is unavailable, not available-by-omission.
+
   assert.equal(hasSavings({ rtk: { savedTokens: 5 }, cache: null }), false);
 });
 
@@ -648,7 +614,7 @@ test('rtkSavingsTile: saved tokens lead, the rate and sample size qualify them',
   assert.ok(tile, 'an available rtk half renders a tile');
   assert.equal(tile.value, '869.7k tokens');
   assert.equal(tile.sub, '94.3% avg across 250 commands');
-  // One command reads as one command.
+
   assert.equal(rtkSavingsTile({ rtk: { ...RTK_SAVINGS, commands: 1 } })?.sub, '94.3% avg across 1 command');
   assert.equal(rtkSavingsTile({ rtk: { available: false } }), null);
   assert.equal(rtkSavingsTile(null), null);
@@ -664,7 +630,6 @@ test('cacheSavingsTile: dollars lead, the tokens behind them qualify', async () 
   assert.equal(cacheSavingsTile(null), null);
 });
 
-// An unpriced model's tokens are counted and its dollars are not, so the figure is a floor and says so.
 test('cacheSavingsTile: unpriced models turn the figure into a floor', async () => {
   const { cacheSavingsTile } = await importCore();
   const one = cacheSavingsTile({ cache: { savedUSD: 2.7, cacheReadTokens: 1_500_000, unpricedModels: ['zzz'] } });

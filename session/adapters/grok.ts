@@ -49,7 +49,6 @@ const PROJECT_CONFIG_CANDIDATES = Object.freeze([
 
 const envProfile: AgentEnvProfile = {
   scrub: [],
-  // ~/.grok/docs/user-guide/05-configuration.md, "Harness compatibility", makes env override config.
   set: { [CLAUDE_COMPAT_HOOKS_ENV]: "false" },
 };
 

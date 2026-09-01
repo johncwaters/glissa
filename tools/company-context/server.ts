@@ -1,20 +1,5 @@
 #!/usr/bin/env node
 
-/**
- * Company-context MCP server (zero-dependency).
- *
- * Implements the OMC company-context contract: exactly one tool,
- *   get_company_context({ query }) -> { context: <markdown> }
- *
- * Transport: MCP stdio = newline-delimited JSON-RPC 2.0 (one message per line,
- * requests/responses on stdout, logs on stderr). No SDK, no npm install.
- *
- * The returned context is every .md file under this server's own `context/`
- * dir, concatenated. Edit those files to change what OMC workflows see. The
- * `query` argument is accepted but currently unused (all context is returned);
- * make it query-aware later if the corpus grows.
- */
-
 import fs from "node:fs";
 import path from "node:path";
 
@@ -81,7 +66,6 @@ function readContext(): string {
       const body = fs.readFileSync(path.join(CONTEXT_DIR, f), "utf8").trim();
       if (body) parts.push(body);
     } catch {
-      /* skip unreadable file */
     }
   }
   return parts.join("\n\n---\n\n") || "Company-context files are present but empty.";
@@ -134,7 +118,6 @@ function handle(msg: JsonRpcMessage): void {
     return;
   }
 
-  // Notifications (no id) get no response.
   if (id === undefined || id === null) return;
 
   sendError(id, -32601, `Method not found: ${String(method)}`);

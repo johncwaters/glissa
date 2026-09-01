@@ -68,8 +68,6 @@ test('Secure is set only when the proxy reports https', () => {
   assert.deepEqual(decideCookieFlags(), { secure: false, sameSite: 'Lax' });
 });
 
-// The proxy's word wins outright. A browser genuinely on TLS must get a Secure cookie, so no local
-// bind setting may veto the flag; a wider bind is not evidence about the scheme the browser used.
 test('a wider bind never strips Secure from a proxied https request', () => {
   assert.equal(decideCookieFlags({ forwardedProto: 'https', insecureBind: true }).secure, true);
   assert.equal(decideCookieFlags({ forwardedProto: 'http', insecureBind: true }).secure, false);

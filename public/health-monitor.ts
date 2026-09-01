@@ -1,7 +1,3 @@
-// ── Health monitor footer panel ──────────────────────────────
-// Renders memory + leak telemetry from server health-snapshot messages.
-// Always shows a compact summary; click to expand into a detailed panel.
-
 import { sendControlMsg } from './control-ws.ts';
 import { el, escapeHtml } from './dom-helpers.ts';
 
@@ -60,8 +56,6 @@ let _root: HTMLDivElement | null = null;
 let _summaryEl: HTMLButtonElement | null = null;
 let _detailEl: HTMLDivElement | null = null;
 
-// House style forbids literal dash characters in source; built here so the rendered
-// missing-value placeholder is unchanged.
 const NO_VALUE = String.fromCharCode(0x2014);
 
 function formatBytes(n: number | null | undefined) {
@@ -82,8 +76,7 @@ function formatUptime(s: number | null | undefined) {
 function buildPanel() {
   const root = el('div', 'health-footer');
   root.dataset.expanded = 'false';
-  // Hidden until debug mode turns it on (see setHealthMonitorVisible). Default
-  // matches config debugMode: false, so it stays hidden through initial load.
+
   root.hidden = true;
 
   const summary = el('button', 'health-summary');

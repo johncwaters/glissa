@@ -1,21 +1,3 @@
-/*
- * Shell-history ingest source, IO shell (docs/plan-ingestion.md, M10). It tails the history files the
- * operator's shells already write and publishes one `command` event per accepted command. Nothing here
- * decides where a shell writes, what a line means, or which commands are noise: that is
- * server/core/ingest-shell-core.js, and where the next read starts is server/core/ingest-tail-core.js.
- *
- * This is the ONE source reading data created outside glissa's own surfaces, which is why it is off by
- * default even with the lane on and why every event goes through the lane's publish-time scrub like any
- * other. It is also the one source that can never name a project: a history file records the command
- * text and nothing else, so every event is machine scope and the digest labels it so.
- *
- * Watchers are lossy WAKEUPS, never truth (the repo's standing invariant): the 2s stat poll over the
- * tracked files is the correctness floor under Windows write-event coalescing, and a watcher that cannot
- * be installed at all costs one warning and leaves the poll doing the whole job. A slower directory
- * sweep is what finds a history file that did not exist when the daemon started.
- *
- * Every tail starts at end of file, so a daemon restart replays nothing.
- */
 
 import fsNode from 'node:fs';
 import os from 'node:os';
@@ -39,14 +21,7 @@ import type { LaneLogger } from './lane-log.ts';
 
 const DEFAULT_POLL_MS = 2000;
 const DEFAULT_DISCOVER_MS = 30000;
-// PSReadLine writes one file per host, so a machine with a console window, a VS Code terminal and an
-// editor extension holds a handful; nothing legitimate approaches this.
 const DEFAULT_MAX_TRACKED = 8;
-/*
- * Half the ring, deliberately. A genuine append is one command; this bound only ever bites on a 256KB
- * catch-up read, and publishing more commands than the ring holds would evict the newest ones with the
- * oldest ones on their way in while spending movement signal on every one of them.
- */
 const DEFAULT_MAX_COMMANDS_PER_DRAIN = 50;
 const WATCH_POLL_DEBOUNCE_MS = 100;
 const WATCH_SWEEP_DEBOUNCE_MS = 500;
@@ -57,7 +32,6 @@ interface ShellHistoryContext {
   previous: string | null;
 }
 
-// What this source needs off a directory watcher: closing it, and hearing that it failed.
 interface DirectoryWatcher {
   close: () => void;
   on?: (event: string, listener: () => void) => unknown;
@@ -71,8 +45,6 @@ interface ShellHistoryOptions {
   homeDir?: string;
   platform?: NodeJS.Platform;
   fsPromises?: typeof fsNode.promises;
-  // The one call shape this source makes, and the two members it reads off the handle, so a test can
-  // inject a watcher without implementing FSWatcher.
   watchFn?: (
     dir: string,
     options: { persistent: boolean },
@@ -119,18 +91,9 @@ function createShellHistoryIngest({
 }: ShellHistoryOptions = {}) {
   if (typeof publish !== 'function') throw new Error('createShellHistoryIngest requires publish');
   const publishEvent = publish;
-  // Timing comes from the RESOLVED source config and nowhere else, the M8 rule: a constructor override
-  // would be a second place to set it and, since the resolver materializes the key from its defaults, a
-  // silently dead one.
   const pollMs = positiveInt(sourceConfig.pollMs, DEFAULT_POLL_MS);
-  // Ahead of the rejected-shell check below, which warns during construction.
   const { note, warn } = createLaneLog({ prefix: '[ingest]', logger });
   const locations = historyLocations({ shells: sourceConfig.shells, env, platform, homeDir });
-  /*
-   * A configured name that matches no known shell is a typo in the one source that must be asked for
-   * explicitly, so it is reported rather than absorbed. Said once, at construction: it is a fact about
-   * the config, not about the lifecycle, and a source that never starts still has the bad key.
-   */
   const rejectedShells = normalizeShells(sourceConfig.shells).rejected;
   if (rejectedShells.length > 0) {
     const nothing = locations.length === 0 ? '; no history file is tailed' : '';
@@ -140,8 +103,6 @@ function createShellHistoryIngest({
   const tails = new Map<string, TailState>();
   const contexts = new Map<string, ShellHistoryContext>();
   const watchers = new Map<string, DirectoryWatcher>();
-  // The location directories that actually existed on the last sweep, which is exactly the set worth
-  // watching: watching a directory fish never created would fail on every reconcile.
   let reachableDirs: string[] = [];
   let pollTimer: NodeJS.Timeout | null = null;
   let discoverTimer: NodeJS.Timeout | null = null;
@@ -150,13 +111,10 @@ function createShellHistoryIngest({
   let running = false;
   let disabled = false;
   let warnedWatchFailure = false;
-  // In-flight guards that HAND BACK the running pass rather than dropping the call, so a watcher wakeup
-  // arriving mid-sweep still resolves after the work it asked for is done.
   let drainInFlight: Promise<void> | null = null;
   let sweepInFlight: Promise<void> | null = null;
   let startPromise: Promise<void> | null = null;
 
-  // Every pass re-reads this after each await: stop() must not be undone by work already in flight.
   function alive(): boolean {
     return running && !disabled;
   }
@@ -165,7 +123,6 @@ function createShellHistoryIngest({
     try {
       watcher.close();
     } catch {
-      // A watcher whose directory already vanished is closed enough.
     }
   }
 
@@ -188,8 +145,6 @@ function createShellHistoryIngest({
     reachableDirs = [];
   }
 
-  // One logged warning and the source goes quiet; the lane and every other source keep running, and a
-  // restart re-arms everything (docs/plan-ingestion.md, "Adapter failure").
   function disable(reason: string): void {
     if (disabled) return;
     disabled = true;
@@ -215,7 +170,6 @@ function createShellHistoryIngest({
     }
   }
 
-  // --- Discovery -----------------------------------------------------------
 
   async function trackFile(location: HistoryLocation, filePath: string, stat: fsNode.Stats): Promise<void> {
     if (tails.has(filePath)) return;
@@ -245,7 +199,6 @@ function createShellHistoryIngest({
     for (const entry of entries) {
       if (!entry.isFile() || !matchesLocation(location, entry.name)) continue;
       const filePath = path.join(location.dir, entry.name);
-      // Recorded from the listing rather than from a stat, so an already-tracked file costs nothing.
       seen.add(filePath);
       if (tails.has(filePath)) continue;
       const stat = await statOrNull(filePath);
@@ -265,11 +218,6 @@ function createShellHistoryIngest({
     for (const filePath of pickStaleByMtime(tails, { maxTracked: maxTrackedFiles })) forgetFile(filePath);
   }
 
-  /**
-   * A tracked file its own directory no longer holds is gone for good, and keeping its tail would cost
-   * a failed stat on every poll forever. A directory that vanished proves nothing about the files that
-   * were in it, so only files under a directory THIS sweep could actually read are forgotten.
-   */
   function forgetVanished(reachable: string[], seen: Set<string>): void {
     for (const filePath of [...tails.keys()]) {
       if (!reachable.includes(path.dirname(filePath)) || seen.has(filePath)) continue;
@@ -282,8 +230,6 @@ function createShellHistoryIngest({
     const seen = new Set<string>();
     for (const location of locations) {
       if (!alive()) return;
-      // One stat per location answers both questions at once: whether there is anything to watch here,
-      // and whether to spend a readdir on it. A shell the operator does not have costs exactly this.
       const dirStat = await statOrNull(location.dir);
       if (!alive()) return;
       if (!dirStat || !dirStat.isDirectory()) continue;
@@ -304,11 +250,9 @@ function createShellHistoryIngest({
     return sweepInFlight;
   }
 
-  // --- Watching ------------------------------------------------------------
 
   function installWatch(dir: string): DirectoryWatcher | null {
     try {
-      // Watched spelling only: an 8.3 short path aborts node in native code (shared/paths.js); `dir` keeps keying reachableDirs and tails.
       const watcher = watchFn(canonicalizePath(dir), { persistent: false }, (eventType) => {
         onWatchEvent(eventType);
       });
@@ -317,11 +261,6 @@ function createShellHistoryIngest({
       }
       return watcher;
     } catch (error) {
-      /*
-       * Graded degradation, and this grade is the mild one: a history file is polled every 2s anyway, so
-       * a platform that refuses the watch costs latency and nothing else. Disabling the source over it
-       * would throw away working ingestion to avoid a wakeup optimization.
-       */
       if (warnedWatchFailure) return null;
       warnedWatchFailure = true;
       warn(`shell-history source: watching ${dir} failed (${errorMessage(error)}); the ${pollMs}ms stat poll covers it`);
@@ -345,11 +284,6 @@ function createShellHistoryIngest({
     }
   }
 
-  /**
-   * A watch event is a wakeup, and its TYPE decides how expensive a wakeup. Only `rename` can mean a
-   * history file appeared or was rotated, so only `rename` schedules a sweep; a plain append fires
-   * `change` on Windows, and letting that drive a sweep would put a readdir behind every command typed.
-   */
   function onWatchEvent(eventType: string): void {
     if (!alive()) return;
     if (!pokeTimer) {
@@ -365,7 +299,6 @@ function createShellHistoryIngest({
     }, WATCH_SWEEP_DEBOUNCE_MS));
   }
 
-  // --- Tailing -------------------------------------------------------------
 
   async function readAt(handle: FileHandle, position: number, length: number): Promise<Buffer> {
     if (length <= 0) return Buffer.alloc(0);
@@ -374,7 +307,6 @@ function createShellHistoryIngest({
     return buffer.subarray(0, bytesRead);
   }
 
-  // The head is sampled AFTER the range, so a rewrite landing between the two reads is caught by the head rather than published as the range.
   async function readWindow(filePath: string, { start = 0, length = 0, sampleHead = false }: {
     start?: number;
     length?: number;
@@ -387,8 +319,6 @@ function createShellHistoryIngest({
       const head = sampleHead ? headSample(await readAt(handle, 0, HEAD_SAMPLE_BYTES)) : null;
       return { text: bytes.toString('utf8'), end: start + bytes.length, head };
     } catch {
-      // A history file the shell holds locked mid-write leaves the offset where it was, so the next poll
-      // retries the same bytes rather than skipping them.
       return null;
     } finally {
       if (handle) await handle.close().catch(() => {});
@@ -406,12 +336,6 @@ function createShellHistoryIngest({
     if (!context) return;
     const parsed = parseHistoryLines({ shell: context.shell, lines, state: context.parseState });
     context.parseState = parsed.state;
-    /*
-     * EVERY parsed command goes through the noise pipeline, and the drain bound is applied to what
-     * survived it. Slicing first left `context.previous` describing a command the drain had dropped, so
-     * a survivor identical to the one just above it published as new and a real change was judged
-     * against the wrong predecessor.
-     */
     const events: ShellIngestEvent[] = [];
     for (const command of parsed.commands) {
       const decided = decideCommandEvent({
@@ -422,8 +346,6 @@ function createShellHistoryIngest({
     }
     const bound = positiveInt(maxCommandsPerDrain, DEFAULT_MAX_COMMANDS_PER_DRAIN);
     const recent = events.slice(-bound);
-    // The offset already moved past them, so a silent drop would be an invisible hole; the note rides
-    // the first surviving event exactly as the agent-log source's dropped-lines note rides its drain.
     const dropped = events.length - recent.length;
     if (dropped > 0) {
       recent[0].summary = `${recent[0].summary} [${dropped} earlier commands dropped]`;
@@ -448,13 +370,6 @@ function createShellHistoryIngest({
     if (!alive() || !stat) return;
     const plan = planRead(state, stat, { maxCatchUpBytes });
     if (plan.action === 'skip') return;
-    /*
-     * A truncation or a file recreated at this path RE-BASELINES and publishes nothing. PSReadLine
-     * rewrites the whole file when it trims to MaximumHistoryCount (4096 by default), and a rewrite's
-     * content is history this tail already had its chance at, so reading it back would flood the ring
-     * with thousands of commands the operator ran weeks ago and spend movement signal on every one.
-     * The cost is at most the one command that landed in the same rewrite, once per 4096.
-     */
     if (plan.reset) {
       await reseed(filePath, stat);
       return;
@@ -473,8 +388,6 @@ function createShellHistoryIngest({
       stat,
       head: read.head,
       dropPartial: plan.dropPartial,
-      // PSReadLine finishes a command that ends in a newline on an EMPTY physical line; dropping it
-      // would glue that command to the next one. Rationale in full at splitKeepingEmpty.
       keepEmptyLines: true,
     });
     if (lines.length === 0) return;
@@ -494,10 +407,7 @@ function createShellHistoryIngest({
     return drainInFlight;
   }
 
-  // --- Lifecycle -----------------------------------------------------------
 
-  // Hands back the FIRST sweep on a repeat call rather than a resolved promise, so a caller that only
-  // holds the lane can still wait for discovery to have happened.
   function start(): Promise<void> {
     if (startPromise) return startPromise;
     if (disabled) return Promise.resolve();
@@ -511,8 +421,6 @@ function createShellHistoryIngest({
     return startPromise;
   }
 
-  // Returns a promise so a caller that wants a settled teardown can await it; the guards above are what
-  // actually stop an in-flight pass from repopulating anything, and this clears again once both land.
   function stop(): Promise<void> {
     running = false;
     startPromise = null;
@@ -530,7 +438,6 @@ function createShellHistoryIngest({
     name: 'shellHistory',
     start,
     stop,
-    // Driven directly by the tests, which need a deterministic sweep and drain rather than a timer race.
     discover: () => runGuarded(discover),
     poll: () => runGuarded(poll),
     get isDisabled() { return disabled; },

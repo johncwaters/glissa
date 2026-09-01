@@ -1,13 +1,3 @@
-// Pure helpers shared by the post-install PATH notice (scripts/postinstall-path-check.js)
-// and `glissa doctor` (bin/glissa.ts). They import only node:path, so they load
-// even when the server or the node-pty native module cannot.
-//
-// Why this exists: the npm `bin` field already makes npm create a `glissa` shim,
-// but a package cannot (and must not) silently rewrite the user's PATH. When the
-// global-bin directory is not on PATH, `glissa` is "not recognized". These
-// functions locate that directory and report whether it is reachable so we can
-// TELL the user the one-step fix.
-
 import path from 'node:path';
 
 interface PlatformScope {
@@ -32,8 +22,6 @@ function isWin(platform: NodeJS.Platform | undefined): boolean {
   return platform === 'win32';
 }
 
-// Normalize one PATH entry for comparison: trim, drop surrounding quotes, strip a
-// trailing separator, and lowercase on Windows (its filesystem is case-insensitive).
 function normalizeDir(dir: string | null | undefined, platform: NodeJS.Platform | undefined): string {
   if (!dir) return '';
   let d = String(dir).trim();
@@ -45,8 +33,6 @@ function normalizeDir(dir: string | null | undefined, platform: NodeJS.Platform 
   return isWin(platform) ? d.toLowerCase() : d;
 }
 
-// Is `dir` present in the PATH string? Splits on ';' on Windows and ':' elsewhere,
-// then compares normalized entries. Never throws on missing/empty inputs.
 function onPath(dir: string | null | undefined, { pathEnv, platform }: PlatformScope = {}): boolean {
   const target = normalizeDir(dir, platform);
   if (!target) return false;
@@ -57,9 +43,6 @@ function onPath(dir: string | null | undefined, { pathEnv, platform }: PlatformS
   return false;
 }
 
-// Where npm places global command shims. On Windows the global PREFIX directory
-// itself holds the .cmd/.ps1/.exe shims (there is no bin/ subdir); on POSIX it is
-// <prefix>/bin. Falls back to the official-installer default on Windows.
 function npmGlobalBinDir({ env = {}, platform, homedir, resolvedPrefix }: GlobalBinScope = {}): string | null {
   const prefix = env.npm_config_prefix || resolvedPrefix || null;
   if (isWin(platform)) {
@@ -71,8 +54,6 @@ function npmGlobalBinDir({ env = {}, platform, homedir, resolvedPrefix }: Global
   return null;
 }
 
-// Best-effort pnpm global-bin directory. pnpm requires `pnpm setup` to put this on
-// PATH, so it is a common "command not found" culprit for pnpm users.
 function pnpmGlobalBinDir({ env = {}, platform, homedir }: GlobalBinScope = {}): string | null {
   if (env.PNPM_HOME) return env.PNPM_HOME;
   if (!homedir) return null;
@@ -80,9 +61,6 @@ function pnpmGlobalBinDir({ env = {}, platform, homedir }: GlobalBinScope = {}):
   return path.join(homedir, '.local', 'share', 'pnpm');
 }
 
-// Human-readable notice. Pure string (no I/O) so it is unit-testable. Uses the safe
-// registry-preserving PowerShell idiom on Windows (NOT `setx`, which truncates PATH
-// at 1024 chars and writes the expanded value).
 function formatPathNotice({ installedBinDir, onPathFlag, platform }: PathNoticeScope = {}): string {
   const dir = installedBinDir || '(unknown)';
   if (onPathFlag) {

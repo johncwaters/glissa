@@ -69,7 +69,6 @@ function parseGrokUsageLine(line: unknown): UsageEntry | null {
 }
 
 function grokDedupIdentity(entry: DedupIdentityEntry | null | undefined): string | null {
-  // Grok turn_completed entries carry prompt_id, with timestamp fallback for older rows.
   if (!entry) return null;
   if (entry.messageId) return `${entry.vendor}:${entry.sessionId}:${entry.messageId}`;
   return `${entry.vendor}:${entry.sessionId}:${entry.timestampMs}:${entry.model}`;

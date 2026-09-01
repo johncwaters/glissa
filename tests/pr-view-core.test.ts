@@ -7,7 +7,6 @@ import {
 } from '../public/pr-view-core.ts';
 import type { PrRow } from '../public/pr-view-core.ts';
 
-// Each fixture row is labelled by its title, the one PrRow field that carries free text.
 const labelsOf = (prs: PrRow[]): (string | undefined)[] => prs.map((pr) => pr.title);
 
 test('prStatusPlaceholder: waits for an initial server status', () => {

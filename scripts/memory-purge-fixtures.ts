@@ -64,7 +64,6 @@ function isExistingDirectory(target: string): boolean {
   }
 }
 
-// The three fields the rule reads, so a caller can judge a record shape that is not a whole one.
 type FixtureCandidate = Pick<MemoryRecord, 'kind' | 'project'> & { source?: { sessionId: string | null } | null };
 
 function fixtureReason(record: FixtureCandidate): string | null {
@@ -78,7 +77,6 @@ function fixtureReason(record: FixtureCandidate): string | null {
   return 'project';
 }
 
-// Ingest offsets for transcripts that were temp fixtures: dead weight, and a re-read of a gone file is a no-op.
 function staleTempTails(store: MemoryStore, tmpDir: string): string[] {
   const state = store.tailState();
   const files = state?.files ? Object.keys(state.files) : [];

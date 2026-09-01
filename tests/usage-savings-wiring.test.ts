@@ -1,8 +1,3 @@
-// The savings field's trip through createUsageWiring: the rtk exec is a seam, so nothing here needs rtk
-// installed. What matters is that a failing or absent rtk costs the rtk half and nothing else, that the
-// process is not spawned once per report pull, and that the cache half is computed from the same model
-// rows and price table the cost estimate uses.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -66,8 +61,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-// The wire report is a Record by design (usage-wiring answers the control plane), so the fields this
-// suite asserts on are narrowed here once rather than at each assertion.
 function blockAt(source: Record<string, unknown>, key: string): Record<string, unknown> {
   const value = source[key];
   if (!isRecord(value)) throw new Error(`the report carries no ${key} block`);
@@ -173,7 +166,7 @@ test('a report carries both savings halves, with rtk parsed off its own JSON', a
     savingsPct: 94.34,
     daily: [{ date: '2026-08-21', commands: 191, savedTokens: 241780, savingsPct: 86.41 }],
   });
-  // Only the Claude row: 1M x (0.000003 - 0.0000003).
+
   const cache = savingsOf(report).cache;
   assert.ok(cache, 'the cache half was computed');
   assert.equal(Math.round(numberAt(cache, 'savedUSD') * 100) / 100, 2.7);
@@ -226,8 +219,6 @@ test('usage.rtkSavings false is fully inert: no path probe, no exec', async () =
   assert.equal(lane.rtkPathCallCount(), 0, 'the binary is not even looked for');
 });
 
-// A report is pulled on every turn end while the tab is open, so an uncached reading would spawn a process
-// per turn for numbers that move by a few hundred tokens.
 test('a successful reading is cached for its TTL, then re-read', async () => {
   const lane = harness();
   await lane.wiring.requestReport({});
@@ -244,8 +235,6 @@ test('a successful reading is cached for its TTL, then re-read', async () => {
   assert.equal(savingsOf(report).rtk.savedTokens, 869660);
 });
 
-// A failure is deliberately not cached: an rtk installed or repaired mid-session should show up on the
-// next pull rather than after a restart.
 test('a failed reading is not cached', async () => {
   const lane = harness({ execResult: new Error('EPERM') });
   await lane.wiring.requestReport({});
@@ -271,14 +260,10 @@ test('rtkSavings defaults on and round trips through resolveUsageConfig', () => 
   assert.equal(DEFAULT_USAGE_CONFIG.rtkSavings, true);
   assert.equal(resolveUsageConfig(undefined).rtkSavings, true);
   assert.equal(resolveUsageConfig({ rtkSavings: false }).rtkSavings, false);
-  // Defensive like every other key: a hand-edited garbage value falls back to the default rather than
-  // silently switching the reading off.
+
   assert.equal(resolveUsageConfig({ rtkSavings: 'no' }).rtkSavings, true);
 });
 
-// Change 1 regression: both fields exist on the scanner report and are read by the frontend, but the
-// wiring re-projects the report field by field, so an omission here is invisible until the section never
-// renders.
 test('byLane and budget survive the report projection onto the wire', async () => {
   const lane = harness();
   const report = await lane.wiring.requestReport({});

@@ -1,11 +1,3 @@
-// THE BYTE-IDENTICAL GUARANTEE. A config without a remote block must behave exactly as it did before
-// remote mode existed: one listener, no auth middleware, no /pair route, no pairing files on disk,
-// and an upgrade path whose refusals look the same on the wire as the old bare socket.destroy().
-//
-// SAFETY: createBackend runs a boot worktree reconcile against the configured projects, so this
-// points at a throwaway temp config with ZERO projects via GLISSA_CONFIG (memory: booting the backend
-// against the real config once destroyed an active worktree). Keep projects [] in this file.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -145,8 +137,6 @@ test('a foreign Origin is refused by a bare socket destroy, with no HTTP status 
   assert.equal(received, '', 'the remote-disabled refusal writes nothing, exactly as before');
 });
 
-// A leftover publicHost in a switched-off remote block used to synthesize an allowed origin, which
-// widened the LOCAL listener's WebSocket allow-list for a feature that was not running.
 test('a disabled remote block with a publicHost grants no extra origin', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-remote-off-host-'));
   const cfgPath = path.join(dir, 'config.json');
@@ -189,7 +179,7 @@ test('a data-terminal upgrade for an unknown session is still refused after the 
     ws.on('error', () => resolve('error'));
     ws.on('close', () => resolve('close'));
   });
-  // The upgrade itself is allowed (no remote gate); the session lookup is what closes it.
+
   assert.notEqual(outcome, 'error');
   ws.close();
 });

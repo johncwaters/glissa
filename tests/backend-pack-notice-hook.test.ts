@@ -1,13 +1,3 @@
-// HTTP-level pin of the live context-pack channel on the hook ingress: a UserPromptSubmit response
-// carries hookSpecificOutput.additionalContext when (and only when) the session owes a pack notice,
-// in the ONE nesting Claude Code actually injects, and every other reply stays byte-identical to what
-// the route answered before the channel existed.
-//
-// SAFETY: createBackend runs a boot worktree reconcile over the configured projects, so this points
-// GLISSA_CONFIG at a throwaway temp config whose single project path is an empty NON-GIT temp dir
-// (memory: booting the backend against the real config once destroyed an active worktree). Pack
-// auto-rebuild is off here too, so booting never touches the real ~/.glissa/packs tree.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -54,8 +44,6 @@ function postHook(event: string, hookToken = ctx().token): Promise<Response> {
   });
 }
 
-// Stands in for a spawn: _resolvePacks records what the PTY was launched with, and launching a real
-// `claude` here is not an option. Spawn-time resolution itself is covered by tests/session-packs.test.ts.
 function pretendSpawnedWith(deliveredPacks: DeliveredPack[]): void {
   const { session } = ctx();
   session._packDelivery.replaceDelivered(deliveredPacks.map((pack) => ({ ...pack })));
@@ -83,8 +71,7 @@ test.before(async () => {
 
   const session = backend.getSession(SESSION_ID);
   assert.ok(session, 'the boot loop created the configured session');
-  // Register the session's bearer token with the shared HookRouter without spawning a PTY: this is
-  // exactly what the spawn path does, minus node-pty.
+
   session._hooks.inject();
   const token = session._hooks.token();
   assert.ok(token, 'hook injection produced a token');

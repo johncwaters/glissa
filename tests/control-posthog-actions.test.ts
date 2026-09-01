@@ -1,7 +1,3 @@
-// Control-WS dispatch for per-issue Radar actions (server/control-handlers.ts):
-// posthog-open-session (paste an investigation prompt into the mapped project session),
-// posthog-issue-action (resolve/suppress in PostHog), and investigation archive actions.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -107,7 +103,7 @@ function harness(over: HarnessOverrides = {}) {
   }));
 
   const connection = connectControl<PosthogFrame>(server);
-  connection.sent.length = 0; // drop the connect preamble
+  connection.sent.length = 0;
   return {
     sent: connection.sent,
     send: connection.send,
@@ -118,8 +114,6 @@ function harness(over: HarnessOverrides = {}) {
     pastes: (id: string): string[] => pastesById.get(id) ?? [],
   };
 }
-
-// --- A. open an interactive session from an issue ---
 
 test('posthog-open-session pastes the investigation prompt into the mapped session', () => {
   const h = harness();
@@ -186,9 +180,6 @@ test('posthog-open-session refuses a malformed issue id before any lookup', () =
   assert.equal(h.sent[0].error, 'Invalid issue id');
 });
 
-// --- A2. auto-creating the Glissa project when none is mapped ---
-
-// The name PostHog knows the project by; the handler must never take it from the client message.
 function statusNamed(projectName: string): Record<string, unknown> {
   return { ...STATUS, projects: [{ ...STATUS.projects[0], name: projectName }] };
 }
@@ -280,8 +271,6 @@ test('posthog-open-session keeps the mapping error when no directory resolves', 
   assert.deepEqual(h.created, []);
 });
 
-// --- B. resolve / suppress in PostHog ---
-
 test('posthog-issue-action forwards a valid action and echoes the result', async () => {
   const h = harness();
 
@@ -330,8 +319,6 @@ test('posthog-issue-action answers cleanly when the lane is not wired in', async
   assert.equal(h.sent[0].ok, false);
   assert.match(String(h.sent[0].error), /not running/);
 });
-
-// --- C. archive one investigations-inbox record ---
 
 test('posthog-archive-investigation forwards a valid id and reports success', async () => {
   const h = harness();

@@ -1,13 +1,3 @@
-/*
- * The pure shell-history core (docs/plan-ingestion.md, M10): where each shell's history lives, how one
- * physical line of each format becomes a command, and which commands are worth a digest line.
- *
- * The format fixtures are the real thing, not a sketch. PSReadLine's trailing-backtick continuation and
- * the EMPTY physical line a command ending in a newline finishes on were read off a live
- * ConsoleHost_history.txt; getting either wrong publishes one command as several fragments, or glues two
- * commands together, which is exactly the shredding the terminal source's repaint filter exists to stop.
- */
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { HistoryParseState } from '../server/core/ingest-shell-core.ts';
@@ -25,8 +15,6 @@ function parse(shell: string, lines: string[], state: HistoryParseState | null =
 function texts(shell: string, lines: string[]) {
   return parse(shell, lines).commands.map((command) => command.text);
 }
-
-// --- Config ----------------------------------------------------------------
 
 test('an absent or empty shells list means the two zero-setup shells, never all four', () => {
   for (const raw of [undefined, null, [], 'powershell']) {
@@ -46,18 +34,11 @@ test('pwsh and powershell are one shell, and a bad entry rides back as rejected 
   assert.deepEqual(normalizeShells(['nushell', 'fish', 42, null]), { shells: ['fish'], rejected: ['nushell', '42', 'null'] });
 });
 
-/*
- * The silent-widening guard. This is the ONE source that must be asked for explicitly, so a list that
- * names nothing glissa knows has to cost the operator their configuration; falling back to the defaults
- * would quietly start reading two shells they never asked for.
- */
 test('a non-empty list naming no known shell resolves to NOTHING, never to the defaults', () => {
   assert.deepEqual(normalizeShells(['nushell']), { shells: [], rejected: ['nushell'] });
   assert.deepEqual(normalizeShells(['nushell', 'csh', 'csh']), { shells: [], rejected: ['nushell', 'csh'] });
   assert.deepEqual(historyLocations({ shells: ['nushell'], env: { HOME: '/home/j' }, platform: 'linux' }), []);
 });
-
-// --- Discovery -------------------------------------------------------------
 
 test('PSReadLine on Windows resolves under APPDATA, which is where both pwsh and Windows PowerShell write', () => {
   const [location] = historyLocations({ env: { APPDATA: 'C:\\Roaming' }, platform: 'win32', shells: ['powershell'] });
@@ -128,14 +109,11 @@ test('a suffix location matches every host file, folding case, and an exact name
   assert.equal(matchesLocation(exact, 'fish_history.bak'), false);
 });
 
-// --- PSReadLine ------------------------------------------------------------
-
 test('one accepted command per line, exactly as PSReadLine appends it', () => {
   assert.deepEqual(texts('powershell', ['npm test', 'git status']), ['npm test', 'git status']);
 });
 
 test('a backtick-continued command publishes as ONE command, not one per fragment', () => {
-  // Read verbatim off a live ConsoleHost_history.txt: every line but the last carries the marker.
   const lines = [
     'git branch -vv |`',
     '  Select-String ": gone]" |`',
@@ -178,8 +156,6 @@ test('PSReadLine carries no timestamp, so the command leaves the parser without 
   assert.equal(parse('powershell', ['npm test']).commands[0].ts, null);
 });
 
-// --- fish ------------------------------------------------------------------
-
 test('a fish entry publishes with the timestamp its when line carries', () => {
   const commands = parse('fish', ['- cmd: npm test', '  when: 1700000000']).commands;
   assert.deepEqual(commands, [{ text: 'npm test', ts: 1700000000000 }]);
@@ -188,7 +164,7 @@ test('a fish entry publishes with the timestamp its when line carries', () => {
 test('fish escapes are undone in one pass, so an embedded newline and a literal backslash both survive', () => {
   assert.equal(unescapeFish('echo a\\nb'), 'echo a\nb');
   assert.equal(unescapeFish('echo "C:\\\\\\\\repo"'), 'echo "C:\\\\repo"');
-  // The pass is left to right: an escaped backslash must not turn its neighbour into an escape.
+
   assert.equal(unescapeFish('a\\\\nb'), 'a\\nb');
   const commands = parse('fish', ['- cmd: for f in *\\n  echo $f\\nend', '  when: 1700000000']).commands;
   assert.equal(commands[0].text, 'for f in *\n  echo $f\nend');
@@ -215,8 +191,6 @@ test('a fish entry that never gets a when line is finished by the next entry sta
     { text: 'npm run build', ts: 1700000000000 },
   ]);
 });
-
-// --- bash and zsh ----------------------------------------------------------
 
 test('bash reads its epoch comment as the timestamp and never as a command', () => {
   const commands = parse('bash', ['#1700000000', 'npm test', 'npm run build']).commands;
@@ -256,8 +230,6 @@ test('an unknown shell parses to nothing rather than guessing at a format', () =
   assert.deepEqual(parse('nushell', ['npm test']).commands, []);
 });
 
-// --- Noise rules -----------------------------------------------------------
-
 test('bare navigation and screen clearing are trivial; the same verb with arguments is not', () => {
   for (const trivial of ['', '  ', 'ls', 'LS', 'cd', 'cd ..', 'pwd', 'cls', 'clear', 'dir', 'exit', 'history']) {
     assert.equal(isTrivialCommand(trivial), true, `expected trivial: ${trivial}`);
@@ -277,7 +249,7 @@ test('a consecutive duplicate collapses, because PSReadLine records every Enter 
   assert.ok(first.event, 'the first one publishes');
   const repeat = decideCommandEvent({ shell: 'powershell', command: { text: 'npm test' }, previous: first.previous, now: 6 });
   assert.equal(repeat.event, null);
-  // Only CONSECUTIVE repeats collapse: a command run again after something else is real activity.
+
   const between = decideCommandEvent({ shell: 'powershell', command: { text: 'git status -sb' }, previous: repeat.previous, now: 7 });
   const again = decideCommandEvent({ shell: 'powershell', command: { text: 'npm test' }, previous: between.previous, now: 8 });
   assert.ok(again.event, 'the same command after another one publishes again');
@@ -298,11 +270,6 @@ test('a command with no timestamp of its own is stamped with arrival time', () =
   assert.equal(event?.ts, 4242);
 });
 
-/*
- * The summary leaves RAW on purpose. normalizeEvent scrubs, THEN folds, THEN slices, and that order is
- * what lets the scrub see a whole quoted value; folding or slicing here would run ahead of it. The fold
- * is asserted where it actually happens, at ring level in tests/ingest-shell-history.test.js.
- */
 test('a multi-line command leaves the core unfolded, carrying its line count for the reader', () => {
   const { event } = decideCommandEvent({
     shell: 'powershell', command: { text: 'git branch -vv |\n  ForEach-Object {\n  }' }, now: 5,

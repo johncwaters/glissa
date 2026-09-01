@@ -1,5 +1,3 @@
-// Home database writes from a test can modify the operator's live memory store.
-
 import path from 'node:path';
 
 const HOME_DB_REFUSED_CODE = 'GLISSA_HOME_DB_REFUSED';
@@ -20,9 +18,6 @@ function underTestRunner(env: { NODE_TEST_CONTEXT?: string } | null | undefined)
   return typeof marker === 'string' && marker !== '';
 }
 
-/**
- * Returns the refusal message, or null when the open may proceed.
- */
 function decideDbOpenRefusal({
   dbPath,
   homeDir,
@@ -36,7 +31,7 @@ function decideDbOpenRefusal({
 }): string | null {
   if (!isTestRunner) return null;
   if (!isUnder(dbPath, homeDir)) return null;
-  // A Windows runner's %TEMP% sits under the home directory, so every temp fixture would be refused.
+
   if (isUnder(dbPath, tmpDir)) return null;
   return `refusing to open a database under the home directory while running under the node test runner: ${dbPath}`;
 }

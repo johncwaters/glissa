@@ -1,8 +1,3 @@
-// shared/paths.ts - deciding when two spellings name one physical directory, and producing the one
-// spelling every producer agrees on. The case that reaches CI is the 8.3 short form: a runner's
-// %TEMP% is C:\Users\RUNNER~1\..., so a path derived from os.tmpdir() is short while git porcelain
-// reports the long form of the very same directory.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

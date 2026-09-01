@@ -1,8 +1,3 @@
-// Error backoff for the polling lanes (2026-08 review, section 6: "a gh or PostHog outage is
-// re-polled at full cadence every tick"). Full jitter, Retry-After honored, and the lane's interval
-// timer deliberately untouched: an outage costs SKIPPED ticks, not a rescheduled timer chain, so the
-// re-entrancy guard and the drain-on-stop behave exactly as before.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -20,8 +15,6 @@ test('full jitter picks a point inside the exponential ceiling, never the ceilin
   assert.equal(nextBackoffMs({ attempt: 3, baseMs, random: () => 0.5 }), 2000);
 });
 
-// The point of jitter: several clients backing off in lockstep re-converge on one retry instant and
-// hammer the recovering service together.
 test('two clients at the same attempt do not pick the same wait', () => {
   const baseMs = 60_000;
   const a = nextBackoffMs({ attempt: 5, baseMs, random: () => 0.2 });
@@ -53,8 +46,6 @@ test('a tick is skipped only while the window is genuinely open', () => {
   assert.equal(shouldSkipTick({ now: 200, backoffUntil: 200 }), false);
   assert.equal(shouldSkipTick({ now: 300, backoffUntil: 0 }), false);
 });
-
-// --- the loop ---
 
 function makeLoop(outcomes: ({ failed?: boolean; retryAfterMs?: number } | null)[], { random = () => 1 } = {}) {
   let clock = 0;

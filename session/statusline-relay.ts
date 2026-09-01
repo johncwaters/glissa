@@ -4,18 +4,10 @@ import type { ChildProcess } from "node:child_process";
 import { readStdin } from "./relay-stdin.ts";
 import type { StdinLike } from "./relay-stdin.ts";
 
-// Managed statusLine relay, run standalone by Claude Code per assistant/tool step, never required by
-// the server. In PARALLEL (any delay is a visible TUI stall): fire-and-forget the stdin blob to the
-// local hook ingress, and chain the statusLine command the operator already had, since a per-session
-// statusLine REPLACES the global one (live-verified 2.1.235) and must not delete their HUD.
-
-// Via the shared wrapper: this spawns a console child several times per turn, windowsHide matters.
 import { spawn } from "../server/child-process-safe.ts";
 
-// Bounded hard: the POST is telemetry, and the status line is the operator's. Anything slower than
-// this is abandoned, not waited on.
 const POST_TIMEOUT_MS = 1500;
-// Argv marker for "the operator had no statusLine of their own".
+
 const NO_CHAIN = "-";
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "[::1]", "localhost"]);
 
@@ -27,8 +19,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-// Never resolves to a rejection and never outlives POST_TIMEOUT_MS. The loopback check is a guard on
-// our own argv: this process only ever talks to the local Glissa.
 function postPayload(url: string, body: Buffer): Promise<void> {
   return new Promise((resolve) => {
     let settled = false;
@@ -88,7 +78,6 @@ function decodeChainCommand(encoded: string | undefined): string | null {
   }
 }
 
-// Used only with nothing to chain; minimal because Glissa stands in for the HUD, not competing.
 function fallbackLine(payload: Record<string, unknown> | null): string {
   const parts: string[] = [];
   const modelField = payload?.model;
@@ -110,8 +99,6 @@ function parsePayload(raw: Buffer | string): Record<string, unknown> | null {
   }
 }
 
-// stdout is inherited so the chained command's own buffering and colors reach the TUI untouched, and
-// its stdin is fed the blob we already consumed (a stream cannot be read twice).
 function runChain(command: string, stdinBody: Buffer): Promise<number> {
   return new Promise((resolve) => {
     let child: ChildProcess;
@@ -133,7 +120,6 @@ function runChain(command: string, stdinBody: Buffer): Promise<number> {
     try {
       child.stdin?.end(stdinBody);
     } catch {
-      // A command that closed stdin immediately is not our problem to report.
     }
   });
 }
@@ -147,7 +133,6 @@ async function main(
   const raw = await readStdin(stdin);
   const chainCommand = decodeChainCommand(chainEncoded);
 
-  // Both started before either is awaited: the POST must not add its latency to the status line.
   const post = postUrl ? postPayload(postUrl, raw) : Promise.resolve();
   if (!chainCommand) {
     const line = fallbackLine(parsePayload(raw));

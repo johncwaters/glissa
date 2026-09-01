@@ -1,11 +1,5 @@
 import WebSocket from 'ws';
 
-// Test-side twin of public/ws-token.ts. The control and data channels are dashboard-only routes: they
-// require a browser Origin on a listener port and the per-process page token, so a test client that
-// stands in for the page has to carry both. Everything here is what the browser does, in one place, so
-// a suite exercising the real upgrade path does not restate the handshake. The socket helpers below
-// are the other half every dashboard suite repeated: open, record, wait, close.
-
 interface DashboardClient {
   origin: string;
   token: string;
@@ -13,8 +7,6 @@ interface DashboardClient {
   options: { origin: string };
 }
 
-// A socket whose frames are recorded from construction onward. `TFrame` is the shape the suite asserts
-// on: JSON.parse hands back an untyped value, so each suite states what it expects to read.
 interface RecordingSocket<TFrame> {
   ws: WebSocket;
   received: TFrame[];
@@ -57,14 +49,6 @@ function openSocket(client: DashboardClient, pathAndSearch: string): Promise<Web
   });
 }
 
-/**
- * Opens a socket that records every message from construction onward, in arrival order.
- *
- * The recording has to start before 'open' resolves: the server sends the snapshot the instant the
- * connection lands, so the 101 response and the first frames usually arrive in ONE socket read and ws
- * emits 'open' and 'message' synchronously within it. A listener attached after awaiting 'open' misses
- * the snapshot entirely.
- */
 function openRecordingSocket<TFrame>(
   client: DashboardClient,
   pathAndSearch = '/control',
@@ -85,8 +69,6 @@ function closeSocket(ws: WebSocket): Promise<void> {
   });
 }
 
-// The first overload keeps a type predicate's narrowing, so a suite matching on a frame's `type`
-// gets that frame's shape back rather than the whole union it was recorded as.
 async function waitForMessage<TFrame, TMatch extends TFrame>(
   received: TFrame[],
   matches: (frame: TFrame) => frame is TMatch,

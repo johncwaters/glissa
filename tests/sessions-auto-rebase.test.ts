@@ -1,9 +1,3 @@
-// Session wiring for the eager auto-rebase: checkWorktreeChange is the funnel every change trigger
-// converges on (the integration-ref watcher's fan-out above all), so the rebase decision hangs off it.
-// The engine is faked here - it is exercised for real in git-workspace-rebase.test.js - and the
-// signature is injected, so these tests are about WHEN Glissa asks the engine to rebase and what it
-// records afterwards, on any platform and with no repo.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Session } from '../session/sessions.ts';
@@ -13,7 +7,6 @@ import type { GitWorkspace, RebaseResult, WorkspaceArgs, WorktreeSignature } fro
 import type { MergeStatus } from '../session/core/worktree-state.ts';
 import type { Workspace } from '../session/session-worktree-lifecycle.ts';
 
-// The lifecycle only reaches rebaseOnly on these paths, so the rest of the seam stays inert.
 const INERT_ENGINE = {
   create() { return { cwd: '/wt', isGit: true }; },
   populate() {},
@@ -23,7 +16,7 @@ const INERT_ENGINE = {
   mergeKeep() { return { merged: true }; },
   async rebaseOnly() { return { ok: true, upToDate: true }; },
 } satisfies GitWorkspace;
-// A worktree that is clean, quiescent, and two commits behind a develop that just moved.
+
 function signature(extra: Partial<WorktreeSignature> = {}): WorktreeSignature {
   return {
     sig: 'sig-1',
@@ -37,7 +30,6 @@ function signature(extra: Partial<WorktreeSignature> = {}): WorktreeSignature {
   };
 }
 
-// Only the rebase verb is exercised here; the rest of the seam is inert so the fake still satisfies it.
 function fakeEngine(results: RebaseResult[] = []) {
   const calls: WorkspaceArgs[] = [];
   const queue = [...results];
@@ -51,8 +43,6 @@ function fakeEngine(results: RebaseResult[] = []) {
   } satisfies GitWorkspace & { calls: WorkspaceArgs[] };
 }
 
-// A Session with a worktree already provisioned (start() is not involved: the funnel under test runs on
-// watcher nudges long after the spawn). The signature is stubbed so no git runs.
 function makeSession({ engine, sig = signature(), state = STATES.IDLE, autoRebase }: {
   engine?: GitWorkspace | null;
   sig?: WorktreeSignature | null;
@@ -154,8 +144,6 @@ test('never fires while the session is working, waiting, dirty, parked, merging,
   }
 });
 
-// The cooldown is what keeps a doomed rebase from being retried on every watcher nudge. It is keyed on
-// the two shas the conflict is a function of, so it expires by itself the moment either side moves.
 test('a conflict stores a cooldown that stops an identical recheck from retrying', async () => {
   const engine = fakeEngine([{ ok: false, reason: 'rebase-conflict', conflicts: ['src/a.js'] }]);
   const s = makeSession({ engine });
@@ -207,9 +195,6 @@ test('a session with no worktree engine never rebases, and an engine failure nev
   } finally { s2.destroy(); }
 });
 
-// A rebase rewrites the worktree, and mid-rebase it reads clean and detached with ahead 0 - exactly the
-// shape decideSignatureDemotion self-heals a review gate to 'none' on. So the whole funnel is suppressed
-// for the duration, the same way a live merge suppresses it, and the window always ends in one recheck.
 test('the funnel is suppressed while a rebase runs, and one recheck always closes the window', async () => {
   let releaseRebase: () => void = () => {};
   const engine = {
@@ -227,7 +212,6 @@ test('the funnel is suppressed while a rebase runs, and one recheck always close
     await new Promise((r) => setImmediate(r));
     assert.equal(engine.calls.length, 1, 'the rebase is in flight');
 
-    // A concurrent nudge (the reflog fan-out re-checking every sibling) lands mid-rebase.
     s.worktreeLifecycle.computeWorktreeSignature = async () => signature({ ahead: '0', behind: '0', headSha: 'detached' });
     await s.checkWorktreeChange();
     assert.equal(engine.calls.length, 1, 'the concurrent check did not start a second rebase');
@@ -255,8 +239,6 @@ test('a conflict and an engine throw each still close the suppressed window with
   }
 });
 
-// A rebase that never started is transient (an index lock, a hook), not something an operator resolves,
-// so it must not burn the cooldown that exists to stop a DOOMED rebase from retrying forever.
 test('a rebase that never started is retried, not cooled down', async () => {
   const engine = fakeEngine([{ ok: false, reason: 'rebase-failed' }]);
   const s = makeSession({ engine });
@@ -276,7 +258,7 @@ test('a rebase that completed under a state change is recorded for forensics', a
     calls: [] as WorkspaceArgs[],
     async rebaseOnly(args: WorkspaceArgs): Promise<RebaseResult> {
       engine.calls.push(args);
-      s.state = STATES.RUNNING; // a turn started while the rebase was rewriting the worktree
+      s.state = STATES.RUNNING;
       return { ok: true, rebased: true, headSha: 'newhead' };
     },
   };
@@ -289,16 +271,13 @@ test('a rebase that completed under a state change is recorded for forensics', a
   } finally { s.destroy(); }
 });
 
-// The trigger this feature exists for: a sibling session merged into develop, so THIS worktree fell
-// behind without a single byte of it changing. The signature hash is deliberately unchanged, which is
-// exactly why the rebase decision has to sit ahead of the dedup early-return.
 test('fires on an unchanged signature, the case an integration-branch move actually produces', async () => {
   const engine = fakeEngine([{ ok: true, upToDate: true }]);
   const s = makeSession({ engine });
   try {
-    await s.checkWorktreeChange();          // establishes the signature baseline
+    await s.checkWorktreeChange();
     assert.equal(engine.calls.length, 1);
-    await s.checkWorktreeChange();          // same sig hash: the emit dedups, the rebase must not
+    await s.checkWorktreeChange();
     assert.equal(engine.calls.length, 2, 'the dedup does not gate the rebase decision');
   } finally { s.destroy(); }
 });

@@ -1,7 +1,3 @@
-// Pure arbitration of the ONE PTY size several data-WS viewers disagree about. The wiring that feeds
-// this (record on resize, hand back on unview/close) is exercised end to end in
-// tests/backend-data-ws-resize.test.js.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -48,7 +44,6 @@ test('a departing viewer with no survivor leaves the PTY alone', () => {
 });
 
 test('connections that never declared a size are not survivors', () => {
-  // A board-only phone and a card that was never visible hold an open socket but have claimed nothing.
   assert.equal(pickSizeAfterDeparture(viewers([
     ['boardOnly', null],
     ['hiddenCard', null],
@@ -66,8 +61,6 @@ test('an out-of-range record is never re-applied', () => {
 });
 
 test('recency ties are impossible because the sequence is monotonic, not a clock', () => {
-  // Two viewers resizing in the same millisecond is ordinary; ordering by a clock would hand the PTY
-  // to whichever entry happened to iterate first.
   const size = pickSizeAfterDeparture(viewers([
     ['first', { cols: 200, rows: 50, resizeSeq: 7 }],
     ['second', { cols: 100, rows: 40, resizeSeq: 8 }],

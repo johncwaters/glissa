@@ -6,7 +6,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-// Codex honours updatedInput only beside permissionDecision "allow"; rtk 0.45.0 omits it for git/cat rewrites (live-probed 2026-08-25).
 function normalizeRtkHookResponse(stdoutText: unknown): string {
   if (typeof stdoutText !== "string") return "";
   const trimmed = stdoutText.trim();

@@ -1,8 +1,3 @@
-// The durable Telegram outbox (2026-08 review, section 5, as narrowed by the operator's ruling: a
-// lost browser notification on restart is acceptable, a lost phone ping is not). The contract is
-// at-least-once - a crash between "Telegram accepted it" and "the file no longer lists it" replays
-// one ping, and a duplicate phone ping is a shrug next to a missing one.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -23,8 +18,6 @@ function tempFile() {
 function readOutbox(filePath: string) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
-
-// --- pure rules ---
 
 test('normalizeOutbox salvages what it can and discards the rest', () => {
   const entries = normalizeOutbox({
@@ -80,8 +73,6 @@ test('removeEntry leaves everything else alone', () => {
   assert.deepEqual(removeEntry(entries, 'missing'), entries);
 });
 
-// --- the shell ---
-
 test('a confirmed send leaves nothing behind', async (t) => {
   const { dir, filePath } = tempFile();
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -112,8 +103,6 @@ test('a failed send stays queued for the next boot', async (t) => {
   assert.equal(stored[0].attempts, 1);
 });
 
-// The crash this exists for: the ping was recorded, the process died, and nothing else would ever
-// have mentioned it again.
 test('a ping queued by a dead process is replayed by the next one', async (t) => {
   const { dir, filePath } = tempFile();
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -183,7 +172,6 @@ test('a missing outbox file is the normal fresh-install case and says nothing', 
   assert.deepEqual(warnings, []);
 });
 
-// An unwritable outbox costs durability, never the ping itself.
 test('a write failure is warned about and the send still happens', async (t) => {
   const { dir, filePath } = tempFile();
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

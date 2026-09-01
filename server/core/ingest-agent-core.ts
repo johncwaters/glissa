@@ -1,20 +1,7 @@
-/*
- * Pure mapping from one line of a vendor's JSONL transcript to ingest events (docs/plan-ingestion.md,
- * M7). Summarizing happens HERE, at the edge: one event per COMPLETED assistant message or per tool
- * call, never one per token or per line of streaming, which is what keeps an agent session's chatter
- * from becoming the whole ring.
- *
- * It sits beside ingest-tail-core rather than inside it because that core is the shared tail machinery
- * the plan also hands to the shellHistory source, and vendor transcript shapes are not shared.
- *
- * Every mapper is a function of its line plus a context, returning the events plus the context values
- * the line revised, so the IO shell owns all the mutable state and this file owns none.
- */
-
 const SOURCE = 'agentLogs';
-// Absent from ingest-core's KINDS_BY_SOURCE on purpose, so no routing slip puts prompt text on the wire.
+
 const PROMPT_KIND = 'agent-prompt';
-// The line-aligned window boundRaw cuts within; a line longer than it is handed on whole, never split.
+
 const MAX_RAW_CHARS = 4000;
 
 export type VendorState = Record<string, string>;
@@ -73,29 +60,11 @@ interface EventBase {
   vendor: string;
 }
 
-// The first of these a tool's input carries becomes its bounded target, so `Read` reads as the file it
-// opened rather than as a bare verb.
 const TOOL_TARGET_KEYS: readonly string[] = Object.freeze([
   'file_path', 'notebook_path', 'path', 'command', 'pattern', 'url', 'query', 'to', 'subagent_type',
   'description', 'prompt',
 ]);
 
-/*
- * Second, independent layer of the feedback-loop exclusion. The ledger is primary, but it depends on a
- * hook callback having landed, so this covers the same transcripts by SHAPE: a visions dispatch runs
- * in a throwaway temp workdir (server/visions-dispatch.js makeWorkDir), and Claude names that
- * session's transcript directory after that cwd with every separator collapsed to one dash. Matching
- * the marker as a segment therefore catches both the raw cwd and the encoded directory name.
- */
-/*
- * The lane markers, all of them: a visions dispatch runs in `glissa-visions-<hex>` (visions-dispatch.js
- * makeWorkDir), a memory distill in `glissa-memory-distill-<hex>` (memory-distill.js WORK_DIR_PREFIX,
- * whose whole reason to be a stable prefix is this list), and the PR-review and Radar fix lanes run in
- * `glissa-wt-<lane>-<hex>` (git-workspace.js createBody). HONEST LIMIT: those two lanes pass a `worktreeBase` in production, and the directory is
- * then named after the REPO exactly like an operator's own session worktree, so no shape rule can tell
- * them apart. The usage-lane ledger is what excludes those, which is why it is the primary mechanism and
- * this is the second layer.
- */
 const DISPATCH_WORKDIR_MARKERS: readonly string[] = Object.freeze([
   'glissa-visions', 'glissa-memory-distill', 'glissa-wt-pr-review', 'glissa-wt-radar-fix',
 ]);
@@ -104,7 +73,7 @@ const DISPATCH_WORKDIR_PATTERN = new RegExp(`(^|[\\\\/-])(${DISPATCH_WORKDIR_MAR
 function isDispatchWorkdir(candidate: unknown): boolean {
   if (typeof candidate !== 'string' || !candidate) return false;
   if (DISPATCH_WORKDIR_PATTERN.test(candidate)) return true;
-  // Grok percent-encodes the cwd into its directory name, so the marker only appears once decoded.
+
   try {
     const decoded = decodeURIComponent(candidate);
     if (decoded === candidate) return false;
@@ -121,19 +90,6 @@ function str(value: unknown): string | null {
   return trimmed;
 }
 
-/**
- * LINE-ALIGNED only, and it never folds. A scrub value pattern stops at a line break by construction, so
- * a line-aligned cut is the one cut that cannot split a value. There used to be a character cut under it
- * for a single line longer than the bound, and that cut ran AHEAD of every scrub downstream: it is how a
- * quoted secret loses its closing quote, leaving the scrub's quoted alternative unmatched and its bare
- * token alternative taking only the first WORD of the value. So a line with no break to cut at is handed
- * on WHOLE and cut after the scrub instead, line-aligned, by ingest-core for the ring and by
- * memory-core's capTextLineAligned for a durable record. It is still bounded, by the tail's own
- * catch-up read, and a caller that needs a hard bound drops the value rather than splitting it.
- *
- * BOTH break characters count. A vendor writing bare carriage returns would otherwise never cut at all,
- * and a CRLF cut on the newline alone would leave the carriage return dangling.
- */
 function boundRaw(value: unknown, max: number = MAX_RAW_CHARS): string {
   const text = String(value == null ? '' : value);
   if (text.length <= max) return text;
@@ -142,7 +98,6 @@ function boundRaw(value: unknown, max: number = MAX_RAW_CHARS): string {
   return text;
 }
 
-// Grok stamps whole seconds; Claude and Codex ship ISO strings.
 function parseTimestamp(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) {
     if (value > 0 && value < 1e12) return Math.floor(value * 1000);
@@ -178,11 +133,7 @@ function toolTarget(input: unknown): string {
   return '';
 }
 
-// --- Events ---------------------------------------------------------------
-
 function turnEvent({ ts, root, sessionId, vendor, text }: EventBase & { text: unknown }): AgentIngestEvent | null {
-  // The M7 vendor prefix is composed here and bounded downstream: normalizeEvent's 400 covers the whole
-  // composed line, prefix included.
   const summary = boundRaw(text).trim();
   if (!summary) return null;
   return {
@@ -230,10 +181,6 @@ function result(
   return { events, root, sessionId, vendorState };
 }
 
-// --- Claude ---------------------------------------------------------------
-
-// The visible text of an assistant message. Thinking blocks are deliberately skipped: they are long,
-// they are not what the turn said, and the digest has one line to spend on this turn.
 function firstTextBlock(content: ContentBlock[]): string | null {
   for (const block of content) {
     if (block?.type !== 'text') continue;
@@ -243,7 +190,6 @@ function firstTextBlock(content: ContentBlock[]): string | null {
   return null;
 }
 
-// A tool result and an isMeta reminder arrive on `user` lines too, and neither is anything a carbon unit typed.
 function claudeUserText(line: TranscriptLine): string | null {
   if (line.isMeta === true || line.isCompactSummary === true) return null;
   const content = line.message?.content;
@@ -271,10 +217,7 @@ function mapClaudeLine(line: TranscriptLine, ctx: MapContext): AgentMapResult | 
   if (line.type !== 'assistant') return null;
   const content = line.message?.content;
   if (!Array.isArray(content)) return null;
-  /*
-   * The line carries its own cwd, which names the project root EXACTLY where reversing the transcript
-   * directory's encoding could only guess (that encoding collapses every separator to one dash).
-   */
+
   const root = str(line.cwd) || ctx.root;
   const sessionId = str(line.sessionId) || ctx.sessionId;
   const ts = parseTimestamp(line.timestamp) || ctx.now;
@@ -290,14 +233,11 @@ function mapClaudeLine(line: TranscriptLine, ctx: MapContext): AgentMapResult | 
   return result(events, root, sessionId, ctx.vendorState);
 }
 
-// --- Codex ----------------------------------------------------------------
-
 function mapCodexLine(line: TranscriptLine, ctx: MapContext): AgentMapResult | null {
   const payload = line.payload;
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
   const ts = parseTimestamp(line.timestamp) || ctx.now;
-  // A rollout file is nested under date directories that name no project, so these two lines are where
-  // the cwd for everything after them comes from.
+
   if (line.type === 'session_meta' || line.type === 'turn_context') {
     return result([], str(payload.cwd) || ctx.root, str(payload.session_id) || ctx.sessionId, ctx.vendorState);
   }
@@ -307,8 +247,7 @@ function mapCodexLine(line: TranscriptLine, ctx: MapContext): AgentMapResult | n
     if (!prompt) return null;
     return result([prompt], ctx.root, ctx.sessionId, ctx.vendorState);
   }
-  // agent_message is the completed message; the response_item/message stream beside it carries the raw
-  // request items, including the whole system prompt.
+
   if (line.type === 'event_msg' && payload.type === 'agent_message') {
     const turn = turnEvent({ ...base, text: payload.message });
     if (!turn) return null;
@@ -321,26 +260,9 @@ function mapCodexLine(line: TranscriptLine, ctx: MapContext): AgentMapResult | n
   return null;
 }
 
-// --- Grok -----------------------------------------------------------------
-
-/*
- * Grok is the one vendor that writes its assistant text as streaming chunks, so the opening text is
- * held on the per-file vendor state and spent on the `turn_completed` line. Publishing per chunk is
- * exactly the per-token event the plan forbids.
- */
 const PENDING_TURN_FIELD = 'pendingText';
 const PENDING_PROMPT_FIELD = 'pendingUserText';
 
-/*
- * The OPENING text is what the summary wants, so once there is enough of it the rest is not held. The
- * budget is applied to the INCOMING chunk rather than checked after it landed: one chunk is one
- * transcript line's text, and nothing bounds that below the tail's own catch-up read (256KB), so a
- * bound checked afterwards would overshoot by a whole one of those. boundRaw is what does the cutting,
- * so what it cuts is still line-aligned wherever the chunk holds a break.
- *
- * Returning only the named field is deliberate: spending one held stream drops the other, which is what
- * keeps a prompt and the turn that answered it from ever being concatenated.
- */
 function appendChunk(vendorState: VendorState | null | undefined, text: unknown, field: string): VendorState {
   const addition = str(text);
   const held = typeof vendorState?.[field] === 'string' ? vendorState[field] : '';
@@ -348,23 +270,13 @@ function appendChunk(vendorState: VendorState | null | undefined, text: unknown,
   const remaining = MAX_RAW_CHARS - held.length - 1;
   if (remaining <= 0) return { [field]: held };
   const bounded = boundRaw(addition, remaining);
-  // An accumulator has to stay bounded, and dropping a chunk beats splitting a value mid-line to fit it.
+
   if (bounded.length > remaining) return { [field]: held };
   return { [field]: `${held} ${bounded}` };
 }
 
-/*
- * A turn that never completes (an abort, a rate-limit retry, a killed session) leaves its chunks held,
- * and without a boundary that stale text would surface as the NEXT turn's summary. A fresh user prompt
- * and a retry are both unambiguously the start of a different turn, so either drops what is held.
- */
 const GROK_TURN_BOUNDARIES: readonly string[] = Object.freeze(['user_message_chunk', 'retry_state']);
 
-/*
- * The user-prompt half, kept OUT of the turn state machine below: nothing marks the end of a chunked user
- * message, so the first update that is not another user chunk spends what was held. The state it hands
- * back no longer carries the prompt, which is what makes the emit exactly once whatever kind follows.
- */
 function takeGrokPrompt(
   vendorState: VendorState | null,
   base: EventBase,
@@ -383,7 +295,6 @@ function grokToolName(update: GrokUpdate): string {
   return str(meta?.name) || str(update.title) || 'tool';
 }
 
-// The turn and tool state machine, unchanged by the prompt feature: it never reads or writes a held prompt.
 function mapGrokTurn(
   kind: string | null,
   update: GrokUpdate,
@@ -403,8 +314,7 @@ function mapGrokTurn(
     if (!turn) return result([], ctx.root, ctx.sessionId, null);
     return result([turn], ctx.root, ctx.sessionId, null);
   }
-  // tool_call is the call; tool_call_update is its streaming progress, and there are four of those per
-  // call in a live transcript.
+
   if (kind === 'tool_call') {
     const target = toolTarget(update.rawInput);
     return result([toolEvent({ ...base, name: grokToolName(update), target })], ctx.root, ctx.sessionId, ctx.vendorState);
@@ -427,7 +337,7 @@ function mapGrokLine(line: TranscriptLine, ctx: MapContext): AgentMapResult | nu
   const turn = mapGrokTurn(kind, update, base, {
     root: ctx.root, sessionId, vendorState: prompt.vendorState,
   });
-  // A kind this mapper has no interest in still has to spend a held prompt, or the next kind would repeat it.
+
   if (!turn) {
     if (prompt.events.length === 0) return null;
     return result(prompt.events, ctx.root, sessionId, prompt.vendorState);
@@ -435,16 +345,9 @@ function mapGrokLine(line: TranscriptLine, ctx: MapContext): AgentMapResult | nu
   return result([...prompt.events, ...turn.events], turn.root, turn.sessionId, turn.vendorState);
 }
 
-// --- Dispatch -------------------------------------------------------------
-
 const MAPPERS: Readonly<Record<string, ((line: TranscriptLine, ctx: MapContext) => AgentMapResult | null) | undefined>> =
   Object.freeze({ claude: mapClaudeLine, codex: mapCodexLine, grok: mapGrokLine });
 
-/**
- * One raw transcript line in, the events it produced plus the revised context out. An unparseable line,
- * an unknown vendor, and a line the vendor's mapper has no interest in all resolve to no events and an
- * unchanged context, so the shell never has to branch on any of those.
- */
 function mapAgentLine({
   vendor = '',
   rawLine = null,

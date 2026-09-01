@@ -1,5 +1,3 @@
-// Hidden terminals may receive output, but only a visible measurement may publish viewer geometry.
-
 export function decideFitAction({
   measured,
   cols,

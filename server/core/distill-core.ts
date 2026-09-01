@@ -1,18 +1,6 @@
-// Pure core of the distiller lane: the drift stamp a derived file carries, the staleness verdict read
-// off it, and the prompt one distill session runs on. No IO, no clock, no spawn; the shell
-// (server/pack-distiller.js) reads files, spawns the session, and re-checks the result through the
-// same needsDistill used to decide the work was needed.
-//
-// The stamp is the whole mechanism. A derived file records WHICH SOURCE CONTENTS it was distilled
-// from, so drift is a hash comparison rather than a timestamp, a guess, or an LLM judgement. It sits
-// on line 1 so a reader (and this parser) finds it without scanning, and it is the only Glissa-owned
-// byte in an otherwise agent-written file.
-
 const STAMP_PREFIX = '<!-- glissa-distill v1 ';
 const STAMP_SUFFIX = ' -->';
-// Truncated hashes: 64 bits is far more than a drift check needs, and it keeps the stamp one readable
-// line even for a spec distilling a whole docs tree. Both sides go through shortHash, so comparing a
-// stamped value against a freshly computed one is apples to apples.
+
 const STAMP_HASH_CHARS = 16;
 
 export interface StampSource {
@@ -39,7 +27,6 @@ function byPath(a: StampSource, b: StampSource): number {
   return 1;
 }
 
-/** Sorted, deduped, short-hashed { path, sha256 } records: the one canonical form both sides compare in. */
 function normalizeStampSources(sources: unknown): StampSource[] {
   const byPathKey = new Map<string, StampSource>();
   const list: unknown[] = Array.isArray(sources) ? sources : [];
@@ -53,15 +40,10 @@ function normalizeStampSources(sources: unknown): StampSource[] {
   return [...byPathKey.values()].sort(byPath);
 }
 
-/**
- * The stamp line for a set of sources. Single line, JSON payload, stable for the same inputs:
- * `<!-- glissa-distill v1 [{"path":"AGENTS.md","sha256":"0123456789abcdef"}] -->`
- */
 function buildStampLine(sources: unknown): string {
   return `${STAMP_PREFIX}${JSON.stringify(normalizeStampSources(sources))}${STAMP_SUFFIX}`;
 }
 
-/** Parse the stamp off a derived file's FIRST line. Anything else returns null (treated as stale). */
 function parseStampLine(content: unknown): DistillStamp | null {
   if (typeof content !== 'string' || content.length === 0) return null;
   const firstLine = content.split('\n', 1)[0].replace(/\r$/, '').trim();
@@ -79,10 +61,6 @@ function parseStampLine(content: unknown): DistillStamp | null {
   return { sources };
 }
 
-/**
- * Does this derived file need regenerating from these sources? `currentSources` carries hashes as read
- * right now; `content` is the derived file's current content, null when it does not exist.
- */
 function needsDistill(currentSources: StampSource[], content: string | null): DistillVerdict {
   if (typeof content !== 'string' || content.length === 0) {
     return { stale: true, reason: 'output file is missing' };
@@ -95,10 +73,6 @@ function needsDistill(currentSources: StampSource[], content: string | null): Di
   return { stale: false, reason: null };
 }
 
-/**
- * The seed prompt for one distill session. Pure string building, same contract as the PR-review and
- * PostHog lanes: the verdict travels back through a result FILE, never stdout.
- */
 function buildDistillPrompt({
   outputPath,
   sources,

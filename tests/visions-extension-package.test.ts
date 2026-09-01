@@ -1,7 +1,3 @@
-// The packed extension is what an operator actually runs: it lives outside this package, so every file
-// it requires has to be inside the vsix and the relay path has to be stamped. This test unpacks the
-// real archive and boots that copy against a fake daemon.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -35,8 +31,6 @@ interface DidOpenMessage {
   params: { textDocument: { uri: string } };
 }
 
-// The stub is an ES module now, so a resolve-time redirect would hand the packed extension's
-// CommonJS `require('vscode')` the namespace wrapper instead of the namespace itself.
 const loader: LoaderInternals = requireFromHere('node:module');
 const originalLoad = loader._load;
 loader._load = function loadWithVscodeStub(this: unknown, request: string, ...rest: unknown[]): unknown {

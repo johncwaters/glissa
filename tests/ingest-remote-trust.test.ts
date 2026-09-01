@@ -1,17 +1,3 @@
-/*
- * Ingest frames never cross the remote listener (docs/plan-ingestion.md, "Privacy and trust posture":
- * the ingest lane is refused to remote-trust sockets exactly like the Visions lane). Captured
- * terminal output is the most sensitive thing this daemon holds in memory, and a paired phone is a
- * device that is not the machine the output came from.
- *
- * This needs a REAL two-listener boot: trust is decided from the socket's local port, so a fake ws
- * would be testing the assertion rather than the wiring. A paired device is minted the same way the
- * remote suite does it, which is also what proves the remote socket is genuinely live and receiving,
- * so "no ingest frame" means refused rather than merely disconnected.
- *
- * SAFETY: temp config with ZERO projects via GLISSA_CONFIG, like every other backend boot test.
- */
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -34,7 +20,6 @@ interface ControlFrame {
   events?: { summary?: string }[];
 }
 
-// What a paired device carries onto the remote listener: its cookie and the allowed browser origin.
 interface PairedDeviceOptions {
   origin: string;
   headers: Record<string, string>;
@@ -45,7 +30,6 @@ interface RemoteSocket {
   received: ControlFrame[];
 }
 
-// The suite's live wiring, filled once by test.before and torn down by test.after.
 interface BootedBackend {
   tmpDir: string;
   previousConfig: string | undefined;
@@ -75,7 +59,6 @@ async function pairDevice(): Promise<string> {
   return cookie.split(';')[0];
 }
 
-// Recording starts before 'open' resolves: the connect frames land the instant the socket does.
 function openRemoteSocket(url: string, options: PairedDeviceOptions): Promise<RemoteSocket> {
   const ws = new WebSocket(url, options);
   const received: ControlFrame[] = [];
@@ -141,12 +124,11 @@ test('the connect-time ingest snapshot goes to a local dashboard and not to a pa
   const local = await openRecordingSocket<ControlFrame>(localDash);
 
   try {
-    // The paired device IS receiving: it gets the ordinary connect snapshot and is told its own trust.
     const snapshotFrame = await waitForMessage(remote.received, (frame) => frame.type === 'snapshot', 'the remote snapshot');
     assert.equal(snapshotFrame.type, 'snapshot');
     const trustFrame = await waitForMessage(remote.received, (frame) => frame.type === 'client-trust', 'the remote trust frame');
     assert.equal(trustFrame.trust, 'remote');
-    // The local dashboard gets the ingest snapshot on the same connect.
+
     const snapshot = await waitForMessage(local.received, (frame) => frame.type === 'ingest-snapshot', 'the local ingest snapshot');
     assert.deepEqual((snapshot.events ?? []).map((event) => event.summary), ['a local command ran']);
 
@@ -175,9 +157,6 @@ test('a batched activity delta reaches a local dashboard and not a paired device
     assert.ok(lane, 'the lane is on for this boot');
     lane.publish({ source: 'terminal', kind: 'output', summary: secret, scope: { root: '/repo' } });
 
-    // Waiting on the LOCAL delta is what makes the remote negative meaningful: the batch interval has
-    // demonstrably fired by the time it resolves, so the remote socket had its chance and got nothing.
-    // What else rode that frame is the batching test's business, not this one's.
     const frame = await waitForMessage(
       local.received,
       (message) => message.type === 'ingest-activity' && (message.events ?? []).some((event) => event.summary === secret),

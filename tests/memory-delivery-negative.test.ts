@@ -1,9 +1,3 @@
-// M16 of docs/plan-visions-3.md, "Enforced non-delivery", as relaxed to toggles-only: memory is a local
-// store whose CONTENT reaches a session and nothing else, while its scalar knobs are dashboard settings
-// like any other lane's. These are the negative pins: no memory-shaped control-WS message type exists at
-// all, none is replayable, no lane logs remembered text, and the settings block accepts an allow-list of
-// booleans and clamped integers, refusing a path or a content-shaped key BY NAME.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -33,8 +27,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-// The settings projection answers Record<string, unknown> | null by design, so a suite reading two
-// levels into it narrows here rather than at each assertion.
 function block(value: unknown, ...keys: string[]): Record<string, unknown> {
   let current = value;
   for (const key of keys) {
@@ -73,7 +65,7 @@ function withRealStore<T>(
 }
 
 const LIVE_MEMORY = { enabled: true, distill: { enabled: false } };
-// Every file-only key the Mill lanes accept from config.json: a path, a watched root, a shell list.
+
 const FILE_ONLY = Object.freeze({
   memory: { ...LIVE_MEMORY, dbPath: '/tmp/glissa-memory.db' },
   ingest: {
@@ -100,7 +92,7 @@ test('a remote-trust control socket is answered without a memory frame, and the 
   withRealStore({ projects: [], teams: [], memory: LIVE_MEMORY }, (driver, store) => {
     driver.send({ type: 'get-settings' });
     driver.send({ type: 'request-mill-report' });
-    // The socket really was answered: an empty transcript would pass every assertion below for free.
+
     assert.equal(driver.sent.length > 0, true);
     const types = driver.sent.map((message) => message.type);
     assert.equal(types.some((type) => String(type).includes('memory')), false);
@@ -113,8 +105,6 @@ test('a remote-trust control socket is answered without a memory frame, and the 
   });
 });
 
-// The way OUT is the same allow-list as the way in: a stored path is not echoable just because the
-// operator put it in config.json themselves.
 test('a file-only key of any Mill block is dropped from the settings echo', () => {
   withRealStore({ projects: [], teams: [], ...FILE_ONLY }, (driver, store) => {
     const settings = store.getSettings();
@@ -146,7 +136,6 @@ test('a memory toggle is settable over the control WS and lands in the config', 
   });
 });
 
-// The load-bearing half of the relaxation: a knob crosses, a filename or a remembered byte does not.
 test('a path or content-shaped memory key is refused by name and nothing is written', () => {
   for (const forbidden of [{ dir: '/tmp/steal' }, { dbPath: '/tmp/steal.db' }, { text: REMEMBERED }]) {
     withRealStore({ projects: [], teams: [] }, (driver, store) => {
@@ -168,7 +157,6 @@ test('an out-of-range memory toggle is refused rather than silently clamped by t
   });
 });
 
-// A hand-set key the Mill tab does not render must survive a save, or the dialog silently unconfigures it.
 test('a settings save merges onto the stored memory block instead of replacing it', () => {
   withRealStore({ projects: [], teams: [], memory: { enabled: false, futureKnob: 7 } }, (driver, store) => {
     driver.send({ type: 'update-settings', settings: { memory: { enabled: true } } });

@@ -1,7 +1,3 @@
-// The tmp+rename writers every durable state file commits through. Windows hands back a transient
-// EPERM from rename whenever a scanner still holds the destination, which cost a real projection write
-// mid-suite, so the rename retries briefly and rethrows the last error rather than swallowing it.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -28,7 +24,6 @@ function failsWithCode(code: string): (error: unknown) => boolean {
   return (error) => typeof error === 'object' && error !== null && 'code' in error && error.code === code;
 }
 
-// Counts rename attempts and fails the first `failures` of them, delegating everything else to real fs.
 function flakyRenameSync(failures: number, code = 'EPERM'): { calls: { rename: number }; fsSync: SyncFileSystem } {
   const calls = { rename: 0 };
   return {

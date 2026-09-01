@@ -12,21 +12,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-// Every api double answers the wire shape createPosthogApi returns, status included.
 function apiOk(body: unknown) {
   return { ok: true as const, status: 200, body };
 }
 
-// A hand-fired timer: the handle is a real unref-ed timer that never runs its own callback, because the
-// seams are typed against NodeJS.Timeout.
 function heldTimer(): NodeJS.Timeout {
   const handle = setTimeout(() => {}, 2 ** 30);
   handle.unref();
   return handle;
 }
 
-// The state store is a Record by design (the lane persists whatever the decision core wrote), so the
-// fields this suite asserts on are narrowed here once.
 interface StateEntry {
   status?: string;
   verdict?: string | null;
@@ -37,8 +32,6 @@ interface StateEntry {
   fix?: Record<string, unknown>;
 }
 
-// onTickComplete reports the control-plane snapshot as a plain record, so the shape this suite asserts
-// on is stated once here and narrowed at the boundary.
 interface TickProject {
   projectId: string | number;
   name?: string;
@@ -65,7 +58,6 @@ function lastTick(summaries: Record<string, unknown>[]): TickSummary {
   return { type, ts, intervalMinutes, projects };
 }
 
-// The investigations ring also rides the broadcast payload.
 function broadcastInvestigations(summaries: Record<string, unknown>[]): Record<string, unknown>[] {
   const summary = summaries.at(-1);
   if (!summary || !Array.isArray(summary.investigations)) throw new Error('the tick summary carries no investigations');
@@ -92,12 +84,10 @@ function tickIssue(summaries: Record<string, unknown>[], index = 0): Record<stri
   return issue;
 }
 
-// The lane stamps its own tick clock into _meta, which the state store carries as an untyped record.
 function lastTickAt(poller: Poller, projectId: string | number): unknown {
   return tickStamps(poller._state())[String(projectId)];
 }
 
-// The lane's own tick clock, writable so a suite can age a project out.
 function tickStamps(stateValue: Record<string, unknown>): Record<string, unknown> {
   const meta = stateValue._meta;
   if (!isRecord(meta)) throw new Error('the state carries no _meta block');
@@ -106,35 +96,30 @@ function tickStamps(stateValue: Record<string, unknown>): Record<string, unknown
   return stamps;
 }
 
-// The lane keeps a ring of investigation records under its own reserved key.
 function investigationAt(stateValue: Record<string, unknown>, index: number): Record<string, unknown> {
   const record = investigationLog(stateValue)[index];
   if (!isRecord(record)) throw new Error(`no investigation record at ${index}`);
   return record;
 }
 
-// The fix block is written only once a fix job has landed, so a read of one says so.
 function fixOf(poller: Poller, key: string): Record<string, unknown> {
   const { fix } = entryOf(poller, key);
   if (!fix) throw new Error(`no fix block on ${key}`);
   return fix;
 }
 
-// Telegram pings are captured as strings; the assertions match on the most recent one.
 function lastPing(pings: string[]): string {
   const ping = pings.at(-1);
   if (ping === undefined) throw new Error('no ping was sent');
   return ping;
 }
 
-// The traffic-spike cooldown ledger, another untyped block the state store carries.
 function trafficBlock(stateValue: Record<string, unknown>): Record<string, unknown> {
   const traffic = stateValue._traffic;
   if (!isRecord(traffic)) throw new Error('the state carries no _traffic block');
   return traffic;
 }
 
-// A reserved underscore block read whole, for the assertions that pin a key ABSENCE.
 function reservedBlock(stateValue: Record<string, unknown>, name: string): Record<string, unknown> {
   const block = stateValue[name];
   if (!isRecord(block)) throw new Error(`the state carries no ${name} block`);
@@ -153,7 +138,6 @@ function investigationLog(stateValue: Record<string, unknown>): Record<string, u
   return records;
 }
 
-// The signature cluster the recurrence rules key off, also carried untyped in the state store.
 function signatureBlock(stateValue: Record<string, unknown>, key: string): Record<string, unknown> {
   const signatures = stateValue._signatures;
   if (!isRecord(signatures)) throw new Error('the _signatures block is not a map');
@@ -199,9 +183,6 @@ function makeApi(over: Partial<PosthogApi> = {}): PosthogApi {
   };
 }
 
-// Build poller deps with in-memory state + captured pings, non-firing timers, and a hand-driven
-// clock. `over.initialState` seeds the state store BEFORE construction (readState reads the store
-// lazily, so seeding after would be ignored). Mirrors tests/pr-poller.test.js harness().
 type HarnessOverrides = Omit<Partial<PosthogPollerDependencies>, 'api'> & {
   initialState?: Record<string, unknown>;
   api?: Partial<PosthogApi>;
@@ -302,8 +283,6 @@ test('a spike event on an undiagnosed issue pings and investigates', async () =>
   assert.match(pings[0], /120 occurrences \/ 8 users/);
 });
 
-// The spike endpoint keeps naming an issue for as long as it spikes, so both the ping and the
-// investigation used to repeat every interval, forever, for an issue already diagnosed.
 test('a persistently spiking diagnosed issue pings once and spends no further sessions', async () => {
   let spawned = 0;
   const { poller, pings } = harness({
@@ -360,8 +339,6 @@ test('a new issue pings NEW ISSUE once, not per tick', async () => {
   assert.equal(newIssue.length, 1, 'pingedPhases dedups the new-issue ping across ticks');
 });
 
-// The detection ping follows the auto-fix major predicate: the issue itself qualifies, blast radius
-// is irrelevant, so a new issue far below userEscalationThreshold still announces itself once.
 test('a new issue below the escalation threshold still pings NEW ISSUE', async () => {
   const { poller, pings } = harness({
     api: { queryIssues: async () => (apiOk({ results: [issueRow({ aggregations: { occurrences: 3, users: 1 } })] })) },
@@ -377,7 +354,6 @@ test('a NEEDS_HUMAN verdict pings once; a later re-investigation does not re-pin
   let tickCount = 0;
   const { poller, pings } = harness({
     api: {
-      // Spike only on the third tick, forcing a second investigation of the same issue.
       listSpikeEvents: async () => {
         tickCount += 1;
         if (tickCount < 3) return apiOk({ results: [] });
@@ -473,9 +449,6 @@ test('a hung investigation is force-resolved to ERROR by the timeout and frees i
   assert.match(pings[1], /^\[glissa\/posthog\] ERROR web$/m);
 });
 
-// queryIssues returns only the top-50 active issues of the last 24h, so absence is not death: the
-// entry is assumed resolved and retained, which is also the only way a return can read as a
-// regression (an active-only query can never hand back a resolved row).
 test('an issue that vanished from the active list is marked resolved, not deleted, with no ping', async () => {
   const { poller, pings } = harness({
     initialState: { [KEY]: { status: 'active', verdict: 'ROOT_CAUSE', pingedPhases: [] } },
@@ -645,8 +618,6 @@ test('onTickComplete carries the persisted occurrence history', async () => {
   assert.deepEqual(issue.history, [{ ts: 500, occurrences: 100 }, { ts: 1000, occurrences: 120 }]);
 });
 
-// Stamping lastTickAt after the queries left the whole query window invisible to the next tick, so a
-// spike arriving mid-tick was never seen. The next tick's cutoff is this tick's START.
 test('the spike cutoff is the tick START time, so a mid-tick spike is still seen next tick', async () => {
   let clock = 1000;
   const { poller } = harness({
@@ -691,10 +662,7 @@ test('start() clears a stale inFlight left by a crash so the issue is re-investi
   assert.equal(spawned, 1, 'a stale in-flight marker does not wedge the issue forever');
 });
 
-// --- Auto-fix dispatch: a MAJOR issue gets an agent that reproduces and repairs, not one that only
-// diagnoses. Opt-in, and it rides the same slots, the same inFlight bookkeeping and the same drain.
 
-// The default row is a first sighting with 8 users, so a threshold of 5 also makes it high impact.
 const MAJOR = { autoFix: true, userEscalationThreshold: 5 };
 
 function fixResult(over: Record<string, unknown> = {}): JobResult {
@@ -764,8 +732,6 @@ test('a FIXED verdict pings once with the repro status and the pull request', as
   const { poller, pings } = harness({ ...MAJOR, spawnInvestigation: async () => fixResult() });
   await poller.start();
   await flush();
-  // The observation ping fires first: a new issue is announced when it is SEEN, and the fix verdict
-  // is a second, differently-kinded ping rather than a replacement for it.
   assert.equal(pings.length, 2);
   assert.match(pings[0], /^\[glissa\/posthog\] NEW ISSUE web$/m);
   assert.match(pings[1], /^\[glissa\/posthog\] FIXED web$/m);
@@ -809,8 +775,6 @@ test('a completed fix is not redispatched on the next tick', async () => {
   assert.equal(pings.filter((p) => p.includes('FIXED')).length, 1, 'and it pings once, not once per tick');
 });
 
-// The spike endpoint keeps naming an issue for as long as the spike lasts, so a redispatch keyed on
-// the classification alone would spend a fix session every interval on an issue that already has one.
 test('a fixed issue that keeps spiking with growing users is not redispatched every tick', async () => {
   let users = 8;
   let spawned = 0;
@@ -832,9 +796,6 @@ test('a fixed issue that keeps spiking with growing users is not redispatched ev
   assert.equal(spawned, 1, 'the blast radius was already past the threshold when the fix ran');
 });
 
-// The other half of the churn rule: a fix that did not hold must be allowed to run again, and its
-// pull request must not be opened in silence (pingedPhases is carried forward forever, so the fix
-// ping is deliberately not deduped through it).
 test('an issue that regresses after a fix is fixed again, and pings again', async () => {
   let present = true;
   let spawned = 0;
@@ -856,9 +817,6 @@ test('an issue that regresses after a fix is fixed again, and pings again', asyn
   assert.equal(pings.filter((p) => p.includes('FIXED')).length, 2);
 });
 
-// A fix job unwinds through its worktree discard, and on the TIMEOUT path the race that freed the
-// slot has already resolved. stop() must still wait for that unwind, or a shutdown (or a settings
-// restart) leaves the throwaway checkout behind for the next instance to trip over.
 test('stop() waits for a timed-out fix job to finish discarding its worktree', async () => {
   const order: string[] = [];
   const gitWorkspace = {
@@ -929,7 +887,6 @@ test('a fix the wiring downgraded is recorded as the investigation it actually w
   assert.equal(investigationAt(stateStore.value, 0).mode, 'investigate');
 });
 
-// --- Investigations inbox: the persisted log the Radar review section renders ---
 
 test('a completed investigation appends one record to the persisted log', async () => {
   const { poller, stateStore, summaries } = harness({
@@ -1005,7 +962,6 @@ test('the 7-day purge runs on state load and on the tick persist, and spares una
       _investigations: [
         record('stale@1', { archived: true, archivedAt: bootAt - (8 * day) }),
         record('recent@2', { archived: true, archivedAt: bootAt - day }),
-        // Archived by a deploy that predates the archivedAt stamp: aged from `at` instead.
         record('legacy@3', { archived: true, at: bootAt - (9 * day) }),
         record('live@4', { at: 1 }),
       ],
@@ -1059,8 +1015,6 @@ test('archiveInvestigation refuses an unknown or malformed id', async () => {
 test('a state file written by an older server (no _investigations) loads and starts a log', async () => {
   const { poller, stateStore } = harness({
     initialState: {
-      // A resolved entry reappearing in the active list classifies as regressed, so this boots
-      // straight into an investigation with no _investigations key anywhere in the file.
       [KEY]: {
         status: 'resolved', lastOccurrences: 120, lastUsers: 8, verdict: null, pingedPhases: [],
       },
@@ -1082,7 +1036,6 @@ test('the investigations log is never treated as an issue entry', async () => {
   });
   await poller.start();
   await flush();
-  // Second tick with the issue gone: reconcileVanished walks every key and must skip the log.
   tickStamps(poller._state())[1] = 0;
   const { poller: gone, stateStore: goneStore } = harness({
     initialState: poller._state(),
@@ -1096,11 +1049,6 @@ test('the investigations log is never treated as an issue entry', async () => {
   assert.equal(goneStore.value._investigations[0].archived, false);
 });
 
-// --- recurrence dedupe and escalation (server/core/posthog-recurrence.js) ---
-//
-// PostHog mints a new issue id whenever an error's grouping fingerprint shifts, so one non-event
-// bought two full investigations hours apart, both concluding TRANSIENT. These cover the lane's
-// cross-issue memory: the second id costs nothing, and a pattern that changes stops trusting it.
 
 const CHUNK_A = 'TypeError: Failed to fetch dynamically imported module: https://shop.example.com/assets/maplibre-gl-B3nQ.js';
 const CHUNK_B = 'TypeError: Failed to fetch dynamically imported module: https://shop.example.com/assets/maplibre-gl-Zk91.js';
@@ -1110,7 +1058,6 @@ function chunkRow(id: string, name: string, users = 1) {
   return issueRow({ id, name, aggregations: { occurrences: 4, users } });
 }
 
-// A cluster as the lane would have written it after one TRANSIENT verdict on iss-1.
 function seedCluster(over: Record<string, unknown> = {}) {
   return {
     _signatures: {
@@ -1301,8 +1248,6 @@ test('the recurrenceDedupe kill switch restores the prior behavior exactly', asy
 test('a state file written before recurrence memory existed loads and behaves as before', async () => {
   const spawned: string[] = [];
   const { poller, stateStore } = harness({
-    // An old file records a TRANSIENT verdict on iss-1 with no cluster anywhere, and iss-1 has since
-    // been assumed resolved, so its reappearance is a regression.
     initialState: {
       'ph.test/1#iss-1': {
         status: 'resolved', lastOccurrences: 4, lastUsers: 1, verdict: 'TRANSIENT', summaryLine: CHUNK_SUMMARY, pingedPhases: [],
@@ -1344,13 +1289,9 @@ test('the signature registry is never treated as an issue entry', async () => {
   assert.ok(signatureBlock(poller._state(), 'ph.test/1#iss-1'), 'reconcileVanished skipped the underscore key');
 });
 
-// ---------------------------------------------------------------------------
-// The traffic spike lane: same tick, its own state slice, failure-isolated from issue triage.
-// ---------------------------------------------------------------------------
 
 const HOUR_MS = 3600000;
 
-// A flat baseline of `users` per hour over two days, i.e. a project with a very stable normal.
 function trafficBody(currentUsers: number, baselineUsers = 10, hours = 48) {
   return {
     ok: true as const,
@@ -1359,7 +1300,6 @@ function trafficBody(currentUsers: number, baselineUsers = 10, hours = 48) {
   };
 }
 
-// A poller harness whose api answers the traffic query from a queue of bodies (one per tick).
 type TrafficReply = Awaited<ReturnType<PosthogApi['queryTrafficBuckets']>>;
 
 function trafficHarness(bodies: (TrafficReply | (() => TrafficReply))[], over: HarnessOverrides = {}) {

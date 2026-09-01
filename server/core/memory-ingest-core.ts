@@ -1,21 +1,9 @@
-/*
- * M14 of docs/plan-visions-3.md: every decision the memory ingest consumer makes. Which mapped agent-log
- * events become which durable records, what a per-tick batch is, and where a resumed read starts.
- *
- * The trust field is stamped HERE, from the write path, and is never read off the event: a transcript is
- * third-party text whatever it claims about itself, so nothing that arrives this way exceeds `reported`.
- */
-
 import { PROMPT_KIND } from './ingest-agent-core.ts';
 import type { KnownProjects } from './memory-core.ts';
 import { SOURCE_VENDORS, canonicalProjectPath, dropEchoedLines } from './memory-core.ts';
 
 const AGENT_LOG_SOURCE = 'agentLogs';
 
-// `prompt` is absent from PROJECTED_KINDS on purpose: raw operator text must never reach dist/.
-// `agent-tool` is absent because a tool invocation is activity, not a remembered fact: admitting it made
-// 53% of the canon verbatim `Bash` command lines, which the distill lane then paid prompt tokens to read
-// (2026-08-27). Tool events still reach the live ingest ring; they just stop becoming records.
 const RECORD_KIND_BY_EVENT_KIND: Readonly<Record<string, string>> = Object.freeze({
   'agent-turn': 'knowledge',
   [PROMPT_KIND]: 'prompt',
@@ -68,7 +56,6 @@ function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-// A rootless event is dropped for the ring's own reason: machine scope lands in every project's retrieval.
 function memoryInputFromEvent(
   event: IngestEventLike | null | undefined,
   {
@@ -87,7 +74,7 @@ function memoryInputFromEvent(
   const project = canonicalProjectPath(nonEmptyString(event.scope?.root), knownProjects);
   if (!project) return null;
   const summary = typeof event.summary === 'string' ? event.summary : '';
-  // Echo suppression: a session quoting its own delivered memory back must not re-ingest it.
+
   const text = deliveredHashes ? dropEchoedLines(summary, deliveredHashes) : summary;
   if (!text.trim()) return null;
   const ts = finiteOr(event.ts, 0);
@@ -102,7 +89,6 @@ function memoryInputFromEvent(
   };
 }
 
-// Oldest-first eviction: a flood of new turns is worth more than the start of the flood it displaced.
 function enqueueIngestInput<TInput>(
   queued: unknown,
   input: TInput | null | undefined,
@@ -117,7 +103,6 @@ function enqueueIngestInput<TInput>(
   return { queue: next.slice(overflow), dropped: overflow };
 }
 
-// One tick writes at most this many records, and the caller yields between the batches.
 function planIngestBatch<TInput>(
   queued: unknown,
   { maxPerTick = DEFAULT_MAX_RECORDS_PER_TICK }: { maxPerTick?: number } = {},
@@ -126,8 +111,6 @@ function planIngestBatch<TInput>(
   const bound = Math.max(1, Math.floor(maxPerTick));
   return { take: list.slice(0, bound), rest: list.slice(bound) };
 }
-
-// --- Durable offsets ------------------------------------------------------
 
 function normalizeTailEntry(raw: unknown): TailEntry | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
@@ -160,7 +143,6 @@ function normalizeTailState(raw: unknown): TailState {
   return { version: TAIL_STATE_VERSION, files };
 }
 
-// Newest-first by the moment each offset was recorded, so a bounded state forgets what stopped moving.
 function recordTailOffset(
   state: unknown,
   entry: unknown,
@@ -191,7 +173,6 @@ function tailStateForget(state: unknown, filePaths: unknown): TailState {
   return { version: TAIL_STATE_VERSION, files };
 }
 
-// Unknown is a cold start from the top; a mismatch restarts at EOF, since the offset indexes a file that is gone.
 function decideResumeRead(
   recorded: unknown,
   stat: { size?: unknown; mtimeMs?: unknown } | null | undefined,
@@ -206,7 +187,6 @@ function decideResumeRead(
   return { action: 'resume', start: entry.offset, reason: null };
 }
 
-// `partial` means the budget ran out before EOF, which is what the recorded offset makes resumable.
 function planBackfillRead({
   start = 0,
   size = 0,

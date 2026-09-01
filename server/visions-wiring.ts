@@ -1,4 +1,3 @@
-// Visions lane IO shell. Design rationale lives in docs/archive/plan-navigator.md.
 
 import fs from 'node:fs';
 import fsPromisesDefault from 'node:fs/promises';
@@ -88,16 +87,12 @@ import { createJsonStateWriter } from './json-file.ts';
 import { createLaneLog } from './lane-log.ts';
 import type { LaneLogger } from './lane-log.ts';
 
-// Quiet window before a document is swept.
 const VISIONS_DEBOUNCE_MS = 300;
-// Whole-document didChange frames can carry editor buffers up to the data WS cap.
 const MAX_FRAME_BYTES = 2 * 1024 * 1024;
 const MARKDOWN_EXTENSIONS = ['.md', '.markdown'];
-// What one dispatch prompt will spend on recent activity, beside a buffer that can be far larger.
 const DIGEST_BUDGET_CHARS = 2000;
 const CODE_ACTION_METHOD = 'textDocument/codeAction';
 const APPLY_EDIT_METHOD = 'workspace/applyEdit';
-// An editor that never answers an applyEdit leaves a slot and a changelog line owed; this bounds both.
 const APPLY_EDIT_TIMEOUT_MS = 2000;
 const FRAME_TYPES = new Set(['lsp', 'lsp-request', 'lsp-response']);
 
@@ -174,8 +169,6 @@ interface VisionsWiringOptions {
     memory?: MemorySection | null;
     prompt?: string | null;
   }) => Promise<DispatchOutcome>) | null;
-  // Answers unknown: the digest comes from the ingest lane, and a non-string reading is treated as absent
-  // rather than stringified into a prompt.
   contextDigest?: ((options: { scopes: null; budgetChars: number; now: number }) => unknown) | null;
   contextSeq?: (() => number | null) | null;
   scopeProjects?: ScopeProject[] | null;
@@ -186,7 +179,6 @@ interface VisionsWiringOptions {
   intentStatePath?: string | null;
   intentThreadTtlMs?: number;
   fsFns?: IntentStateReader;
-  // The writer set createJsonStateWriter takes, rather than the whole fs/promises module.
   fsPromises?: Parameters<typeof createJsonStateWriter>[0]['fsPromises'];
   digestBudgetChars?: number;
   hashFn?: (text: string) => string;
@@ -205,12 +197,10 @@ function isMarkdownDoc(doc: DocLike): boolean {
   return MARKDOWN_EXTENSIONS.some((extension) => uri.endsWith(extension));
 }
 
-// A null id is JSON-RPC for "no id", which is exactly as unroutable here as an absent one.
 function hasId(parsed: { id?: unknown }): boolean {
   return parsed.id !== null && parsed.id !== undefined;
 }
 
-// One relay frame, or the reason it is unusable.
 function readFrame(raw: string): LaneFrame {
   let parsed: { type?: unknown; id?: unknown; result?: unknown; method?: unknown; params?: unknown } | null = null;
   try {
@@ -249,10 +239,6 @@ function shouldWarnForInvalidIntentFile(raw: unknown, revived: IntentState): boo
   return !isPersistedEmptyIntentFile(raw);
 }
 
-// The prune runs AFTER the warn decision: a file whose only statements belonged to deleted projects was
-// valid when it was written, and calling that invalid would put a warning on a routine deletion.
-// The one sync read this module makes, rather than the whole fs module: a suite proving the lane touches
-// no storage has to be able to inject it.
 interface IntentStateReader {
   readFileSync: (filePath: string, encoding: 'utf8') => string;
 }
@@ -283,10 +269,6 @@ function loadIntentState({ intentStatePath, fsFns, warn, knownProjectIds }: {
   }
 }
 
-/*
- * What a refused didChange needs beside its reason for the log line to answer the next question by
- * itself: which buffer, which frame, and which change in the batch was the malformed one.
- */
 function changeFailureReason(
   uri: string | null,
   version: unknown,
@@ -308,83 +290,43 @@ function createVisionsWiring({
   nowFn = Date.now,
   sweep = sweepMarkdownWithFixes,
   maxPayload = MAX_FRAME_BYTES,
-  // Tier 1 silent fixes (docs/archive/plan-navigator-2.md, M6). The pull half is always on with the lane; this
-  // flag governs only the push half, where an edit lands in the buffer without being asked for.
   autoFix = false,
   fixLogMax = DEFAULT_FIX_LOG_MAX,
   applyEditTimeoutMs = APPLY_EDIT_TIMEOUT_MS,
   logger = console,
   broadcast = null,
-  // Tier 3 model dispatch (docs/archive/plan-navigator.md, M4). Absent config or no dispatch function means
-  // the lane behaves exactly as it did before M4: no dispatch timer is ever armed and nothing spawns.
   dispatchConfig = null,
   dispatch = null,
-  // Cross-source context digest from the ingest lane (docs/plan-ingestion.md, M6). Absent by default
-  // and then never called, which is what keeps a dispatch prompt with no ingest lane byte-identical.
   contextDigest = null,
-  // The ingest lane's newest seq (docs/plan-ingestion.md, M7.5): the movement signal that lets the gate
-  // see activity the buffer never showed. Absent means null, and the gate is then the pre-M7.5 one.
   contextSeq = null,
-  // Each entry is { id, path }: the id names the intent slot a uri's proposals land in, the path scopes it.
   scopeProjects = null,
   knownProjectIds = null,
-  /*
-   * Long-term memory (docs/plan-visions-3.md, M13). A thunk because the store is constructed once at
-   * boot and is null on a default config; every writer below is then a no-op and nothing is recorded.
-   */
   getMemoryStore = null,
-  // The ingest lane's editor source (docs/plan-ingestion.md, M6 Sources). Absent by default, and the
-  // lane then reports nothing; it is handed markers only, never the buffer this lane holds.
   onEditorEvent = null,
-  // How many remembered records one dispatch prompt may carry (docs/plan-visions-3.md, M16).
   memoryDeliveryLimit = MAX_DELIVERED_RECORDS,
   intentStatePath = null,
-  // A thread nobody advanced for this long retires on the next read (docs/plan-visions-4-focus.md, M20).
   intentThreadTtlMs = DEFAULT_THREAD_TTL_MS,
   fsFns = fs,
   fsPromises = fsPromisesDefault,
   digestBudgetChars = DIGEST_BUDGET_CHARS,
   hashFn = hashText,
   buildPrompt = buildVisionsPrompt,
-  // Per-keystroke chatter, off unless the operator turned debugMode on. Boolean or getter, and the
-  // privacy rule every line here obeys lives with the helper in server/lane-log.ts.
   debug = false,
 }: VisionsWiringOptions = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload });
   const connections = new Set<VisionsConnection>();
   const { debugNote, note, warn } = createLaneLog({ prefix: '[visions]', logger, debugFlag: debug });
-  /*
-   * Findings the Visions tab is currently showing, keyed by uri and shared across relays: the tab is a
-   * view of what is open in the editors, not of which socket mirrored it. A uri with no findings is
-   * ABSENT rather than stored empty, so the map and the rendered sections always agree.
-   */
   const findingsByUri = new Map<string, LineDiagnostic[]>();
   const ruleFindingsByUri = new Map<string, SweepDiagnostic[]>();
   const modelDiagnosticsByUri = new Map<string, LineDiagnostic[]>();
-  /*
-   * Tier 3 model comments, keyed by uri beside the findings and on the same lifecycle: replaced whole
-   * by each dispatch, cleared on didClose. Separate from findingsByUri because a document can have one
-   * kind without the other, and the tab renders them as two different things.
-   */
   const commentsByUri = new Map<string, VisionsComment[]>();
-  // The same comments as LSP diagnostics, kept apart from the tab's copy because they die with the next
-  // keystroke exactly as the model diagnostics beside them do.
   const commentDiagnosticsByUri = new Map<string, LineDiagnostic[]>();
   const handsByUri = new Map<string, string>();
-  // The same hand as an LSP diagnostic, on the same lifecycle as the comment diagnostics beside it: it
-  // describes the text the dispatch read, so a buffer that moved invalidates it too.
   const handDiagnosticsByUri = new Map<string, LineDiagnostic[]>();
   const openOwnersByUri = new Map<string, Set<VisionsConnection>>();
-  /*
-   * Tier 1 fixes from the last sweep of each uri, stored WITH the text hash they were computed against.
-   * A code action is offered only while that hash still describes the buffer, so a fix can never be
-   * served against text the carbon unit has already moved on from.
-   */
   const fixesByUri = new Map<string, { fixes: SweepFix[]; textHash: string }>();
-  // What the lane has actually touched, applied and refused alike: the tab's audit of tier 1.
   let fixLog: FixLogEntry[] = [];
   let nextApplyEditId = 1;
-  // The intent model (docs/plan-visions-4-focus.md, M20): threads per project, uri-bound, decaying on read.
   const scopePaths = scopePathsOf(scopeProjects);
   let intentState = loadIntentState({
     intentStatePath, fsFns, warn, knownProjectIds,
@@ -399,20 +341,9 @@ function createVisionsWiring({
   const dispatchSettings = resolveDispatchConfig(dispatchConfig);
   const dispatchEnabled = dispatchSettings.enabled === true && typeof dispatch === 'function';
   const dispatchState = createDispatchState();
-  /*
-   * The last gate LOGGED per uri. Activity arms a window as often as the machine moves, so an
-   * undeduped refusal line is one log entry per open document per quiet window, forever. A refusal is
-   * news when the gate CHANGES; the same gate holding again is the steady state, not an event.
-   */
   const lastGateByUri = new Map<string, string>();
-  // Concurrency 1, machine-wide: a dispatch while one is in flight is GATED, never queued.
   let dispatchInFlight = false;
 
-  /*
-   * Keyed by trigger AND gate, never the gate alone: a poke and a save can be refused by the same cap
-   * for entirely different reasons, and the operator's own save being turned away is exactly the line
-   * that must not be swallowed by the machine's. A dispatch clears the mark, so the next refusal is news.
-   */
   function noteGate(uri: string, { gate, trigger }: { gate: string | null; trigger: DispatchTrigger | null }): void {
     const key = `${trigger}:${gate}`;
     if (lastGateByUri.get(uri) === key) return;
@@ -426,7 +357,6 @@ function createVisionsWiring({
 
   const memoryStoreOf = typeof getMemoryStore === 'function' ? getMemoryStore : () => null;
 
-  // A failing ingest lane must never break the editor channel it rode in on.
   function reportEditorEvent(method: string, uri: string | null): void {
     if (typeof onEditorEvent !== 'function' || !uri) return;
     try {
@@ -436,10 +366,8 @@ function createVisionsWiring({
     }
   }
   const servedFindingKeys = createBoundedKeySet();
-  // Keyed by project AND thread, with the pre-thread legacy head under the thread-less key.
   const intentHeadByKey = new Map<string, string | null>();
   let intentHeadsSeeded = false;
-  // One chain for every memory write, so a supersession can never interleave with the record it names.
   let memoryChain: Promise<void> = Promise.resolve();
 
   function queueMemoryWrite(work: (store: VisionsMemoryStore) => Promise<void>): void {
@@ -452,7 +380,6 @@ function createVisionsWiring({
     return projectTagFor(projectForUri(uri, scopeProjects), scopeProjects);
   }
 
-  // Counts only: what was remembered is never what is logged.
   function rememberRecords(inputs: unknown[]): void {
     const list = (Array.isArray(inputs) ? inputs : []).filter((input) => input !== null);
     if (list.length === 0) return;
@@ -466,7 +393,6 @@ function createVisionsWiring({
     });
   }
 
-  // Seeded from the loaded canon, so a restart continues the intent chain instead of forking a new one.
   function seedIntentHeads(store: VisionsMemoryStore): void {
     if (intentHeadsSeeded) return;
     intentHeadsSeeded = true;
@@ -474,11 +400,6 @@ function createVisionsWiring({
     for (const [key, id] of latestIntentHeads(store.records())) intentHeadByKey.set(key, id);
   }
 
-  /*
-   * The head this advance supersedes: its own thread's, or the unthreaded legacy head under the same
-   * project key, which the first advance of ANY thread closes so it cannot stay valid beside them. The
-   * legacy key only comes back to be closed; the close itself waits for a record that supersedes it.
-   */
   function readIntentHead(projectTag: string | null, threadId: string | null): { key: string; head: string | null; legacyKey: string | null } {
     const own = intentHeadKey(projectTag, threadId);
     if (intentHeadByKey.has(own)) return { key: own, head: intentHeadByKey.get(own) ?? null, legacyKey: null };
@@ -494,10 +415,8 @@ function createVisionsWiring({
       const input = intentMemoryInput({
         text: thread.text, project: projectTag, supersedes: head, threadId: thread.id,
       });
-      // Nothing to remember is not a refusal, so it leaves both heads exactly where they were.
       if (!input) return;
       const record = await store.append(input);
-      // A refused write leaves the chain naming a head no later record could resolve, so it starts over.
       if (!record) {
         intentHeadByKey.delete(key);
         return;
@@ -542,11 +461,6 @@ function createVisionsWiring({
     );
   }
 
-  /*
-   * What the next prompt is told not to repeat: the tier 2 RULE findings alone, never the union the tab
-   * renders. The union carries this lane's own hand and comments, so feeding it back told the session
-   * to omit a hand nobody had lowered, and the empty answer then lowered it.
-   */
   function standingFindingsFor(uri: string): SweepDiagnostic[] {
     return ruleFindingsByUri.get(uri) || [];
   }
@@ -557,7 +471,6 @@ function createVisionsWiring({
     if (findings.length > 0) ruleFindingsByUri.set(uri, findings);
   }
 
-  // A uri the tab never had a section for needs no message telling it to forget one.
   function clearFindings(uri: string): void {
     ruleFindingsByUri.delete(uri);
     if (!findingsByUri.delete(uri)) return;
@@ -589,7 +502,6 @@ function createVisionsWiring({
     return { changed: hadDiagnostics || diagnostics.length > 0, diagnostics: unionDiagnosticsFor(uri) };
   }
 
-  // Both halves of a dispatch describe the text it read, so a buffer that moved invalidates both.
   function dropDispatchDiagnostics(uri: string | null): void {
     if (!uri) return;
     modelDiagnosticsByUri.delete(uri);
@@ -602,7 +514,6 @@ function createVisionsWiring({
     broadcast({ type: 'visions-comments', uri, comments, ts: nowFn() });
   }
 
-  // Wholesale replacement, like a sweep's findings: a uri with no comments is absent, never stored empty.
   function recordComments(uri: string, comments: VisionsComment[], doc: { text?: string } | null = null): { changed: boolean } {
     const list = Array.isArray(comments) ? comments : [];
     if (list.length === 0) commentsByUri.delete(uri);
@@ -638,8 +549,6 @@ function createVisionsWiring({
     const previous = handsByUri.get(uri) || null;
     if (!next) handsByUri.delete(uri);
     if (next) handsByUri.set(uri, next);
-    // Rebuilt whatever the text says, since a didChange dropped the diagnostic while the tab kept the
-    // hand: an equality shortcut here left the editor warning gone for good on a repeated hand.
     const diagnostics = handToLsp(next, { text: doc?.text || '' });
     const hadDiagnostics = handDiagnosticsByUri.has(uri);
     if (diagnostics.length === 0) handDiagnosticsByUri.delete(uri);
@@ -652,7 +561,6 @@ function createVisionsWiring({
     recordHand(uri, null);
   }
 
-  // Replaced wholesale by each sweep, like the findings they were derived from.
   function recordFixes(uri: string, fixes: SweepFix[], textHash: string): void {
     if (fixes.length === 0) {
       fixesByUri.delete(uri);
@@ -687,11 +595,6 @@ function createVisionsWiring({
     lastGateByUri.delete(uri);
   }
 
-  /*
-   * One changelog line per fix the lane touched. A refusal is logged exactly as loudly as a success and
-   * is never retried: the fix stays on offer through the pull half, which is where a carbon unit who
-   * wanted it asks for it.
-   */
   function logFix(uri: string, fix: SweepFix, applied: boolean): void {
     const entry = fixLogEntry({
       uri, fix, applied, ts: nowFn(),
@@ -704,7 +607,6 @@ function createVisionsWiring({
     });
   }
 
-  // Every uri the tab has a section for: findings, comments, or both.
   function documentsSnapshot() {
     const uris = new Set([...findingsByUri.keys(), ...commentsByUri.keys(), ...handsByUri.keys()]);
     return [...uris].map((uri) => ({
@@ -744,7 +646,6 @@ function createVisionsWiring({
     return true;
   }
 
-  // Decay happens here, on the read, never on a timer; a project whose list shrank is told once.
   function retireIntentThreads(): void {
     const retired = retireStaleThreads(intentState, { now: nowFn(), ttlMs: intentThreadTtlMs });
     if (!retired.changed) return;
@@ -754,20 +655,15 @@ function createVisionsWiring({
     note('intent threads retired on read');
   }
 
-  // The one way to read the intent: every reader decays first, or a lane with dispatch off serves
-  // threads nothing will ever retire.
   function currentIntentState(): IntentState {
     retireIntentThreads();
     return intentState;
   }
 
   function applyModelIntent(intent: unknown, projectId: string | null = null, uri: string | null = null): boolean {
-    // Against the decayed state, never the standing one: a dispatch that outlives the ttl of the thread
-    // it was reading would otherwise revive it by advancing it.
     const merged = mergeModelIntent(currentIntentState(), {
       intent, now: nowFn(), projectId, uri,
     });
-    // A count and never the text: the id a session named is its own claim, not a fact about the canon.
     if (merged.refused) note(`intent proposal refused for ${projectId || 'unowned'}: ${merged.refused}`);
     const changed = commitIntent(merged, projectId, uri);
     const { thread } = merged;
@@ -776,13 +672,6 @@ function createVisionsWiring({
     return true;
   }
 
-  /*
-   * THE one place the orientation rule lives (docs/plan-visions-4-focus.md, M21). An orientation is
-   * asked for intent and hand alone, so every comment and diagnostic it returns is discarded unread and
-   * the sections an earlier dispatch published stand: writing its empty answer over them blanked a
-   * window's findings the moment a second window opened the same document. A hand it did not raise is
-   * likewise not a hand it lowered.
-   */
   function applyOrientationResult(
     uri: string,
     result: DispatchOutcome,
@@ -802,13 +691,6 @@ function createVisionsWiring({
     return true;
   }
 
-  /*
-   * What a finished dispatch is allowed to change. An ERROR (no result file, unparsable, unknown
-   * verdict, timeout) leaves the standing comments exactly as they were: the lane says nothing rather
-   * than inventing something or blanking a section because one session fell over.
-   */
-  // The focus gate runs HERE, on the returned result, so the wiring tests exercise it behind whatever
-  // fake dispatch they inject and touched ranges never enter the dispatch contract.
   function applyDispatchResult(
     uri: string,
     result: DispatchOutcome,
@@ -833,8 +715,6 @@ function createVisionsWiring({
     if (refusedCounts) note(`refused comments for ${uri}: ${refusedCounts}`);
     const { comments, hand } = filtered;
     const commentUpdate = recordComments(uri, comments, doc);
-    // Recorded BEFORE the publish below, or a hand raised on its own never reaches the editor: the
-    // frame it belongs in has already gone out by the time the old order got here.
     const handUpdate = recordHand(uri, hand, doc);
     if (modelUpdate.changed || commentUpdate.changed || handUpdate.changed) {
       const merged = unionDiagnosticsFor(uri);
@@ -847,11 +727,6 @@ function createVisionsWiring({
     return true;
   }
 
-  /*
-   * The ingest lane's digest, read once per dispatch and never on any other path. Synchronous by its own
-   * contract, so it cannot describe two moments at once; a lane that throws costs this prompt its
-   * context section and nothing else, because additive context must never fail a dispatch.
-   */
   function readContextDigest(): string {
     if (typeof contextDigest !== 'function') return '';
     try {
@@ -863,12 +738,6 @@ function createVisionsWiring({
     }
   }
 
-  /*
-   * Long-term memory for this dispatch (docs/plan-visions-3.md, M16): top-K lexically relevant records
-   * for the ACTIVE project plus the global layer. Guarded exactly like the digest, so a store that
-   * throws costs this prompt its memory section and never the dispatch. Every delivered line is
-   * registered with the store, which is what lets the M14 consumer drop the same line coming back.
-   */
   async function readMemorySection(uri: string, text: string): Promise<MemorySection | null> {
     const store = memoryStoreOf();
     if (!store || typeof store.retrieve !== 'function') return null;
@@ -880,7 +749,6 @@ function createVisionsWiring({
       if (lines.length === 0) return null;
       const body = lines.join('\n');
       if (typeof store.noteDelivered === 'function') store.noteDelivered(body);
-      // Counts and a version only: what was remembered is never what is logged.
       debugNote(() => `memory: ${lines.length} record(s) delivered for ${uri}`);
       return { text: body, count: lines.length, version: await readProjectionVersion(store) };
     } catch (error) {
@@ -895,11 +763,6 @@ function createVisionsWiring({
     return typeof manifest?.version === 'string' ? manifest.version : null;
   }
 
-  /*
-   * The same contract as the digest and read on the same path: once per dispatch, guarded, and a
-   * provider that throws costs this dispatch its movement signal rather than the dispatch itself. Null
-   * whenever no lane is wired, which is what makes every gate decision identical to the pre-M7.5 one.
-   */
   function readContextSeq(): number | null {
     if (typeof contextSeq !== 'function') return null;
     try {
@@ -911,10 +774,8 @@ function createVisionsWiring({
     }
   }
 
-  // The in-flight dispatch, so a test (and shutdown) can wait for the lane to go quiet.
   let dispatchSettled: Promise<unknown> = Promise.resolve();
 
-  // Connect-time repair for the control WS: one current-state frame, not a replay of superseded ones.
   function snapshotMessage() {
     const documents = documentsSnapshot();
     note(`snapshot served: ${documents.length} documents`);
@@ -923,15 +784,12 @@ function createVisionsWiring({
     };
   }
 
-  // One document store per connection: an editor's buffers die with the relay that mirrored them.
   function openConnection({ send }: { send: (message: unknown) => void }): VisionsConnection {
     const store = createDocStore();
     const sweepTimersByUri = new Map<string, NodeJS.Timeout>();
     const dispatchTimersByUri = new Map<string, NodeJS.Timeout>();
-    // Per connection and per open, beside the store: a uri open in two windows orients in each.
     const touchState = createTouchState();
     const orientedUris = new Set<string>();
-    // applyEdit requests this relay owes an answer for, keyed by the id the lane minted for each.
     const pendingApplyEditById = new Map<string, PendingApplyEdit>();
     let closed = false;
 
@@ -949,13 +807,6 @@ function createVisionsWiring({
       dispatchTimersByUri.delete(uri);
     }
 
-    /**
-     * One dispatch attempt, already at a pause boundary. Every remaining question (has the buffer
-     * moved, is the cooldown up, is the hourly budget spent, is one already running) belongs to the
-     * pure gate, and a refusal costs exactly one log line naming the gate that held. `armedBy` says
-     * which boundary opened this window, and the gate uses it only to classify a buffer it has no
-     * recorded hash for.
-     */
     async function runDispatch(uri: string, armedBy: DispatchTrigger = 'edit'): Promise<void> {
       if (!dispatchEnabled || closed) return;
       const doc = getDoc(store, uri);
@@ -990,8 +841,6 @@ function createVisionsWiring({
       }
       const orientation = decision.reason === ORIENTATION_REASON;
       const [activeThread = null, ...rest] = liveThreadsFor(currentIntentState(), projectId, uri);
-      // liveThreadsFor leads with every thread bound to this uri, and "also in flight, not this
-      // document" must name none of them.
       const otherThreads = rest.filter((thread) => !thread.uris.includes(uri));
       const focus = { touchedRanges, orientation, activeThread };
       dispatchInFlight = true;
@@ -1034,8 +883,6 @@ function createVisionsWiring({
       } finally {
         dispatchInFlight = false;
       }
-      // Only a finished spawn is evidence about the LANE: the throw above never reached the CLI, and a
-      // real spawn failure still arrives here as a result whose verdict is ERROR.
       if (!result) return;
       const outcome = noteDispatchOutcome(dispatchState, {
         verdict: result.verdict, errorSource: result.errorSource, now: nowFn(),
@@ -1068,23 +915,14 @@ function createVisionsWiring({
       }, dispatchSettings.quietMs);
       if (timer && typeof timer.unref === 'function') timer.unref();
       dispatchTimersByUri.set(uri, timer);
-      // Debug only: a busy machine re-arms this as often as it moves.
       debugNote(() => `dispatch armed for ${uri} by ${armedBy} in ${dispatchSettings.quietMs}ms`);
     }
 
-    // Typing pushes an armed quiet window out and never opens one, because a document with no published
-    // sweep behind it has nothing to react to yet; noteActivity below is the only other armer.
     function rearmDispatch(uri: string): void {
       if (!dispatchTimersByUri.has(uri)) return;
       armDispatch(uri, 'edit');
     }
 
-    /*
-     * Machine activity reached the lane (docs/plan-ingestion.md, M7.5). It ARMS an idle document and
-     * never touches an armed one: a continuous stream of activity that kept pushing the window out would
-     * starve dispatch forever, which is the opposite of what the poke exists for. A window this arms
-     * that races a dispatch is simply refused by the gate, at the cost of one log line.
-     */
     function noteActivity(): void {
       if (!dispatchEnabled || closed) return;
       for (const doc of listDocs(store)) {
@@ -1102,10 +940,6 @@ function createVisionsWiring({
       }
     }
 
-    /*
-     * The pull half never re-sweeps: it filters what the last sweep of this buffer already computed, and
-     * offers nothing at all once the stored hash stops describing the mirrored text.
-     */
     function codeActionsFor(params: Record<string, unknown> | undefined) {
       const target = params?.textDocument as { uri?: unknown } | undefined;
       const uri = target?.uri;
@@ -1119,7 +953,6 @@ function createVisionsWiring({
       return buildCodeActions(offered, { uri, version: doc.version });
     }
 
-    // Answered, never dropped: the relay times an unanswered request out and the editor pays that wait.
     function handleRequestFrame(frame: { id?: unknown; method?: string; params?: Record<string, unknown> }): void {
       if (frame.method !== CODE_ACTION_METHOD) {
         sendResponse(frame.id, null);
@@ -1151,11 +984,6 @@ function createVisionsWiring({
       }
     }
 
-    /*
-     * The push half, gated on autoFix. One request per sweep carrying that sweep's auto-safe edits as one
-     * versioned WorkspaceEdit, so an edit racing a keystroke is refused by the editor rather than landing
-     * on moved text, and a refusal costs one changelog line rather than a retry.
-     */
     function requestAutoFix(uri: string, doc: StoredDoc): void {
       if (!autoFix) return;
       const entry = fixesByUri.get(uri);
@@ -1175,11 +1003,6 @@ function createVisionsWiring({
       }
     }
 
-    /*
-     * `armedBy` is also what decides how loudly the sweep is reported. A debounced sweep runs at typing
-     * cadence, so it is debug-gated exactly like the didChange line that drives it; a save is
-     * operator-paced, so that one stays the always-visible marker.
-     */
     function publishDiagnostics(uri: string, armedBy = 'edit'): void {
       const doc = getDoc(store, uri);
       if (!doc || !isMarkdownDoc(doc)) return;
@@ -1193,13 +1016,11 @@ function createVisionsWiring({
       requestAutoFix(uri, doc);
       if (armedBy === 'save') note(`swept ${uri} on save: ${diagnostics.length} findings`);
       if (armedBy !== 'save') debugNote(() => `swept ${uri}: ${diagnostics.length} findings`);
-      // A published sweep is the pause boundary tier 3 waits behind; the quiet window starts here.
       armDispatch(uri, 'edit');
     }
 
     function scheduleSweep(uri: string | null): void {
       if (closed || !uri) return;
-      // Non-markdown documents are mirrored but never swept in v1, so they arm no timer either.
       if (!isMarkdownDoc(getDoc(store, uri))) return;
       if (!isUriInScope(uri)) return;
       rearmDispatch(uri);
@@ -1236,7 +1057,6 @@ function createVisionsWiring({
         const doc = uri ? getDoc(store, uri) : null;
         dropDispatchDiagnostics(uri);
         if (uri && doc && isMarkdownDoc(doc)) recordChanges(touchState, uri, result.changes || [], doc.text);
-        // Debug only: this fires once per keystroke burst on every open buffer.
         debugNote(() => `didChange ${uri} v${version} (${result.changeCount} changes, ${result.size} chars)`);
         scheduleSweep(uri);
         if (!uri || !previousDoc || !doc || !isMarkdownDoc(doc)) return null;
@@ -1249,19 +1069,16 @@ function createVisionsWiring({
         dispatchSettled = runDispatch(uri, 'edit').catch((error: unknown) => warn(`dispatch loop failed: ${errorMessage(error)}`));
         return null;
       },
-      // A save IS a pause boundary, so it sweeps without waiting out the quiet window.
       'textDocument/didSave': (params) => {
         const uri = uriOfParams(params);
         if (!uri) return 'invalid-params';
         reportEditorEvent('textDocument/didSave', uri);
         cancelSweep(uri);
         publishDiagnostics(uri, 'save');
-        // A save is the boundary itself: it evaluates the same gate now rather than waiting it out.
         cancelDispatch(uri);
         dispatchSettled = runDispatch(uri, 'edit').catch((error: unknown) => warn(`dispatch loop failed: ${errorMessage(error)}`));
         return null;
       },
-      // A buffer this lane never sweeps still moves the machine, and the marker carries no text.
       [ACTIVITY_METHOD]: (params) => {
         const uri = typeof params?.uri === 'string' ? params.uri : null;
         const method = typeof params?.method === 'string' ? params.method : null;
@@ -1269,7 +1086,6 @@ function createVisionsWiring({
         reportEditorEvent(method, uri);
         return null;
       },
-      // The one editor-driven refusal signal there is; absent it, a served finding is simply unlabeled.
       'visions/dismissFinding': (params) => {
         const dismissal = readDismissParams(params);
         if (!dismissal || !isUriInScope(dismissal.uri)) {
@@ -1281,7 +1097,6 @@ function createVisionsWiring({
         })]);
         return null;
       },
-      // The carbon unit closed the buffer, so its findings are gone rather than merely unrefreshed.
       'textDocument/didClose': (params) => {
         const uri = uriOfParams(params);
         if (uri) cancelSweep(uri);
@@ -1316,15 +1131,12 @@ function createVisionsWiring({
         return;
       }
       const handler = frame.method ? handlersByMethod[frame.method] : undefined;
-      // Every other LSP notification (initialize, workspace events) is simply not part of v1.
       if (!handler) return;
       const reason = handler(frame.params);
       if (!reason) return;
       warn(`ignored ${frame.method}: ${reason}`);
     }
 
-    // Findings deliberately survive a dropped relay: the shim replays its open buffers on reconnect, so
-    // wiping the tab here would blank it for the length of a Vite restart and then refill it unchanged.
     function close(): void {
       if (closed) return;
       closed = true;
@@ -1370,7 +1182,6 @@ function createVisionsWiring({
     return connection;
   }
 
-  // Catch frame handler faults before they reach the ws message emitter.
   function handleSocketData(connection: VisionsConnection, data: Buffer): void {
     try {
       connection.handleFrame(data.toString());
@@ -1379,11 +1190,6 @@ function createVisionsWiring({
     }
   }
 
-  /*
-   * The ingest lane's poke: the machine moved, so every open markdown buffer gets the same quiet window
-   * an edit would have armed. Nothing dispatches here; the gate still decides when the window expires,
-   * and a lane with dispatch off does nothing at all.
-   */
   function noteActivity(): void {
     if (!dispatchEnabled) return;
     for (const connection of connections) connection.noteActivity();
@@ -1397,7 +1203,6 @@ function createVisionsWiring({
     });
   }
 
-  // Close detached upgraded sockets so shutdown can exit.
   function stop(): void {
     for (const client of wss.clients) client.close(1001, 'Visions stopped');
     for (const connection of [...connections]) connection.close();
@@ -1416,11 +1221,8 @@ function createVisionsWiring({
     getIntent: () => intentPayload(currentIntentState()),
     getIntentFor: (projectId: string | null = null, uri: string | null = null) => intentProjectPayload(currentIntentState(), projectId, uri),
     whenIntentPersistenceIdle: () => (intentStateWriter ? intentStateWriter.idle() : Promise.resolve()),
-    // Settles once every queued memory write has landed, which is how a test waits for the writers.
     whenMemoryIdle: () => memoryChain,
-    // The movement signal the next gate will read, so a caller can see whether a lane is wired at all.
     latestContextSeq: readContextSeq,
-    // Settles once the in-flight dispatch has been applied, which is how a test waits for the lane.
     whenDispatchSettled: () => Promise.resolve(dispatchSettled),
     get connectionCount() { return connections.size; },
     get dispatchEnabled() { return dispatchEnabled; },

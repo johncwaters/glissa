@@ -1,12 +1,3 @@
-// HTTP-level coverage of the ONE write ingress: POST /hook/:glissaId/:event (Claude Code hook
-// callbacks). The unit-level token logic lives in hook-source.test.ts; this exercises the mounted
-// Express route end to end: status codes, JSON shape, the 64KB body cap, and that an aborted
-// oversize request does not kill the server (backend req.on('error') listener).
-//
-// SAFETY: createBackend resolves its config store and runs a boot worktree reconcile against the
-// configured projects. It is pointed at a throwaway temp config with a single non-git temp project via
-// GLISSA_CONFIG, so it can never touch a real repo or remove a real worktree.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -56,7 +47,7 @@ test.before(async () => {
 
   const server = http.createServer();
   const backend = createBackend(server, { staticDir: null });
-  // createBackend returns the Express app; the embedder wires it (mirrors server/main.ts).
+
   server.on('request', backend.app);
   await listenOnLoopback(server);
 
@@ -73,7 +64,7 @@ test.after(async () => {
   if (!booted.context) return;
   const { backend, server, prevEnv, tmpDir } = booted.context;
   backend.shutdown();
-  // fetch (undici) pools keep-alive sockets; server.close() alone would wait on them forever.
+
   server.closeAllConnections();
   await closeServer(server);
   if (prevEnv == null) delete process.env.GLISSA_CONFIG;
@@ -120,13 +111,11 @@ test('malformed JSON body is tolerated (route answers, does not throw)', async (
 test('oversize body (>64KB) is aborted and the server survives', async () => {
   const { base } = ctx();
   const big = 'x'.repeat(70 * 1024);
-  // The route destroys the request mid-body; fetch surfaces that as a network error OR a non-200.
+
   await fetch(`${base}/hook/no-such-session/Stop`, { method: 'POST', body: big })
     .then((res) => assert.notEqual(res.status, 200, 'oversize never yields 200'))
-    .catch(() => { /* connection reset is the expected shape */ });
+    .catch(() => {  });
 
-  // The regression this pins: req.destroy() emits a request 'error'; without backend's error
-  // listener that throw killed the whole process. A follow-up request must still be served.
   const after = await fetch(`${base}/hook/no-such-session/Stop`, { method: 'POST', body: '{}' });
   assert.equal(after.status, 404, 'server is still alive and routing after the aborted request');
 });

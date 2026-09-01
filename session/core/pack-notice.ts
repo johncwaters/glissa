@@ -1,14 +1,3 @@
-// Pure text for the live pack-notice channel: when a context pack a session is already running on
-// gets rebuilt, its next UserPromptSubmit hook response carries this one notice through
-// hookSpecificOutput.additionalContext (docs/plan-context-mill.md, lever 2). No IO, no Session import.
-//
-// The notice is GLISSA-AUTHORED ONLY: it names the pack and the two versions and points at the added
-// directory, and never carries a byte of pack content. That is a security property, not a style
-// choice - the live channel must not become a relay for text a pack source could plant.
-//
-// Claude Code caps additionalContext near 10000 chars; a per-turn notice has no business anywhere
-// near that, so the pack list truncates after a handful and the whole string is hard-capped.
-
 const MAX_LISTED_PACKS = 3;
 const MAX_NOTICE_CHARS = 600;
 const VERSION_CHARS = 12;
@@ -40,7 +29,6 @@ function readLatest(latestVersions: LatestVersions, name: string): string | null
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-/** Delivered packs whose latest built version differs from the one this session spawned against. */
 function listStalePacks(
   deliveredPacks: readonly DeliveredPack[] | null | undefined,
   latestVersions: LatestVersions,
@@ -56,7 +44,6 @@ function listStalePacks(
   return stale;
 }
 
-/** The notice text for the current staleness, or null when nothing this session runs on has moved. */
 function buildPackNotice(
   deliveredPacks: readonly DeliveredPack[] | null | undefined,
   latestVersions: LatestVersions,

@@ -1,11 +1,3 @@
-// Deterministic SGR/cursor-dense ANSI corpus for perf measurement.
-//
-// Pure, dependency-free, no DOM. `.mjs` so it is ESM in BOTH the browser (Vite
-// imports it from perf-harness.js) and Node (tests dynamic-import it): the
-// project is type:commonjs, so a plain `.js` with `export` would be treated as
-// CJS by Node and fail to load. Dense escape content (colors, dim, cursor
-// moves) so the xterm parser does realistic work, not trivial ASCII.
-
 function mulberry32(seed: number) {
   let a = seed >>> 0;
   return function next() {
@@ -22,7 +14,6 @@ const WORDS = [
   'flush', 'parse', 'token', 'frame', 'buffer', 'socket', 'stream', 'chunk', 'queue',
 ];
 
-// One SGR/cursor-dense line, CRLF-terminated.
 function buildLine(rnd: () => number) {
   const segs = 3 + Math.floor(rnd() * 6);
   let s = '';
@@ -33,12 +24,11 @@ function buildLine(rnd: () => number) {
     const n = Math.floor(rnd() * 10000);
     s += `\x1b[${bold}${fg}m${word}\x1b[0m \x1b[2m${n}\x1b[0m `;
   }
-  // A cursor column move + a short redraw fragment to exercise parser state.
+
   s += `\x1b[${1 + Math.floor(rnd() * 40)}G`;
   return `${s}\r\n`;
 }
 
-// `lines` of dense corpus as one string. Deterministic for a given seed.
 export function generateCorpus(lines = 200, seed = 1) {
   const rnd = mulberry32(seed);
   let out = '';

@@ -1,22 +1,5 @@
-// Global terminal RENDER scheduler, Option A: callback-gated round-robin with a
-// per-frame terminal budget. It schedules xterm WRITES per frame.
-//
-// Empirically the best feed strategy under heavy multi-session load (see
-// .omc/plans/perf-responsiveness.md): vs the old per-session throttle it cut echo
-// p95 ~3.7x and DOUBLED rendered throughput at 20 streaming terminals, by bounding
-// aggregate per-frame parse work instead of letting N independent xterm parsers
-// saturate the shared main thread.
-//
-// One module-level RAF loop owns every terminal. Each session enqueues inbound
-// bytes; per frame the loop services up to `budget` dirty terminals round-robin,
-// each gated by xterm's write-drain callback (one in-flight write per terminal),
-// carrying leftovers to the next frame. The loop parks when nothing is dirty.
-//
-// `.mjs` so it is ESM in both Vite (browser) and Node (tests dynamic-import it);
-// the project is type:commonjs, so a plain `.js` with `export` loads as CJS in Node.
-
-const DEFAULT_BUDGET = 6; // terminals serviced per frame
-const DEFAULT_MAX_CHUNK = 256 * 1024; // bytes per single write (anti-monopoly cap)
+const DEFAULT_BUDGET = 6;
+const DEFAULT_MAX_CHUNK = 256 * 1024;
 
 export type TerminalSinkWrite = (data: string, onDrained: () => void) => void;
 
@@ -73,16 +56,7 @@ export function createScheduler({
       const s = sinks.get(id);
       if (!serviceable(s)) continue;
 
-      // Build the chunk to write by consuming from the pending array via a read-index cursor.
-      // readIdx advances over fully consumed chunks; the array is compacted (splice) when the
-      // queue drains or the cursor exceeds a threshold. This avoids O(n) per-service shift()
-      // on a deep backlog while preserving byte-exact semantics:
-      //   - Under-cap: all pending chunks coalesce into one write per service.
-      //   - Over-cap: whole chunks are consumed up to maxChunkBytes; a single chunk that
-      //     would overflow alone is split (head sent, remainder written back at readIdx);
-      //     an acc that has content but can't fit the next chunk stops without splitting.
-      // The existing tests pin this boundary: enqueue('abcdefg') cap=4 -> 'abcd' then 'efg'.
-      const COMPACT_THRESHOLD = 64; // splice off consumed prefix when cursor passes this
+      const COMPACT_THRESHOLD = 64;
       let acc = '';
       let consumed = 0;
       while (s.readIdx < s.pending.length) {
@@ -94,22 +68,17 @@ export function createScheduler({
           s.readIdx++;
           continue;
         }
-        // next would overflow. If acc is empty this is a single oversized chunk: split it,
-        // write the remainder back in place at the cursor position.
+
         if (acc.length === 0) {
           acc = next.slice(0, remaining);
           consumed += remaining;
           s.pending[s.readIdx] = next.slice(remaining);
-          // do NOT advance readIdx: the remainder stays at the same slot for next service
         }
-        // acc has content (or oversized split handled): send what we have.
+
         break;
       }
       s.pendingBytes -= consumed;
-      // Compact: when the queue drains, reset fully (dirty=false). When the read cursor
-      // has grown past the threshold, splice off the consumed prefix to bound memory.
-      // The drain branch is the common fast-path; the threshold splice is the safety valve
-      // on deep backlogs. Both reset readIdx to 0 so the next service starts at the front.
+
       if (s.pendingBytes === 0) {
         s.pending.length = 0;
         s.readIdx = 0;
@@ -122,7 +91,7 @@ export function createScheduler({
 
       s.inFlight = true;
       s.write(acc, () => {
-        if (!s.live) return; // sink unregistered while this write was in flight
+        if (!s.live) return;
         s.inFlight = false;
         if (s.pendingBytes > 0) {
           s.dirty = true;
@@ -131,7 +100,7 @@ export function createScheduler({
       });
       serviced++;
     }
-    if (n > 0) rr = (rr + 1) % n; // rotate the start each frame for fairness
+    if (n > 0) rr = (rr + 1) % n;
     if (anyServiceable()) arm();
   }
 
@@ -149,7 +118,7 @@ export function createScheduler({
     unregister(id: string) {
       const s = sinks.get(id);
       if (!s) return;
-      s.live = false; // guard any in-flight write callback still pending
+      s.live = false;
       sinks.delete(id);
       const idx = order.indexOf(id);
       if (idx !== -1) order.splice(idx, 1);
@@ -181,5 +150,4 @@ export function createScheduler({
   };
 }
 
-// App-wide singleton (uses global requestAnimationFrame).
 export const renderScheduler = createScheduler();

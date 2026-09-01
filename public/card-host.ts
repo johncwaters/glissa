@@ -1,8 +1,3 @@
-// THE re-parenting seam for a live session card. A session owns exactly one xterm, so the
-// single-borrower invariant is GLOBAL, not per-surface: borrowCard releases whoever holds a card before
-// taking one, which is what lets a layout flip hand the card across without coordination. The borrowed
-// id lives in the cross-cutting UI store, so the WebGL pool can read it without an injected provider.
-
 import { adoptElement, releaseElement } from './dom-helpers.ts';
 import type { SessionUi } from './session-card/card-registry.ts';
 import { container, sessionUIs } from './session-card/card-registry.ts';
@@ -13,9 +8,6 @@ export function getBorrowedCardId() {
   return uiState.snapshot().borrowedCardId;
 }
 
-// Move `ui.card` into `slotEl` and make its terminal live and correctly sized there. `className` is the
-// surface's own marker class (the Focus center and the phone Terminal screen style the borrowed card
-// differently); it is removed again on release, and swapping surfaces swaps the class.
 export function borrowCard(ui: SessionUi | null | undefined, sessionId: string, slotEl: HTMLElement | null | undefined, { className }: { className?: string } = {}) {
   if (!ui?.card || !slotEl) return;
   const borrowedId = getBorrowedCardId();
@@ -32,16 +24,13 @@ export function borrowCard(ui: SessionUi | null | undefined, sessionId: string, 
   activateTerminalViewer(ui, sessionId);
 }
 
-// Return the borrowed card to its home slot. Safe to call when nothing is borrowed. Returns the id that
-// was released (or null), so a caller can reconcile its own bookkeeping.
 export function releaseCard() {
   const releasedId = getBorrowedCardId();
   uiState.dispatch('borrowCard', null);
   if (!releasedId) return null;
 
   const ui = sessionUIs.get(releasedId);
-  // Back in the hidden home slot this card is nobody's viewer, so it gives its claim on the PTY size
-  // back to whichever client is still looking at the session.
+
   ui?._unviewTerminal?.();
   const card = ui?.card;
   if (!card) return releasedId;

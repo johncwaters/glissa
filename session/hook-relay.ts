@@ -3,23 +3,12 @@ import http from "node:http";
 import { readStdin } from "./relay-stdin.ts";
 import type { StdinLike } from "./relay-stdin.ts";
 
-// Hook relay, run standalone by a non-Claude agent CLI as a command-type hook, never required by the
-// server (the session/statusline-relay.ts mold). It reads the hook envelope from stdin, POSTs it
-// UNTOUCHED to Glissa's local ingress, and exits 0 whatever happened: a hook that fails must never
-// fail, delay or block the turn it was called from. Every decision it makes is in
-// session/core/hook-relay-core.ts; this file is the socket around them.
-//
-// Usage as a hook command: `node <path>/hook-relay.ts <EventName>`, with GLISSA_HOOK_URL (token
-// embedded) in the agent process's env, which hook children inherit. Without that variable the relay
-// posts nothing, so an installed hooks file is inert for the operator's own unsupervised runs.
-
 import {
   MAX_RESPONSE_BYTES,
   decideRelayPost,
   decideHookStdout,
 } from "./core/hook-relay-core.ts";
 
-// Bounded hard: the agent is waiting on this process, and the payload is telemetry.
 const POST_TIMEOUT_MS = 1500;
 
 interface PostResponse {
@@ -32,8 +21,6 @@ interface StdoutLike {
   write(text: string): unknown;
 }
 
-// Never rejects and never outlives POST_TIMEOUT_MS. The body is the stdin bytes verbatim: translating
-// a vendor's field names is the adapter's job on the server side, where the session's vocabulary is known.
 function postPayload(url: string, body: Buffer): Promise<PostResponse> {
   return new Promise((resolve) => {
     let settled = false;

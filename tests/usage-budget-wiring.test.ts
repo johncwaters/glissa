@@ -1,9 +1,3 @@
-// The budget evaluate-persist-broadcast cycle through createUsageWiring with every side effect injected.
-// The 50/75/100 ladder itself is the committed core's own test; what matters here is that a threshold fires
-// ONCE per period, survives a restart, re-arms on rollover, and that a broken or missing state file cannot
-// take the lane down.
-//
-// The state file always lives in a temp dir: nothing here may write to the operator's real ~/.glissa.
 
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -26,7 +20,6 @@ const BUDGET_BLOCK = {
   rows: [{ scope: 'daily' as const, spentUsd: 12.4, budgetUsd: 16, pct: 77.5, tone: 'warn' as const }],
 };
 
-// The full scanner surface, so a test states only the parts its own case turns on.
 function fakeScanner({ partial = false, spend }: { partial?: boolean; spend: () => BudgetSpend }): Scanner {
   return {
     runPass: async () => ({ files: 1, entries: 1, newEntries: 1, partial, durationMs: 0 }),
@@ -95,10 +88,6 @@ async function makeTempRoot(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'glissa-usage-budget-'));
 }
 
-/*
- * A fake scanner: this file is about the budget decision and its persistence, so the transcript walk is out
- * of the picture entirely. `spend` is mutable so a test can move the numbers between passes.
- */
 interface HarnessOptions {
   root: string;
   usage?: Record<string, unknown>;
@@ -130,8 +119,6 @@ function harness({ root, usage = {}, telegram = null, telegramNotifications = fa
       telegrams.push(args);
       return { ok: true, error: null };
     },
-    // This file is about budgets; an rtk reading here would exec a real binary on whatever machine runs
-    // the suite (tests/usage-savings-wiring.test.js owns that path).
     rtkPathFn: () => null,
   });
   return {
@@ -167,7 +154,6 @@ test('no budget configured is fully inert: no state file, no alerts', async () =
   await h.wiring.start();
   assert.equal(h.alerts().length, 0);
   assert.equal(await exists(h.statePath), false);
-  // And the default config carries no ceiling at all.
   assert.deepEqual(resolveUsageConfig(undefined).budget, { dailyUsd: null, monthlyUsd: null });
   assert.deepEqual(DEFAULT_USAGE_CONFIG.budget, { dailyUsd: null, monthlyUsd: null });
 });
@@ -184,7 +170,6 @@ test('crossing a threshold broadcasts once and persists the fired mark', async (
   assert.equal(alerts[0].budgetUsd, 16);
   assert.equal(alerts[0].periodKey, TODAY);
   assert.ok(alerts[0].ts > 0);
-  // The text travels ON the message, so the browser notification and the Telegram ping are one string.
   assert.equal(alerts[0].text, 'Usage budget: daily spend $12.40 reached 75% of $16.00');
   const stored = await readState(h.statePath);
   assert.deepEqual(stored.fired.daily[TODAY], [50, 75]);
@@ -195,7 +180,6 @@ test('a repeat pass at the same spend does not re-alert', async () => {
   const h = harness({ root, usage: { budget: { dailyUsd: 16 } }, spend: { todayUsd: 12.4, monthUsd: 12.4 } });
   await h.wiring.start();
   assert.equal(h.alerts().length, 1);
-  // force:true always drives a pass (rate-limited to a plain one, which is still a completed pass).
   await h.wiring.requestReport({ force: true });
   await h.wiring.requestReport({ force: true });
   assert.equal(h.alerts().length, 1, 'still one');
@@ -209,13 +193,11 @@ test('a higher threshold later in the same period fires once more, the lower one
   h.state.spend = { todayUsd: 17, monthUsd: 17 };
   await h.wiring.requestReport({ force: true });
   assert.deepEqual(h.alerts().map((alert) => alert.threshold), [75, 100]);
-  // Spend falling back must not re-arm anything inside the same period.
   h.state.spend = { todayUsd: 9, monthUsd: 9 };
   await h.wiring.requestReport({ force: true });
   assert.deepEqual(h.alerts().map((alert) => alert.threshold), [75, 100]);
 });
 
-// A restart must not re-alert what was already delivered: that is the whole reason the state is on disk.
 test('the fired state survives a restart', async () => {
   const root = await makeTempRoot();
   const first = harness({ root, usage: { budget: { dailyUsd: 16 } }, spend: { todayUsd: 12.4, monthUsd: 12.4 } });
@@ -230,7 +212,6 @@ test('the fired state survives a restart', async () => {
 test('a new period re-arms the ladder and drops the old marks', async () => {
   const root = await makeTempRoot();
   await fs.mkdir(path.join(root, '.glissa'), { recursive: true });
-  // Yesterday reached 100%; today must start clean.
   await fs.writeFile(path.join(root, '.glissa', 'usage-budget-state.json'), JSON.stringify({
     version: 1,
     fired: { daily: { '2026-08-18': [50, 75, 100] }, monthly: { '2026-07': [50] } },
@@ -248,7 +229,6 @@ test('both scopes are independent', async () => {
   const root = await makeTempRoot();
   const h = harness({ root, usage: { budget: { dailyUsd: 100, monthlyUsd: 100 } }, spend: { todayUsd: 10, monthUsd: 80 } });
   await h.wiring.start();
-  // Daily is at 10% (nothing), monthly at 80% (50 and 75 crossed, reported as the highest).
   assert.deepEqual(h.alerts().map((alert) => `${alert.scope}:${alert.threshold}`), ['monthly:75']);
 });
 
@@ -258,8 +238,6 @@ test('a corrupt state file starts empty, warns, and still alerts', async () => {
   await fs.writeFile(path.join(root, '.glissa', 'usage-budget-state.json'), '{ not json');
   const h = harness({ root, usage: { budget: { dailyUsd: 16 } }, spend: { todayUsd: 12.4, monthUsd: 12.4 } });
   await h.wiring.start();
-  // Starting empty can only ever RE-fire an alert, never suppress a real one, so the alert still lands and
-  // the file is rebuilt from this evaluation.
   assert.equal(h.alerts().length, 1);
   assert.deepEqual((await readState(h.statePath)).fired.daily[TODAY], [50, 75]);
 });
@@ -284,13 +262,10 @@ test('an unwritable state path degrades to a warning, not a failed pass', async 
     fsPromises: { ...fs, writeFile: async () => { throw new Error('EACCES simulated'); } },
   });
   await wiring.start();
-  // The alert still went out; only the durability of the mark was lost.
   assert.equal(sent.filter(isBudgetAlert).length, 1);
   assert.equal(await exists(path.join(root, '.glissa', 'usage-budget-state.json')), false);
 });
 
-// A partial pass has seen an arbitrary slice of the tree; firing off an undercount would burn the threshold
-// for the rest of the period.
 test('a partial pass never evaluates budgets', async () => {
   const root = await makeTempRoot();
   const sent: Record<string, unknown>[] = [];
@@ -315,7 +290,6 @@ test('a partial pass never evaluates budgets', async () => {
   assert.equal(await exists(path.join(root, '.glissa', 'usage-budget-state.json')), false);
 });
 
-// ── Telegram: the session channel's zero-connections rule, reused rather than reimplemented ──
 
 test('telegram fires only with the channel on, credentials present, and nobody watching', async () => {
   const credentials = { botToken: 'bot', chatId: 'chat' };
@@ -337,7 +311,6 @@ test('telegram fires only with the channel on, credentials present, and nobody w
     });
     await h.wiring.start();
     assert.equal(h.telegrams.length, testCase.expect, testCase.label);
-    // The broadcast is unconditional either way: the dashboard is the primary channel.
     assert.equal(h.alerts().length, 1, `${testCase.label}: broadcast regardless`);
     if (testCase.expect === 0) continue;
     assert.equal(h.telegrams[0].text, 'Usage budget: daily spend $12.40 reached 75% of $16.00');
@@ -360,11 +333,6 @@ test('budgetAlertText: the one wording, plain and dash free', () => {
   }
 });
 
-/*
- * requestReport re-projects the scanner's report field by field, so a field the scanner produces and the
- * dashboard reads can go missing without anything failing: the budget meters and the Glissa lanes section
- * simply never render. Both were dropped that way.
- */
 test('byLane and budget reach the wire on a pulled report', async () => {
   const root = await makeTempRoot();
   const h = harness({ root });
@@ -372,15 +340,12 @@ test('byLane and budget reach the wire on a pulled report', async () => {
   assert.equal(report.type, 'usage-report');
   assert.deepEqual(report.byLane, LANE_ROWS);
   assert.deepEqual(report.budget, BUDGET_BLOCK);
-  // And on the cached copy a reconnecting client is replayed.
   const cached = h.wiring.getCachedReport();
   assert.ok(cached, 'a pulled report is cached for the next connect');
   assert.deepEqual(blockAt(cached, 'budget'), BUDGET_BLOCK);
   assert.deepEqual(cached.byLane, report.byLane);
 });
 
-// An alert is a moment, not a state: replaying it on reconnect would re-alert a crossing that already
-// happened, possibly days later.
 test('usage-budget-alert is not retained by the control replay log', () => {
   const log = createReplayLog();
   log.stamp({ type: 'usage-budget-alert', scope: 'daily', threshold: 75 }, 1000);

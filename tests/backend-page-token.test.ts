@@ -1,11 +1,3 @@
-// The third layer of the localhost defense, through the REAL upgrade path: a control or data socket
-// from a local client must carry the page token, and the token endpoint hands it out same-origin only.
-// The layer exists because the port-exact Origin rule (layer two) leans on one header; together they
-// mean a web page on another local port can neither forge the handshake nor learn the secret.
-//
-// SAFETY: temp GLISSA_CONFIG with zero projects, like every other backend boot test (the boot worktree
-// reconcile would otherwise touch real repos).
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -43,8 +35,6 @@ test.before(async () => {
   const prevEnv = process.env.GLISSA_CONFIG;
   process.env.GLISSA_CONFIG = cfgPath;
 
-  // The static root is a temp dir holding one .js file: public/ is TypeScript sources served by Vite,
-  // so nothing under it is a .js asset the production static handler would ever hand out.
   fs.writeFileSync(path.join(tmpDir, 'media-type-probe.js'), 'export const probe = 1;\n', 'utf8');
 
   const server = http.createServer();
@@ -89,8 +79,6 @@ test('static JavaScript uses the current IANA media type', async () => {
   assert.equal(res.headers.get('content-type'), 'text/javascript; charset=utf-8');
 });
 
-// A same-origin GET carries no Origin header at all, so the presence of a disallowed one is the tell.
-// The browser would withhold the body anyway; refusing outright does not depend on it doing so.
 test('a cross-origin fetch of the token is refused outright', async () => {
   const res = await fetch(`http://127.0.0.1:${ctx().port}/control-token`, {
     headers: { Origin: 'http://localhost:5173' },
@@ -117,13 +105,10 @@ test('a data socket is gated by the same token', async () => {
   const token = await fetchPageToken(port);
   const origin = { origin: `http://127.0.0.1:${port}` };
   assert.equal(await upgradeOutcome('/terminals/no-such-session', origin), 'refused');
-  // With the token the upgrade itself succeeds; the unknown session is what closes it afterwards,
-  // which is the pre-existing behavior this must not have changed.
+
   assert.equal(await upgradeOutcome(`/terminals/no-such-session?token=${token}`, origin), 'open');
 });
 
-// The gap the 2026-08 pass closed: any localhost origin used to be admitted whatever its port, so a
-// page on another local port could open a channel that spawns permissionless sessions.
 test('a token-carrying socket from another local port is still refused on Origin', async () => {
   const token = await fetchPageToken(ctx().port);
   assert.equal(
@@ -137,7 +122,6 @@ test('a token-carrying socket from another local port is still refused on Origin
   );
 });
 
-// Host is a forbidden header for fetch, so the rebinding shape is only reachable over a raw request.
 function statusWithHost(hostHeader: string): Promise<number | undefined> {
   return new Promise((resolve, reject) => {
     const req = http.request({

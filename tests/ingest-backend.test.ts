@@ -1,18 +1,3 @@
-/*
- * The ingest lane inside a REAL booted backend (docs/plan-ingestion.md, M6): the config gate (absent
- * config constructs nothing at all), the connect-time snapshot on the control WS, and the load-bearing
- * ephemeral-session exclusion.
- *
- * That exclusion is the whole reason the tap lives in wireSessionEvents: visions dispatch sessions are
- * PTY sessions too, and tapping one feeds the Visions lane's own output back into its next prompt. This
- * file pins BOTH halves of the rule, because either alone would pass while the bug is present: a project
- * session that goes through wireSessionEvents IS tapped, and a session registered through
- * registerEphemeralSession (the one seam every lane uses) is NOT.
- *
- * SAFETY: every boot points at a throwaway temp config with ZERO real project paths via GLISSA_CONFIG,
- * like every other backend boot test, and no session is ever started, so nothing spawns a PTY.
- */
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -38,7 +23,6 @@ type Backend = ReturnType<typeof createBackend>;
 const INGEST_ON = { enabled: true, sources: { terminal: { enabled: true } } };
 const MESSAGE_WAIT_MS = 5000;
 
-// The frames these suites read off a control socket.
 interface ControlFrame {
   type: string;
   [field: string]: unknown;
@@ -48,14 +32,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-// The health snapshot's anomaly flags, narrowed once rather than at each read.
 function anomalies(frame: ControlFrame): Record<string, unknown> {
   const stats = frame.stats;
   if (!isRecord(stats) || !isRecord(stats.anomalies)) throw new Error('a health snapshot carries its anomalies');
   return stats.anomalies;
 }
 
-// The ingest frames the connect snapshot carries.
 function snapshotEvents(frame: ControlFrame): { summary?: unknown }[] {
   const events = frame.events;
   if (!Array.isArray(events)) throw new Error('an ingest snapshot carries its events');
@@ -68,8 +50,6 @@ interface StubWatcher {
   module: { subscribe: (root: string) => Promise<{ unsubscribe: () => Promise<void> }> };
 }
 
-// Whatever a test's own seed step built beside its config, before the backend booted. Each field is
-// optional because each test seeds only what it needs; `seededPath` states the one it is about to read.
 interface Seeded {
   projectDir?: string;
   laneDir?: string;
@@ -93,11 +73,6 @@ interface WithBackendOptions {
   seed?: ((paths: { tmpDir: string; cfgPath: string }) => Seeded) | null;
 }
 
-/*
- * A lane's ephemeral session as registration and the root derivations see it: an EventEmitter with an
- * id, its checkout and a destroy(). Deliberately not a real Session, because the property under test is
- * that an ephemeral one never enters the persisted map those derivations read.
- */
 class FakeEphemeralSession extends EventEmitter {
   id: string;
 
@@ -132,7 +107,6 @@ function seededWatcher(seeded: Seeded): StubWatcher {
   return seeded.watcher;
 }
 
-// The lane accessors below answer null when the source is off; every case reading one has it on.
 function laneOf(backend: Backend) {
   const lane = ingestLane(backend);
   if (!lane) throw new Error('the ingest lane was never constructed');
@@ -220,7 +194,6 @@ function withBackend(
   };
 }
 
-// Recording starts before 'open' resolves: the connect frames land the instant the socket does.
 function openRecordingSocket(dash: DashboardClient, pathAndSearch = '/control'): Promise<{ ws: WebSocket; received: ControlFrame[] }> {
   const ws = new WebSocket(dash.url(pathAndSearch), dash.options);
   const received: ControlFrame[] = [];
@@ -250,8 +223,6 @@ function waitFor(received: ControlFrame[], match: (frame: ControlFrame) => boole
   });
 }
 
-// Waits on a condition a boot-time async pass will satisfy, for the cases where asking the backend to do
-// the work itself would be the very thing under test.
 function until(predicate: () => boolean, message: string): Promise<void> {
   const deadline = Date.now() + MESSAGE_WAIT_MS;
   return new Promise((resolve, reject) => {
@@ -269,8 +240,6 @@ function until(predicate: () => boolean, message: string): Promise<void> {
     poll();
   });
 }
-
-// --- Config gating --------------------------------------------------------
 
 test('with no ingest config the lane is never constructed and no session is tapped', withBackend({}, async ({ backend }) => {
   assert.equal(ingestLane(backend), null);
@@ -294,8 +263,6 @@ test('the lane on with every source off builds no adapter and taps nothing', wit
   assert.equal(sessionOf(backend, 'p1').listenerCount('data'), 0);
 }));
 
-// --- The tap and its exclusion --------------------------------------------
-
 test('a project session is tapped, because it goes through wireSessionEvents', withBackend({ ingest: INGEST_ON }, async ({ backend }) => {
   const lane = laneOf(backend);
   assert.equal(lane.terminalEnabled, true);
@@ -303,7 +270,6 @@ test('a project session is tapped, because it goes through wireSessionEvents', w
   const sess = sessionOf(backend, 'p1');
   assert.equal(sess.listenerCount('data'), 1);
 
-  // The tap is real, not merely present: output published through it reaches the rings.
   sess.emit('data', 'a command ran here\n');
   await new Promise((resolve) => { setTimeout(resolve, 700).unref(); });
   const summaries = lane.recentEvents().map((event) => event.summary);
@@ -315,8 +281,6 @@ test('an ephemeral lane session is NOT tapped, which is what keeps the visions o
   const lane = laneOf(backend);
   assert.equal(lane.tapCount, 1, 'only the project session');
 
-  // Exactly how every ephemeral lane registers its session: the one seam, and it never touches
-  // wireSessionEvents, which is where the tap lives.
   const ephemeral = new FakeEphemeralSession('visions:file:///tmp/plan.md');
   registerEphemeralSession({
     map: new Map(),
@@ -330,31 +294,13 @@ test('an ephemeral lane session is NOT tapped, which is what keeps the visions o
   assert.equal(ephemeral.listenerCount('data'), 0, 'no ingest tap may ride an ephemeral session');
   assert.equal(lane.tapCount, 1, 'the tap count must not have moved');
 
-  // And its output goes nowhere even if something does emit it.
   ephemeral.emit('data', 'the visions talking to itself\n');
   await new Promise((resolve) => { setTimeout(resolve, 700).unref(); });
   assert.equal(lane.recentEvents().length, 0);
 }));
 
-// --- The git watch set and its exclusion ----------------------------------
-
 const GIT_ON = { enabled: true, sources: { git: { enabled: true } } };
 
-/*
- * Two rules at once, both of which a booted backend is the only place to see.
- *
- * The watch set has to be POPULATED at boot. The lane is constructed before the session-construction loop
- * runs (the Visions lane below it takes this one's digest as a dependency), so the source's provider
- * would see an empty map and the source would sit inert until its first 60s poll, whose first read of each
- * repo is a baseline: a commit made in that window would be absorbed and never reported. Nothing here
- * calls reconcile(), deliberately, so removing backend.js's boot poke fails this test.
- *
- * And the set is derived from the persisted `sessions` map and nothing else, which is what keeps every
- * ephemeral lane's checkout outside it BY CONSTRUCTION: a pr-review worktree and a visions dispatch
- * workdir belong to sessions registered through registerEphemeralSession, which never enter that map.
- * Same mechanism as the terminal tap's placement in wireSessionEvents above, pinned here because a filter
- * added later would be the wrong fix.
- */
 test('the git watch set is populated at boot, and never by an ephemeral lane session', { skip: !hasGit() }, withBackend(
   { ingest: GIT_ON },
   async ({ backend, seeded }) => {
@@ -374,7 +320,6 @@ test('the git watch set is populated at boot, and never by an ephemeral lane ses
       name: 'pr review',
     });
 
-    // The same seam a real worktree-ready uses, so the re-derivation is genuine rather than assumed.
     await lane.noteRepos();
     assert.deepEqual(
       gitSourceOf(backend).repoKeys,
@@ -399,16 +344,8 @@ test('the git watch set is populated at boot, and never by an ephemeral lane ses
   },
 ));
 
-// --- The fs watch set and its exclusion -----------------------------------
-
 const FS_ON = { enabled: true, sources: { fs: { enabled: true } } };
 
-/*
- * A stub @parcel/watcher, because what a booted backend is the only place to see is the ROOT DERIVATION:
- * which sessions contribute a root, and on which lifecycle edges. The real native subscription is covered
- * in tests/ingest-fs.test.js, and installing one here would leave a live OS handle on the temp directory
- * the harness deletes on the way out.
- */
 function stubWatcher(): StubWatcher {
   const subscribed: string[] = [];
   const unsubscribed: string[] = [];
@@ -431,20 +368,12 @@ const withStubWatcher: WithBackendOptions = {
   }),
 };
 
-// The transition a real spawn drives, minus the PTY: the backend's own state-change listener is what
-// turns it into a watched root, so nothing here calls the source directly.
 function transition(sess: { state: string; emit: (event: string, payload: unknown) => unknown }, to: string): void {
   const from = sess.state;
   sess.state = to;
   sess.emit('state-change', { from, to, event: 'test', detail: null });
 }
 
-/*
- * The fs source follows LIVE sessions, which is the difference between it and the git source: git watches
- * the checkouts of every persisted session, while an fs watcher on an idle project would cost a recursive
- * subscription for a session nobody started. So the root arrives on the start edge and leaves on the exit
- * edge, and a machine with nothing running watches nothing at all.
- */
 test('an fs root appears when a session starts and leaves when it exits', withBackend(
   { ingest: FS_ON },
   async ({ backend, seeded }) => {
@@ -459,7 +388,6 @@ test('an fs root appears when a session starts and leaves when it exits', withBa
     assert.deepEqual(fsSourceOf(backend).roots, [projectRoot]);
     assert.deepEqual(seededWatcher(seeded).subscribed, [projectRoot]);
 
-    // Every transition in between re-registers the same root, and must cost nothing.
     transition(sess, 'RUNNING');
     transition(sess, 'IDLE');
     transition(sess, 'COMPLETE');
@@ -503,8 +431,6 @@ test('a rebuilt fs lane follows state changes from a pre-existing live session',
   withStubWatcher,
 ));
 
-// The lane's own rule, and the reason the edge is a gated listener rather than an optional-chained one:
-// a source that is off owes a session zero listeners, not a no-op listener per transition.
 test('with the fs source off a session carries no extra state-change listener', withBackend(
   { ingest: INGEST_ON },
   async ({ backend }) => {
@@ -515,12 +441,6 @@ test('with the fs source off a session carries no extra state-change listener', 
   },
 ));
 
-/*
- * Same mechanism as the terminal tap and the git watch set, pinned for the same reason: ephemeral lane
- * sessions (pr-review, visions dispatch, posthog, pack-distill) register through their own seam and
- * never pass through wireSessionEvents, which is where the fs root edge lives. A visions dispatch
- * workdir entering the watch set would feed the dispatch's own file writes back into its next prompt.
- */
 test('an ephemeral lane session never contributes an fs root', withBackend(
   { ingest: FS_ON },
   async ({ backend, seeded }) => {
@@ -534,7 +454,6 @@ test('an ephemeral lane session never contributes an fs root', withBackend(
       name: 'visions dispatch',
     });
 
-    // Even driven all the way through a live lifecycle, it reaches no listener that could widen the set.
     transition(ephemeral, 'STARTING');
     transition(ephemeral, 'RUNNING');
     await fsSourceOf(backend).settle();
@@ -545,11 +464,6 @@ test('an ephemeral lane session never contributes an fs root', withBackend(
   withStubWatcher,
 ));
 
-// --- Health anomaly --------------------------------------------------------
-
-// The tap is a server-side `data` listener with no data-WS client behind it. Before the health
-// snapshot learned about it, every tapped session tripped listenerMismatch permanently, which lit
-// the Radar attention dot on an otherwise healthy install.
 test('the ingest tap does not trip the listener-mismatch anomaly, and a real leak still does', withBackend({ ingest: INGEST_ON }, async ({ backend, dash, track }) => {
   assert.equal(laneOf(backend).tapCount, 1);
   const { ws, received } = await openRecordingSocket(dash);
@@ -557,7 +471,6 @@ test('the ingest tap does not trip the listener-mismatch anomaly, and a real lea
   const snapshot = await waitFor(received, (msg) => msg.type === 'health-snapshot');
   assert.equal(anomalies(snapshot).listenerMismatch, false, 'a tapped session with zero data clients is healthy');
 
-  // A listener nothing accounts for is still a leak worth flagging.
   sessionOf(backend, 'p1').on('data', () => {});
   const mark = received.length;
   ws.send(JSON.stringify({ type: 'request-health-snapshot' }));
@@ -565,13 +478,6 @@ test('the ingest tap does not trip the listener-mismatch anomaly, and a real lea
   assert.equal(anomalies(leaked).listenerMismatch, true);
 }));
 
-// --- The agent-log source and its ledger seam ------------------------------
-
-/*
- * The agent-log source pointed at a throwaway Claude home, so a booted backend never reads the
- * operator's real transcripts. What this proves that the adapter's own tests cannot is the SEAM: that
- * backend.js hands the usage-lane ledger to the lane, which is the whole feedback-loop exclusion.
- */
 const AGENT_LOGS_ON = { enabled: true, sources: { agentLogs: { enabled: true } } };
 
 function seedTranscripts({ tmpDir }: { tmpDir: string }): Seeded {
@@ -584,7 +490,7 @@ function seedTranscripts({ tmpDir }: { tmpDir: string }): Seeded {
     fs.writeFileSync(filePath, '', 'utf8');
     return filePath;
   };
-  // The ledger backend.js builds beside the config file, exactly as usage-lane-ledger.js writes it.
+
   fs.writeFileSync(path.join(tmpDir, 'usage-lanes.json'), JSON.stringify({
     version: 1,
     updatedAt: new Date().toISOString(),
@@ -612,8 +518,7 @@ test('a completed agent turn reaches the rings and the digest, and a lane sessio
     const lane = laneOf(backend);
     assert.equal(lane.agentLogsEnabled, true);
     await agentLogsOf(backend).start();
-    // backend.js loads the ledger eagerly at boot but cannot await it from a synchronous factory, so
-    // give that one read a tick before asking it which lane spawned what.
+
     await new Promise((resolve) => { setTimeout(resolve, 50).unref(); });
 
     fs.appendFileSync(seededPath(seeded.cardFile, 'card transcript'), assistantLine('Ran the suite and it is green.', 'card-session'), 'utf8');
@@ -651,7 +556,7 @@ test('an editor buffer opened through the Visions lane reaches the rings as a ma
     const events = lane.recentEvents();
     assert.deepEqual(events.map((event) => event.kind), ['doc-save', 'doc-open']);
     assert.deepEqual(events.map((event) => event.summary), ['saved docs/plan.md', 'opened docs/plan.md']);
-    // The buffer text is what this source must never carry: it would ride into the next dispatch prompt.
+
     assert.equal(events.some((event) => JSON.stringify(event).includes('# Plan')), false);
     assert.equal(events[0].scope.root, projectDir);
   },
@@ -701,14 +606,6 @@ test('the agentLogs source off builds no adapter, even with the lane on', withBa
   assert.equal(lane.agentLogs, null);
 }));
 
-/*
- * The shell-history source (docs/plan-ingestion.md, M10). It is the one source reading data created
- * OUTSIDE glissa's own surfaces, so the default-off rule is the load-bearing one here: it must stay
- * inert with the lane on and every other source running, and only an explicit `enabled: true` builds it.
- *
- * SAFETY: the PSReadLine directory is a throwaway temp path injected through APPDATA with an explicit
- * `platform`, so no test here reads the operator's real shell history.
- */
 const SHELL_HISTORY_ON = { enabled: true, sources: { shellHistory: { enabled: true } } };
 
 function seedShellHistory({ tmpDir }: { tmpDir: string }): Seeded {
@@ -748,10 +645,7 @@ test('a command accepted in an external shell reaches the feed and the digest as
     const [event] = lane.recentEvents();
     assert.equal(event.summary, 'powershell: npm run deploy');
     assert.deepEqual(event.scope, { root: null, sessionId: null });
-    /*
-     * The M7 contract drops a null-root agentLogs event precisely because machine scope belongs to this
-     * source; here the digest must render it, labelled, rather than silently omitting it.
-     */
+
     const digest = lane.buildDigest({});
     assert.ok(digest.includes('- shell '), digest);
     assert.ok(digest.includes('(machine scope): powershell: npm run deploy'), digest);
@@ -772,8 +666,6 @@ test('a machine-scope command survives a project-scoped digest, since it belongs
   },
   withSeededShell,
 ));
-
-// --- Wire ------------------------------------------------------------------
 
 test('a connecting dashboard is repaired with one ingest snapshot', withBackend({ ingest: INGEST_ON }, async ({ backend, dash, track }) => {
   const lane = laneOf(backend);
@@ -797,8 +689,6 @@ test('a batched activity delta reaches the dashboard, and is deliberately not re
   assert.equal(frame.overflow, 0);
   assert.deepEqual(snapshotEvents(frame).map((event) => event.summary), ['live output']);
 
-  // The snapshot repairs a gap, so an activity delta must never be re-sent on reconnect: an ingest
-  // event is current ring state, not the one-shot moment control-replay-core retains.
   const log = createReplayLog();
   log.stamp({ type: 'ingest-activity', events: [] });
   log.stamp({ type: 'ingest-snapshot', events: [] });
@@ -811,14 +701,6 @@ test('no dashboard connected costs the lane nothing: publishing still fills the 
   assert.equal(lane.recentEvents().length, 1);
 }));
 
-// --- Activity-driven dispatch, both halves of the seam (docs/plan-ingestion.md, M7.5) ---
-
-/*
- * Dispatch stays OFF in every boot below, because an enabled one spawns a real headless claude the
- * moment a gate passes. What a booted backend can prove that the unit tests cannot is the wiring itself:
- * that the ingest batch reaches the Visions lane, and that the gate's movement signal IS this lane's
- * seq. The arming and the dispatch behind that poke are pinned in tests/visions-wiring.test.js.
- */
 const BOTH_LANES = { ingest: INGEST_ON, visions: { enabled: true } };
 
 test('an ingest batch pokes the Visions lane, and its gate reads this lane seq', withBackend(BOTH_LANES, async ({ backend }) => {
@@ -832,13 +714,10 @@ test('an ingest batch pokes the Visions lane, and its gate reads this lane seq',
   assert.ok(lane.latestSeq() > 0);
   assert.equal(visions.latestContextSeq(), lane.latestSeq(), 'one signal, read from the lane that owns it');
 
-  // The poke rides the lane's own 1s batch, so this waits out one real interval and no new timer.
   await new Promise((resolve) => { setTimeout(resolve, 1400).unref(); });
   assert.equal(pokes, 1, 'one poke for the batch, however many events it carried');
 }));
 
-// Visions IMPLIES the lane now, so ingest off here is the operator's explicit opt-out, which is the only
-// thing that still produces the pre-M7.5 shape.
 test('with ingest off the Visions lane is wired to no movement signal at all', withBackend({ visions: { enabled: true }, ingest: { enabled: false } }, async ({ backend }) => {
   assert.equal(ingestLane(backend), null);
   assert.equal(

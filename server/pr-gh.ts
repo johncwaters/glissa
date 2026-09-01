@@ -1,9 +1,5 @@
 import { execFileAsync } from './child-process-safe.ts';
 
-// The gh/git shell-outs the PR-review poller needs, all through child-process-safe (windowsHide).
-// No `git worktree` here (that stays in server/git-workspace.ts behind the worktree guard); this module
-// only runs `gh` and non-worktree `git` (branch/rev-parse). Every wrapper returns a normalized
-// {ok,out,err} and never throws, so the poller can branch on ok without try/catch at each site.
 
 interface CommandResult {
   ok: boolean;
@@ -73,11 +69,6 @@ function parseJson<T>(text: string, fallback: T): T {
   catch { return fallback; }
 }
 
-// Pure: map a gh statusCheckRollup array to a four-way status. Exported for direct unit testing so
-// the poller's merge gate can be verified without a live `gh`. Contract (critic finding #4): a PR
-// with NO checks is 'none', never 'green', so a CI-less repo is never auto-merged. A rollup entry is
-// either a CheckRun (status COMPLETED + conclusion) or a legacy StatusContext (state) from the Status
-// API; both are normalized so Status-API-only CI is also understood.
 const CHECK_CONCLUSION_OK = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
 function normalizeCheck(c: RollupEntry): { done: boolean; ok: boolean } {
   if (c.status !== undefined || c.conclusion !== undefined) {
@@ -99,7 +90,6 @@ function classifyChecks(rollup: unknown): ChecksStatus {
   return 'failing';
 }
 
-// Normalize a `gh pr list` row to the shape server/core/pr-review-core.ts expects.
 function normalizePr(row: PrListRow): NormalizedPr {
   const author = row.author || {};
   return {
@@ -145,8 +135,6 @@ function createPrGh(cwd: string): PrGh {
       return r.ok ? r.out : null;
     },
 
-    // true = touches a workflow file, false = does not, null = could not determine (gh failed). The
-    // caller MUST fail closed on null: an unknown file list can never clear the workflow-edit gate.
     async touchesWorkflows(n) {
       const r = await run('gh', ['pr', 'view', String(n), '--json', 'files', '-q', '.files[].path'], cwd);
       if (!r.ok) return null;

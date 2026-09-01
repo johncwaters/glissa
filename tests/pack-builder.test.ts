@@ -1,7 +1,3 @@
-// The context mill's IO shell against a temp fixture: spec discovery, the source walk (globs,
-// excludes, nested dirs, skill dirs), the built layout, and the atomic current pointer.
-// Never touches ~/.glissa or the repo's own packs/.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -17,7 +13,6 @@ import type { BuildReport } from '../server/pack-builder.ts';
 import type { PackManifest } from '../server/core/pack-core.ts';
 import { projectVariantSlug } from '../server/core/pack-core.ts';
 
-// A spec is JSON on disk, so a fixture states the keys it cares about and leaves the rest open.
 interface SpecFixture {
   name: string;
   [field: string]: unknown;
@@ -209,8 +204,7 @@ test('rebuilding unchanged sources publishes nothing at all', async () => {
     assert.equal(second.unchanged, true);
     assert.equal(second.version, first.version);
     assert.equal(second.currentDir, firstDir, 'an unchanged build still reports where the pack lives');
-    // The whole point of the skip: Claude Code hot-reloads skills out of a delivered pack dir, so a
-    // rewrite of identical bytes would poke every live session.
+
     assert.equal(fs.statSync(path.join(firstDir, 'CLAUDE.md')).mtimeMs, publishedAt);
   });
 });
@@ -768,8 +762,7 @@ test('packWatchRoots resolves each source glob and skill dir to an existing dire
       });
       const roots = await packWatchRoots(spec, { baseDir: packsDir });
       const relative = roots.map((root) => root.slice(root.indexOf('/packs/') + '/packs/'.length));
-      // A file source watches its directory: fs.watch on a file stops seeing an editor's save-and-
-      // rename. Every entry is a directory that exists right now.
+
       assert.deepEqual(relative.sort(), ['skills/voice-style', 'sources/demo', 'sources/notes']);
       for (const root of roots) assert.ok(fs.statSync(root).isDirectory());
     },
@@ -873,9 +866,6 @@ test('a missing pointed version is refused without a previous fallback', async (
   });
 });
 
-// M16 of docs/plan-visions-3.md: {{glissaHome}} resolution, the one runtime path a version-controlled
-// spec may name. The home is injected here, so no test ever reads the operator's real config directory.
-
 function memorySpec(overrides: Record<string, unknown> = {}): SpecFixture {
   return baseSpec({
     name: 'memory',
@@ -955,10 +945,6 @@ test('a source whose root IS the config directory resolves as inside it', async 
   }, { spec: memorySpec(), seed: () => {} });
 });
 
-// ---- Per-project variants: one derived top-level pack per consuming project ----
-
-// projectVariantSlug answers null for a path it cannot tag; these two are real paths, so the fixture
-// states that up front rather than at each use.
 function slugFor(projectPath: string): string {
   const slug = projectVariantSlug(projectPath);
   if (!slug) throw new Error(`${projectPath} has no variant slug`);
@@ -993,7 +979,6 @@ test('a group build publishes its base plus one independent pack per consuming p
     assert.deepEqual(report.variants.map((variant) => variant.name), [`memory-${SLUG_A}`, `memory-${SLUG_B}`]);
     assert.equal(report.variants.every((variant) => variant.ok), true);
 
-    // Every derived name is a real pack: its own dir, its own version, its own manifest.
     const variantDir = currentVersionDir(builtRoot, `memory-${SLUG_A}`);
     const baseDir = currentVersionDir(builtRoot, 'memory');
     const otherVariantDir = currentVersionDir(builtRoot, `memory-${SLUG_B}`);
@@ -1003,7 +988,6 @@ test('a group build publishes its base plus one independent pack per consuming p
     assert.equal(variantManifest.projectId, 'p1');
     assert.notEqual(variantManifest.version, readManifest(baseDir).version);
 
-    // The project layer rides its OWN variant and nothing else.
     const ownLayer = path.join(variantDir, 'data', `02-${SLUG_A}`, `${SLUG_A}.md`);
     assert.equal(fs.existsSync(ownLayer), true);
     assert.equal(fs.existsSync(path.join(baseDir, 'data', `02-${SLUG_A}`)), false);

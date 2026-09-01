@@ -1,12 +1,3 @@
-// Per-card "Resume conversation" picker. Lists the Claude conversations resumable into this card
-// (this repo's main checkout + every linked worktree, newest-first) and, on selection, binds the
-// session to that conversation via the control channel. A DORMANT card is then started immediately so
-// the conversation visibly loads; a live card is left running (the binding applies on its next restart).
-//
-// Standalone leaf module (imports only control-ws + dom-helpers + the toast leaf, plus the shared
-// modal scaffold) so it adds no edge to the card-dom.js <-> dialogs.js boundary. Shares its overlay
-// and focus-trap mechanics with the shared confirm prompt in modal.js rather than duplicating them.
-
 import { sendControlMsg, sendControlRequest } from '../control-ws.ts';
 import { el, escapeHtml } from '../dom-helpers.ts';
 import { buildDialogShell } from './modal.ts';
@@ -14,7 +5,6 @@ import { showErrorToast } from './toast.ts';
 
 const DORMANT = 'DORMANT';
 
-// "3m ago" / "2h ago" / "5d ago" from an epoch-ms timestamp.
 function relTime(ms: number | null | undefined) {
   if (!ms) return '';
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
@@ -27,7 +17,6 @@ function relTime(ms: number | null | undefined) {
   return `${d}d ago`;
 }
 
-// One row of the list-conversations reply. The wire shape is the server's, cast once at the boundary.
 interface ResumableConversation {
   id: string;
   title?: string;
@@ -73,8 +62,6 @@ export function openResumeDialog(sessionId: string, opts: { currentState?: strin
 
   dialog.append(hint, listEl, actions);
 
-  // Bind (or clear) the conversation, then surface the result. A DORMANT card is started so the
-  // conversation loads now; a live card keeps running and picks up the binding on its next restart.
   function apply(conversationId: string | null) {
     sendControlMsg({ type: 'resume-conversation', id: sessionId, conversationId: conversationId || '' });
     close();

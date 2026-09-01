@@ -1,4 +1,3 @@
-// M12 of docs/plan-visions-3.md: every long-term-memory decision lives here, so no IO shell holds one.
 
 import crypto from 'node:crypto';
 import {
@@ -11,15 +10,12 @@ import { buildStampLine } from './distill-core.ts';
 import { scrubText } from './ingest-core.ts';
 
 const MEMORY_KINDS: readonly string[] = Object.freeze(['intent', 'feedback', 'knowledge', 'preference', 'deadend', 'prompt', 'tombstone']);
-// `deadend` is negative knowledge: retiring a failed attempt forgets it, and the next session proposes it again.
 const PROJECTED_KINDS: readonly string[] = Object.freeze(['intent', 'knowledge', 'preference', 'feedback', 'deadend']);
 const MEMORY_LAYERS: readonly string[] = Object.freeze(['episodic', 'semantic']);
-// Pasted-secret density is highest here, so a prompt may be remembered only as raw episodic material.
 const USER_PROMPT_DENIED_KINDS: readonly string[] = Object.freeze(['knowledge', 'preference', 'deadend']);
 const SOURCE_KINDS: readonly string[] = Object.freeze(['operator', 'action', 'reported', 'model']);
 const SOURCE_VENDORS: readonly string[] = Object.freeze(['claude', 'codex', 'grok', 'glissa']);
 
-// reported and model are equal for gating; the split preserves provenance only.
 const TRUST_RANK_VALUES: Readonly<Record<string, number>> = Object.freeze({
   operator: 3, action: 2, reported: 1, model: 1,
 });
@@ -33,7 +29,6 @@ const MAX_RETRIEVAL_TERMS = 24;
 const DEFAULT_RETRIEVAL_LIMIT = 10;
 const DEFAULT_RECENCY_HALF_LIFE_DAYS = 30;
 const MS_PER_DAY = 86400000;
-// Clock skew between the machine that wrote a transcript line and this one. Minutes, not hours.
 const MAX_OBSERVED_TS_SKEW_MS = 5 * 60 * 1000;
 
 const CANON_FILE_PREFIX = 'canon-';
@@ -125,7 +120,6 @@ function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-// Null-returning rather than Number()-coercing: Number(null) is 0, and a validTo of 0 reads as expired.
 function finiteNumber(value: unknown): number | null {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (typeof value !== 'string' || !value.trim()) return null;
@@ -179,7 +173,6 @@ function highestTrustRank(kinds: unknown): string | null {
   return best;
 }
 
-// Lineage can only fall, so a model claim quoted back and re-observed can never climb above model rank.
 function computeLineage({
   sourceKind,
   ancestorLineages = [],
@@ -224,7 +217,6 @@ function characterClassCount(token: string): number {
   return classes;
 }
 
-// A durable record keeps a secret for a year, so the trade flips toward rejection; paths are excluded by shape.
 function isHighEntropyToken(raw: unknown): boolean {
   const token = String(raw || '');
   if (token.length < HIGH_ENTROPY_MIN_LENGTH) return false;
@@ -234,9 +226,6 @@ function isHighEntropyToken(raw: unknown): boolean {
   return shannonEntropyBits(token) >= HIGH_ENTROPY_MIN_BITS;
 }
 
-// Scanned as maximal shape RUNS, not whole whitespace tokens: punctuation embedded in a token
-// (blob='...', value:...;, foo("..."), a=...,b=2) otherwise walks a secret past the shape test, while a
-// repo path still yields one run starting with / and stays excluded.
 function findHighEntropyToken(text: unknown): string | null {
   for (const run of String(text || '').match(SECRET_SHAPE_RUN_RE) || []) {
     if (isHighEntropyToken(run)) return run;
@@ -275,7 +264,6 @@ function absolutizeDates(text: unknown, { now }: { now?: unknown } = {}): string
   ));
 }
 
-// The scrub is the EXPORTED ingest one, never a second pattern list that can drift out from under this gate.
 function screenMemoryText(raw: unknown, {
   maxChars = MAX_RECORD_CHARS, now = null,
 }: { maxChars?: number; now?: number | null } = {}): { ok: boolean; reason: string | null; text: string } {
@@ -298,7 +286,6 @@ function normalizeProjectTag(raw: unknown): string | null {
   return folded.slice(0, MAX_PROJECT_TAG_CHARS) || null;
 }
 
-// Accepted as an array or as a zero-arg getter, since only the server reads the live config list.
 function readKnownProjects(knownProjects: KnownProjects): unknown[] {
   const configuredProjects = typeof knownProjects === 'function' ? knownProjects() : knownProjects;
   if (!Array.isArray(configuredProjects)) return [];
@@ -351,7 +338,6 @@ function canonicalProjectPath(cwd: unknown, knownProjects: KnownProjects): strin
   return matches[0] || value;
 }
 
-// The hash tail: two checkouts routinely share a basename, and one file holding both is a cross-project leak.
 function projectFileSlug(tag: unknown): string {
   const value = String(tag || '');
   const base = value.replace(/\\/g, '/').replace(/\/+$/, '').split('/').filter(Boolean).pop() || 'project';
@@ -380,13 +366,6 @@ function normalizeSource(raw: unknown): MemorySource | null {
   return { kind, vendor, sessionId: nonEmptyString(record.sessionId) };
 }
 
-/**
- * An observed ts is transcript-supplied, so it is third-party input on a field that decides which monthly
- * segment a record lands in. A future-dated one lands in a segment `expiredSegmentKeys` will never prune
- * and heads every recency ranking forever, and one older than retention writes a segment the next boot
- * drops. Outside the window the record is stamped with the clock instead, which costs the observed time
- * and, for that record only, the stable id a re-read would otherwise derive.
- */
 function clampObservedTs(
   observed: unknown,
   {
@@ -426,8 +405,6 @@ function buildMemoryRecord(
   const raw: Record<string, unknown> = input && typeof input === 'object' && !Array.isArray(input)
     ? (input as Record<string, unknown>)
     : {};
-  // An observed record is stamped with the moment it describes (clamped, since that moment is untrusted
-  // input), which is also what makes a re-ingest of the same transcript line derive the same id.
   const at = clampObservedTs(raw.ts, { now, retainDays });
   if (at === null) return { ok: false, reason: 'no-clock', record: null };
   if (!MEMORY_KINDS.includes(raw.kind as string)) return { ok: false, reason: 'bad-kind', record: null };
@@ -440,7 +417,6 @@ function buildMemoryRecord(
   const screened = screenMemoryText(raw.text, { maxChars, now: at });
   if (!screened.ok) return { ok: false, reason: screened.reason, record: null };
   const supersedes = nonEmptyString(raw.supersedes);
-  // A derivation that skipped its ancestry would re-enter at its own rank, which IS the promotion loop.
   if (supersedes && highestTrustRank(raw.ancestorLineages) === null) {
     return { ok: false, reason: 'missing-ancestors', record: null };
   }
@@ -471,8 +447,6 @@ function buildMemoryRecord(
   };
 }
 
-// The cap is enforced HERE too, not only on the write path: a line a local process appended itself is
-// otherwise unbounded, and an over-long one no longer matches its signature, so bloat costs its trust.
 function validateMemoryRecord(
   raw: unknown,
   { maxChars = MAX_RECORD_CHARS }: { maxChars?: number } = {},
@@ -507,14 +481,11 @@ function validateMemoryRecord(
       lineage: fields.lineage as string,
       locked: fields.locked === true,
       sig: typeof fields.sig === 'string' ? fields.sig : null,
-      // Storage ordinal, deliberately outside SIGNED_FIELDS: it decides read order, never trust.
       seq: Number.isInteger(fields.seq) ? (fields.seq as number) : null,
     },
   };
 }
 
-// Every field a trust decision reads: an unsigned lineage byte would defeat the promotion cap, and an
-// unsigned project byte would retag a signed record into another checkout's projection.
 function canonicalSignaturePayload(record: MemoryRecord): string {
   const source: Partial<MemorySource> = record?.source ? record.source : {};
   return JSON.stringify([
@@ -577,7 +548,6 @@ function selectValidRecords(records: unknown, { now }: { now?: unknown } = {}): 
   return (Array.isArray(records) ? (records as MemoryRecord[]) : []).filter((record) => isValidAt(record, at));
 }
 
-// Only an operator mutation clears a lock; a model or reported record can never close a locked one.
 function decideSupersession({
   candidate,
   target,
@@ -603,7 +573,6 @@ function decideSupersession({
   return { allowed: true, reason: null, validTo: at };
 }
 
-// The canon is append-only, so a superseded record's validTo is DERIVED at load, never written back.
 function applySupersessions(records: unknown): MemoryRecord[] {
   const all = Array.isArray(records) ? (records as MemoryRecord[]) : [];
   const byId = new Map(all.map((record) => [record.id, record]));
@@ -625,7 +594,6 @@ function compareRecords(left: MemoryRecord, right: MemoryRecord): number {
   return left.id < right.id ? -1 : (left.id > right.id ? 1 : 0);
 }
 
-// Oldest-first alone let a flood of model claims evict the operator corrections they contradict.
 function compareEvictionPriority(left: MemoryRecord, right: MemoryRecord): number {
   const leftRank = effectiveRankValue(left);
   const rightRank = effectiveRankValue(right);
@@ -672,7 +640,6 @@ function parseSegmentFileName(name: unknown): string | null {
   return `${match[1]}${match[2]}`;
 }
 
-// Exclusive: the first instant of the month AFTER this segment.
 function segmentEndMs(key: unknown): number | null {
   const year = Number(String(key).slice(0, 4));
   const month = Number(String(key).slice(4, 6));
@@ -680,7 +647,6 @@ function segmentEndMs(key: unknown): number | null {
   return Date.UTC(year, month, 1);
 }
 
-// Whole segments only: that is how append-only storage and pruning coexist.
 function expiredSegmentKeys(
   keys: unknown,
   { now, retainDays = DEFAULT_MEMORY_RETAIN_DAYS }: { now?: unknown; retainDays?: number } = {},
@@ -761,12 +727,6 @@ function scoreMemoryRecord(record: MemoryRecord, {
   return score;
 }
 
-/*
- * The substrate's ranked candidates, folded in as a bounded bonus rather than as the answer: an index
- * ranks relevance better than a substring test, but the gates, the trust weight and the recency decay
- * still belong to the pure rules. Absent (no index, no terms) the scoring is byte-identical to the
- * lexical path, which is what makes the index droppable at any time.
- */
 const MATCH_BONUS_BASE = 2;
 const MATCH_BONUS_SPAN = 2;
 
@@ -821,7 +781,6 @@ const KIND_HEADINGS: Readonly<Record<string, string>> = Object.freeze({
   deadend: 'Dead ends',
 });
 
-// Brackets are reserved for the Glissa-authored prefix, so remembered text cannot forge an id or a rank.
 function sanitizeProjectionText(text: unknown): string {
   return String(text || '')
     .replace(/\s+/g, ' ')
@@ -850,7 +809,6 @@ function projectionBullet(record: MemoryRecord): string {
 const PROJECTION_BULLET_RE = /^- \[([^\]]*)\] \(([a-z]+)( \[locked\])?\) (.*)$/;
 const RECORD_ID_RE = /^m-[0-9a-f]{16}$/;
 
-// The parse is what makes a published line auditable: no ids, no claim, whatever the markdown looks like.
 function parseProjectionBullet(line: unknown): ProjectionBullet | null {
   const match = PROJECTION_BULLET_RE.exec(String(line || ''));
   if (!match) return null;
@@ -875,7 +833,6 @@ const KIND_BY_HEADING = new Map<string, string>(Object.entries(KIND_HEADINGS).ma
 const PROJECTION_HEADING_RE = /^## (.+)$/;
 const PROJECTION_PROJECT_RE = /^Project: (.+)$/;
 
-// The heading and Project line preserve each bullet's kind and project when claims are read back.
 function parsePublishedClaims(text: unknown): PublishedClaim[] {
   const claims: PublishedClaim[] = [];
   let kind: string | null = null;
@@ -900,10 +857,8 @@ function parsePublishedClaims(text: unknown): PublishedClaim[] {
   return claims;
 }
 
-// The handle joins on NUL so no field value can spell the separator and forge another claim's handle.
 const CLAIM_FIELD_SEPARATOR = String.fromCharCode(0);
 
-// Server-minted so a model can only ever name a claim that already stands, never invent one.
 function claimHandle(claim: { kind?: unknown; project?: unknown; ids?: unknown; text?: unknown } | null | undefined): string {
   const parts: unknown[] = [
     claim?.kind ?? '', claim?.project ?? '', (Array.isArray(claim?.ids) ? claim.ids : []).join(' '),
@@ -912,7 +867,6 @@ function claimHandle(claim: { kind?: unknown; project?: unknown; ids?: unknown; 
   return `c-${sha256Hex(parts.join(CLAIM_FIELD_SEPARATOR)).slice(0, 10)}`;
 }
 
-// No clock and no build stamp, so the same bullets always render byte-identical markdown.
 function renderProjectionDocument(
   bulletsByKind: Map<string, string[]>,
   { project = null }: { project?: string | null } = {},
@@ -953,10 +907,6 @@ const PROJECTS_DIR_NAME = 'projects';
 const PROJECTION_MANIFEST_FILE = 'manifest.json';
 const PROJECTION_SOURCES: readonly string[] = Object.freeze(['trivial', 'distill']);
 
-/**
- * The canon watermark a build is measured against: enough to tell a moved canon from a still one, and
- * enough for a reader to say how fresh a published projection is.
- */
 function canonWatermark(records: unknown): CanonWatermark {
   const list = [...(Array.isArray(records) ? (records as MemoryRecord[]) : [])].sort(compareRecords);
   const last = list.length > 0 ? list[list.length - 1] : null;
@@ -972,11 +922,6 @@ function projectionStampSources(watermark: { hash?: unknown } | null | undefined
   return [{ path: 'memory/canon', sha256: String(watermark?.hash || '') }];
 }
 
-/**
- * One projection build, mill-style: every delivered byte hashed into `version`, the stamp line first so
- * drift reads the same way it does for a distilled pack source, and manifest.json excluded from the
- * version because it carries builtAt.
- */
 function planProjectionBuild({
   files = [], watermark = null, builtAt = 0, source = 'trivial', verdict = null, distilledAt = null,
   recordCount = 0, claimCount = null,
@@ -1036,8 +981,6 @@ function looksLikeRecordId(needle: unknown): boolean {
   return /^m-[0-9a-f]{16}$/.test(String(needle || ''));
 }
 
-// A list of ids removes them WHOLE in one pass: a text pattern would redact the matched substring and
-// leave the rest of the record standing, which is the wrong shape for expunging a class of record.
 function makeForgetMatcher(needle: unknown): ForgetMatcher | null {
   if (Array.isArray(needle)) {
     const ids = new Set<string>(needle.filter((entry) => looksLikeRecordId(entry)));
@@ -1072,7 +1015,6 @@ function decideForget(
   return { action: 'redact', text };
 }
 
-// A canon line too malformed to become a record still holds its bytes, so the expunge judges it RAW.
 function matchesForgetPattern(rawLine: unknown, matcher: ForgetMatcher | null | undefined): boolean {
   if (!matcher) return false;
   const line = String(rawLine || '');
@@ -1084,7 +1026,6 @@ function matchesForgetPattern(rawLine: unknown, matcher: ForgetMatcher | null | 
 
 const MAX_TOMBSTONE_IDS = 20;
 
-// Ids only: the pattern an operator forgot IS the secret.
 function tombstoneText(ids: string[]): string {
   if (ids.length === 0) return 'forgot 0 record(s)';
   const listed = ids.slice(0, MAX_TOMBSTONE_IDS);

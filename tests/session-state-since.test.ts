@@ -1,5 +1,3 @@
-// stateSince is server-owned so a page reload cannot rebase the card's elapsed clock.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as sleep } from 'node:timers/promises';

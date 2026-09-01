@@ -1,8 +1,6 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 
-// PINNED release plus PINNED digests. Never resolve "latest" and never read a checksums file served
-// beside the binary: one compromised release page would then swap both halves and verify clean.
 const RTK_VERSION = '0.45.0';
 const RTK_RELEASE_BASE_URL = 'https://github.com/rtk-ai/rtk/releases/download/v0.45.0/';
 

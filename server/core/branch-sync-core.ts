@@ -1,8 +1,3 @@
-// Pure parsing/decision logic for the review sidebar's branch-sync indicator: whether a project's
-// LOCAL base branch is ahead of and/or behind its remote upstream tracking branch. No
-// IO here; the caller (session/sessions.js getBranchSync) runs the git commands and hands the raw
-// text to parseLeftRightCount, then decideBranchSyncState.
-
 export const GIT_FETCH_TIMEOUT_MS = 8000;
 
 export type BranchSyncState = 'no-upstream' | 'unknown' | 'diverged' | 'ahead' | 'behind' | 'in-sync';
@@ -13,13 +8,6 @@ export interface LeftRightCount {
   ahead: number;
 }
 
-// Parse `git rev-list --left-right --count <upstream>...<branch>` output. Verified against a real
-// diverged repo (2 local-only commits, 1 remote-only commit): the LEFT count is commits reachable
-// from upstream but not branch (behind), the RIGHT count is commits reachable from branch but not
-// upstream (ahead) - i.e. the output is "<behind><TAB><ahead>", matching `git status -sb`'s "ahead 2,
-// behind 1" for that same repo. Tolerates surrounding whitespace and a stray CR. Returns null when
-// the shape does not parse (unexpected git output), so the caller can report it as unknown rather
-// than trusting a garbage count.
 function parseLeftRightCount(output: string | null | undefined): LeftRightCount | null {
   const parts = String(output || '').trim().split(/\s+/);
   if (parts.length !== 2) return null;
@@ -29,10 +17,6 @@ function parseLeftRightCount(output: string | null | undefined): LeftRightCount 
   return { behind, ahead };
 }
 
-// Decide the compact display state. hasUpstream:false short-circuits to 'no-upstream' regardless of
-// counts (there is nothing to compare against: a fresh local branch, or one whose upstream was never
-// configured). An upstream with missing/unparseable counts is 'unknown', a distinct state from
-// 'no-upstream' so a fetch failure on that path is still surfaced as stale by the UI.
 function decideBranchSyncState({
   hasUpstream,
   ahead,
@@ -51,22 +35,12 @@ function decideBranchSyncState({
   return 'in-sync';
 }
 
-// Remote name from an upstream ref like "origin/main" -> "origin". Defensive fallback of 'origin'
-// for a slash-less value (should not happen for a real @{upstream} result, but a resync must never be
-// pointed at an empty remote name).
 function parseRemoteFromUpstream(upstream: string | null | undefined): string {
   const idx = String(upstream || '').indexOf('/');
   if (idx === -1) return 'origin';
   return String(upstream).slice(0, idx);
 }
 
-// Decide what an on-demand resync should DO, purely from the already-classified sync state and whether
-// the base branch is the one currently checked out in the main checkout. Only 'behind' and 'ahead' ever
-// mutate anything; every other state (in-sync, diverged, no-upstream, unknown) is 'none' - a resync
-// must never rebase, force-push, or otherwise touch a diverged branch. isCheckedOut decides HOW a
-// fast-forward happens: `git merge --ff-only` needs the branch checked out (it advances the working
-// tree too), whereas an unchecked-out branch is fast-forwarded via `git fetch <remote> <branch>:<branch>`
-// (ff-only by default) so the operator's actual checkout is never touched.
 function decideResyncAction(state: string, isCheckedOut: boolean): ResyncAction {
   if (state === 'behind') return isCheckedOut ? 'ff-merge' : 'ff-fetch';
   if (state === 'ahead') return 'push';
@@ -94,11 +68,8 @@ function buildResyncCommand(
   return null;
 }
 
-// A short, readable line from a failed git command. Strip command echoes, ANSI/control noise,
-// then prefer git's own fatal/error/push-rejection line over hook chatter.
 function firstGitErrorLine(err: unknown): string {
-  // typeof-checked, not a truthiness `||` chain: an Error with a legitimately empty .message must stay
-  // empty (and fall through to the generic line below), not stringify the whole Error object to "Error".
+
   const maxGitErrorLineLength = 200;
   const raw = errorMessageOrText(err);
   const msg = raw

@@ -52,16 +52,11 @@ const DEFAULT_BYTE_BUDGET = 64 * 1024 * 1024;
 const DEFAULT_CHUNK_SIZE = 1024 * 1024;
 const LINE_YIELD_INTERVAL = 5000;
 const SYNTHETIC_PRIMARY = Symbol('syntheticPrimary');
-// The anomaly baseline is the trailing month, NOT the whole retained series: a sparse multi-month mean
-// makes an ordinary day look like a spike (and a heavy month makes a real spike look ordinary).
 const ANOMALY_BASELINE_DAYS = 30;
 
 const noopLogger = Object.freeze({ warn: () => {} });
 
 type ScannerLogger = Pick<Console, 'warn'> | { warn: (message: string) => void };
-// The handle surface the chunked reader uses. Declared rather than Picked from fs/promises so a suite can
-// inject a handle that fails mid-file: an overloaded FileHandle has no test double.
-// The three stat fields this module reads.
 interface ScannerFileStat {
   isDirectory(): boolean;
   size: number;
@@ -73,8 +68,6 @@ interface ScannerFileHandle {
   close(): Promise<unknown>;
 }
 
-// mkdir/writeFile/rename/rm/appendFile stay the fs/promises signatures because the shared atomic writer
-// takes them; the read half is narrowed to the calls this module makes, so a suite can inject them.
 type ScannerFileSystem =
   Pick<typeof nodeFsPromises, 'mkdir' | 'writeFile' | 'rename' | 'rm' | 'appendFile'>
   & {
@@ -167,7 +160,6 @@ function yieldNow(): Promise<void> {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
-// Only Codex carries state across lines within a file; the others are line-local.
 function createVendorState(vendor: string): CodexUsageState | null {
   if (vendor === 'codex') return createCodexUsageState();
   return null;
@@ -200,7 +192,6 @@ function shouldTrackMissingModel(
     costMode: string;
   },
 ): boolean {
-  // Grok prices itself, so a Grok model missing from the price table is not a gap in the report.
   if (entry?.vendor === 'grok') return false;
   if (costMode === 'display') return false;
   if (resolved) return false;
@@ -209,8 +200,6 @@ function shouldTrackMissingModel(
   return totalTokensOf(entry) > 0;
 }
 
-// Absent vendor means Claude: the field was added when other vendors were, and every pre-existing entry
-// shape is a Claude one.
 function isClaudeEntry(entry: { vendor?: unknown } | null | undefined): boolean {
   const vendor = typeof entry?.vendor === 'string' ? entry.vendor.trim() : '';
   return vendor === '' || vendor === 'claude';
@@ -266,11 +255,6 @@ function relativeToProjects(file: string, dirs: string[]): string {
   return path.relative(owner, file);
 }
 
-/*
- * Dedup identity, per vendor. Each vendor's own core owns its rule (Codex has no message id, Grok has a
- * prompt id), and both cores put the vendor name in the first segment of the key they return, so a
- * Claude key can never collide with a Codex or Grok one. Pinned by a test.
- */
 function keysForEntry(entry: StoredEntry, syntheticPrimary: string | null = null): EntryKeys {
   if (entry?.vendor === 'codex') return { primary: codexDedupIdentity(entry), collision: null };
   if (entry?.vendor === 'grok') return { primary: grokDedupIdentity(entry), collision: null };
@@ -321,11 +305,6 @@ async function existingRoots(candidates: VendorRoot[], fsPromises: ScannerFileSy
   return checks.filter((candidate): candidate is VendorRoot => candidate !== null);
 }
 
-/*
- * Codex and Grok roots that actually exist. A missing home is silently absent, NOT an error: unlike
- * CLAUDE_CONFIG_DIR (an explicit claim that a directory is there), these are opportunistic. A vendor
- * switched off in config contributes no candidates at all, so its tree is never even stat'ed.
- */
 async function resolveVendorRootsAsync(
   { fsPromises, env, homeDir, vendors }: {
     fsPromises: ScannerFileSystem;
@@ -338,8 +317,6 @@ async function resolveVendorRootsAsync(
   if (vendors?.codex !== false) {
     const homes = codexHomes(env, homeDir);
     const surviving = await existingRoots(codexRootCandidates(homes), fsPromises);
-    // Only when neither sessions/ nor archived_sessions/ exists does the home itself count as a flat
-    // JSONL dir; a real ~/.codex also holds history.jsonl and plugin fixtures, which are not usage.
     const fallback = await existingRoots(codexFallbackRoots(homes, surviving), fsPromises);
     for (const root of [...surviving, ...fallback]) roots.push({ vendor: 'codex', dir: root.dir, kind: root.kind });
   }
@@ -387,8 +364,6 @@ async function walkSourceFiles(
     await walkDir(root.dir, root.vendor, fsPromises, found, logger);
     for (const file of found) files.push({ file, vendor: root.vendor, kind: root.kind });
   }
-  // The same Codex rollout can exist under both sessions/ and archived_sessions/; the active copy wins,
-  // since it is the one still being appended to.
   const codexFiles = dedupeCodexFiles(files.filter((entry) => entry.vendor === 'codex'));
   const others = files.filter((entry) => entry.vendor !== 'codex');
   return [...others, ...codexFiles].sort((left, right) => left.file.localeCompare(right.file));
@@ -406,34 +381,22 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     blockHours = 5,
     retainDays = 90,
     extraProjectsDirs = [],
-    // Which non-Claude vendors to walk. A disabled vendor contributes no roots at all, so its tree is
-    // never read and an all-Claude machine behaves exactly as before.
     vendors = { codex: true, grok: true },
-    // Durable per-day-per-model history. Claude Code deletes transcripts after about 30 days, so without
-    // this the daily series silently truncates and every longer view is quietly wrong. Absent path (older
-    // callers, unit tests) means the warehouse is inert: nothing is read, nothing is written.
     warehousePath = null,
     warehouseRetainDays = 365,
-    // Spend budgets (config usage.budget). Absent means off, and every budget surface then reports
-    // nothing at all rather than a zero ceiling.
     budget: budgetDep = null,
-    // Claude session id -> the Glissa lane that spawned it. A function rather than a snapshot so a report
-    // always joins against what the ledger knows NOW, not what it knew when the scanner was built.
     laneMap = null,
     logger = noopLogger,
     byteBudget = DEFAULT_BYTE_BUDGET,
     chunkSize = DEFAULT_CHUNK_SIZE,
   } = deps;
 
-  // Normalized once at this module's seam; nothing downstream re-normalizes.
   const budget = normalizeBudgetConfig(budgetDep);
   const fileStates = new Map<string, FileState | null>();
   const primaryIndex = new Map<string, number>();
   const collisionIndex = new Map<string, number>();
   const entries: StoredEntry[] = [];
   const missingModels = new Set<string>();
-  // `claudeDirs` drives Claude identity (relPath -> project + session id) and the resolution error;
-  // `dirs` is every transcript root scanned, which is what the report reports.
   let claudeDirs: string[] = [];
   let dirs: string[] = [];
   let lastFileCount = 0;
@@ -448,7 +411,6 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
   let currentFileJournal: FileJournalAction[] | null = null;
   let warehouseRecords: WarehouseRecord[] = [];
   let warehouseLoaded = false;
-  // tmp + rename, so a crash mid-write can never leave a half-written history file behind.
   const warehouseWriter = warehousePath
     ? createJsonStateWriter({
       filePath: warehousePath,
@@ -521,8 +483,6 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
   }
 
   function priceEntry(entry: StoredEntry): StoredEntry {
-    // Grok reports its own cost in the transcript (billing ticks, or the parser's published rate card),
-    // so it is authoritative here and never routed through the price table or the missing-price warning.
     if (entry.vendor === 'grok') return entry;
     const resolved = lookupModelPrice(pricingTable, entry.model, { aliases });
     const priced = costForEntry(entry, resolved?.price || null, { costMode });
@@ -555,12 +515,6 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     return false;
   }
 
-  /*
-   * A non-Claude entry, already in the shared entry shape. Its own core owns identity and (for Grok)
-   * cost, and there is no advisor expansion or transcript-path identity to derive: the project is the
-   * vendor's session dir, and attribution to a Glissa card is deliberately not attempted (cards are keyed
-   * by CLAUDE session id).
-   */
   function ingestVendorLine(parsed: UsageEntry | null, file: string): number {
     if (!parsed) return 0;
     const entry = stripIngestFields(priceEntry({ ...parsed, project: path.dirname(file) }));
@@ -628,16 +582,9 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     const decision = decideFileRead(prior, { size: stat.size, mtimeMs: stat.mtimeMs });
     if (decision.action === 'skip') return { bytesRead: 0, partial: false };
 
-    /*
-     * Codex token_count lines report CUMULATIVE totals and name their model in a separate earlier line,
-     * so an appended read has to continue from the same running snapshot or it would re-count the whole
-     * session as one delta. That is what vendorState carries, per file, beside offset and carry.
-     */
     const state: FileState = decision.action === 'restart'
       ? { size: stat.size, mtimeMs: stat.mtimeMs, offset: 0, carry: '', lineOrdinal: 0, vendorState: createVendorState(vendor) }
       : { ...(prior || {}), size: stat.size, mtimeMs: stat.mtimeMs, offset: decision.readFrom, carry: prior?.carry || '', lineOrdinal: prior?.lineOrdinal || 0, vendorState: prior?.vendorState || createVendorState(vendor) };
-    // The parsers MUTATE vendorState, so the rollback snapshot needs its own copy or a failed read would
-    // leave the running Codex totals advanced past the entries that were just rolled back.
     const priorSnapshot = prior ? { ...prior, vendorState: cloneVendorState(prior.vendorState) } : null;
     fileStates.set(file, state);
 
@@ -713,7 +660,6 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     markDirty();
   }
 
-  // -- Warehouse --
 
   function todayDayKey(): string {
     return localDayKey(nowFn());
@@ -727,7 +673,6 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     try {
       text = await fsPromises.readFile(warehousePath, 'utf8');
     } catch {
-      // No file yet is the ordinary first-run case, not a problem to report.
       return;
     }
     if (text === null) return;
@@ -738,18 +683,11 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
       warehouseRecords = pruneWarehouse(records, { retainDays: warehouseRetainDays, todayKey: todayDayKey() });
       warehouseWriter.reset();
     } catch (error) {
-      // A corrupt file starts empty rather than crashing the lane: the transcripts are still the source of
-      // truth for everything inside live coverage, and the next complete pass rebuilds what it can see.
       warn(logger, `usage warehouse unreadable, starting empty: ${errorMessage(error)}`);
       warehouseRecords = [];
     }
   }
 
-  /*
-   * Merge this pass's live day rollups into durable history and write atomically. `liveDays` is what the
-   * scan actually produced, so a day the live scan covers always WINS over the stored copy (the live read
-   * is fresher), while a day the transcripts no longer have survives untouched.
-   */
   async function persistWarehouse(): Promise<void> {
     if (!warehouseWriter) return;
     await loadWarehouse();
@@ -757,7 +695,6 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     const liveDays = rollups.daily.map((row) => row.day);
     const merged = mergeWarehouse(warehouseRecords, rollupFromReport(rollups.daily), { liveDays });
     warehouseRecords = pruneWarehouse(merged, { retainDays: warehouseRetainDays, todayKey: todayDayKey() });
-    // Nothing moved: an idle machine rescanning on its interval should not rewrite the same bytes.
     await warehouseWriter.write(
       warehouseRecords,
       () => `${JSON.stringify({ version: 1, updatedAt: new Date(nowFn()).toISOString(), records: warehouseRecords }, null, 2)}\n`,
@@ -769,8 +706,6 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     return Number.isFinite(day) ? day : 1;
   }
 
-  // A monthly budget is measured against the whole month, so with one configured the entry store keeps
-  // at least the elapsed month (pruning runs before aggregation, so widening later cannot recover days).
   function entryRetentionDays(): number {
     if (budget.monthlyUsd === null) return retainDays;
     return Math.max(retainDays, daysElapsedThisMonth());
@@ -804,7 +739,6 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     return rollups;
   }
 
-  // Matches the retention floor; a widened window needs its own cache key (memoized on the first arg).
   function budgetRollups() {
     const lookback = entryRetentionDays();
     if (lookback === retainDays) return cachedRollupsForDays(undefined, retainDays);
@@ -815,11 +749,6 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     return (models || []).slice().sort((a, b) => b.tokens - a.tokens);
   }
 
-  /*
-   * The daily series the report ships: live rows, plus history for days OLDER than live coverage. Strictly
-   * older, so a day the live scan is still filling in is never topped up from a stale stored copy. Each
-   * history row is marked, because a row Glissa remembers is a different claim from one it can still see.
-   */
   function mergedDailyRows<T extends { day: string; costUSD: number }>(liveDaily: T[]) {
     if (warehouseRecords.length === 0) return liveDaily;
     const liveDays = liveDaily.map((row) => row.day).filter(Boolean);
@@ -831,11 +760,6 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     return [...historyRows, ...liveDaily].sort((a, b) => a.day.localeCompare(b.day));
   }
 
-  /*
-   * Spend for the two budget periods, over the MERGED daily series so it matches what the panel shows
-   * (history included). One definition, used both for the report's standing meters and for the wiring's
-   * once-per-period alert evaluation, so a meter and an alert can never disagree about what was spent.
-   */
   function budgetSpend() {
     const todayKey = todayDayKey();
     const monthKey = todayKey.slice(0, 7);
@@ -850,10 +774,6 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     return { todayKey, monthKey, todayUsd, monthUsd };
   }
 
-  /*
-   * The standing meters. Computed here rather than client-side because usage-budget-core owns the tone
-   * ladder, and a second implementation in the browser core would be a second place for it to drift.
-   */
   function buildBudget() {
     if (budget.dailyUsd === null && budget.monthlyUsd === null) return null;
     const spend = budgetSpend();
@@ -864,9 +784,6 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     };
   }
 
-  // -- Anomaly --
-  // Machine level only. A per-session baseline is a different data model (sessions are short and unevenly
-  // sampled), so it is deliberately out of scope here.
   function buildAnomaly(
     daily: { day: string; costUSD?: unknown; tokens?: unknown }[],
     blockSummary: { blocks: UsageBlock[] },
@@ -892,11 +809,6 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     };
   }
 
-  /*
-   * Lane attribution over the LIVE window only. The ledger is durable, but the ENTRIES it joins against are
-   * not: the warehouse stores day-by-model rollups with no session id in them, so a history day cannot be
-   * split by lane. Fabricating history rows here would invent attribution that was never observed.
-   */
   function buildLaneRows(reportRetainDays: number, now: number) {
     if (typeof laneMap !== 'function') return null;
     const lanes = laneMap();
@@ -908,11 +820,6 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     const reportRetainDays = days == null ? retainDays : days;
     const rollups = cachedRollupsForDays(days, reportRetainDays);
     const now = nowFn();
-    /*
-     * Blocks, burn rate and the token-limit reference are CLAUDE-ONLY. The 5h window is a Claude
-     * subscription concept, and mixing another vendor's tokens into it would produce a number that looks
-     * like a plan limit and is not one.
-     */
     const blockEntries = entriesWithinDays(entries, { now, retainDays: reportRetainDays })
       .filter((entry) => isClaudeEntry(entry));
     const blockSummary = buildBlocks(blockEntries, { blockHours, now });
@@ -920,9 +827,6 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     const activeBlock = blockSummary.activeBlock
       ? { ...blockSummary.activeBlock, burn: activeBurn, projection: projectBlock(blockSummary.activeBlock, activeBurn, now) }
       : null;
-    // Only the DAILY series is extended with history (and what the dashboard derives from it: the week and
-    // month views, the heatmap, the anomaly baseline). Totals, models, sessions and blocks stay live-only,
-    // because the warehouse stores day-by-model rollups and nothing finer.
     const daily = mergedDailyRows(cloneValue(rollups.daily));
     return {
       ts: now,
@@ -947,10 +851,6 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     if (cachedSessionTotals && !isReportDirty) return cloneSessionTotals(cachedSessionTotals);
     const totalsBySession = new Map<string, SessionTotal>();
     for (const entry of entries) {
-      // The per-card join key: a Claude card is joined by its in-line transcript session id, a supervised
-      // codex/grok card (M5) by the vendor session id its transcript carries. Both equal the card's
-      // resumeSessionId, so the wiring side joins by that bare id regardless of vendor. Collision across
-      // vendors is not a concern: every id here is a UUID.
       const key = isClaudeEntry(entry) ? entry.inlineSessionId : entry.sessionId;
       if (!key) continue;
       const bucket = totalsBySession.get(key) || { tokens: 0, costUSD: 0, lastTs: null };
@@ -1017,11 +917,6 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     lastScanMs = nowFn();
     lastPartial = partial;
     if (newEntryCount > 0) markDirty();
-    /*
-     * Only a COMPLETE pass may write history. A partial pass has seen an arbitrary slice of the tree, so
-     * merging its day totals would persist an undercount as durable truth; that is also why continuation
-     * storms cost no writes at all rather than needing a timer to coalesce them.
-     */
     if (!partial) await persistWarehouse();
     return {
       files: lastFileCount,
@@ -1063,13 +958,10 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     budgetSpend,
     _entriesForTest: () => entries.map((entry) => entry),
   };
-  // Kept off the enumerable surface so nothing serializes the whole entry store by accident.
   Object.defineProperty(api, '_entriesForTest', { enumerable: false });
   return api;
 }
 
-// The lane-facing surface. The wiring declares its scanner dependency as this rather than as the concrete
-// factory, so the test hook below stays off the lane's contract.
 type UsageScannerApi = Omit<ReturnType<typeof createUsageScanner>, '_entriesForTest'>;
 
 export { createUsageScanner };

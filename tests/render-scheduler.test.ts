@@ -4,8 +4,6 @@ import assert from 'node:assert/strict';
 import { createScheduler } from '../public/render-scheduler.ts';
 import type { SchedulerOptions } from '../public/render-scheduler.ts';
 
-// A sink whose write callbacks the test fires manually (models xterm's async
-// parse-drain). drainOne/drainAll fire pending callbacks in FIFO order.
 function makeSink() {
   const calls: string[] = [];
   const drains: (() => void)[] = [];
@@ -25,8 +23,6 @@ function makeSink() {
   };
 }
 
-// Build a scheduler with a manual frame queue so frames run only when the test
-// calls runFrame(): no real requestAnimationFrame.
 function setup(opts: Pick<SchedulerOptions, 'budget' | 'maxChunkBytes'> = {}) {
   const queue: { id: number; callback: FrameRequestCallback }[] = [];
   let nextId = 1;
@@ -166,7 +162,6 @@ test('a chatty sink does not starve others (budget bounds it; round-robin servic
 });
 
 test('multi-chunk crossing the cap boundary: front-consumption + split correctness', () => {
-  // cap=4: enqueue 'ab','cd','ef' -> first service 'abcd' (two full chunks), second service 'ef'
   const { sched, runFrame } = setup({ budget: 4, maxChunkBytes: 4 });
   const sink = makeSink();
   sched.register('a', sink.write);
@@ -181,8 +176,6 @@ test('multi-chunk crossing the cap boundary: front-consumption + split correctne
 });
 
 test('multi-chunk with a chunk that straddles the cap boundary', () => {
-  // cap=4: enqueue 'ab' (2), 'cde' (3) -> acc='ab', next='cde' would make 5 > 4, stop.
-  // First service writes 'ab'; second service writes 'cde'. No data lost.
   const { sched, runFrame } = setup({ budget: 4, maxChunkBytes: 4 });
   const sink = makeSink();
   sched.register('a', sink.write);
@@ -198,8 +191,6 @@ test('multi-chunk with a chunk that straddles the cap boundary', () => {
 });
 
 test('large backlog produces same observable output as string accumulation would (regression guard)', () => {
-  // Enqueue 100 small chunks; the observable write sequence must be byte-for-byte identical
-  // to what the old string-concat path would have produced (no loss, no reorder).
   const { sched, runFrame } = setup({ budget: 4, maxChunkBytes: 50 });
   const sink = makeSink();
   sched.register('a', sink.write);

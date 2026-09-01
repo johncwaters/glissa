@@ -1,6 +1,3 @@
-// Synthesized status for a poller lane that has never ticked: the connect-time replay and the
-// settings-toggle broadcast both need one so a client can tell off from waiting-for-first-poll.
-
 interface LaneGate {
   start: boolean;
   reason?: string | null;

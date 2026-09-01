@@ -1,5 +1,3 @@
-// The one logger wrapper every lane and lane source shares (server/lane-log.ts).
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -34,7 +32,6 @@ test('note and warn carry the prefix and go to their own logger channel', () => 
   assert.deepEqual(warnings, ['[ingest] the git source disabled: no git']);
 });
 
-// Every lane injects its own logger, and a partial one must not fault the caller.
 test('a logger missing a channel silently drops that level', () => {
   const notes: string[] = [];
   const log = createLaneLog({
@@ -71,7 +68,6 @@ test('debugNote accepts a boolean flag or a getter, and the getter is read per l
   assert.deepEqual(dynamic.notes, ['[ingest] after'], 'the setting moves while the lane stays up');
 });
 
-// A logging decision must never fault whatever it rode in on.
 test('a debug getter that throws reads as off rather than propagating', () => {
   const { log, notes, warnings } = capture({ debugFlag: () => { throw new Error('settings unavailable'); } });
   assert.doesNotThrow(() => log.debugNote(() => 'suppressed'));

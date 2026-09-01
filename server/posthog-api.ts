@@ -1,21 +1,3 @@
-/*
- * PostHog REST client for the monitoring lane. The IO sibling of server/pr-gh.ts: it is the only
- * module in the lane that talks to PostHog, and like pr-gh it NEVER throws - every method resolves
- * to { ok, status, body } or { ok: false, error } so a poller tick can degrade instead of dying.
- *
- * The POLLING lane is read-only: nothing on an automatic tick writes to PostHog. The single write
- * below (updateIssueStatus) is only ever reached from an explicit operator click on a Radar row, and
- * it is the reason an install that wants that button needs an error_tracking WRITE scope on its key.
- * The headless investigation sessions never get to call it: they are deny-listed from the issues
- * endpoint (POSTHOG_DENY in server/posthog-wiring.ts) and only Glissa itself holds this client.
- *
- * TODO (live probe): the issues-query request body and the spike/recommendation endpoints below are
- * modeled on the PostHog MCP tool layer and have NOT been verified against a live instance or the
- * public REST docs. Everything that consumes a response goes through the defensive normalizers at
- * the bottom of this file, so an unexpected shape degrades to zeroes rather than a crash, but the
- * paths themselves need confirming before the lane is trusted unattended.
- */
-
 const DEFAULT_ISSUE_LIMIT = 50;
 const DEFAULT_DATE_RANGE_HOURS = 24;
 const DEFAULT_BASELINE_DAYS = 7;
@@ -70,8 +52,6 @@ function toCount(value: unknown, fallback = 0): number {
   return fallback;
 }
 
-// A timestamp field, kept verbatim when it is the ISO string PostHog sends and stringified otherwise,
-// so the state entry it lands in always holds a string or null.
 function timestampOrNull(value: unknown): string | null {
   if (typeof value === 'string') return value;
   return value == null ? null : String(value);
@@ -88,9 +68,6 @@ function isRecord(value: unknown): value is RawRow {
   return Boolean(value) && typeof value === 'object';
 }
 
-// Rows can arrive as objects (REST list endpoints) or as a HogQL-style { columns, results } matrix
-// where each result is a positional array. Both are flattened to plain objects here so every
-// normalizer below only ever sees one shape.
 function extractRows(body: unknown): RawRow[] {
   if (!body) return [];
   if (Array.isArray(body)) return body.filter(isRecord);
@@ -109,7 +86,6 @@ function extractRows(body: unknown): RawRow[] {
     .filter(isRecord);
 }
 
-/** Map one raw issue row into the lane's internal shape. Unknown numeric fields default to 0. */
 function normalizeIssue(raw: unknown): NormalizedIssue {
   const row: RawRow = isRecord(raw) ? raw : {};
   const agg: RawRow = isRecord(row.aggregations) ? row.aggregations : row;
@@ -128,13 +104,6 @@ function normalizeIssues(body: unknown): NormalizedIssue[] {
   return extractRows(body).map(normalizeIssue).filter((issue) => issue.issueId !== '');
 }
 
-/**
- * Issue ids named by spike events NEWER than sinceTs. A row must carry POSITIVE evidence of being
- * fresh: a missing or unparseable timestamp is dropped, not kept. The endpoint shape here is
- * unverified (see the TODO above), and "keep what we cannot date" turned an unexpected shape into a
- * permanent spike for every row, i.e. a Telegram ping plus a fresh Claude investigation every
- * interval forever. Missing one real spike costs a delay; that cost is bounded and this one was not.
- */
 function parseSpikeIssueIds(body: unknown, sinceTs: unknown = 0): Set<string> {
   const ids = new Set<string>();
   for (const row of extractRows(body)) {
@@ -150,8 +119,6 @@ function parseSpikeIssueIds(body: unknown, sinceTs: unknown = 0): Set<string> {
   return ids;
 }
 
-// The traffic query is the one place a config value reaches SQL text, so it is reduced to a whole
-// number inside a fixed range first: anything unparseable becomes the default, never an expression.
 function clampBaselineDays(value: unknown): number {
   if (value == null || value === '') return DEFAULT_BASELINE_DAYS;
   const n = Math.trunc(Number(value));
@@ -225,7 +192,6 @@ function createPosthogApi({ host, apiKey, fetchFn }: {
     });
   }
 
-  // Two small queries avoid adding a synthetic marker column just to split series from scalar.
   async function queryTrafficBuckets(
     projectId: ProjectId,
     { baselineDays = DEFAULT_BASELINE_DAYS }: { baselineDays?: unknown } = {},
@@ -262,13 +228,6 @@ function createPosthogApi({ host, apiKey, fetchFn }: {
     return request(`/api/projects/${encodeURIComponent(projectId)}/error_tracking/recommendations/`);
   }
 
-  /*
-   * Set one issue's status. The only write in the lane, driven by the Radar row's resolve/suppress
-   * actions. Endpoint per the PostHog API reference (error-tracking issues partial update):
-   * PATCH /api/projects/:project_id/error_tracking/issues/:id/ with a status of
-   * active | resolved | suppressed. The caller maps its action name through
-   * core/posthog-core.ts decideIssueAction, so no arbitrary status string reaches this path.
-   */
   function updateIssueStatus(projectId: ProjectId, issueId: string, status: string): Promise<PosthogResponse> {
     const pathname = `/api/projects/${encodeURIComponent(projectId)}/error_tracking/issues/${encodeURIComponent(issueId)}/`;
     return request(pathname, { method: 'PATCH', body: { status } });

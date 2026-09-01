@@ -1,8 +1,3 @@
-// The agent adapter registry (M1 of docs/plan-agent-adapters.md). It also owns THE lazy per-agent
-// command cache that replaced the module-load CLAUDE_CMD global: resolution runs on the first spawn
-// that needs it, so requiring sessions.ts no longer pays a `where claude`, and it is cached per agent
-// id so every session of that agent shares one lookup exactly as before.
-
 import claudeCode from "./claude-code.ts";
 import codex from "./codex.ts";
 import grok from "./grok.ts";
@@ -14,8 +9,6 @@ import type { AgentEnvOptions, AgentEnvProfile, SpawnEnv } from "../core/spawn-e
 import type { PackDelivery } from "../core/pack-pointer-core.ts";
 import type { HookPayload } from "../../shared/contracts/index.ts";
 
-// Every CC-only feature a session could run is asked of the adapter rather than assumed, so an
-// adapter earns a feature by claiming it and never by omission.
 interface AgentCapabilities {
   hooks: boolean;
   awaitingInput: boolean;
@@ -37,12 +30,10 @@ interface ProjectConfigCandidate {
   presenceIsHit?: boolean;
 }
 
-// HTTP hooks written into a per-session managed --settings file; no repo modification, no shell.
 interface SettingsFileInjection {
   kind: "settings-file";
 }
 
-// Command-type hooks on argv, pointed at session/hook-relay.ts.
 interface ArgvConfigInjection {
   kind: "argv-config";
   relayPath: string;
@@ -58,7 +49,6 @@ interface ArgvConfigInjection {
   mayContributeHooks(configText: unknown): boolean;
 }
 
-// An opt-in hooks file under the agent's own home, inert without GLISSA_HOOK_URL.
 interface HomeHooksFileInjection {
   kind: "home-hooks-file";
   filePath(env?: Record<string, string | undefined>, homedir?: string): string;
@@ -99,7 +89,6 @@ interface AgentCommandOptions {
   exec?: PathLookupExec;
 }
 
-// The whole surface a Session, the hook lifecycle and the CLI read off an agent adapter.
 interface AgentAdapter {
   id: string;
   label: string;
@@ -121,8 +110,6 @@ interface AgentAdapter {
   sessionIdOf?(payload: HookPayload): unknown;
 }
 
-// An adapter carries agent-specific tables and predicates beside this contract (its own tests pin
-// them), so conformance is checked without excess-property narrowing.
 type AgentAdapterShape = AgentAdapter & Record<string, unknown>;
 
 const DEFAULT_AGENT_ID = claudeCode.id;
@@ -152,8 +139,6 @@ function getAdapter(agentId: string | null | undefined): Adapter | null {
   return null;
 }
 
-// The defensive read a construction site uses: an unknown id costs a warning and the default agent,
-// never a failed spawn (config-store refuses the value on reload; boot must still come up).
 function resolveAdapter(
   agentId: string | null | undefined,
   { warn = console.warn, label = "" }: { warn?: (message: string) => void; label?: string } = {},
@@ -174,7 +159,6 @@ function commandFor(adapterOrId: AgentAdapter | string, options?: AgentCommandOp
   return resolved;
 }
 
-// Tests only: drop the cache so a resolution can be observed happening again.
 function resetCommandCache(): void {
   resolvedCommands.clear();
 }

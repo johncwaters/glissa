@@ -1,18 +1,3 @@
-// The usage lane end to end through the REAL backend and a REAL control WebSocket: lazy start on the
-// first connection, the usage-sessions push and its connect replay, the request-usage-report round
-// trip, the enabled:false kill switch, and the cfg-key gating of a settings-triggered restart.
-//
-// SAFETY: createBackend resolves its config store and runs a boot worktree reconcile against the
-// configured projects, so it is pointed at a throwaway temp config via GLISSA_CONFIG and can never see
-// a real repo (memory: booting the backend against the real config once destroyed an active worktree).
-// The single project's path is an empty temp directory: not a git repo, so the reconcile lists no
-// worktrees and removes nothing, and the boot loop builds the session DORMANT without spawning. The
-// project deliberately carries resumeSessionId (the usage attribution key) but NEVER wasActive, which
-// is what boot auto-resume selects on: adding wasActive here would spawn a real `claude` PTY.
-//
-// The transcript tree is a temp fixture reached through the scanner's injected env
-// (CLAUDE_CONFIG_DIR), and pricing is loaded snapshot-only, so nothing here reads the operator's real
-// ~/.claude or touches the network.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -42,8 +27,6 @@ interface UsageSessionRow {
   lastTs: number;
 }
 
-// The frames this suite reads. A refused report carries only its requestId and error, so every body
-// field of usage-report is optional here.
 type ControlFrame =
   | { type: 'usage-sessions'; pricingSource: string; ts: number; sessions: UsageSessionRow[] }
   | {
@@ -102,8 +85,6 @@ function transcriptLine({ sessionId, requestId, messageId, input, output, timest
   })}\n`;
 }
 
-// A minimal but REAL transcript tree: <claudeHome>/projects/<encoded-dir>/<uuid>.jsonl, the shape
-// resolveProjectsDirs + the scanner walk expect.
 function writeTranscriptFixture(claudeHome: string): void {
   const projectDir = path.join(claudeHome, 'projects', 'C--fixture-repo');
   fs.mkdirSync(projectDir, { recursive: true });
@@ -123,8 +104,6 @@ interface ScanCounts {
   open: number;
 }
 
-// Counts every fs call the scanner makes plus every scanner construction, which is how the lazy-start
-// and restart assertions observe the lane without reaching into it.
 function makeUsageProbe(claudeHome: string) {
   const counts: ScanCounts = { scanners: 0, stat: 0, readdir: 0, open: 0 };
   const fsPromises = {
@@ -133,14 +112,11 @@ function makeUsageProbe(claudeHome: string) {
     open: (...args: Parameters<typeof realFsp.open>) => { counts.open += 1; return realFsp.open(...args); },
   };
   const options = {
-    // Snapshot-only pricing: no network fetch, no ~/.glissa cache read, whatever config.usage says.
     loadPricingFn: (args: Parameters<typeof loadPricing>[0]) => loadPricing({ ...args, fetchEnabled: false }),
     createScanner: (deps: Parameters<typeof createUsageScanner>[0]) => {
       counts.scanners += 1;
       return createUsageScanner(deps);
     },
-    // HOME is pinned to the fixture as well as CLAUDE_CONFIG_DIR: the scanner also resolves the Codex and
-    // Grok homes from it, so without this the lane would walk the operator's real ~/.codex and ~/.grok.
     scannerDeps: { env: { CLAUDE_CONFIG_DIR: claudeHome, HOME: path.dirname(claudeHome), USERPROFILE: path.dirname(claudeHome) }, fsPromises },
     logger: { warn: () => {}, log: () => {} },
   };
@@ -277,7 +253,6 @@ test('request-usage-report replies to the requesting socket only, with the full 
   await settle();
   assert.equal(bystander.received.filter(isUsageReport).length, 0, 'the report is replied, never broadcast');
 
-  // A client connecting after a report exists gets it replayed, with no requestId of its own.
   const latecomer = await openControl(dash);
   const replayed = await waitForMessage(latecomer.received, isUsageReport, 'the replayed report');
   assert.equal(replayed.requestId, null);
@@ -331,17 +306,10 @@ test('a settings save restarts the lane only when the usage block actually chang
   await closeSocket(client.ws);
 }));
 
-// --- pass scheduling, against a stubbed pass (no fs, no backend) ---
-//
-// The scanner caps each pass at a byte budget, so a large transcript tree comes back partial and the
-// lane must finish it on its own short timer rather than waiting out scanIntervalMinutes. Measured on
-// a real machine: 6927 files, budget exhausted, 36 of the entries found on the first pass.
 
 type PassResult = Awaited<ReturnType<ReturnType<typeof createUsageScanner>['runPass']>>;
 type PassArgs = Parameters<ReturnType<typeof createUsageScanner>['runPass']>[0];
 
-// A real scanner whose ONE pass is scripted: everything the wiring reads afterwards (the report, the
-// per-session totals, the scan stats) stays the genuine article over an empty entry set.
 function scriptedScanner(passes: PassArgs[], passResults: PassResult[]) {
   const scanner = createUsageScanner({ env: {}, homeDir: path.join(os.tmpdir(), 'glissa-usage-nowhere') });
   scanner.runPass = async (args?: PassArgs) => {

@@ -1,4 +1,3 @@
-// M15 of docs/plan-visions-3.md: every memory-distill decision, so the lane shell holds none.
 
 import {
   INTERVAL_MINUTES_RANGE,
@@ -23,19 +22,10 @@ const DEFAULT_INTERVAL_MINUTES = 1440;
 const DEFAULT_TIMEOUT_SECONDS = 900;
 const DEFAULT_MAX_NEW_CLAIMS = 20;
 const DEFAULT_QUIET_MS = 60000;
-// Age is a reason to skip work, never a reason to do it: past this the record is dropped from the delta
-// and the cursor steps over it, the way the PostHog lane prunes vanished issues instead of replaying them.
 const DEFAULT_STALE_HORIZON_DAYS = 7;
 const DEFAULT_MAX_PROJECT_CLAIMS = 200;
-// The delivered ceiling, in characters of rendered projection, roughly 4k tokens. A claim COUNT bounds
-// nothing an operator feels: 200 claims at the line cap is a 120k character prefix on every session.
 const DEFAULT_MAX_PROJECT_CHARS = 16000;
-// How often the loop looks, as opposed to how often it distills: a tick skipped for a busy canon must
-// retry in minutes, not tomorrow.
 const CHECK_INTERVAL_MS = 15 * 60 * 1000;
-// The prompt's stand-in for a record that carries no project. It must never look like a project tag:
-// rendering it as `global` had the model copy that word back as the claim's project, and every
-// global claim then failed `mixes projects`, which deadlocked the lane (2026-08-26).
 const NO_PROJECT_LABEL = '<none>';
 const MAX_PROMPT_RECORDS = 400;
 const MAX_PROMPT_CHARS = 200000;
@@ -112,10 +102,6 @@ function integerWithin(value: unknown, { min, max }: { min: number; max: number 
   return value;
 }
 
-/**
- * config.memory.distill. Automatic once memory is on (the operator's "never thought about" rule), so
- * the kill switch is an explicit `enabled: false` rather than an opt-in true.
- */
 function resolveDistillConfig(raw: unknown, { memoryEnabled = false }: { memoryEnabled?: boolean } = {}): DistillConfig {
   const source: Record<string, unknown> = raw && typeof raw === 'object' && !Array.isArray(raw)
     ? (raw as Record<string, unknown>)
@@ -140,10 +126,6 @@ function canonLine(record: MemoryRecord): string {
   return `[${record.id}] (${effectiveRank(record)}${lock}) ${record.kind} project=${project} :: ${sanitizeProjectionText(record.text)}`;
 }
 
-/**
- * What of the canon one run may be shown. A canon past the budget is REFUSED rather than silently
- * sliced: distilling a slice would drop every unshown record from the published projection.
- */
 function selectCanonForPrompt(
   records: unknown,
   { maxRecords = MAX_PROMPT_RECORDS, maxChars = MAX_PROMPT_CHARS }: { maxRecords?: number; maxChars?: number } = {},
@@ -163,11 +145,6 @@ function renderCanonForPrompt(records: MemoryRecord[]): string {
   return records.map(canonLine).join('\n');
 }
 
-/**
- * The seed prompt for one memory-distill run. The canon rides inside its OWN marker fence and is named
- * as DATA; the model answers with structured claims, never with markdown, so no remembered byte ever
- * reaches the published file except through the renderer below.
- */
 function buildMemoryDistillPrompt({
   records = [], resultPath, maxNewClaims = DEFAULT_MAX_NEW_CLAIMS, maxClaims = MAX_CLAIMS,
   maxClaimChars = MAX_PROJECTION_LINE_CHARS, maxProjectChars = DEFAULT_MAX_PROJECT_CHARS,
@@ -262,11 +239,6 @@ function normalizeClaim(raw: unknown, index: number, recordsById: Map<string, Me
   const project = fields.project === NO_PROJECT_LABEL ? null : normalizeProjectTag(fields.project);
   if (cited.some((record) => (record.project || null) !== project)) return { ok: false, error: `${at} mixes projects` };
   if (cited.some((record) => record.kind !== fields.kind)) return { ok: false, error: `${at} mixes record kinds` };
-  /*
-   * The implied-rank rule: a claim may not outrank its sources, and since a distillation is itself a
-   * model claim, anything rendered above `model` has to be a verbatim copy of one record rather than a
-   * derivation of it.
-   */
   const sourceRank = Math.max(...cited.map(effectiveRankValue));
   if (trustRankValue(rank) > sourceRank) return { ok: false, error: `${at} claims a rank its sources do not carry` };
   const verbatim = cited.length === 1 && sanitizeProjectionText(cited[0].text) === sanitizeProjectionText(text);
@@ -277,8 +249,6 @@ function normalizeClaim(raw: unknown, index: number, recordsById: Map<string, Me
   return {
     ok: true,
     error: null,
-    // A rephrased lock is structurally valid and still unpublishable: the claim survives so the pending
-    // build shows the operator what was proposed, and the id is what refuses the auto-publish.
     lockedIds: locked && !verbatim ? cited.filter((record) => record.locked === true).map((record) => record.id) : [],
     claim: {
       kind: fields.kind as string, project, rank, ids: cited.map((record) => record.id), locked, text,
@@ -294,10 +264,6 @@ function publishedClaimTexts(documents: unknown): Set<string> {
   return texts;
 }
 
-/**
- * The whole result, believed or refused as one. A single bad claim fails the run rather than being
- * dropped: a partial accept publishes a projection nobody planned, and the cap exists to be a wall.
- */
 function validateDistillResult(parsed: unknown, {
   records = [], previousTexts = new Set<string>(), maxNewClaims = DEFAULT_MAX_NEW_CLAIMS, maxClaims = MAX_CLAIMS,
 }: {
@@ -351,7 +317,6 @@ function recordTs(record: MemoryRecord | null | undefined): number {
   return Number.isFinite(ts) ? ts : 0;
 }
 
-// Delta results merge into standing claims, so unread records retain their existing claims.
 function selectDeltaForPrompt(records: unknown, {
   sinceSeq = 0, limit = MAX_PROMPT_RECORDS, maxChars = MAX_PROMPT_CHARS, now = 0, horizonMs = 0,
 }: {
@@ -381,14 +346,12 @@ function selectDeltaForPrompt(records: unknown, {
   let cursorAt = floor;
   for (const record of above) {
     if (selected.length >= window) break;
-    // Stepping the cursor over it is the whole point: an unadvanced cursor replays the same tail forever.
     if (horizon !== null && recordTs(record) < horizon) {
       stale += 1;
       cursorAt = recordSeq(record);
       continue;
     }
     chars += canonLine(record).length + 1;
-    // The first record always rides, or one oversized record stalls the cursor at its own seq forever.
     if (chars > maxChars && selected.length > 0) break;
     selected.push(record);
     cursorAt = recordSeq(record);
@@ -399,14 +362,12 @@ function selectDeltaForPrompt(records: unknown, {
   return {
     records: selected,
     nextCursor: cursorAt,
-    // `pending` gates whether a run happens at all, so it counts only what a run would actually read.
     pending: fresh,
     stale,
     remaining: fresh - selected.length,
   };
 }
 
-/** A run of non-advancing runs narrows the window, so a record the model chokes on is isolated, not fatal. */
 function deltaWindowFor(base: number, failures: unknown): number {
   const halvings = Math.floor(Math.max(0, Math.floor(Number(failures) || 0)) / FAILURES_PER_HALVING);
   const window = Math.floor(Math.max(MIN_DELTA_WINDOW, Math.floor(base)) / 2 ** halvings);
@@ -443,7 +404,6 @@ function projectionChars(claims: readonly Partial<DistillClaim>[], project: stri
   return renderDistilledProjection(claims, { project }).length;
 }
 
-// A full project re-distill is the only operation that can shrink a claim set a merge grows.
 function decideDistillMode(published: HandledClaim[], {
   maxProjectClaims = DEFAULT_MAX_PROJECT_CLAIMS, maxChars = MAX_PROMPT_CHARS,
   maxProjectChars = DEFAULT_MAX_PROJECT_CHARS,
@@ -455,14 +415,11 @@ function decideDistillMode(published: HandledClaim[], {
   const counts = [...claimsByProject(published).entries()]
     .sort((left, right) => right[1] - left[1] || (String(left[0]) < String(right[0]) ? -1 : 1));
   if (counts.length === 0) return { mode: 'incremental', project: null, claims: 0 };
-  // Bytes before counts: a project past the delivered ceiling is compacted by a model first, so the
-  // eviction wall below only ever fires on a compaction that declined to shrink.
   const oversize = counts
     .map(([project, claims]) => ({ project, claims, chars: projectionChars(published, project) }))
     .filter((entry) => entry.chars > Math.floor(maxProjectChars))
     .sort((left, right) => right.chars - left.chars || (String(left.project) < String(right.project) ? -1 : 1));
   if (oversize.length > 0) return { mode: 'full', project: oversize[0].project, claims: oversize[0].claims };
-  // The standing claims are a prompt corpus too, so a set that no longer fits compacts whatever grew most.
   const overBudget = renderPublishedForPrompt(published).length > maxChars;
   if (!overBudget && counts[0][1] <= Math.floor(maxProjectClaims)) {
     return { mode: 'incremental', project: null, claims: 0 };
@@ -470,11 +427,6 @@ function decideDistillMode(published: HandledClaim[], {
   return { mode: 'full', project: counts[0][0], claims: counts[0][1] };
 }
 
-/**
- * Whether a compaction earned its run. Fewer claims is the count-triggered win; fewer rendered
- * characters is the byte-triggered one, and demanding both would deadlock a lane that a model
- * legitimately shrank by rewriting long claims short.
- */
 function compactionShrank(
   published: HandledClaim[],
   claims: readonly Partial<DistillClaim>[],
@@ -497,7 +449,6 @@ function renderPublishedForPrompt(claims: unknown): string {
   return (Array.isArray(claims) ? (claims as HandledClaim[]) : []).map(publishedLine).join('\n');
 }
 
-// Separate untrusted corpora need separate markers so one fence cannot close the other.
 function buildIncrementalDistillPrompt({
   published = [], records = [], resultPath, maxNewClaims = DEFAULT_MAX_NEW_CLAIMS, maxClaims = MAX_CLAIMS,
   maxClaimChars = MAX_PROJECTION_LINE_CHARS,
@@ -567,7 +518,6 @@ function opFailure(reason: string, detail: string): DistillOpsResult {
   };
 }
 
-// Operations are accepted whole because a partial projection was never planned.
 function validateDistillOps(parsed: unknown, {
   records = [], published = [], maxClaims = MAX_CLAIMS,
 }: { records?: MemoryRecord[]; published?: HandledClaim[]; maxClaims?: number } = {}): DistillOpsResult {
@@ -597,7 +547,6 @@ function validateDistillOps(parsed: unknown, {
     if (operation.op !== 'add') {
       target = publishedByHandle.get(nonEmptyString(operation.target) ?? '') ?? null;
       if (!target) return opFailure('bad-op', `${at} names a claim that does not stand`);
-      // A retired or rewritten lock is refused the way a rephrased one is: the operator reviews it.
       if (target.locked === true) lockedTouched.push(...target.ids);
       if (operation.op === 'retire') {
         ops.push({ op: 'retire', target: target.handle, claim: null });
@@ -614,7 +563,6 @@ function validateDistillOps(parsed: unknown, {
   };
 }
 
-/** Ops applied in order onto the standing set: last write wins, so the result is order-deterministic. */
 function applyDistillOps(published: unknown, ops: unknown): HandledClaim[] {
   const claims = withHandles(published).map((claim) => ({ ...claim }));
   const indexByHandle = new Map(claims.map((claim, index) => [claim.handle, index]));
@@ -655,7 +603,6 @@ function lockedClaimFor(record: MemoryRecord): HandledClaim {
   return { ...claim, handle: claimHandle(claim) };
 }
 
-// Merge prunes departed records and re-synthesizes locks so the locked sweep sees the complete claim set.
 function finalizeMergedClaims(claims: unknown, {
   records = [], previousTexts = new Set<string>(), maxNewClaims = DEFAULT_MAX_NEW_CLAIMS, maxClaims = MAX_CLAIMS,
   lockedTouched = [],
@@ -685,7 +632,6 @@ function finalizeMergedClaims(claims: unknown, {
     seen.add(claim.handle);
     merged.push(claim);
   }
-  // Empty is the truth only when there is nothing left to claim; otherwise it is a run erasing the file.
   if (merged.length === 0 && valid.some((record) => PROJECTED_KINDS.includes(record.kind))) {
     return claimFailure('bad-result', 'the merge left no claim at all while the canon still holds records');
   }
@@ -724,7 +670,6 @@ function compareClaims(left: DistillClaim, right: DistillClaim): number {
   return 0;
 }
 
-/** Rendered by Glissa from validated fields, so the published bytes are never the model's own markdown. */
 function renderDistilledProjection(claims: unknown, { project = null }: { project?: string | null } = {}): string {
   const tag = normalizeProjectTag(project);
   const selected = (Array.isArray(claims) ? (claims as DistillClaim[]) : []).filter((claim) => (claim.project || null) === tag);
@@ -736,7 +681,6 @@ function renderDistilledProjection(claims: unknown, { project = null }: { projec
   return renderProjectionDocument(bulletsByKind, { project: tag });
 }
 
-/** Least valuable last: a lock survives every eviction, then trust rank, then how many records agree. */
 function compareClaimValue(left: DistillClaim, right: DistillClaim): number {
   if ((left.locked === true) !== (right.locked === true)) return left.locked === true ? -1 : 1;
   const rankGap = trustRankValue(right.rank) - trustRankValue(left.rank);
@@ -745,7 +689,6 @@ function compareClaimValue(left: DistillClaim, right: DistillClaim): number {
   return compareClaims(left, right);
 }
 
-/** Rendered length is monotone in the kept prefix, so the largest set that fits is one binary search. */
 function longestFittingPrefix(ordered: readonly HandledClaim[], project: string | null, budget: number, floor: number): number {
   let low = floor;
   let high = ordered.length;
@@ -760,12 +703,6 @@ function longestFittingPrefix(ordered: readonly HandledClaim[], project: string 
   return low;
 }
 
-/**
- * The wall a claim count is not. Compaction ASKS a model to shrink and it may decline, so the delivered
- * bytes are bounded here, after every model has had its say, or one project's canon silently grows the
- * prefix of every session that opens it. Locked claims are exempt: dropping one quietly is exactly what
- * the pending-review path exists to prevent, and a project is never emptied, since empty reads as erased.
- */
 function enforceProjectionBudget(
   claims: unknown,
   { maxProjectChars = DEFAULT_MAX_PROJECT_CHARS }: { maxProjectChars?: number } = {},
@@ -800,7 +737,6 @@ function claimProjectTags(claims: unknown): string[] {
   return tags;
 }
 
-/** A run is due when the canon moved, the last distilled build is older than the interval, and appends have settled. */
 function decideDistillRun({
   now = 0, watermark = null, manifest = null, lastAppendAt = 0, intervalMs = DEFAULT_INTERVAL_MINUTES * 60000,
   quietMs = DEFAULT_QUIET_MS, workPending = false,
@@ -817,10 +753,7 @@ function decideDistillRun({
   const distilledAt = typeof manifestDistilledAt === 'number' && Number.isFinite(manifestDistilledAt)
     ? manifestDistilledAt
     : null;
-  // Measured against the last DISTILLED build: a fallback publish carries no distilledAt, so an
-  // expunge or a fresh enable leaves a run due rather than looking like a canon that never moved.
   const published = distilledAt === null ? null : manifest?.watermark;
-  // A matching watermark still has work while records exceed the cursor or a project needs compaction.
   const settled = workPending !== true;
   if (settled && published && watermark && published.hash === watermark.hash) return { run: false, reason: 'unchanged' };
   if (distilledAt !== null && now - distilledAt < intervalMs) return { run: false, reason: 'cooling' };

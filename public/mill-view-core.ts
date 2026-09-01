@@ -1,16 +1,6 @@
-// ── Mill view (pure) ─────────────────────────────────────────
-// Every string, tone, ordering and threshold the Mill tab shows. No DOM, so it is unit-testable from
-// node, and public/mill-panel.js stays a builder of elements.
-//
-// The numeric formatters are the Usage tab's (formatTokens, formatPercent, formatCount): a token count
-// is a token count, and two surfaces rounding it differently would read as two different numbers.
-
 import { attentionSignature } from './attention-ack-core.ts';
 import { NO_VALUE, formatCount, formatPercent, formatTokens } from './usage-view-core.ts';
 
-// A written manifest can never exceed its own budget (the builder refuses that build), so the ladder
-// stops at one warning: what this threshold catches is a pack approaching the ceiling it will one day
-// fail to build under, not a pack already over it.
 export const BUDGET_WARN_PCT = 90;
 
 export interface MillOutput {
@@ -171,9 +161,6 @@ function familyOf(pack: MillPack) {
   return typeof pack?.group === 'string' && pack.group ? pack.group : String(pack?.name ?? '');
 }
 
-// Invalid specs first (nothing downstream of them is trustworthy), then anything stale, then by name so
-// a quiet mill reads as a stable list rather than reshuffling on every pull. A pack's per-project
-// variants stay with it: they are separate packs, but they are the same pack's story.
 export function sortPackRows(packs: unknown): MillPack[] {
   const rank = (pack: MillPack) => {
     if (!pack.specValid) return 0;
@@ -200,7 +187,6 @@ export function sortPackRows(packs: unknown): MillPack[] {
   });
 }
 
-// One line saying what a derived row is, or '' for an ordinary pack.
 export function variantNote(pack: MillPack | null | undefined) {
   const group = typeof pack?.group === 'string' && pack.group ? pack.group : '';
   if (!group) return '';
@@ -244,8 +230,6 @@ export function indexLine(built: MillBuild | null | undefined) {
   return `index ${used} / ${formatTokens(cap)} tokens`;
 }
 
-// A pack nothing delivers is not built ON PURPOSE (the mill skips its watchers and its sweep), so it
-// reads as a plain fact rather than as the unbuilt-pack warning a consumed pack would earn.
 export function builtLine(pack: MillPack | null | undefined) {
   const built = pack?.built;
   if (built?.empty === true) return `${shortVersion(built.version)} built ${formatBuiltAt(built.builtAt)}, empty`;
@@ -316,8 +300,6 @@ export function distillTone(row: Pick<MillDistillRow, 'stale'> | null | undefine
   return 'warn';
 }
 
-// Display prose for the lane kinds pack-core enumerates. A kind with no entry here falls back to its
-// config label, so adding a pack-naming key server-side surfaces here rather than vanishing.
 const LANE_DISPLAY: Record<string, string> = { prReview: 'the PR review lane', posthog: 'the Radar lane' };
 
 export function consumerLine(pack: MillPack | null | undefined) {
@@ -397,11 +379,6 @@ export function outcomeSplitLines(measurement: MillMeasurement | null | undefine
   ];
 }
 
-// ── Assignment (the "Deliver to" control) ──
-// Which packs a project's sessions are spawned against is a field on the project record, edited here and
-// persisted by `set-project-packs`. The ephemeral lanes' lists stay config-file only, so they render as
-// the read-only sentence consumerLine already writes.
-
 export const DELIVER_TO_TITLE = 'Deliver to';
 export const DELIVER_TO_EMPTY_TEXT = 'No projects.';
 export const DELIVER_TO_CAP_NOTE = 'at cap';
@@ -416,10 +393,8 @@ function packCap(report: MillAssignmentReport | null | undefined) {
   return max;
 }
 
-// One assignment row per project: whether this pack is delivered to it, whether it still can be, and
-// the project's current list.
 export function deliveryTargets(report: MillAssignmentReport | null | undefined, pack: { name?: unknown; group?: unknown } | null | undefined): MillDeliveryTarget[] {
-  // A variant is never assigned: a project assigns the GROUP, and the mill derives the variant from it.
+
   if (typeof pack?.group === 'string' && pack.group) return [];
   const name = typeof pack?.name === 'string' ? pack.name : '';
   const cap = packCap(report);
@@ -433,7 +408,7 @@ export function deliveryTargets(report: MillAssignmentReport | null | undefined,
       id,
       name: typeof project?.name === 'string' ? project.name : id,
       checked,
-      // A project already at the per-session cap can drop a pack but not take another.
+
       disabled: !checked && packs.length >= cap,
       packs,
     });
@@ -441,8 +416,6 @@ export function deliveryTargets(report: MillAssignmentReport | null | undefined,
   return targets;
 }
 
-// A DELTA, not a list: the server re-reads the project's current packs inside its own write, so two
-// dashboards toggling different packs cannot overwrite each other.
 export function packDeltaFor(target: Pick<MillDeliveryTarget, 'id' | 'checked'> | null | undefined, packName: string) {
   return { projectId: target?.id, pack: packName, deliver: target?.checked !== true };
 }
@@ -468,7 +441,7 @@ export function totalsChips(report: MillReport | null | undefined): { label: str
   return [
     { label: 'packs', value: formatCount(totals.packCount ?? 0) },
     { label: 'built', value: formatCount(totals.builtCount ?? 0) },
-    // Informational, never toned: an unconsumed pack is skipped on purpose, not a problem to fix.
+
     { label: 'no consumers', value: formatCount(totals.unconsumed ?? 0) },
     { label: 'invalid specs', value: formatCount(totals.invalidSpecs ?? 0), tone: Number(totals.invalidSpecs) > 0 ? 'crit' : null },
     { label: 'stale deliveries', value: formatCount(totals.staleDeliveries ?? 0), tone: Number(totals.staleDeliveries) > 0 ? 'warn' : null },
@@ -476,17 +449,13 @@ export function totalsChips(report: MillReport | null | undefined): { label: str
   ];
 }
 
-// Watchers are the automation's own health: auto-rebuild switched on with zero watchers means every
-// rebuild is waiting on the 15 minute sweep, which is a different surface from a mill that is off.
 export function autoRebuildLine(report: MillReport | null | undefined) {
   if (!report) return '';
   if (report.autoRebuild !== true) return 'auto rebuild off, glissa pack build only';
   const watchers = report.watcherCount;
   if (typeof watchers !== 'number' || !Number.isFinite(watchers)) return 'auto rebuild on';
   if (watchers > 0) return `auto rebuild on, ${formatCount(watchers)} watched roots`;
-  // Zero watchers has two meanings, and only one of them is a problem. With nothing delivered anywhere
-  // there is deliberately nothing to watch; with something delivered, every rebuild is waiting on the
-  // fallback sweep, which is the state this line was written to catch.
+
   if (nothingIsConsumed(report)) return 'auto rebuild on, no consumers';
   return `auto rebuild on, ${formatCount(watchers)} watched roots, fallback sweep only`;
 }
@@ -516,11 +485,6 @@ export function configWarningsOf(report: MillReport | null | undefined): string[
   return Array.isArray(report?.configWarnings) ? report.configWarnings : [];
 }
 
-/*
- * What the Mill dot means: something the operator has to act on, never a standing fact. A spec that
- * does not validate never builds, a session running an older build is carrying context that has moved,
- * and a drifted derived file is a pack telling the agent something no longer true.
- */
 export function millAttentionSignature(report: MillReport | null | undefined) {
   const parts: string[] = [];
   for (const warning of configWarningsOf(report)) parts.push(`config:${warning}`);
@@ -538,7 +502,7 @@ export function millAttentionSignature(report: MillReport | null | undefined) {
 export function shouldApplyMillReport(msg: unknown, latestRequestId: unknown) {
   if (!msg || typeof msg !== 'object') return false;
   const id = (msg as { requestId?: unknown }).requestId;
-  // A connect-time replay carries no id; only a reply to a request we superseded is stale.
+
   if (id == null) return true;
   return id === latestRequestId;
 }

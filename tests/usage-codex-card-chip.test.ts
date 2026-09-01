@@ -1,11 +1,3 @@
-// M5 acceptance: a SUPERVISED codex card shows its own token/cost chip from its own Codex transcript.
-// The join is the same one a Claude card uses (the card's captured session id, which is its
-// resumeSessionId), so nothing in usage-wiring is vendor-branched: the scanner keys a codex session by
-// its own id, and the card carries that id.
-//
-// SAFETY: the scanner reads transcripts, so it is pointed at a throwaway CODEX_HOME (and empty CLAUDE /
-// GROK homes) through an explicit env passed to scannerDeps. It never touches process.env or the
-// operator's real ~/.codex. isolateTranscriptHomes is applied to process.env too, belt and suspenders.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -22,8 +14,6 @@ const CODEX_SESSION_ID = '019f43ea-76ac-7041-bd4b-6362e85f6630';
 const CARD_ID = 'b0000000-0000-4000-8000-0000000000c0';
 const MODEL = 'gpt-5.5';
 
-// The real Codex rollout shape: a turn_context line names the model, a token_count line reports the
-// CUMULATIVE usage. codexSessionIdFromPath reads the id out of the rollout filename.
 function writeCodexFixture(codexHome: string, { input, output }: { input: number; output: number }): void {
   const dir = path.join(codexHome, 'sessions');
   fs.mkdirSync(dir, { recursive: true });
@@ -63,8 +53,6 @@ test('a supervised codex card shows its own token/cost chip from the Codex trans
       broadcast: (message) => broadcasts.push(message),
       loadPricingFn: (args) => loadPricing({ ...args, fetchEnabled: false }),
       createScanner: createUsageScanner,
-      // Explicit env: the scanner never reads process.env, so the real ~/.codex is unreachable. CODEX_HOME
-      // points at the fixture; the claude and grok homes are empty, so no other vendor contributes.
       scannerDeps: { env: { CODEX_HOME: codexHome, CLAUDE_CONFIG_DIR: emptyHome, GROK_HOME: emptyHome, HOME: emptyHome, USERPROFILE: emptyHome } },
       logger: { warn: () => {}, log: () => {} },
     });
@@ -77,7 +65,6 @@ test('a supervised codex card shows its own token/cost chip from the Codex trans
     assert.ok(row, 'the codex card has a usage row');
     assert.equal(row.tokens, 2200, 'the codex transcript tokens are attributed to the card (2000 + 200)');
     assert.ok(row.costUSD > 0, 'priced from the committed snapshot (gpt-5.5 is in it)');
-    // No statusLine for codex, so the official-cost figure is absent and the chip shows the estimate.
     assert.equal(row.officialCostUSD, null);
 
     await usage.stop();

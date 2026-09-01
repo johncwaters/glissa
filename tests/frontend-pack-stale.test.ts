@@ -1,10 +1,6 @@
-// The rule behind the card's "pack stale" chip: which delivered context packs the mill has rebuilt
-// since the session was spawned, and (just as important) when it must stay quiet.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-// pack-stale-core is ESM (.mjs); dynamic-import it so the suite drives the shipped module.
 const importCore = () => import('../public/session-card/pack-stale-core.ts');
 
 test('a delivered pack whose current version moved is stale', async () => {
@@ -23,8 +19,7 @@ test('matching versions are never stale', async () => {
 
 test('a pack the dashboard has no current version for is never judged', async () => {
   const { stalePackNames } = await importCore();
-  // Auto-rebuild off, or a pack built before this dashboard connected: guessing "stale" here would
-  // nag about every session forever.
+
   assert.deepEqual(stalePackNames([{ name: 'crew-rules', version: 'v9' }], {}), []);
   assert.deepEqual(stalePackNames([{ name: 'crew-rules', version: 'v9' }], { 'crew-rules': null }), []);
 });

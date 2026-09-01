@@ -1,5 +1,3 @@
-// Visions view.
-
 import { el, isPanelHidden } from './dom-helpers.ts';
 import { createSettingsLink } from './settings-link.ts';
 import {
@@ -54,24 +52,22 @@ let _findingsByUri = new Map<string, VisionsFinding[]>();
 let _commentsByUri = new Map<string, VisionsComment[]>();
 let _handsByUri = new Map<string, string>();
 let _intent: IntentState = emptyIntentState();
-// Project names for the intent rows, from the same snapshot that builds the cards. An id nothing named
-// renders as the id rather than as a blank.
+
 let _projectNames = new Map<string, string>();
 let _root: HTMLDivElement | null = null;
 let _feed: HTMLDivElement | null = null;
 let _intentUI: { list: HTMLDivElement } | null = null;
 let _activityCallback: ((level: string | null) => void) | null = null;
 let _isEnabled: boolean | null = null;
-// The ingest lane's cross-source timeline, newest first and already capped by the view core.
+
 let _activityEvents: ActivityEvent[] = [];
-// What the last batched frame could not fit. A count, never the events themselves.
+
 let _activityOverflow = 0;
 let _activityUI: { count: HTMLSpanElement; list: HTMLDivElement; overflow: HTMLParagraphElement } | null = null;
-// The tier 1 changelog, newest first and already capped by the view core.
+
 let _fixEntries: VisionsFixEntry[] = [];
 let _fixUI: { count: HTMLSpanElement; list: HTMLDivElement } | null = null;
-// Findings that landed while the operator was looking at another tab. Cleared when this one is shown,
-// which is the whole point of the dot: it says "something arrived since you last looked".
+
 let _unseen = false;
 
 function buildIntentBlock() {
@@ -86,7 +82,7 @@ function buildIntentBlock() {
 function buildIntentRow(row: IntentRow) {
   const item = el('div', 'visions-intent-item');
   const head = el('div', 'visions-intent-head');
-  // A project name comes from the operator's config: built as text, never markup.
+
   head.append(el('span', 'visions-intent-scope', row.label), el('span', 'visions-intent-meta', row.meta));
   const statement = el('p', 'visions-intent-text', row.text);
   statement.classList.toggle('visions-intent-none', !row.hasText);
@@ -100,7 +96,6 @@ function renderIntent() {
   _intentUI.list.replaceChildren(...intentRows(_intent, _projectNames).map(buildIntentRow));
 }
 
-// Fed by the connect snapshot, which is also where the cards get their names.
 export function setVisionsProjectNames(namesById: unknown) {
   _projectNames = namesById instanceof Map ? namesById : new Map();
   renderIntent();
@@ -109,7 +104,7 @@ export function setVisionsProjectNames(namesById: unknown) {
 function buildSection(section: VisionsSection) {
   const wrap = el('section', 'visions-doc');
   const head = el('div', 'visions-doc-head');
-  // Buffer paths come from an editor: built as text, never markup.
+
   const name = el('h2', 'visions-doc-name');
   name.textContent = section.name;
   name.title = section.uri;
@@ -136,14 +131,13 @@ function buildHandBanner(hand: string) {
   return banner;
 }
 
-// A tier 3 card, deliberately unlike a tier 2 row: a chip naming who is talking, then a sentence.
 function buildCommentCard(comment: VisionsComment) {
   const card = el('div', 'visions-comment');
   const head = el('div', 'visions-comment-head');
   head.append(el('span', 'visions-comment-chip', 'visions'));
   head.append(el('span', 'visions-comment-line', commentLineLabel(comment)));
   card.append(head);
-  // Model text about the carbon unit's own prose: built as text, never markup.
+
   const message = el('p', 'visions-comment-message');
   message.textContent = comment?.message == null ? '' : String(comment.message);
   card.append(message);
@@ -155,21 +149,19 @@ function buildFindingRow(finding: VisionsFinding) {
   row.append(el('span', 'visions-finding-line', findingLineLabel(finding)));
   const code = finding?.code == null ? '' : String(finding.code);
   if (code) row.append(el('span', 'visions-finding-code', code));
-  // Rule messages quote the carbon unit's own prose back at them: text, never markup.
+
   const message = el('span', 'visions-finding-message');
   message.textContent = finding?.message == null ? '' : String(finding.message);
   row.append(message);
   return row;
 }
 
-// A push while another tab is open is dropped: the surface rebuilds when it is next looked at, which is
-// what the dot is for. The lane sweeps on every pause boundary, so this is not a rare path.
 function render({ force = false }: { force?: boolean } = {}) {
   if (!_feed) return;
   if (!force && isPanelHidden(_root)) return;
   _feed.textContent = '';
   const sections = visionsSections(_findingsByUri, _commentsByUri, _handsByUri);
-  // The bare hint, with no section chrome to make an idle lane look like a broken one (Radar's precedent).
+
   if (sections.length === 0) {
     const empty = el('p', 'visions-empty', VISIONS_EMPTY_TEXT);
     if (_isEnabled === false) {
@@ -187,11 +179,6 @@ export function applyVisionsSettings(settings: unknown) {
   render();
 }
 
-/*
- * The ingest activity feed: one section under the findings, one row per normalized event, newest first.
- * It carries no controls, so nothing here has a label to keep constant; the head's count is status text
- * beside the title rather than anything clickable.
- */
 function buildActivityBlock() {
   const section = el('section', 'visions-activity');
   const head = el('div', 'visions-activity-head');
@@ -212,7 +199,7 @@ function buildActivityRow(event: ActivityEvent, now: number) {
   row.append(el('span', 'visions-activity-source', activitySourceLabel(event.source)));
   row.append(el('span', 'visions-activity-age', activityAgeText(event.ts, now)));
   row.append(el('span', 'visions-activity-scope', activityScopeText(event)));
-  // Captured output about whatever the carbon unit was doing: built as text, never markup.
+
   const summary = el('span', 'visions-activity-summary');
   summary.textContent = event.summary;
   row.append(summary);
@@ -235,10 +222,6 @@ function renderActivity({ force = false }: { force?: boolean } = {}) {
   overflow.textContent = activityOverflowText(_activityOverflow);
 }
 
-/*
- * The tier 1 changelog: what the lane silently changed, and what it tried to change and was refused.
- * It carries no controls either, so the head's count is status text beside the title.
- */
 function buildFixesBlock() {
   const section = el('section', 'visions-fixes');
   const head = el('div', 'visions-fixes-head');
@@ -255,7 +238,7 @@ function buildFixesBlock() {
 function buildFixRow(entry: VisionsFixEntry) {
   const row = el('div', 'visions-fix-row');
   row.dataset.applied = entry.applied ? 'yes' : 'no';
-  // Buffer paths come from an editor: built as text, never markup.
+
   const file = el('span', 'visions-fix-file');
   file.textContent = basenameOfUri(entry.uri) || entry.uri;
   file.title = entry.uri;
@@ -263,7 +246,7 @@ function buildFixRow(entry: VisionsFixEntry) {
   row.append(el('span', 'visions-fix-line', fixLineLabel(entry)));
   row.append(el('span', 'visions-fix-outcome', fixOutcomeText(entry)));
   row.append(el('span', 'visions-fix-code', entry.code || ''));
-  // Rule messages quote the carbon unit's own prose back at them: text, never markup.
+
   const message = el('span', 'visions-fix-message');
   message.textContent = entry.message;
   row.append(message);
@@ -294,9 +277,6 @@ function noteArrival(arrived: boolean) {
   _unseen = true;
 }
 
-// The tab-activity seam (defined in pr-panel.js): the view owns the condition, app.js owns the dot
-// element. This one hands over a LEVEL rather than a boolean, since a raised hand is not the same ask
-// as an unread arrival; the other panels still pass a boolean.
 export function setVisionsActivityCallback(callback: (level: string | null) => void) {
   _activityCallback = callback;
   refreshActivity();
@@ -320,7 +300,6 @@ export function mountVisionsView(parent: HTMLElement) {
   return root;
 }
 
-// Called when the Visions surface becomes visible: seeing the findings is what clears the dot.
 export function refreshVisionsView() {
   _unseen = false;
   refreshActivity();
@@ -330,7 +309,6 @@ export function refreshVisionsView() {
   renderActivity({ force: true });
 }
 
-// Tier 1: one edit the lane applied, or tried to and was refused. Both are news worth the dot.
 export function applyVisionsFix(msg: VisionsMessage) {
   _fixEntries = applyFixMessage(_fixEntries, msg);
   noteArrival(hasFix(msg));
@@ -345,7 +323,6 @@ export function applyVisionsFindings(msg: VisionsMessage) {
   refreshActivity();
 }
 
-// Tier 3: what a visions dispatch had to say about one buffer, replacing that uri's cards whole.
 export function applyVisionsComments(msg: VisionsMessage) {
   _commentsByUri = applyCommentsMessage(_commentsByUri, msg);
   noteArrival(hasComments(msg));
@@ -369,10 +346,6 @@ export function applyVisionsIntent(msg: VisionsMessage) {
   refreshActivity();
 }
 
-/*
- * One batched ingest frame (docs/plan-ingestion.md, M6). The lane sends at most one per second carrying
- * at most 50 events, and what it could not fit rides as a count rather than as more rows.
- */
 export function applyIngestActivity(msg: VisionsMessage) {
   _activityEvents = applyActivityMessage(_activityEvents, msg);
   _activityOverflow = activityOverflowCount(msg);
@@ -381,7 +354,6 @@ export function applyIngestActivity(msg: VisionsMessage) {
   refreshActivity();
 }
 
-// Connect-time repair for the feed: the rings as they stand now, replacing this tab's list.
 export function applyIngestSnapshot(msg: VisionsMessage) {
   _activityEvents = applyActivitySnapshot(msg);
   _activityOverflow = 0;
@@ -390,7 +362,6 @@ export function applyIngestSnapshot(msg: VisionsMessage) {
   refreshActivity();
 }
 
-// Connect-time repair: the server's whole current map, replacing this tab's rather than merging into it.
 export function applyVisionsSnapshot(msg: VisionsMessage) {
   _findingsByUri = applyFindingsSnapshot(msg);
   _commentsByUri = applyCommentsSnapshot(msg);

@@ -1,4 +1,3 @@
-// Unit tests for the pure background sub-agent bookkeeping (session/core/agent-tracker.js).
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -67,9 +66,9 @@ test('pruneAgents drops only entries at or past the ttl, returns the count remov
   const now = 100000;
   const ttl = 1000;
   const m = new Map([
-    ['old', now - ttl],       // exactly ttl old -> pruned (>=)
-    ['older', now - ttl - 1], // pruned
-    ['fresh', now - 500],     // kept
+    ['old', now - ttl],
+    ['older', now - ttl - 1],
+    ['fresh', now - 500],
   ]);
   const removed = pruneAgents(m, now, ttl);
   assert.equal(removed, 2);
@@ -88,9 +87,6 @@ test('extractBackgroundTasks reads the array shape only (hooks never send other 
     [{ id: 'b1', type: 'shell' }],
   );
   assert.deepEqual(extractBackgroundTasks({ background_tasks: [{}] }), [{ id: null, type: null }]);
-  // Absent/unrecognized (older Claude versions, non-hook shapes) -> null so the caller
-  // falls back to the counted map alone. The { count, tasks } shape (claude-code#33310)
-  // is a statusLine surface, never sent to hooks: deliberately unparsed.
   assert.equal(extractBackgroundTasks({}), null);
   assert.equal(extractBackgroundTasks(null), null);
   assert.equal(extractBackgroundTasks({ background_tasks: 3 }), null);
@@ -103,7 +99,6 @@ test('extractBackgroundTasks drops settled entries (defensive; emitter pre-filte
       { id: 'b1', type: 'shell', status: 'running' },
       { id: 'tm', type: 'teammate', status: 'idle' },
       { id: 'tm2', type: 'teammate', status: 'IDLE' },
-      // Deny-list, not allow-list: an unknown status still counts as running.
       { id: 'x', type: 'subagent', status: 'starting' },
     ],
   });
@@ -151,7 +146,6 @@ test('declaredActiveCount: idleNameCount is clamped to the surviving teammate co
     { id: 't2', type: 'teammate' },
     { id: 'b1', type: 'shell' },
   ];
-  // idleNameCount=5 but only 2 teammate entries exist: clamp to 2, leaving the shell entry.
   assert.equal(declaredActiveCount(entries, new Set<string>(), 0, undefined, 5), 1);
 });
 
@@ -170,14 +164,9 @@ test('declaredActiveCount: a teammate entry counts fresh and stops counting past
 
 test('declaredActiveCount: an aged-out teammate does not absorb the idleNameCount clamp, leaving a shell entry counted', () => {
   const entries = [{ id: 't1', type: 'teammate' }, { id: 'b1', type: 'shell' }];
-  // ageMs=200 ages out the teammate (teammateTtlMs=100) but is well under the default weak ttl,
-  // so the shell entry still counts. The aged-out teammate must not be in teammateCount, so the idle
-  // name (which no longer matches any surviving teammate) cannot wrongly subtract from the shell entry.
   assert.equal(declaredActiveCount(entries, new Set<string>(), 200, undefined, 1, 100), 1, 'the shell entry survives; the stale idle name has nothing to clamp against');
 });
 
-// --- msUntilNextDrain: what a gate timer should wait when background work is still gating.
-// The whole point is that TTLs age from the timestamp that created them, not from "now".
 
 const TTLS = { agentTtlMs: 30 * 60 * 1000, weakTtlMs: 5 * 60 * 1000, teammateTtlMs: 90 * 1000 };
 
@@ -240,9 +229,9 @@ test('msUntilNextDrain: counted-only uses the OLDEST counted ts plus the agent T
 test('msUntilNextDrain: the counted map and the declared snapshot are compared against each other', () => {
   const now = 1000000;
   const ms = msUntilNextDrain({
-    countedAgents: new Map([['a1', now - 29 * 60 * 1000]]), // ~1min of agent ttl left
+    countedAgents: new Map([['a1', now - 29 * 60 * 1000]]),
     declaredEntries: [{ id: 'tm1', type: 'teammate' }],
-    declaredTs: now - 80000,                                // 10s of teammate ttl left
+    declaredTs: now - 80000,
     now,
     ...TTLS,
   });
@@ -276,8 +265,6 @@ test('msUntilNextDrain: nothing gating returns null so the caller keeps its own 
 
 test('msUntilNextDrain: an already-expired contributor is skipped, never reported as an instant drain', () => {
   const now = 1000000;
-  // The weak entry expired 1min ago but sits in a snapshot the subagent entry keeps alive: reporting
-  // it as "drains now" would re-arm the gate timer at its floor for the rest of the snapshot's life.
   const ms = msUntilNextDrain({
     declaredEntries: [{ id: 'b1', type: 'shell' }, { id: 'x1', type: 'subagent' }],
     declaredTs: now - 6 * 60 * 1000,
@@ -305,13 +292,12 @@ test('msUntilNextDrain: every returned value is strictly positive', () => {
 
 test('declaredActiveCount: dream + weak-ttl + id-drain + idleNameCount compose correctly', () => {
   const entries = [
-    { id: 'd1', type: 'dream' },        // never gates
-    { id: 'b1', type: 'shell' },        // past weak ttl: drops out
-    { id: 't1', type: 'teammate' },     // id-drained
-    { id: 't2', type: 'teammate' },     // survives, then subtracted by idleNameCount
-    { id: 'x1', type: 'subagent' },     // survives, always gates
+    { id: 'd1', type: 'dream' },
+    { id: 'b1', type: 'shell' },
+    { id: 't1', type: 'teammate' },
+    { id: 't2', type: 'teammate' },
+    { id: 'x1', type: 'subagent' },
   ];
   const idleIds = new Set(['t1']);
-  // ageMs=100 >= weakTtlMs=100 drops the shell entry; one idle name drains t2, leaving x1.
   assert.equal(declaredActiveCount(entries, idleIds, 100, 100, 1), 1);
 });

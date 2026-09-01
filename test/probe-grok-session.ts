@@ -1,6 +1,3 @@
-// Live verification of the Grok adapter, run by hand against a REAL grok binary:
-// node test/probe-grok-session.ts [--keep]
-
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -12,10 +9,7 @@ import grok from "../session/adapters/grok.ts";
 import type { Session } from "../session/sessions.ts";
 import type { HookPayload } from "../shared/contracts/index.ts";
 
-// _packsBuiltRoot and _hookToken are no longer Session fields; the probe still names them, so the
-// shape it writes and reads is declared here rather than pretended into the class.
 interface ProbeSession extends Session {
-  _packsBuiltRoot?: string;
   _hookToken?: string;
 }
 
@@ -333,7 +327,7 @@ async function main(args: string[] = process.argv.slice(2)): Promise<void> {
   } finally {
     try {
       session.kill();
-    } catch { /* the process is exiting either way */ }
+    } catch {  }
     await delay(1500);
     backend.shutdown();
     server.closeAllConnections();

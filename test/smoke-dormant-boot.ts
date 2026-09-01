@@ -1,6 +1,3 @@
-// Smoke test: verifies dormant-by-default boot and start-session control flow.
-// Runs the server in-process so it shuts down cleanly when the test exits.
-
 import http from 'node:http';
 import WebSocket from 'ws';
 
@@ -24,7 +21,6 @@ interface ControlEvent {
 const PORT = 3098;
 process.env.GLISSA_PORT = String(PORT);
 
-// Tee console.log so we can assert on the per-session spawn line emitted by sessions.ts.
 const logLines: string[] = [];
 const origConsoleLog = console.log.bind(console);
 console.log = (...a: unknown[]) => { logLines.push(a.map(String).join(' ')); origConsoleLog(...a); };
@@ -38,8 +34,6 @@ function assert(label: string, cond: boolean): void {
 
 function delay(ms: number): Promise<void> { return new Promise((r) => setTimeout(r, ms)); }
 
-// Best-effort: when claude resolves to a real .exe, the spawn must go direct
-// (no cmd.exe /c shim layer). Skips on hosts where claude is a .cmd/.ps1 shim.
 function assertSpawnStrategy(target: SnapshotSession): void {
   console.log('\nSpawn strategy:');
   const claudeCmd = claudeCommand();
@@ -59,7 +53,7 @@ function assertSpawnStrategy(target: SnapshotSession): void {
 async function main(): Promise<void> {
   const httpServer = http.createServer();
   const backend = createBackend(httpServer, { staticDir: null });
-  // The app has to be mounted to reach /control-token: the dashboard channels need the page token.
+
   httpServer.on('request', backend.app);
   await new Promise<void>((r) => { httpServer.listen(PORT, '127.0.0.1', () => r()); });
 
@@ -74,7 +68,6 @@ async function main(): Promise<void> {
     ws.once('error', rej);
   });
 
-  // Wait briefly for initial snapshot
   await delay(200);
 
   console.log('\nSnapshot:');
@@ -84,7 +77,6 @@ async function main(): Promise<void> {
   const sessions = snapshot?.sessions || [];
   assert(`all ${sessions.length} sessions are DORMANT`, !!snapshot && sessions.every((s) => s.state === 'DORMANT'));
 
-  // Pick one session and start it
   const target = sessions[0];
   if (target) {
     console.log(`\nStart-session for "${target.name}" (${target.id}):`);
@@ -100,7 +92,6 @@ async function main(): Promise<void> {
     assert('first transition is DORMANT -> INITIALIZING',
       !!firstChange && firstChange.from === 'DORMANT' && firstChange.to === 'INITIALIZING');
 
-    // Verify other sessions remained dormant (no spurious spawns)
     const otherChanges = events.filter((e) =>
       e.type === 'state-change' && e.id !== target.id,
     );
@@ -109,7 +100,6 @@ async function main(): Promise<void> {
     assertSpawnStrategy(target);
   }
 
-  // Cleanup
   ws.close();
   backend.shutdown();
   httpServer.close();

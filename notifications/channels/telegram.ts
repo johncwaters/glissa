@@ -1,16 +1,3 @@
-// Opt-in off-dashboard channel: session notifications (complete / waiting / failed) reach the
-// operator's phone when there is no dashboard tab open anywhere to raise a browser notification.
-//
-// Dumb delivery pipe like the other channels - the lifecycle decision (which category fires, when,
-// and the once-per-work-cycle gate) stays in NotificationManager and session/core/notify-gate.js.
-// The only decision here is decideTelegramNotification below: whether THIS delivery has a reason to
-// leave the machine at all.
-//
-// Registered unconditionally at boot and gated per delivery off live config, so flipping
-// telegramNotifications takes effect immediately with no re-registration and no restart. With the
-// key absent the gate short-circuits on the first line, which is why an unconfigured install
-// behaves exactly as before.
-
 import { sendTelegramMessage } from '../../server/telegram-transport.ts';
 import { decideOffDashboardDelivery } from '../../server/core/client-presence.ts';
 import type { NotificationContext } from '../notification-manager.ts';
@@ -21,26 +8,19 @@ export interface TelegramDecision {
 }
 
 export interface TelegramGateInput {
-  /** config.telegramNotifications, read strictly: only a literal true opens the gate */
   enabled: unknown;
-  /** config.telegram.botToken (shared with the PR-review lane) */
+
   botToken: string | undefined;
-  /** config.telegram.chatId */
+
   chatId: string | undefined;
-  /** open control-WS connections right now */
+
   connectionCount: number;
-  /**
-   * The notification ladder's last rung: the operator was shown a browser notification and did not
-   * acknowledge it, so a dashboard being open somewhere is exactly what this delivery disbelieves.
-   * Everything else about the gate still applies - it is the AUDIENCE test that is bypassed, never
-   * the opt-in or the credentials.
-   */
+
   phoneEscalation?: boolean;
   category?: string | null;
   activeAgents?: number;
 }
 
-/** Pure gate for one delivery. */
 function decideTelegramNotification({
   enabled,
   botToken,
@@ -58,8 +38,6 @@ function decideTelegramNotification({
   return { send: true, reason: 'no-dashboard-audience' };
 }
 
-// Mirrors what the web notification shows: the manager's message already names the session, and the
-// category is what the browser toast conveys through its own grouping. Plain text, no parse_mode.
 function formatTelegramText(sessionName: string, category: string | null, message: string): string {
   const body = message || `${sessionName} needs attention`;
   if (!category) return body;
@@ -67,14 +45,13 @@ function formatTelegramText(sessionName: string, category: string | null, messag
 }
 
 export interface TelegramChannelDeps {
-  /** live config object (read per delivery, never captured) */
   getConfig: () => { telegramNotifications?: boolean; telegram?: { botToken?: string; chatId?: string } | null } | null;
-  /** open control-WS connection count */
+
   getConnectionCount: () => number;
   getActiveAgentCount?: (sessionId: string) => number;
-  /** durable at-least-once queue; absent means fire-and-forget as before */
+
   outbox?: { deliver: (text: string) => Promise<void> } | null;
-  /** injected transport for tests */
+
   send?: (message: { botToken: string; chatId: string; text: string; tag?: string }) => unknown;
 }
 
@@ -103,17 +80,12 @@ function createTelegramChannel({
     if (!decision.send) return decision;
     if (!botToken || !chatId) return decision;
     const text = formatTelegramText(sessionId, category, message);
-    /*
-     * Through the outbox when there is one: the ping is recorded BEFORE it is attempted, so a crash
-     * mid-send replays it at the next boot instead of losing it. The credentials are read at SEND
-     * time, not queue time, so a replayed entry uses whatever config the new process holds.
-     */
+
     if (outbox) {
       void outbox.deliver(text);
       return decision;
     }
-    // Not awaited: sendTelegramMessage swallows its own failures, and a channel must never make the
-    // manager's delivery loop wait on the network.
+
     send({
       botToken,
       chatId,

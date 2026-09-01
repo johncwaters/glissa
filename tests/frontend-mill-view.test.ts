@@ -3,12 +3,10 @@ import assert from 'node:assert/strict';
 
 import type { MillBuild, MillPack } from '../public/mill-view-core.ts';
 
-// mill-view-core is a browser module; dynamic-import it so the suite drives the shipped source.
 const importCore = () => import('../public/mill-view-core.ts');
 
 const VERSION = 'abcdef0123456789';
 
-// A pack whose built block is always present, so a test can reach into it without re-narrowing.
 type BuiltPack = MillPack & { built: MillBuild };
 
 function build(overrides: Partial<MillBuild> = {}): MillBuild {
@@ -176,8 +174,6 @@ test('an unmeasured token estimate is said out loud, never rendered as an empty 
   assert.equal(indexLine(build()), 'index 300 / 1.2k tokens');
 });
 
-// ── Consumer gating and the assignment control ──
-
 test('an unbuilt pack nothing consumes reads as a plain fact, not as a warning', async () => {
   const { builtLine, builtTone, deliveryEmptyText } = await importCore();
   const unconsumed = pack({ built: null, builtReason: 'not built', hasConsumers: false });
@@ -228,8 +224,7 @@ test('a project with no id is not an assignment target: nothing could address it
 
 test('the checkbox list is one row per project the server ships, so sibling cards appear once', async () => {
   const { deliveryTargets } = await importCore();
-  // The server groups two records on one checkout into a single project row; the tab renders exactly
-  // what it is given, which is what stops a "glissa" and a "glissa (2)" box offering the same delivery.
+
   const report = { maxPacksPerProject: 4, projects: [{ id: 'p1', name: 'glissa', packs: ['house-rules'] }] };
   assert.deepEqual(deliveryTargets(report, pack()).map((target) => [target.id, target.name]), [['p1', 'glissa']]);
 });
@@ -277,7 +272,6 @@ test('zero watchers reads as the nothing-consumed steady state, not as a health 
   const quiet = { autoRebuild: true, watcherCount: 0, totals: { packCount: 3, unconsumed: 3 } };
   assert.equal(autoRebuildLine(quiet), 'auto rebuild on, no consumers');
 
-  // Something IS delivered and still nothing is watched: that is the case this line exists to catch.
   const stuck = { autoRebuild: true, watcherCount: 0, totals: { packCount: 3, unconsumed: 1 } };
   assert.equal(autoRebuildLine(stuck), 'auto rebuild on, 0 watched roots, fallback sweep only');
 });
@@ -287,8 +281,6 @@ test('the assignment hint quotes the cap the server shipped, and says nothing wi
   assert.equal(deliverToCapHint({ maxPacksPerProject: 4 }), '4 packs max per project. Next spawn applies.');
   assert.equal(deliverToCapHint({}), '');
 });
-
-// ---- Per-project variants: separate packs, read as one pack's story ----
 
 test('a pack keeps its variants beside it, and the family is ranked by its worst row', async () => {
   const { sortPackRows } = await importCore();

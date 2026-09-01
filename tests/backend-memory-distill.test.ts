@@ -1,9 +1,3 @@
-// The memory-distill lane is constructed only beside a memory store (docs/plan-visions-3.md, M15), and
-// its kill switch is an explicit false rather than an opt-in true. Memory off must construct nothing.
-//
-// SAFETY: createBackend runs a boot worktree reconcile against the configured projects, so every boot
-// here points at a throwaway temp config with ZERO projects via GLISSA_CONFIG.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -37,7 +31,7 @@ async function bootWithConfig(memory?: Record<string, unknown>): Promise<BootedB
   const backend = createBackend(server, { staticDir: null });
   server.on('request', backend.app);
   await listenOnLoopback(server);
-  // Every stopper fires on the first call, so a test reading the names and the close() below share one.
+
   const outcome: { result: ShutdownOutcome | null } = { result: null };
   const shutdownOnce = (): ShutdownOutcome => {
     outcome.result = outcome.result || backend.shutdown();

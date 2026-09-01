@@ -2,7 +2,6 @@ import { numberOrNull } from './usage-number-core.ts';
 
 export type ModelPrice = Record<string, unknown>;
 
-// Loose on purpose: costing reads token counts off whatever row it is handed, parsed entry or not.
 export interface PricedEntry {
   costUSD?: unknown;
   input?: unknown;
@@ -173,7 +172,7 @@ function isExactOnlyKey(key: unknown): boolean {
 function fastMultiplierFor(entry: PricedEntry | null | undefined, price: ModelPrice | null | undefined): number {
   if (entry?.speed !== 'fast' && !String(entry?.model || '').endsWith('-fast')) return 1;
   if (price?._resolvedExact && isExactOnlyKey(price?._resolvedPricingKey)) return 1;
-  // LiteLLM anthropic entries currently carry no fast multiplier, so fast entries bill at 1x until data provides one.
+
   return numberOrNull(price?.fast_multiplier) ?? numberOrNull(price?.fastMultiplier) ?? 1;
 }
 

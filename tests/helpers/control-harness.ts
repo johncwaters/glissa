@@ -9,14 +9,6 @@ import { registerControlHandlers } from '../../server/control-handlers.ts';
 import type { ControlHandlerDeps } from '../../server/control-handlers.ts';
 import type { RequestTrust } from '../../server/core/request-trust.ts';
 
-/*
- * A control suite drives registerControlHandlers directly instead of booting a backend, so the two real
- * dependencies that registration insists on live here once: the WebSocketServer it registers against,
- * and the ConfigStore its deps carry. Both are genuine instances. The store is the shipping one over a
- * throwaway config.json, with only `save` swapped for an in-memory mutation, so a suite can keep
- * asserting on the config object it handed in while getSettings stays the real projection.
- */
-
 const HARNESS_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-control-harness-'));
 process.on('exit', () => {
   fs.rmSync(HARNESS_CONFIG_DIR, { recursive: true, force: true });
@@ -43,9 +35,6 @@ interface TestConfigStoreOptions {
   onSave?: () => void;
 }
 
-// The store the control deps take, with save rewritten to mutate `config` in place. The real save is a
-// disk round-trip that hands back a fresh object; a suite asserting on what a handler persisted wants
-// the object it holds to be the one that changed.
 function testConfigStore(config: GlissaConfig, options: TestConfigStoreOptions = {}): ConfigStore {
   const real = realConfigStore();
   real.applySettings(config);
@@ -61,8 +50,6 @@ function testConfigStore(config: GlissaConfig, options: TestConfigStoreOptions =
   };
 }
 
-// The deps every control suite has to supply before it can state the one or two it actually cares
-// about. generateProjectId and the two reload hooks are required by the registration and inert here.
 function controlDeps(config: GlissaConfig, overrides: Partial<ControlHandlerDeps> = {}): ControlHandlerDeps {
   return {
     sessions: new Map(),
@@ -82,13 +69,11 @@ function createControlServer(deps: ControlHandlerDeps): WebSocketServer {
   return controlWss;
 }
 
-// What the control handlers call on a connected socket. The real one is a ws WebSocket the upgrade
-// path built; a suite that never opens a port supplies this much and nothing else is touched.
 type ControlMessageListener = (raw: string) => unknown;
 
 interface ControlConnection<TFrame> {
   sent: TFrame[];
-  /** Feeds one frame into the connection's message listener, returning what an async handler returns. */
+
   send(message: unknown): unknown;
 }
 

@@ -1,15 +1,3 @@
-/*
- * The IO shell around notifications/core/outbox-core.ts: one JSON file beside the resolved config
- * (tmp+rename, like every other durable sidecar), a serialized write chain, and a boot replay.
- *
- * The contract is at-least-once, deliberately not exactly-once: a crash between "Telegram accepted it"
- * and "the file no longer lists it" replays one ping. A duplicate phone ping is a shrug; a missing one
- * is the failure this exists to prevent.
- *
- * Every path here is best-effort about the FILE and strict about the SEND. An unwritable outbox costs
- * durability, never the ping itself: the send is attempted regardless and only the record is lost.
- */
-
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 
@@ -23,9 +11,8 @@ import type { OutboxEntry } from './core/outbox-core.ts';
 const OUTBOX_VERSION = 1;
 
 export interface TelegramOutboxDeps {
-  /** telegram-outbox.json beside the resolved config */
   filePath: string;
-  /** performs one delivery */
+
   send: (entry: OutboxEntry) => Promise<{ ok: boolean }>;
   now?: () => number;
   maxEntries?: number;
@@ -57,8 +44,6 @@ function createTelegramOutbox({
     try {
       entries = normalizeOutbox(JSON.parse(readFileSync(filePath, 'utf8')));
     } catch (error) {
-      // A missing file is the normal case on a fresh install and says nothing worth logging; a
-      // corrupt one starts empty, which can only ever lose a queued ping, never invent one.
       const code = (error as NodeJS.ErrnoException | null)?.code;
       if (error && code !== 'ENOENT') warn(`[telegram-outbox] unreadable, starting empty: ${error instanceof Error ? error.message : String(error)}`);
       entries = [];
@@ -73,7 +58,6 @@ function createTelegramOutbox({
     return writeChain;
   }
 
-  /** Record the ping, then attempt it. Recording FIRST is what makes a crash mid-send recoverable. */
   async function deliver(text: string): Promise<void> {
     load();
     const entry: OutboxEntry = { id: crypto.randomUUID(), text, queuedAt: now(), attempts: 0 };
@@ -101,10 +85,6 @@ function createTelegramOutbox({
     await persist();
   }
 
-  /**
-   * Boot replay. Anything too old or too often failed is dropped rather than sent: a queue that
-   * replays yesterday's completions on boot teaches the operator to ignore the channel.
-   */
   async function replay(): Promise<{ sent: number; expired: number }> {
     load();
     const plan = planReplay(entries, { now: now(), maxAgeMs, maxAttempts });

@@ -1,11 +1,3 @@
-// Self-update check: compare the running version against the latest GitHub release tag, and surface the
-// command that updates THIS flavor of install.
-// Advisory only - every failure path resolves null or degrades to the semver compare, never rejects, so
-// a boot is never blocked, delayed past the timeout, or crashed by this check. Notify only: nothing here
-// runs an update (on Windows the running server holds node_modules/node-pty open).
-// All decisions live in server/core/update-core.ts; this file is the IO around them, with every IO seam
-// injectable so the whole check runs offline in tests.
-
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -26,7 +18,7 @@ import { packageRoot as resolvedPackageRoot } from './runtime-paths.ts';
 
 const GIT_REMOTE_URL = 'https://github.com/johncwaters/glissa.git';
 const GITHUB_LATEST_RELEASE_URL = 'https://api.github.com/repos/johncwaters/glissa/releases/latest';
-// Budget for the WHOLE check, not per request.
+
 const DEFAULT_TIMEOUT_MS = 8000;
 const GIT_HEAD_TIMEOUT_MS = 3000;
 const LS_REMOTE_TIMEOUT_MS = 5000;
@@ -82,8 +74,6 @@ function readRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
-// npm records the resolved commit of a global git install in the hidden lockfile one level ABOVE the
-// package (node_modules/.package-lock.json), which survives an install that stripped .git.
 function readLockfileSha(packageRoot: string): string | null {
   const doc = readRecord(readJsonFile(path.join(packageRoot, '..', '.package-lock.json')));
   const packages = readRecord(doc?.packages);
@@ -92,8 +82,6 @@ function readLockfileSha(packageRoot: string): string | null {
   return parseResolvedSha(entry.resolved);
 }
 
-// npm stamps `gitHead` into the packed package.json of a git install; the fallback when no lockfile
-// entry is readable (a different install layout, or a lockfile npm never wrote).
 function readPackageGitHead(packageRoot: string): string | null {
   const doc = readRecord(readJsonFile(path.join(packageRoot, 'package.json')));
   if (!doc) return null;
@@ -121,8 +109,6 @@ async function runGitStdout(
   }
 }
 
-// Which commit is running, and how it was installed. The file reads are one-shot boot IO so they stay
-// sync; only the clone branch spends a child process, and only when no file already answered.
 async function resolveInstalledIdentity(
   { packageRoot, runCommand, signal }: { packageRoot: string; runCommand: RunCommand; signal: AbortSignal },
 ): Promise<InstalledIdentity> {
@@ -169,7 +155,6 @@ function writeCheckState(statePath: string, state: Record<string, unknown>): voi
   try {
     writeJsonAtomicSync(statePath, state, { mkdir: true });
   } catch {
-    // Throttle state is an optimization; losing it costs one extra network check.
   }
 }
 
@@ -189,16 +174,6 @@ function finish(
   });
 }
 
-/**
- * Decide whether a newer Glissa exists. Resolves the update status when a comparison was possible, and
- * null when no latest release version could be read.
- *
- * Never rejects. The abort timer is deliberately NOT unref'd: it is the only thing that settles the
- * promise when a request hangs, so an unref'd timer lets the loop drain and leaves the caller awaiting
- * forever instead of resolving null. It is cleared in every exit path, so it pins the loop only while a
- * check is genuinely in flight (bounded by timeoutMs). The caller may pass its own abortController so a
- * shutdown cancels both the fetches and the git children (execFile takes the same signal).
- */
 async function checkForUpdate({
   currentVersion,
   fetchFn = fetch,

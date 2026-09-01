@@ -39,7 +39,6 @@ interface SerializedDailyBucket extends UsageTotals {
   entries: number;
   models: ModelBucket[];
   vendors: string[];
-  // Stamped only on a row the warehouse remembered, so a reader can tell history from a live day.
   source?: string;
 }
 
@@ -68,7 +67,6 @@ function buildUsageReport(
   const byVendor = new Map<string, VendorTotals>();
 
   for (const entry of keptEntries) {
-    // Aggregation reads entry.costUSD as effective cost; ingest must overwrite it with priced cost per costMode.
     addEntryToTotals(totals, entry);
     addEntryToVendorTotals(byVendor, entry);
     const day = localDay(entry.timestampMs);
@@ -88,7 +86,6 @@ function buildUsageReport(
   };
 }
 
-// An entry with no vendor is Claude: that is where the lane started, and the field was added later.
 function vendorOf(entry: { vendor?: unknown } | null | undefined): string {
   const vendor = typeof entry?.vendor === 'string' ? entry.vendor.trim() : '';
   return vendor || 'claude';
@@ -102,8 +99,6 @@ function addEntryToVendorTotals(map: Map<string, VendorTotals>, entry: UsageEntr
   map.set(vendor, bucket);
 }
 
-// Only vendors that actually contributed appear, so an all-Claude machine reports exactly one key and
-// the dashboard can tell "no other vendor" from "another vendor at zero".
 function serializeVendorTotals(map: Map<string, VendorTotals>): Record<string, VendorTotals> {
   const wire: Record<string, VendorTotals> = {};
   for (const vendor of Array.from(map.keys()).sort()) {
@@ -146,8 +141,6 @@ function addEntryToDailyBucket(map: Map<string, DailyBucket>, day: string, entry
   map.set(day, bucket);
 }
 
-// Keyed by model name alone, unchanged: no two vendors ship a model of the same name, so the vendor is a
-// property OF the bucket rather than part of its identity, and Claude's grouping is untouched.
 function addEntryToModelBucket(map: Map<string, ModelBucket>, model: string, entry: UsageEntryLike): void {
   const bucket: ModelBucket = map.get(model) || { key: model, model, vendor: vendorOf(entry), ...emptyTotals(), entries: 0 };
   addEntryToTotals(bucket, entry);
@@ -167,7 +160,6 @@ function addEntryToSessionBucket(
     id: key,
     name: knownSession?.name || key,
     project: null,
-    // A session belongs to exactly one vendor, so this one is a scalar.
     vendor: vendorOf(entry),
     ...emptyTotals(),
     entries: 0,
@@ -180,8 +172,6 @@ function addEntryToSessionBucket(
   map.set(key, bucket);
 }
 
-// A day legitimately spans vendors, so it carries the SET that contributed rather than a scalar vendor
-// that would have to pick one and be wrong.
 function serializeDailyBucket(bucket: DailyBucket): SerializedDailyBucket {
   const { modelByName, vendorSet, ...wireBucket } = bucket;
   return {
@@ -200,8 +190,4 @@ function pad2(value: number): string {
   return String(value).padStart(2, '0');
 }
 
-// localDayKey is the daily bucket key, exported so anything asking "which day is it" (the anomaly
-// baseline's exclude-today, the warehouse prune cutoff) uses the same local-clock rule the buckets
-// were keyed on. vendorOf is the one statement of "absent vendor is Claude", exported so the savings
-// core cannot drift from it.
 export { buildUsageReport, pruneEntries, localDay as localDayKey, vendorOf };

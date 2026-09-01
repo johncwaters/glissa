@@ -42,8 +42,6 @@ test('allowedOrigins drops non-string and blank entries', () => {
   assert.deepEqual(remote.allowedOrigins, ['https://a.test']);
 });
 
-// allowedOrigins feeds the WS origin check on BOTH listeners, so a switched-off remote block must
-// not widen the local listener's allow-list on the strength of a leftover publicHost.
 test('a disabled remote block contributes no allowed origins at all', () => {
   assert.deepEqual(normalizeRemoteConfig({ enabled: false, publicHost: 'glissa.test' }).allowedOrigins, []);
   assert.deepEqual(

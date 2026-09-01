@@ -1,7 +1,3 @@
-// The pure auto-rebase gate: every skip reason, the allowed/refused state split, and the conflict
-// cooldown. These tests ARE the statement of the guard ordering (the module deliberately does not
-// describe it in prose), so a reordering that changes which reason wins fails here.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -9,7 +5,6 @@ import { decideAutoRebase, AUTO_REBASE_STATES, SPAWN_GAP_TRIGGER } from '../sess
 import type { AutoRebaseInputs } from '../session/core/rebase-gate.ts';
 import { STATES } from '../shared/states.ts';
 
-// The shape of a worktree that SHOULD be rebased: enabled, quiescent, clean, behind, nothing pending.
 function eligible(extra: AutoRebaseInputs = {}) {
   return {
     enabled: true,
@@ -43,9 +38,6 @@ test('every skip reason fires for its own condition', () => {
   assert.equal(reasonFor({ lastConflictKey: 'headsha::targetsha' }), 'conflict-cooldown');
 });
 
-// A worktree may only be rewritten while nothing is running in it. WAITING is the load-bearing
-// exclusion: the merge gate accepts it, this one must not (a permission prompt pauses a turn that
-// resumes into the files a rebase would have rewritten).
 test('only quiescent states are rebased; every live-work state is busy', () => {
   for (const state of [STATES.IDLE, STATES.COMPLETE, STATES.DONE, STATES.FAILED, STATES.DORMANT]) {
     assert.deepEqual(decideAutoRebase(eligible({ state })), { action: 'rebase' }, `${state} is rebasable`);
@@ -78,12 +70,12 @@ test('behind reads the same whether it arrives as git output or a number', () =>
 
 test('the cooldown holds only while the key is unchanged and non-empty', () => {
   assert.equal(reasonFor({ lastConflictKey: 'headsha::targetsha' }), 'conflict-cooldown');
-  // The target moved: worth another attempt, the conflict may be gone.
+
   assert.deepEqual(
     decideAutoRebase(eligible({ currentKey: 'headsha::newtarget', lastConflictKey: 'headsha::targetsha' })),
     { action: 'rebase' },
   );
-  // An unresolvable signature keys on nothing, so it must never masquerade as a matching cooldown.
+
   assert.deepEqual(
     decideAutoRebase(eligible({ currentKey: '', lastConflictKey: '' })),
     { action: 'rebase' },
@@ -94,9 +86,6 @@ test('a call with no arguments at all is a disabled skip, never a rebase', () =>
   assert.deepEqual(decideAutoRebase(), { action: 'skip', reason: 'disabled' });
 });
 
-// The exemption and its price. A fresh restart sits in the spawn gap, where the session state reads
-// STARTING and says nothing about the tree, so it substitutes a stronger proof (no live PTY) for the
-// state guard the module header calls load-bearing. It buys nothing else: every other guard still fires.
 test('the fresh-restart trigger swaps the state guard for a live-PTY guard and keeps every other', () => {
   const fresh = (extra: AutoRebaseInputs = {}) => decideAutoRebase(eligible({
     trigger: SPAWN_GAP_TRIGGER, state: STATES.STARTING, hasLivePty: false, ...extra,

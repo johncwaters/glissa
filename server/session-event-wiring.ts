@@ -188,7 +188,6 @@ function createSessionEventWiring(dependencies: SessionEventDependencies): (sess
 
     const ingestLaneAtWiring = dependencies.getIngestLane();
     if (ingestLaneAtWiring?.fsEnabled) {
-      // Per-session listeners are registered once, so replacement lanes must be read live.
       session.on('state-change', () => {
         const ingestLane = dependencies.getIngestLane();
         if (ingestLane?.fsEnabled) ingestLane.noteSessionRoots(session);

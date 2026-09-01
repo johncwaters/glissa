@@ -1,10 +1,3 @@
-// The unified task registry (2026-08 review, section 3: five ledgers where one registry would do).
-//
-// STRUCTURAL ONLY. The arithmetic is unchanged and still unit-tested through the free functions in
-// tests/agent-tracker.test.ts; what this pins is that ONE object now owns the five stores, that one
-// reaper applies the three TTLs, and that max(counted, declared) is a query. The proof that nothing
-// moved is tests/sessions-detection.test.js and the replay fixtures passing unchanged.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -13,7 +6,6 @@ import {
 } from '../session/core/agent-tracker.ts';
 import type { TaskRegistryOptions } from '../session/core/agent-tracker.ts';
 
-// A clock the test drives, so every TTL assertion is a decision rather than a wait.
 function makeRegistry(overrides: TaskRegistryOptions = {}) {
   let clock = 1_000_000;
   const registry = createTaskRegistry({ now: () => clock, ...overrides });
@@ -103,7 +95,6 @@ test('a lookalike agent_id does not re-gate a different teammate', () => {
   assert.equal(registry.activeCount(), 0, '"foo-bar" starting is not "foo" waking up');
 });
 
-// The one reaper, applying the three per-kind TTLs the five stores used to each apply themselves.
 test('one reaper ages out a weak entry, a teammate entry, and a counted id on their own bounds', () => {
   const { registry, advance } = makeRegistry();
   registry.noteAgentStart('a1', 1_000_000);
@@ -155,7 +146,7 @@ test('a departed teammate evicts the name idled against it', () => {
   registry.reconcileDeclared([{ id: 't1', type: 'teammate' }]);
   registry.noteTeammateIdle('alice', 1_000_000);
   assert.equal(registry.activeCount(), 0);
-  // t1 shut down and a different teammate took its place: the old idle name must not offset it.
+
   registry.reconcileDeclared([{ id: 't2', type: 'teammate' }]);
   assert.equal(registry.activeCount(), 1);
 });

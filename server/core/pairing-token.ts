@@ -1,12 +1,3 @@
-// Pairing tokens and device credentials. Deterministic given an injected randomBytes, so every
-// lifetime rule (single use, TTL, revocation, max device age) is unit-testable without a clock or a
-// filesystem. node:crypto is used only for hashing and entropy - no IO.
-//
-// INVARIANT: only HASHES are ever persisted or logged. A pairing URL is a bearer password that grants
-// a device cookie, and that cookie is remote code execution as the server account (the control WS
-// accepts an arbitrary project path plus dangerouslySkipPermissions). Nothing here returns a shape
-// that tempts a caller to store or print the plaintext.
-
 import crypto from 'node:crypto';
 
 const DEFAULT_TOKEN_TTL_MS = 10 * 60 * 1000;
@@ -69,7 +60,6 @@ function decideRedemption({
 }
 
 function mintDeviceCredential({ randomBytes = crypto.randomBytes }: { randomBytes?: RandomBytes } = {}): DeviceCredential {
-  // base64url so neither half can contain the "." that separates them in the cookie value.
   const id = Buffer.from(randomBytes(8)).toString('base64url');
   const secret = Buffer.from(randomBytes(32)).toString('base64url');
   return { id, secret, secretHash: hashSecret(secret), cookieValue: `${id}.${secret}` };

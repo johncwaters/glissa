@@ -1,32 +1,5 @@
-// Cross-worktree Claude conversation discovery.
-//
-// Claude Code stores each conversation as a JSONL transcript at
-//   <claudeHome>/projects/<encoded-cwd>/<session-uuid>.jsonl
-// where the directory name is the absolute cwd with EVERY non-alphanumeric char
-// turned into a single '-'. Verified against the on-disk layout, e.g.
-//   C:\Users\johnw\Projects\glissa                     -> C--Users-johnw-Projects-glissa
-//   C:\Users\johnw\Projects\.glissa-worktrees\glissa-x -> C--Users-johnw-Projects--glissa-worktrees-glissa-x
-// Because every separator collapses to '-', a forward-slash path (as `git
-// worktree list` prints on Windows) and a backslash path encode to the SAME dir,
-// so we never normalize slashes.
-//
-// WHY this module exists: each Glissa session runs in its own linked git
-// worktree, and Claude silos transcripts per-cwd, so a conversation started in
-// worktree A lives under A's project dir, invisible to a session spawned in
-// worktree B. Claude's own `--resume <id>` DOES resolve a session across all
-// worktrees of one repo (proven), but it has no UI to LIST them. This module is
-// that listing: it walks the repo's worktree set, locates each worktree's
-// project dir, and reads light metadata (title, cwd, branch, mtime) so the
-// dashboard can offer "resume this conversation here". Resuming itself is just
-// `claude --resume <id>` in the target worktree (see sessions.js).
-//
-// Everything here is a one-shot, user-initiated cold path (the operator clicked
-// "Resume" on a card), so synchronous fs reads are fine; the only subprocess
-// (`git worktree list`) is async so a large repo never stalls the event loop.
-
 import path from 'node:path';
 
-// The injected fs seam: the exact synchronous surface this core reads through, so it imports no node:fs.
 interface TranscriptFsApi {
   openSync: (path: string, flags: string) => number;
   fstatSync: (fd: number) => { size: number };
@@ -62,14 +35,10 @@ interface ListConversationsOptions {
   limit?: number;
 }
 
-// Reproduce Claude Code's project-dir encoding: every non-alphanumeric char -> '-'.
-// Drive-letter case is preserved (only non-alnum is touched), matching the store.
 function encodeProjectDir(cwd: unknown): string {
   return String(cwd || '').replace(/[^a-zA-Z0-9]/g, '-');
 }
 
-// Root of Claude Code's per-project transcript store. CLAUDE_CONFIG_DIR relocates
-// the whole ~/.claude home; honor it so a relocated config still resolves.
 function claudeProjectsDir(
   env: Record<string, string | undefined> | null | undefined,
   homeDir: string,
@@ -79,9 +48,6 @@ function claudeProjectsDir(
   return path.join(home, 'projects');
 }
 
-// Every working tree attached to `repoPath`'s repository (the main checkout plus
-// every linked worktree), as printed by `git worktree list --porcelain`. Falls
-// back to just [repoPath] for a non-git path or any git failure.
 async function listRepoWorktreePaths(repoPath: string, git: GitRunner): Promise<string[]> {
   let out: string | Buffer;
   try {
@@ -97,8 +63,6 @@ async function listRepoWorktreePaths(repoPath: string, git: GitRunner): Promise<
   return paths.length ? paths : [repoPath];
 }
 
-// Pull a human-readable title out of a user message's `content` (string, or an
-// array of content blocks). Returns '' when there is no usable text.
 function userText(content: unknown): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
@@ -110,10 +74,6 @@ function userText(content: unknown): string {
   return '';
 }
 
-// Turn the first user turn into a one-line label: prefer a slash-command's
-// <command-args>, strip XML-ish wrappers (command-message/name, system-reminder),
-// collapse whitespace, and truncate. Keeps the picker readable when the first
-// turn is an OMC command envelope rather than plain prose.
 function stripCommandEnvelope(raw: string): string {
   const argsMatch = /<command-args>([\s\S]*?)<\/command-args>/i.exec(raw);
   if (argsMatch?.[1].trim()) return argsMatch[1];
@@ -129,10 +89,6 @@ function cleanTitle(raw: unknown, max = 100): string {
   return s.length > max ? `${s.slice(0, max - 3).trimEnd()}...` : s;
 }
 
-// Read up to maxBytes from the head of a transcript and return its COMPLETE
-// lines. The first user turn and the cwd/branch metadata sit near the top, so a
-// bounded read avoids loading multi-MB transcripts in full. A trailing partial
-// line (when truncated) is dropped so JSON.parse never sees a half line.
 function readHeadLines(filePath: string, fsMod: TranscriptFsApi, maxBytes = 262144): string[] {
   const fd = fsMod.openSync(filePath, 'r');
   try {
@@ -152,7 +108,6 @@ function readHeadLines(filePath: string, fsMod: TranscriptFsApi, maxBytes = 2621
   }
 }
 
-// Extract { cwd, gitBranch, title } from a transcript's head lines.
 function extractMeta(lines: readonly string[]): TranscriptMeta {
   let cwd: string | null = null;
   let gitBranch: string | null = null;
@@ -177,12 +132,6 @@ function extractMeta(lines: readonly string[]): TranscriptMeta {
   return { cwd, gitBranch, title };
 }
 
-// List resumable Claude conversations for a repo, across the main checkout and
-// every linked worktree, newest-first. De-duplicated by session id (a session
-// that Claude migrated/forked can surface under two project dirs; keep newest).
-//
-//   listRepoConversations({ repoPath, projectsDir, git, fsMod, limit? })
-//     -> [{ id, title, cwd, worktreePath, worktreeName, gitBranch, mtime }]
 async function listRepoConversations({
   repoPath,
   projectsDir,
@@ -193,8 +142,6 @@ async function listRepoConversations({
   if (!repoPath) return [];
   const worktreePaths = await listRepoWorktreePaths(repoPath, git);
 
-  // Pass 1 (cheap): stat every transcript and de-dup by id (newest copy wins). No file BODIES are read
-  // here, so cost is one stat per transcript regardless of how many the repo has accumulated.
   const byId = new Map<string, { id: string; full: string; worktreePath: string; mtime: number }>();
   const seenDirs = new Set<string>();
   for (const wt of worktreePaths) {
@@ -217,14 +164,11 @@ async function listRepoConversations({
     }
   }
 
-  // Sort newest-first and keep only `limit` BEFORE the bounded head-read below, so the (up to 256KB)
-  // body read runs at most `limit` times even on a repo with thousands of transcripts.
   const top = [...byId.values()].sort((a, b) => b.mtime - a.mtime).slice(0, limit);
 
-  // Pass 2 (bounded): read each survivor's head for the title/cwd/branch shown in the picker.
   return top.map((c) => {
     let meta: TranscriptMeta = { cwd: null, gitBranch: null, title: null };
-    try { meta = extractMeta(readHeadLines(c.full, fsMod)); } catch { /* unreadable -> minimal entry */ }
+    try { meta = extractMeta(readHeadLines(c.full, fsMod)); } catch {  }
     return {
       id: c.id,
       title: meta.title || '(no messages yet)',
@@ -242,6 +186,6 @@ export {
   encodeProjectDir,
   listRepoWorktreePaths,
   listRepoConversations,
-  cleanTitle, // exported for unit tests
+  cleanTitle,
 };
 export type { ConversationEntry, GitRunner, ListConversationsOptions, TranscriptFsApi, TranscriptMeta };

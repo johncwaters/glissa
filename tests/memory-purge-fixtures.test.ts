@@ -1,8 +1,3 @@
-/*
- * The cleanup pass for a memory database a test suite polluted (audit 2026-08-25). It runs against a
- * temp COPY here and never against the operator's own store, which is the same rule the bug broke.
- */
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

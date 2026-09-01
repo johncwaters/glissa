@@ -1,7 +1,3 @@
-// The terminal ingest pure core (docs/plan-ingestion.md, M6): the accumulator's pre-strip cap, ANSI
-// stripping, the drop-not-queue window budget with its truncation note, the rebaseline clear, and the
-// multi-MB burst that has to stay inside every one of those bounds.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { TerminalAccumulator, TerminalIngestEvent } from '../server/core/ingest-terminal-core.ts';
@@ -24,11 +20,6 @@ const NOW = 1700000000000;
 const ESC = String.fromCharCode(27);
 const BELL = String.fromCharCode(7);
 
-/*
- * The glyphs the Claude Code TUI actually paints, built by code point because the house style keeps
- * these characters out of source literals. They are fixture DATA only: nothing in the core looks at
- * what a character is, so no rule here depends on any of them.
- */
 const SPINNER = String.fromCharCode(0x273B);
 const SPINNER_ALT = String.fromCharCode(0x2736);
 const SPINNER_STAR = String.fromCharCode(0x2722);
@@ -39,7 +30,6 @@ const MIDDOT = String.fromCharCode(0xB7);
 const UP_ARROW = String.fromCharCode(0x2191);
 const WARPING = `Warping${DOTS}`;
 
-// Cursor position, erase line, erase display: the structure the segmenter reads, and nothing else.
 const cup = (row: number, col: number) => `${ESC}[${row};${col}H`;
 const el = (mode: string | number) => `${ESC}[${mode}K`;
 const ed = (mode: string | number) => `${ESC}[${mode}J`;
@@ -57,8 +47,6 @@ function flushAll(state: TerminalAccumulator, chunks: string[]) {
   }
   return events;
 }
-
-// --- ANSI and cleanup -----------------------------------------------------
 
 test('CSI colour and cursor sequences are stripped, the text between them is not', () => {
   const raw = `${ESC}[32mPASS${ESC}[0m tests/app.test.js${ESC}[2K${ESC}[1G`;
@@ -92,8 +80,6 @@ test('the summary is one line: the tail of the output, folded', () => {
   assert.equal(summarize(long, 20), long.slice(-20));
 });
 
-// --- Accumulator ----------------------------------------------------------
-
 test('the accumulator keeps only its newest bytes at the pre-strip cap', () => {
   const state = accumulator({ accumulatorBytes: 64 });
   for (let index = 0; index < 40; index += 1) appendChunk(state, `chunk-${index} `);
@@ -105,7 +91,7 @@ test('the accumulator keeps only its newest bytes at the pre-strip cap', () => {
 test('a slice that lands mid-codepoint drops the partial character rather than decoding it as noise', () => {
   const state = accumulator({ accumulatorBytes: 8 });
   appendChunk(state, 'aaaa');
-  // Three bytes each, so a byte-exact tail cut would land inside one of them.
+
   appendChunk(state, 'ααααα');
   assert.ok(!state.pending.includes(String.fromCharCode(0xFFFD)));
   assert.ok(state.pendingBytes <= 8);
@@ -113,7 +99,7 @@ test('a slice that lands mid-codepoint drops the partial character rather than d
 
 test('past the window budget a chunk is DROPPED, never queued, and the event says so', () => {
   const state = accumulator({ accumulatorBytes: 1024, windowBytes: 100 });
-  // Newline-terminated because only complete lines publish now; the drop is what this test is about.
+
   appendChunk(state, `${'a'.repeat(120)}\n`);
   const before = state.pendingBytes;
   appendChunk(state, `${'b'.repeat(5000)}\n`);
@@ -179,7 +165,7 @@ test('a multi-MB burst stays inside both caps and yields one bounded event', () 
   const state = accumulator();
   const chunk = `${ESC}[32mbuilding module ${'z'.repeat(4000)}${ESC}[0m\n`;
   let pushed = 0;
-  // 3MB through the tap in one window, the npm-install storm the plan bounds at the adapter boundary.
+
   while (pushed < 3 * 1024 * 1024) {
     appendChunk(state, chunk);
     pushed += Buffer.byteLength(chunk, 'utf8');
@@ -193,13 +179,9 @@ test('a multi-MB burst stays inside both caps and yields one bounded event', () 
   assert.equal(state.pendingBytes, 0);
 });
 
-// --- The scrub runs before the cut, not after ---
-// Every slice in this module cuts from the FRONT, so a cut through `name=secret` strips the name the
-// scrub matches on. Scrubbing afterwards cannot repair that, which is why it happens first.
-
 test('a secret straddling the summary cut is scrubbed, not decapitated into a bare value', () => {
   const state = accumulator();
-  // Sized so the 400-char summary tail begins INSIDE the assignment, past `api_key=`.
+
   appendChunk(state, `${'x'.repeat(200)} api_key=sk-live-DEADBEEFCAFEBABE${'z'.repeat(376)}\n`);
   const event = flushAccumulator(state, { now: NOW }) as TerminalIngestEvent;
   assert.ok(!event.summary.includes('sk-live-DEADBEEFCAFEBABE'), `leaked: ${event.summary.slice(0, 60)}`);
@@ -207,8 +189,6 @@ test('a secret straddling the summary cut is scrubbed, not decapitated into a ba
 });
 
 test('the secret is scrubbed at EVERY offset the cut could land on', () => {
-  // The bug only shows at the offsets where the tail begins between the name and the value, so sweep
-  // the whole neighbourhood rather than trusting one lucky alignment.
   for (let lead = 340; lead <= 420; lead += 1) {
     const state = accumulator();
     appendChunk(state, `${'x'.repeat(lead)} api_key=sk-live-DEADBEEFCAFEBABE ${'z'.repeat(30)}\n`);
@@ -230,7 +210,7 @@ test('the truncation note survives the scrub expanding the text it shares a budg
 
 test('the accumulator cap cuts on a line boundary, so a secret line is dropped whole or kept whole', () => {
   const state = accumulator({ accumulatorBytes: 200 });
-  // The byte-exact cut lands inside the assignment; only a line-aligned cut can keep the name with it.
+
   appendChunk(state, `${'x'.repeat(180)}\napi_key=sk-live-DEADBEEFCAFEBABE\n${'z'.repeat(150)}\n`);
   assert.ok(state.pendingBytes <= 200);
   assert.equal(state.pending.startsWith('sk-live-'), false, 'the cut must not orphan a bare value');
@@ -239,11 +219,6 @@ test('the accumulator cap cuts on a line boundary, so a secret line is dropped w
   assert.ok(!event.detail.text.includes('sk-live-DEADBEEFCAFEBABE'));
 });
 
-/*
- * Contract change from M6: an unterminated run is HELD, not published. It used to go out as-is, which
- * is how a painted TUI frame reached the ring at all, since a frame written cell by cell never carries
- * a newline. The bytes are still kept, and the line still publishes the moment it is finished.
- */
 test('a window with no line break holds its bytes and publishes once the line finishes', () => {
   const state = accumulator({ accumulatorBytes: 64 });
   appendChunk(state, 'q'.repeat(500));
@@ -255,18 +230,10 @@ test('a window with no line break holds its bytes and publishes once the line fi
   appendChunk(state, '\n');
   const event = flushAccumulator(state, { now: NOW }) as TerminalIngestEvent;
   assert.ok(event.summary.length > 0);
-  // The truncation happened in the earlier window, and the flag travelled with the text it describes.
+
   assert.ok(event.summary.endsWith(`[${TRUNCATION_NOTE}]`), event.summary.slice(-40));
   assert.equal(state.pendingBytes, 0);
 });
-
-// --- TUI repaint filtering -------------------------------------------------
-//
-// A glissa session runs the Claude Code TUI, which PAINTS a screen. Stripping the escape sequences out
-// of a painted frame keeps every character they were positioning and loses the positions, so the frame
-// used to arrive as shredded fragments. The junk described below is taken from event summaries captured
-// on the operator's live daemon; each test rebuilds the ANSI structure that produces one and pins that
-// it now publishes nothing at all.
 
 test('a repaint frame writes cells at positions, so it forms no line and publishes nothing', () => {
   const state = accumulator();
@@ -276,13 +243,13 @@ test('a repaint frame writes cells at positions, so it forms no line and publish
     cup(9, 12), 'th', cup(9, 14), 'e',
     cup(24, 1), el(2), RULE.repeat(40),
   ].join('');
-  // Many frames, many flushes: a leak that only shows on the fiftieth repaint is still a leak.
+
   assert.deepEqual(flushAll(state, Array.from({ length: 50 }, () => frame)), []);
 });
 
 test('the spinner cycling in one cell publishes nothing', () => {
   const state = accumulator();
-  // Captured summary: the four spinner frames run together into one event.
+
   const raw = [SPINNER, SPINNER_ALT, '*', SPINNER_STAR]
     .map((glyph) => `${cup(2, 3)}${glyph}`)
     .join('');
@@ -291,7 +258,7 @@ test('the spinner cycling in one cell publishes nothing', () => {
 
 test('the interleaved label and cell writes publish nothing', () => {
   const state = accumulator();
-  // Captured summary: the Warping label repeated with single letters of another region between them.
+
   const raw = [
     cup(2, 3), SPINNER, cup(2, 5), WARPING, cup(9, 12), 'th',
     cup(2, 3), SPINNER_FLOWER, cup(2, 5), WARPING, cup(9, 14), 'e',
@@ -303,7 +270,7 @@ test('the interleaved label and cell writes publish nothing', () => {
 
 test('the token-count status region publishes nothing', () => {
   const state = accumulator();
-  // Captured summary: the elapsed time and token counter shredded through the Warping label.
+
   const raw = [
     cup(2, 5), WARPING, cup(2, 20), `501s ${MIDDOT} ${UP_ARROW} 37.1k token`,
     cup(2, 41), '2', cup(2, 5), WARPING, cup(2, 3), SPINNER,
@@ -315,7 +282,7 @@ test('the token-count status region publishes nothing', () => {
 
 test('a wrapped paragraph redrawn region by region publishes nothing', () => {
   const state = accumulator();
-  // Captured summary: fragments of several screen regions run together into one false sentence.
+
   const raw = [
     cup(5, 1), 'F', cup(5, 10), '-start ',
     cup(6, 1), 'ailing of', cup(6, 20), 'Claude/Codex/Grok',
@@ -327,7 +294,7 @@ test('a wrapped paragraph redrawn region by region publishes nothing', () => {
 
 test('single-cell overwrites publish nothing, however many land in one window', () => {
   const state = accumulator();
-  // Captured summaries: three separate events of pure interleaved cell writes.
+
   const cells = ['j', 'u', 'n', '8', 'k', '7', 't', '8', '8', '5', 'i', 's', ',', '6', 'a', 'l'];
   const raw = cells.map((cell, index) => `${cup(3 + (index % 4), 10 + index)}${cell}`).join('');
   assert.deepEqual(flushAll(state, [raw, raw]), []);
@@ -335,7 +302,7 @@ test('single-cell overwrites publish nothing, however many land in one window', 
 
 test('the status bar rule and its label publish nothing', () => {
   const state = accumulator();
-  // Captured summary: a long box-drawing rule with the model name on the end of it.
+
   const raw = `${cup(24, 1)}${el(2)}${RULE.repeat(60)}${cup(24, 62)}Model: Fable`;
   assert.deepEqual(flushAll(state, [raw, raw, raw]), []);
 });
@@ -355,7 +322,7 @@ test('a mixed window publishes the clean lines and none of the repaint around th
   const event = flushAccumulator(state, { now: NOW }) as TerminalIngestEvent;
   assert.equal(event.detail.text, 'npm run build\n> glissa@1.0.0 build\nbuilt in 4.2s');
   assert.equal(event.summary, 'npm run build > glissa@1.0.0 build built in 4.2s');
-  // The trailing spinner is unterminated, so it waits in the accumulator and never becomes a line.
+
   assert.ok(state.pendingBytes > 0);
   assert.equal(flushAccumulator(state, { now: NOW }), null);
 });
@@ -376,7 +343,7 @@ test('colour sequences are not motion, so a coloured build log publishes in full
 
 test('an erase that reaches forward from the cursor does not cost the line it ends', () => {
   const state = accumulator();
-  // A bare ESC[K before the newline is how a great deal of ordinary coloured output ends its lines.
+
   appendChunk(state, `${ESC}[32mPASS${ESC}[0m tests/app.test.js${el(0)}\n`);
   assert.equal((flushAccumulator(state, { now: NOW }) as TerminalIngestEvent).detail.text, 'PASS tests/app.test.js');
 });
@@ -393,8 +360,6 @@ test('an alternate screen switch drops whatever was being collected, because tha
   assert.equal(flushAccumulator(state, { now: NOW }), null);
 });
 
-// --- The duplicate gate ----------------------------------------------------
-
 test('a window that settles on the text already published does not publish it again', () => {
   const state = accumulator();
   appendChunk(state, 'watching for changes\n');
@@ -405,7 +370,7 @@ test('a window that settles on the text already published does not publish it ag
 
   appendChunk(state, 'rebuilding\n');
   assert.equal((flushAccumulator(state, { now: NOW }) as TerminalIngestEvent).detail.text, 'rebuilding');
-  // The gate follows the NEWEST event, so earlier text can legitimately be reported again later.
+
   appendChunk(state, 'watching for changes\n');
   assert.equal((flushAccumulator(state, { now: NOW }) as TerminalIngestEvent).detail.text, 'watching for changes');
 });
@@ -419,11 +384,6 @@ test('the duplicate gate is per accumulator, so one session cannot mute another'
   assert.ok(flushAccumulator(second, { now: NOW }));
 });
 
-/*
- * The gate exists to suppress a screen repainting ITSELF. A rebaseline says that screen is gone (an
- * in-place restart, a PTY exit), so the dead stream's last line must not mute the identical first line
- * the new one writes, which is exactly the line that says the session came back up.
- */
 test('a rebaseline clears the duplicate gate, so the restarted process publishes its first line', () => {
   const state = accumulator();
   appendChunk(state, 'watching for changes\n');
@@ -436,8 +396,6 @@ test('a rebaseline clears the duplicate gate, so the restarted process publishes
   assert.equal(event.detail.text, 'watching for changes');
 });
 
-// --- The segmenter on its own ----------------------------------------------
-
 test('segmentLines keeps linear lines, drops repositioned fragments, and carries the tail', () => {
   const segmented = segmentLines(`first\n${cup(4, 9)}fragment\nsecond\nunfinished`);
   assert.deepEqual(segmented.lines, ['first', 'second']);
@@ -448,8 +406,7 @@ test('segmentLines carries the RAW tail, so its escape context survives into the
   const segmented = segmentLines(`done\n${cup(2, 3)}${SPINNER}`);
   assert.deepEqual(segmented.lines, ['done']);
   assert.equal(segmented.carry, `${cup(2, 3)}${SPINNER}`);
-  // Re-reading that carry alone must reach the same verdict, which is what makes it safe to carry
-  // as bytes with no flags beside it.
+
   assert.deepEqual(segmentLines(segmented.carry).lines, []);
 });
 
@@ -466,30 +423,19 @@ test('every erase mode is read off its parameter rather than guessed', () => {
   assert.deepEqual(segmentLines(`gone${ed(2)}\n`).lines, []);
 });
 
-/*
- * The one thing the new contract gives up, pinned so it stays a known cost rather than a surprise: the
- * first line to finish after a reposition is dropped along with the fragment it shared a line with. The
- * alternative is admitting the fragment, which is the whole failure this mechanism exists to stop.
- */
 test('the line a repaint fragment landed on is dropped whole, fragment and all', () => {
   const segmented = segmentLines(`${cup(3, 7)}fragment and then real output\nthe next line\n`);
   assert.deepEqual(segmented.lines, ['the next line']);
 });
 
-// --- Reading the erase parameter, not any digit in the sequence -------------
-
 test('an omitted first erase parameter is mode 0, however many digits follow it', () => {
-  // ESC[;2K is "erase forward" with the mode defaulted: a scan for any digit reads the 2 and is wrong.
   assert.deepEqual(segmentLines(`kept${ESC}[;2K\n`).lines, ['kept']);
   assert.deepEqual(segmentLines(`kept${ESC}[;3J\n`).lines, ['kept']);
   assert.deepEqual(segmentLines(`kept${ESC}[0;2K\n`).lines, ['kept'], 'an explicit 0 is still forward');
   assert.deepEqual(segmentLines(`gone${ESC}[2;0K\n`).lines, [], 'and a leading 2 still reaches back');
 });
 
-// --- Every token class the walker distinguishes ----------------------------
-
 test('each segmentation token keeps its own meaning with an OSC in the same window', () => {
-  // An OSC leads the alternation, so a token class read by position rather than by name would shift.
   const osc = `${ESC}]0;claude working${BELL}`;
   assert.deepEqual(segmentLines(`${osc}plain line\n`).lines, ['plain line'], 'OSC alone is not motion');
   assert.deepEqual(segmentLines(`${osc}${cup(4, 2)}moved\n`).lines, [], 'motion still poisons');
@@ -499,8 +445,6 @@ test('each segmentation token keeps its own meaning with an OSC in the same wind
   assert.deepEqual(segmentLines(`${osc}gone${ESC}[?1049h\n`).lines, [], 'alt screen still clears');
   assert.deepEqual(segmentLines(`${osc}${ESC}[32mcoloured\n`).lines, ['coloured'], 'SGR taints nothing');
 });
-
-// --- Blank lines ------------------------------------------------------------
 
 test('a blank line is real output, but a line something erased is not', () => {
   assert.deepEqual(segmentLines('first\n\nsecond\n').lines, ['first', '', 'second']);
@@ -522,14 +466,6 @@ test('a window of nothing but blank lines still publishes nothing', () => {
   assert.equal(flushAccumulator(state, { now: NOW }), null);
 });
 
-// --- The carry is cut where the WALK saw the newline ------------------------
-
-/*
- * The OSC form deliberately stops at a newline so an unterminated one resyncs rather than eating the
- * stream, which means a payload carrying a literal LF has its tail read as text. That shape is known;
- * what is pinned here is that the flush boundary cannot change it. The carry is cut at the newline the
- * walk consumed AS TEXT, so the same bytes split anywhere publish the same output.
- */
 test('an OSC payload holding a literal newline reads the same however the flush window splits it', () => {
   const raw = `${ESC}]133;C;cmd\nline two\nline three${BELL}after the osc\n`;
 

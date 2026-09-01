@@ -7,7 +7,6 @@ import { spawn } from "../server/child-process-safe.ts";
 
 import { MAX_RTK_STDOUT_BYTES, RTK_PATH_ENV, normalizeRtkHookResponse } from "./core/rtk-hook-core.ts";
 
-// The agent's tool call blocks on this process and the rewrite is only an optimization.
 const RTK_TIMEOUT_MS = 3000;
 
 interface StdoutLike {

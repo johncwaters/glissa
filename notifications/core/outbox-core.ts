@@ -1,18 +1,3 @@
-/*
- * Pure rules for the Telegram outbox (2026-08 review, section 5).
- *
- * The operator's ruling narrowed durability to ONE channel: a lost browser notification on restart is
- * acceptable, a lost phone ping is not, because Telegram is the channel of last resort. So this is not
- * a persisted entry store - it is a small at-least-once queue for pings that have been decided on but
- * not yet confirmed delivered, replayed at the next boot.
- *
- * Three bounds keep it from becoming a liability of its own. A ping older than maxAgeMs is dropped
- * rather than sent: "a session finished" is news for minutes, and a queue that replays yesterday's
- * work on boot trains the operator to ignore the channel. A ping that has failed maxAttempts times is
- * dropped for the same reason. And the queue itself is capped, oldest first, so a Telegram outage
- * plus a busy machine cannot grow a file without limit.
- */
-
 const DEFAULT_MAX_ENTRIES = 50;
 const DEFAULT_MAX_ATTEMPTS = 5;
 const DEFAULT_MAX_AGE_MS = 6 * 60 * 60 * 1000;
@@ -33,7 +18,6 @@ function isEntry(value: unknown): value is { id: string; text: string; queuedAt?
     && entry.text !== '';
 }
 
-/** A file written by an older build, a truncated file, or garbage all normalize to a usable queue. */
 function normalizeOutbox(raw: unknown): OutboxEntry[] {
   if (!raw || typeof raw !== 'object' || !('entries' in raw)) return [];
   const list: unknown[] = Array.isArray(raw.entries) ? raw.entries : [];
@@ -45,7 +29,6 @@ function normalizeOutbox(raw: unknown): OutboxEntry[] {
   }));
 }
 
-/** Newest wins on overflow: an old ping is the one whose loss matters least. */
 function planEnqueue(
   entries: OutboxEntry[],
   entry: OutboxEntry,
@@ -60,10 +43,6 @@ function removeEntry<Entry extends { id: string }>(entries: Entry[], id: string)
   return entries.filter((entry) => entry.id !== id);
 }
 
-/**
- * A failed send. Past maxAttempts the entry is dropped rather than retried forever: something is
- * wrong with the credentials or the network, and holding a stale ping cannot fix either.
- */
 function recordFailure(
   entries: OutboxEntry[],
   id: string,
@@ -86,7 +65,6 @@ function recordFailure(
   return { entries: next, dropped };
 }
 
-/** What a boot replay should do with what it found. */
 function planReplay(
   entries: OutboxEntry[],
   { now = Date.now(), maxAgeMs = DEFAULT_MAX_AGE_MS, maxAttempts = DEFAULT_MAX_ATTEMPTS }:

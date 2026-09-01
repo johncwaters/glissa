@@ -1,6 +1,3 @@
-// Markers only, and the two dedup rules that make them honest: a relay replays every open document on
-// each reconnect, and a close for a uri nothing opened is not an event.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { EditorState } from '../server/core/ingest-editor-core.ts';
@@ -52,7 +49,7 @@ test('the deepest containing root wins and a file under none is machine scope', 
   const state = createEditorState();
   const outside = applyEditorNotification(state, { method: 'textDocument/didSave', uri: 'file:///tmp/secret-project/notes.md', roots: ROOTS, now: 1 }).event;
   assert.equal(outside?.scope.root, null);
-  // A path outside every known root reports its basename alone, never where on the disk it lives.
+
   assert.equal(outside?.summary, 'saved notes.md');
 });
 

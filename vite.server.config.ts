@@ -1,6 +1,3 @@
-// The node half of the build: every process the published package starts (the server, the CLI, the four
-// relays, the postinstall notice) becomes one bundled ES module under dist/, because Node refuses to
-// strip types inside node_modules and an installed package is nothing but node_modules.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -10,8 +7,6 @@ import type { Plugin } from 'vite';
 
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
 
-// Anything not resolved out of this repo stays a runtime import: node builtins, node-pty's native
-// binding, and every dependency npm already installed beside the package.
 function isExternal(id: string): boolean {
   if (id.startsWith('#')) return false;
   if (id.startsWith('.')) return false;
@@ -64,7 +59,6 @@ export default defineConfig({
         format: 'es',
         entryFileNames: '[name].js',
         chunkFileNames: 'chunks/[name]-[hash].js',
-        // A relay is run once per hook and must stay cheap to load, so nothing gets merged into it.
         experimentalMinChunkSize: 0,
       },
     },

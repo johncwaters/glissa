@@ -1,5 +1,3 @@
-// Every non-VS-Code editor spawns `glissa visions relay`; stdout must reach the client untouched.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -9,7 +7,6 @@ import { WebSocketServer } from 'ws';
 import { createParserState, feedFrameBytes, serializeFrame } from '../server/core/visions-lsp-core.ts';
 import type { AddressInfo } from 'node:net';
 
-// Every frame read back here is asserted field by field, so one indexable shape covers them.
 type LspRecord = Record<string, unknown>;
 const CLI_PATH = path.join(import.meta.dirname, '..', 'bin', 'glissa.ts');
 const WAIT_MS = 8000;

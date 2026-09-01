@@ -34,7 +34,7 @@ test('entriesSince covers the exact allowlist and nothing else: notify, session-
   log.stamp({ type: 'notify' });
   log.stamp({ type: 'session-error' });
   log.stamp({ type: 'post-turn-result' });
-  // A near-miss type is not a prefix match away from replaying: the allowlist is exact.
+
   log.stamp({ type: 'notify-extra' });
   log.stamp({ type: 'session-agents' });
 
@@ -57,16 +57,14 @@ test('entriesSince(since) returns only entries with seq > since, in seq order', 
 
 test('eviction by maxEntries still replays surviving entries; evicted flags an older loss, not a replay gate', () => {
   const log = createReplayLog({ maxEntries: 2 });
-  log.stamp({ type: 'notify', n: 1 }); // evicted once n:3 lands
+  log.stamp({ type: 'notify', n: 1 });
   log.stamp({ type: 'notify', n: 2 });
   log.stamp({ type: 'notify', n: 3 });
 
-  // since=0 predates the evicted n:1, but n:2 and n:3 are still retained and must still replay.
   const fresh = log.entriesSince(0);
   assert.equal(fresh.evicted, true);
   assert.deepEqual(fresh.entries.map((e) => e.n), [2, 3]);
 
-  // A cursor at or past the last evicted seq (1) has not lost anything.
   const caughtUp = log.entriesSince(1);
   assert.equal(caughtUp.evicted, false);
   assert.deepEqual(caughtUp.entries.map((e) => e.n), [2, 3]);
@@ -77,11 +75,8 @@ test('eviction by maxAgeMs happens lazily, including on an entriesSince call wit
   log.stamp({ type: 'notify', n: 1 }, 0);
   log.stamp({ type: 'notify', n: 2 }, 500);
 
-  // Neither stamp call is old enough yet to evict at t=500.
   assert.deepEqual(log.entriesSince(0, 500).entries.map((e) => e.n), [1, 2]);
 
-  // At t=1600, entry n:1 (ts 0) is 1600ms old (> maxAgeMs) and ages out; n:2 (ts 500) is 1100ms
-  // old and also ages out. No new stamp triggers this - entriesSince alone evicts lazily.
   const result = log.entriesSince(0, 1600);
   assert.deepEqual(result.entries, []);
   assert.equal(result.evicted, true);

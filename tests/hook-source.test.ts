@@ -27,8 +27,6 @@ test('mapHookToSignal maps events correctly', () => {
 });
 
 test('mapHookToSignal: SubagentStart/Stop are tracking signals, never a completion', () => {
-  // A sub-agent (Task tool) finishing mid-turn must not mark the session COMPLETE: it maps to a
-  // counted tracking signal (gated downstream), not 'ready'. SubagentStart opens the count.
   assert.equal(mapHookToSignal('SubagentStart'), 'subagent-start');
   assert.equal(mapHookToSignal('SubagentStop'), 'subagent-stop');
   assert.notEqual(mapHookToSignal('SubagentStop'), 'ready');
@@ -38,14 +36,14 @@ test('mapHookToSignal: benign/unknown Notification subtypes are ignored (no fals
   assert.equal(mapHookToSignal('Notification', { notification_type: 'auth_success' }), null);
   assert.equal(mapHookToSignal('Notification', { notification_type: 'something_new' }), null);
   assert.equal(mapHookToSignal('Notification', {}), null);
-  // elicitation prompts still count as needing input
+
   assert.equal(mapHookToSignal('Notification', { notification_type: 'elicitation_dialog' }), 'awaiting-input');
 });
 
 test('mapHookConfidence: idle_prompt readys are demoted to low (idle nudge, not a completion proof)', () => {
   assert.equal(mapHookConfidence('Notification', { notification_type: 'idle_prompt' }), 'low');
   assert.equal(mapHookConfidence('notification', { notificationType: 'idle_prompt' }), 'low');
-  // Everything else keeps the source default (high for hooks).
+
   assert.equal(mapHookConfidence('Stop', {}), null);
   assert.equal(mapHookConfidence('Notification', { notification_type: 'permission_prompt' }), null);
   assert.equal(mapHookConfidence('UserPromptSubmit', {}), null);
@@ -55,7 +53,7 @@ test('mapHookPromptKind: classifies the origin of an awaiting-input signal', () 
   assert.equal(mapHookPromptKind('PermissionRequest', {}), 'permission');
   assert.equal(mapHookPromptKind('Notification', { notification_type: 'permission_prompt' }), 'permission');
   assert.equal(mapHookPromptKind('Notification', { notification_type: 'elicitation_dialog' }), 'elicitation');
-  // Not an awaiting-input origin: no kind.
+
   assert.equal(mapHookPromptKind('Stop', {}), null);
   assert.equal(mapHookPromptKind('Notification', { notification_type: 'idle_prompt' }), null);
   assert.equal(mapHookPromptKind('Notification', {}), null);
@@ -194,8 +192,6 @@ test('buildHookSettings produces http hooks with glissaId + token in URL', () =>
   assert.ok(s.hooks.Notification && s.hooks.UserPromptSubmit && s.hooks.SessionStart);
 });
 
-// The deny-list branch is what bounds the PR-review and PostHog lanes (both spawn with
-// --dangerously-skip-permissions and pass their own settingsPermissions).
 test('buildHookSettings merges permissions.deny when provided, omits it otherwise', () => {
   const base = { port: 1234, glissaId: 'g1', token: 't1' };
   const permissions = { deny: ['Bash(gh pr merge:*)', 'Write(.github/workflows/**)'] };
@@ -264,25 +260,21 @@ test('writeSessionSettings writes the rtk PreToolUse block when opted in', () =>
 });
 
 test('safeDirSegment strips path-illegal chars (Windows) but keeps plain ids intact', () => {
-  // Colon-namespaced setup/team ids must not produce an illegal Windows dir name.
   assert.equal(safeDirSegment('setup:marketing:bb78afb5'), 'setup-marketing-bb78afb5');
   assert.equal(safeDirSegment('a<b>c:"d/e\\f|g?h*i'), 'a-b-c--d-e-f-g-h-i');
   assert.equal(safeDirSegment('trailing.dot. '), 'trailing.dot');
-  // Plain UUID-style ids (the normal-session case) are unchanged.
+
   assert.equal(safeDirSegment('bb78afb5-e527-48da-9632-580c00153a1b'), 'bb78afb5-e527-48da-9632-580c00153a1b');
 });
 
 test('writeSessionSettings handles colon-namespaced ids without ENOENT (Windows-safe dir)', () => {
-  // Regression: setup:<team>:<uuid> contains colons, illegal in a Windows path segment, which
-  // crashed mkdirSync with ENOENT. The dir name must be sanitized; the real glissaId still rides
-  // the hook URL (URL-encoded) so HookRouter lookup by the unsanitized id is unaffected.
   const baseDir = path.join(os.tmpdir(), `glissa-colon-${Date.now()}`);
   const glissaId = 'setup:marketing:bb78afb5-e527-48da-9632-580c00153a1b';
   const { settingsPath, dir, cleanup } = writeSessionSettings({ port: 5173, glissaId, baseDir });
   assert.ok(fs.existsSync(settingsPath));
   assert.equal(path.basename(dir).includes(':'), false);
   const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-  // URL keeps the real id, percent-encoded.
+
   assert.match(parsed.hooks.Stop[0].hooks[0].url, /\/hook\/setup%3Amarketing%3Abb78afb5/);
   cleanup();
   assert.equal(fs.existsSync(dir), false);
@@ -293,7 +285,7 @@ test('sweepOrphans removes stale dirs only', () => {
   const baseDir = path.join(os.tmpdir(), `glissa-sweep-${Date.now()}`);
   const fresh = writeSessionSettings({ port: 1, glissaId: 'fresh', baseDir });
   const stale = writeSessionSettings({ port: 1, glissaId: 'stale', baseDir });
-  // Age the stale dir well past the cutoff.
+
   const old = Date.now() - 48 * 60 * 60 * 1000;
   fs.utimesSync(stale.dir, new Date(old), new Date(old));
   const removed = sweepOrphans(baseDir, 24 * 60 * 60 * 1000);
@@ -302,10 +294,6 @@ test('sweepOrphans removes stale dirs only', () => {
   assert.equal(fs.existsSync(fresh.dir), true);
   try { fs.rmSync(baseDir, { recursive: true, force: true }); } catch {}
 });
-
-// The sweep runs at boot, before any write, and rmSync's recursively as the server account. On a
-// multi-user box the shared-/tmp base path is exactly what an attacker pre-plants, so a base dir that
-// is not a real directory this user owns must sweep NOTHING rather than being followed.
 
 function captureWarnings<T>(fn: () => T): { result: T; warnings: string[] } {
   const warnings: string[] = [];
@@ -329,7 +317,7 @@ test('sweepOrphans refuses a base dir that is a symlink, deleting nothing behind
   const stale = writeSessionSettings({ port: 1, glissaId: 'stale', baseDir: realDir });
   const old = Date.now() - 48 * 60 * 60 * 1000;
   fs.utimesSync(stale.dir, new Date(old), new Date(old));
-  // A junction is the Windows shape of the same trick, and needs no privilege to create.
+
   fs.symlinkSync(realDir, linkDir, process.platform === 'win32' ? 'junction' : 'dir');
   try {
     const { result, warnings } = captureWarnings(() => sweepOrphans(linkDir, 24 * 60 * 60 * 1000));
@@ -343,8 +331,6 @@ test('sweepOrphans refuses a base dir that is a symlink, deleting nothing behind
   }
 });
 
-// Nothing here can chown a directory to another user, so the alien-owner case is asserted against a
-// real system directory this account does not own. Vacuous as root, where every dir IS ours.
 const currentUid = typeof process.getuid === 'function' ? process.getuid() : null;
 const alienUidSkip = process.platform === 'win32'
   ? 'posix uids only'

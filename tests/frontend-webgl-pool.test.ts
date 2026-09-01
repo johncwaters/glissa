@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-// webgl-core is ESM (.mjs); dynamic-import it so the suite drives the shipped module.
 const importCore = () => import('../public/session-card/webgl-core.ts');
 
 test('pickEvictionVictims: returns nothing while under the cap', async () => {
@@ -11,7 +10,7 @@ test('pickEvictionVictims: returns nothing while under the cap', async () => {
 
 test('pickEvictionVictims: at the cap evicts the oldest key that is not protected', async () => {
   const { pickEvictionVictims } = await importCore();
-  // size 2 >= cap 2; protected key 'c' is absent, so the oldest ('a') is evicted, then size 1 < 2 stops.
+
   assert.deepEqual(pickEvictionVictims(['a', 'b'], 2, ['c']), ['a']);
 });
 

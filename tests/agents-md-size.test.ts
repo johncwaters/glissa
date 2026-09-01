@@ -1,5 +1,3 @@
-// Root loads into every session; a nested AGENTS.md loads only when that code is open, so the root cap is the strict one.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -22,7 +20,6 @@ function agentsMdFiles(dir: string, found: string[] = []): string[] {
   return found;
 }
 
-// A citation names a path shape: has a separator, ends in a known extension (optionally plus a trailing `.symbol`).
 function citedPaths(markdown: string): Set<string> {
   const cited = new Set<string>();
   for (const match of markdown.matchAll(/`([^`]+)`/g)) {
@@ -70,7 +67,6 @@ test('every nested AGENTS.md stays under its own budget, so growth cannot just m
   );
 });
 
-// A citation resolving to nothing is the one machine-checkable sign a rule outlived its code.
 test('every path an AGENTS.md cites still exists', () => {
   const broken: string[] = [];
   for (const file of agentsMdFiles(REPO_ROOT)) {

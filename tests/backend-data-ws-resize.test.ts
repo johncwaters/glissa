@@ -1,16 +1,3 @@
-// Active-viewer resize arbitration over the data WebSocket. One session owns one PTY but any number of
-// data connections, so a phone opening a session used to reflow the desktop's terminal to phone width
-// and leave it there: the desktop's own box never changed, so its client cached the size and never
-// re-pushed. The departing viewer now hands its claim back ({type:'unview'}, or a close) and the server
-// re-applies the most recent surviving viewer's size. The decision itself is pure
-// (tests/viewer-size-core.test.ts); this file pins the wiring.
-//
-// SAFETY: same constraints as tests/backend-upload-route.test.ts. createBackend runs a boot worktree
-// reconcile against the configured projects, so GLISSA_CONFIG points at a throwaway temp config whose
-// ONE project is an empty temp directory (not a git repo, so nothing is listed or removed) and whose
-// session stays DORMANT. Never point this file at a path outside its temp dir. A fake PTY records the
-// resizes; no real `claude` process launches.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -54,8 +41,7 @@ function ctx(): ResizeContext {
 
 function attachFakePty(): void {
   ptyResizes.length = 0;
-  // UNREACHABLE_PID is past every platform's pid_max on purpose: shutdown() destroys this session, and
-  // off Windows that kill signals the pid's process GROUP, which must never name a real one on the host.
+
   ctx().session.ptyProcess = {
     pid: UNREACHABLE_PID,
     onData() {},
@@ -70,8 +56,6 @@ function openViewer(): Promise<WebSocket> {
   return openSocket(ctx().client, `/terminals/${SESSION_ID}`);
 }
 
-// A resize message produces one pty.resize, so the assertions poll for the expected total rather than
-// sleeping a fixed amount and hoping.
 async function waitForResizeCount(expected: number): Promise<ResizeCall[]> {
   const deadline = Date.now() + 3000;
   while (ptyResizes.length < expected && Date.now() < deadline) {
@@ -101,7 +85,7 @@ test.before(async () => {
 
   const server = http.createServer();
   const backend = createBackend(server, { staticDir: null });
-  // createBackend registers its own 'upgrade' listener; only 'request' is the embedder's to wire.
+
   server.on('request', backend.app);
   await listenOnLoopback(server);
   const client = await dashboardClient(boundPort(server));

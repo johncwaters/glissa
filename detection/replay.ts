@@ -1,9 +1,3 @@
-// Replay harness, driving recorded sessions (session-recorder JSONL) through the
-// real detection pipeline (OscTitleSource + StatusSource + hook mapping) so the
-// engine's reliability is measurable against ground truth. Version-aware:
-//   v1: data records only (legacy; exercises the title fallback).
-//   v2: data + hook records (exercises the authoritative path too), interleaved by ts.
-
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import { createOscTitleSource } from './osc-title-source.ts';
@@ -30,9 +24,6 @@ export interface ReplayOptions {
   titleContext?: TitleContext;
 }
 
-// Parse a JSONL recording into { version, agent, records } with records sorted by ts. `agent` is the
-// header field the recorder stamps (M2); a recording made before it, or by the default agent, replays
-// through the Claude Code adapter exactly as it always did.
 function parseRecording(text: string): { version: number; agent: string | null; records: ReplayRecord[] } {
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
   let version = 1;
@@ -43,7 +34,7 @@ function parseRecording(text: string): { version: number; agent: string | null; 
     try {
       rec = JSON.parse(line);
     } catch {
-      continue; // tolerate a truncated trailing line
+      continue;
     }
     if (rec.type === 'header') {
       version = typeof rec.version === 'number' ? rec.version : 1;
@@ -56,12 +47,6 @@ function parseRecording(text: string): { version: number; agent: string | null; 
   return { version, agent, records };
 }
 
-// Replay records through the detection pipeline. Records are fed in ts order;
-// timers (title stabilization, conflict window) run in real time, then we settle.
-// Returns { signals, meta } where signals are the resolved StatusSource emissions.
-// `agent` selects the adapter whose title profile and hook vocabulary the replay reads with, so a
-// codex recording is judged by codex's rules rather than Claude Code's (absent = the default agent);
-// `titleContext` supplies what that profile needs about the recorded session (its cwd basename).
 async function replayDetection(records: ReplayRecord[], opts: ReplayOptions = {}) {
   const stabilizationMs = opts.stabilizationMs ?? 1500;
   const conflictWindowMs = opts.conflictWindowMs ?? 750;
@@ -70,8 +55,7 @@ async function replayDetection(records: ReplayRecord[], opts: ReplayOptions = {}
   if (!adapter) throw new Error(`unknown agent adapter: ${opts.agent}`);
 
   const title = createOscTitleSource({ stabilizationMs, titleProfile: adapter.titleProfile });
-  // What the live session's title source is told at spawn (codex reads its idle title by comparing it
-  // against the cwd basename), so a fixture is judged by the same rule rather than an easier one.
+
   if (opts.titleContext) title.setContext(opts.titleContext);
   const status = createStatusSource({ sessionId: 'replay', conflictWindowMs, dedupWindowMs });
   const signals: ResolvedStatusSignal[] = [];
@@ -98,7 +82,6 @@ async function replayDetection(records: ReplayRecord[], opts: ReplayOptions = {}
   return { signals, meta };
 }
 
-// Convenience: count resolved signals by type.
 function summarize(signals: { signal: string }[]): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const s of signals) counts[s.signal] = (counts[s.signal] || 0) + 1;

@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-// mobile-keys is ESM (.mjs); dynamic-import it so the suite drives the shipped module.
 const importCore = () => import('../public/mobile-keys.ts');
 
 test('MOBILE_KEYS: the strip carries exactly the seven touch controls, in order', async () => {

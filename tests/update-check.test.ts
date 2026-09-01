@@ -43,7 +43,6 @@ function tagsStdout({ version = '0.21.0', tagSha = SHA_RELEASE_TAG, commitSha = 
 
 type RunCommand = NonNullable<CheckForUpdateOptions['runCommand']>;
 
-// execFileAsync is variadic, so a fake reads its argv out of the rest tuple.
 function argvOf(rest: unknown[]): string[] {
   const args = rest[0];
   return Array.isArray(args) ? args.map((arg) => String(arg)) : [];
@@ -65,7 +64,6 @@ function fakeGit({ head, tags, throws }: { head?: string; tags?: string; throws?
   };
 }
 
-// A real Response, so the check's ok probe and JSON parse run against the shape fetch really returns.
 function fakeFetch({ version, ok = true, throws }: { version?: string; ok?: boolean; throws?: Error } = {}): typeof fetch {
   return async () => {
     if (throws) throw throws;
@@ -74,12 +72,10 @@ function fakeFetch({ version, ok = true, throws }: { version?: string; ok?: bool
   };
 }
 
-// Never settles until the caller's signal aborts, which is what the timeout and abort paths need.
 const hangingFetch: typeof fetch = (_input, init) => new Promise((_resolve, reject) => {
   init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
 });
 
-// checkForUpdate answers null on every advisory failure path, so a suite reading a field says so first.
 function statusOf(result: Awaited<ReturnType<typeof checkForUpdate>>) {
   if (!result) throw new Error('expected an update status, the check answered null');
   return result;

@@ -35,7 +35,7 @@ import {
 import type { DaemonMessage } from "./core/visions-relay-core.ts";
 
 const DEFAULT_PORTS = [5173, 3000];
-// A reconnect replays mirrored documents from the doc store; a marker has no store, so it is held here.
+
 const MAX_PENDING_FORWARDS = 50;
 const INITIAL_RETRY_MS = 500;
 const MAX_RETRY_MS = 5000;
@@ -43,18 +43,15 @@ const STABLE_CONNECTION_MS = 5000;
 const METHOD_NOT_FOUND = -32601;
 const MIRROR_METHODS = new Set(["textDocument/didOpen", "textDocument/didChange", "textDocument/didClose"]);
 const FORWARDED_METHODS = new Set([...MIRROR_METHODS, "textDocument/didSave", ACTIVITY_METHOD]);
-// The one editor request the daemon answers. Everything else is still method-not-found.
+
 const CODE_ACTION_METHOD = "textDocument/codeAction";
-// The one request the daemon initiates, which is what makes tier 1 silent (docs/archive/plan-navigator-2.md, M6).
+
 const APPLY_EDIT_METHOD = "workspace/applyEdit";
-// A daemon that never answers must not hang the editor: past this the relay answers "no actions" itself.
+
 const CODE_ACTION_TIMEOUT_MS = 2000;
 
-// The buffer core keeps its params shape private, so the mirror path borrows it from applyDidOpen.
 type MirrorParams = Parameters<typeof applyDidOpen>[1];
 
-// LSP params arrive as untyped JSON; anything that is not an object carries no textDocument either,
-// which is what both uriOfParams and the applyDid* mirrors already answer for.
 function asDocumentParams(params: unknown): MirrorParams {
   if (params && typeof params === "object" && !Array.isArray(params)) return params as MirrorParams;
   return null;
@@ -88,7 +85,6 @@ interface StreamLike {
   write(chunk: string | Buffer): unknown;
 }
 
-// The socket surface the frame guards need, so a test can drive them with a two-field stand-in.
 interface WebSocketLike {
   readyState: number;
   send(data: string): void;
@@ -100,8 +96,6 @@ function parsePortValue(value: unknown): number | null {
   return port;
 }
 
-// The configured port leads but the defaults stay behind it: a dev daemon answers on Vite's 5173 while
-// its own config still says 3000.
 function resolvePortPlan(
   argv: string[] = [],
   env: Record<string, string | undefined> = process.env,
@@ -119,7 +113,6 @@ function resolvePortPlan(
   return { ports: [configured, ...DEFAULT_PORTS.filter((port) => port !== configured)], isFixed: false };
 }
 
-// Read-only: the relay runs inside somebody's editor and must never seed or rewrite the operator's config.
 function readConfiguredPort(env: Record<string, string | undefined> = process.env, fsApi: FsApi = fs): unknown {
   const decided = decideConfigPath({
     env,
@@ -146,8 +139,6 @@ function nextDelayMs(currentDelayMs: number): number {
   return Math.min(currentDelayMs * 2, MAX_RETRY_MS);
 }
 
-// LSP TextDocumentSyncKind. Incremental is fewer bytes per keystroke on a large buffer, and the store
-// still takes whole-text changes, so a client that only speaks Full sync keeps working unchanged.
 const SYNC_KIND_INCREMENTAL = 2;
 
 function initializeResult(): Record<string, unknown> {
@@ -197,7 +188,6 @@ function editorRequest(id: string, method: string, params: unknown): Record<stri
   return { jsonrpc: "2.0", id, method, params };
 }
 
-// What a refused mirror update needs beside its reason to be diagnosable from one log line.
 function mirrorFailureDetail(update: MirrorUpdate): string {
   if (update.reason === "invalid-range" || update.reason === "invalid-text") return ` change=${update.index} range=${formatRange(update.range)}`;
   if (update.reason === "stale-version") return ` version=${update.version} current=${update.currentVersion}`;
@@ -237,15 +227,14 @@ function createRelay({
   let retryMs = INITIAL_RETRY_MS;
   let nextPortIndex = 0;
   let isStopping = false;
-  // Editor request id -> its expiry timer, for the codeAction requests the daemon is answering.
+
   const pendingCodeActionById = new Map<unknown, NodeJS.Timeout>();
-  // Editor-facing id -> the daemon id it answers for, for the applyEdit direction.
+
   const applyEditDaemonIdByEditorId = new Map<string, unknown>();
   const unsyncedUris = new Set<string>();
   const pendingForwards: DaemonMessage[] = [];
   let nextEditorRequestId = 1;
 
-  // stdout carries the LSP protocol, so every line the relay says about itself goes to stderr.
   function note(message: string): void {
     stderr.write(`[visions-relay] ${message}\n`);
   }
@@ -283,7 +272,6 @@ function createRelay({
     retryMs = nextDelayMs(retryMs);
   }
 
-  // Editor activity reported while the daemon is down still happened, so it waits for the socket.
   function forwardNotification(method: string, params: unknown): boolean {
     const message = daemonMessage(method, params);
     if (sendWsJson(ws, message)) return true;
@@ -295,7 +283,6 @@ function createRelay({
   function flushPendingForwards(): number {
     let sent = 0;
     while (pendingForwards.length > 0) {
-      // Held again rather than dropped: a socket that refuses the first one refuses the rest too.
       if (!sendWsJson(ws, pendingForwards[0])) return sent;
       pendingForwards.shift();
       sent += 1;
@@ -349,7 +336,7 @@ function createRelay({
     socket.on("close", () => {
       if (ws === socket) ws = null;
       clearStableConnectionTimer();
-      // A daemon that went away answers nothing, so the editor gets the "no actions" answer now.
+
       failPendingCodeActions();
       applyEditDaemonIdByEditorId.clear();
       scheduleReconnect(port);
@@ -369,7 +356,6 @@ function createRelay({
     for (const id of [...pendingCodeActionById.keys()]) settleCodeAction(id, null);
   }
 
-  // The editor's own id travels to the daemon and back, so this direction mints nothing.
   function forwardCodeAction(id: unknown, params: unknown): void {
     if (!sendWsJson(ws, daemonRequest(id, CODE_ACTION_METHOD, params))) {
       writeEditorMessage(responseMessage(id, null));
@@ -380,7 +366,6 @@ function createRelay({
     pendingCodeActionById.set(id, timer);
   }
 
-  // The other direction needs an id the editor has never seen, hence the one prefix the relay mints.
   function forwardApplyEdit(daemonId: unknown, params: unknown): void {
     const editorId = `glissa-visions-${nextEditorRequestId}`;
     nextEditorRequestId += 1;
@@ -388,7 +373,6 @@ function createRelay({
     writeEditorMessage(editorRequest(editorId, APPLY_EDIT_METHOD, params));
   }
 
-  // A client error answering an applyEdit is a refusal, which is exactly what the daemon logs it as.
   function handleEditorResponse(editorId: unknown, msg: LspMessage): void {
     if (typeof editorId !== "string" || !applyEditDaemonIdByEditorId.has(editorId)) return;
     const daemonId = applyEditDaemonIdByEditorId.get(editorId);

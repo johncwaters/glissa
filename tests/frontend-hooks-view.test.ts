@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 
 import type { HookEvent, HookRecord } from '../public/hooks-view-core.ts';
 
-// hooks-view-core is a browser module; dynamic-import it so the suite drives the shipped source.
 const importCore = () => import('../public/hooks-view-core.ts');
 
 const EVENTS: HookEvent[] = [
@@ -72,7 +71,7 @@ test('draftProblem names the first blocking problem and nothing when the draft i
   assert.equal(draftProblem({ ...good, command: '' }, EVENTS), 'Enter the command to run.');
   assert.equal(draftProblem({ ...good, type: 'http', url: 'x' }, EVENTS), 'Enter a URL starting with http:// or https://.');
   assert.equal(draftProblem({ ...good, timeout: '0' }, EVENTS), 'Timeout must be a whole number of seconds from 1 to 600.');
-  // Claude Code runs command handlers only on SessionStart, so the editor refuses before the server does.
+
   assert.equal(draftProblem({ ...good, event: 'SessionStart', type: 'http', url: 'http://x' }, EVENTS), 'SessionStart does not support HTTP hooks.');
 });
 
@@ -86,8 +85,6 @@ test('the timeout ceiling comes from the report, with the server default as the 
   assert.equal(draftProblem(good, EVENTS), null);
 });
 
-// projectsOf has one home, dom-helpers.js, and the client no longer strips a stale scope before a
-// toggle: the server keeps the ids the record already held, so a dead scope survives an edit inert.
 test('the core carries neither a second projectsOf nor the old scope stripper', async () => {
   const core = await importCore();
   assert.equal('projectsOf' in core, false);
@@ -145,7 +142,7 @@ test('templates open as valid drafts and a dirty draft is told from an untouched
     assert.equal(draftProblem(draft, events), null, template.id);
     assert.equal(draft.id, null);
   }
-  // An event the catalog does not carry falls back to the first one rather than an unpickable value.
+
   assert.equal(templateDraft({ id: 'unknown-event', label: 'x', summary: 'x', draft: { event: 'Nope' } }, EVENTS).event, 'PreToolUse');
   const draft = { ...emptyDraft(EVENTS), name: 'x', command: 'echo' };
   const origin = fromDraft(draft);

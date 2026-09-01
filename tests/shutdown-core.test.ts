@@ -1,7 +1,3 @@
-// The shutdown coordinator's decisions. The failure it exists to prevent: a restart bringing a fresh
-// backend up while the old one's lanes are still discarding a worktree or writing the same state file,
-// because shutdown fired every lane stop as `void lane.stop()` and nothing awaited them.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -16,8 +12,6 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-// A timer seam that fires only when the test says so, so "the bound expired" is a decision the test
-// makes rather than a wall-clock race.
 interface ManualTimer {
   fn: () => void;
   cleared: boolean;

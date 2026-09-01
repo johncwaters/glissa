@@ -17,13 +17,10 @@ function findBurntToastViaPowerShell(): string | null {
     ], { encoding: 'utf8', timeout: 5000 }).trim();
     if (result && fs.statSync(result).isDirectory()) return result;
   } catch {
-    // PowerShell unavailable or module not found
   }
   return null;
 }
 
-// Both PowerShell editions keep user modules under <root>\<edition>\Modules; the search order is
-// per-user first (redirected to OneDrive on a synced Documents folder), machine-wide last.
 const POWERSHELL_EDITIONS = ['PowerShell', 'WindowsPowerShell'];
 
 function burntToastModuleRoots(): string[] {
@@ -44,7 +41,6 @@ function findBurntToastByPath(): string | null {
     try {
       if (fs.statSync(candidate).isDirectory()) return candidate;
     } catch {
-      // not found, try next
     }
   }
   return null;
@@ -54,8 +50,6 @@ function findBurntToastModule(): string | null {
   return findBurntToastViaPowerShell() || findBurntToastByPath();
 }
 
-// Resolve and log the BurntToast module path once, or log the msg-fallback decision.
-// Guard-clause form of the found/not-found branch so the caller stays else-free.
 function resolveBurntToastModulePath(): string | false {
   const found = findBurntToastModule();
   if (found) {
@@ -66,15 +60,6 @@ function resolveBurntToastModulePath(): string | false {
   return false;
 }
 
-/**
- * Create a toast channel adapter for NotificationManager.
- * Dumb delivery pipe - no debounce, no suppression logic.
- *
- * Windows-only by construction (BurntToast, with `msg` as the fallback). Elsewhere it degrades to a
- * no-op after ONE warning: config.osToast is a plain boolean an operator can carry to a Linux box, and
- * shelling powershell per notification there costs a spawn and a warning line for every delivery.
- * `platform` is injectable so a test can exercise both halves on either host.
- */
 function createToastChannel(
   { platform = process.platform }: { platform?: string } = {},
 ): (sessionName: string, category: string, message: string, context: object) => void {
@@ -86,7 +71,7 @@ function createToastChannel(
       console.warn(`[channel:toast] osToast is Windows-only; OS toasts are skipped on ${platform}`);
       return;
     }
-    // Lazy BurntToast discovery on first call
+
     if (burntToastModulePath === null) {
       burntToastModulePath = resolveBurntToastModulePath();
     }

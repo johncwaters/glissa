@@ -1,8 +1,3 @@
-// The audit log is bounded, on EVERY append path (2026-08 review, section 2). It was not: the
-// ordinary transition trimmed after pushing, while the self-transition branch pushed and returned
-// early, so a session repeating a self-transition - a restart loop firing process_exit_fail against
-// an already FAILED state - grew the array without limit until something else transitioned.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Session } from '../session/sessions.ts';
@@ -34,9 +29,9 @@ test('ordinary transitions are still capped, and the newest entries are the ones
   const s = makeSession(STATES.IDLE);
   try {
     for (let i = 0; i < CAP; i += 1) {
-      s.transition('new_output');    // IDLE/COMPLETE -> RUNNING
-      s.transition('task_complete');  // RUNNING -> COMPLETE
-      s.transition('user_dismiss');   // COMPLETE -> IDLE
+      s.transition('new_output');
+      s.transition('task_complete');
+      s.transition('user_dismiss');
     }
     assert.equal(s.auditLog.length, CAP);
     assert.equal(s.auditLog[s.auditLog.length - 1].to, STATES.IDLE, 'the tail is the most recent transition');
@@ -49,17 +44,17 @@ test('a mixed stream of self and real transitions stays at the cap', () => {
   const s = makeSession(STATES.IDLE);
   try {
     for (let i = 0; i < CAP * 2; i += 1) {
-      s.transition('new_output');    // IDLE -> RUNNING
-      s.transition('task_complete');  // RUNNING -> COMPLETE
-      s.transition('user_dismiss');   // COMPLETE -> IDLE
-      s.transition('task_complete');  // IDLE -> COMPLETE
-      s.transition('prompt_detected'); // COMPLETE -> WAITING
-      s.transition('process_exit_fail'); // WAITING -> FAILED
-      s.transition('process_exit_fail'); // already FAILED: a self-transition
-      s.transition('user_reset');     // FAILED -> DORMANT
-      s.transition('user_start');     // DORMANT -> INITIALIZING
-      s.transition('spawn_success', { spawnCwdExists: true });  // INITIALIZING -> STARTING
-      s.transition('first_output');   // STARTING -> IDLE
+      s.transition('new_output');
+      s.transition('task_complete');
+      s.transition('user_dismiss');
+      s.transition('task_complete');
+      s.transition('prompt_detected');
+      s.transition('process_exit_fail');
+      s.transition('process_exit_fail');
+      s.transition('user_reset');
+      s.transition('user_start');
+      s.transition('spawn_success', { spawnCwdExists: true });
+      s.transition('first_output');
     }
     assert.equal(s.auditLog.length, CAP);
   } finally {

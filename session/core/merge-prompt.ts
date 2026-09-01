@@ -1,12 +1,3 @@
-// Pure builder for the "manual merge" handoff prompt. When a session's worktree merge PARKS (the
-// rebase-then-FF onto the integration branch could not complete automatically), Glissa hands the
-// conflict context back to the Claude agent running IN that worktree by pasting this prompt into its
-// PTY (see Session.pasteMergePrompt). The agent then performs the merge it is best placed to do.
-//
-// Side-effect free and string-only so it is unit-testable without a Session or a PTY. The bracketed-
-// paste wrapping and the actual PTY write live in sessions.js; this returns just the text.
-
-// Plain-English "why it parked", keyed by the engine's park reason (server/git-workspace.js).
 interface MergePromptInputs {
   branch?: string;
   target?: string;
@@ -33,8 +24,6 @@ function reasonText(reason: string | undefined, target: string): string {
   }
 }
 
-// Build the handoff prompt. `conflicts` is the list of conflicting files (empty for a non-content park
-// like a lost fast-forward). `branch`/`target`/`worktreeDir` describe the merge the agent must finish.
 function buildMergePrompt(
   { branch, target, reason, conflicts = [], worktreeDir }: MergePromptInputs = {},
 ): string {

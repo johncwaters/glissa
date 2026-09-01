@@ -1,9 +1,3 @@
-/*
- * The Visions switch takes effect on the save that flipped it: `server/visions-setup.ts` wires the
- * editors at that moment, so a lane arriving only at the next boot would leave them mirroring into
- * nothing. Booted backend, real control WS, no PTY ever spawned.
- */
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -83,8 +77,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-// A dotted read into parsed config JSON, so an assertion states the path it means rather than
-// narrowing one level at a time.
 function readConfigValue(filePath: string, dottedPath: string): unknown {
   let cursor: unknown = JSON.parse(fs.readFileSync(filePath, 'utf8'));
   for (const key of dottedPath.split('.')) {
@@ -127,7 +119,6 @@ test('a boot with Visions on brings up the lanes it implies, on that same boot',
   assert.equal(lane?.fsEnabled, true);
   assert.equal(lane?.editorEnabled, true);
 
-  // Written to disk as well, or the dashboard would show sources off while they ran.
   assert.equal(readConfigValue(cfgPath, 'ingest.enabled'), true);
   assert.equal(readConfigValue(cfgPath, 'visions.dispatch.enabled'), true);
 }));

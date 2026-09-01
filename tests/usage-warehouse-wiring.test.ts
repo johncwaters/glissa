@@ -1,9 +1,3 @@
-// The warehouse write-merge-prune cycle through the REAL scanner, against a temp dir. Claude Code deletes
-// transcripts after about 30 days, so this file is the only reason a longer view is not silently truncated;
-// the failure modes that matter are all about not corrupting or losing what it remembers.
-//
-// The pure merge/prune rules are covered by the warehouse core's own tests. This covers the wiring: when a
-// write happens, what it contains, what survives a transcript disappearing, and what a corrupt file does.
 
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -45,7 +39,6 @@ function makeScanner(root: string, overrides: UsageScannerOptions = {}): Scanner
     pricingTable,
     nowFn: () => NOW,
     retainDays: 90,
-    // Never the real ~/.glissa: the warehouse path is always inside the temp root here.
     warehousePath: path.join(root, '.glissa', 'usage-warehouse.json'),
     ...overrides,
   });
@@ -113,13 +106,10 @@ test('a completed pass writes per-day per-model records atomically', async () =>
   assert.equal(stored.records[0].model, 'claude-sonnet-4-20250514');
   assert.equal(stored.records[0].tokens, 1100);
   assert.equal(stored.records[1].tokens, 1200);
-  // The tmp file is renamed, never left behind.
   const glissaDir = await fs.readdir(path.join(root, '.glissa'));
   assert.deepEqual(glissaDir, ['usage-warehouse.json']);
 });
 
-// A partial pass has seen an arbitrary slice of the tree, so persisting its day totals would write an
-// undercount as durable truth. This is also why continuation storms need no debounce timer.
 test('a partial pass writes nothing at all', async () => {
   const root = await makeTempRoot();
   await writeTranscript(root, 'a.jsonl', [claudeLine({ messageId: 'm1', day: '2026-08-17' })]);
@@ -142,10 +132,6 @@ test('an unchanged rescan does not rewrite the file', async () => {
   assert.ok((await fs.stat(path.join(root, '.glissa', 'usage-warehouse.json'))).mtimeMs >= first);
 });
 
-/*
- * The whole point of the feature. A transcript that disappears (Claude Code's ~30 day deletion) must leave
- * its day in the series, and the report must mark it as remembered rather than observed.
- */
 test('a deleted transcript keeps its day in the report, marked as history', async () => {
   const root = await makeTempRoot();
   const oldFile = await writeTranscript(root, 'old.jsonl', [claudeLine({ messageId: 'm1', day: '2026-06-01', output: 500 })]);
@@ -157,7 +143,6 @@ test('a deleted transcript keeps its day in the report, marked as history', asyn
   assert.deepEqual(before.daily.map((row) => row.day), ['2026-06-01', '2026-08-18']);
   assert.equal(before.daily[0]?.source, undefined, 'a live day carries no history marker');
 
-  // Claude Code prunes the old transcript. A fresh scanner (a restart) reads history from disk.
   await fs.rm(oldFile);
   const second = makeScanner(root);
   await second.runPass();
@@ -169,7 +154,6 @@ test('a deleted transcript keeps its day in the report, marked as history', asyn
   assert.equal(remembered.tokens, 1500, 'the remembered totals are the ones that were observed');
   assert.equal(remembered.models[0]?.model, 'claude-sonnet-4-20250514');
 
-  // Live-only surfaces must NOT absorb history: the warehouse stores day-by-model rollups and nothing finer.
   assert.equal(after.totals.tokens, 1100, 'totals stay live-only');
   const blockTokens = after.blocks.reduce((sum, block) => sum + block.tokens, 0);
   assert.equal(blockTokens, 1100, 'blocks stay live-only');
@@ -182,7 +166,6 @@ test('a day the live scan still covers wins over the stored copy', async () => {
   await first.runPass();
   assert.equal((await readWarehouse(root)).records[0].tokens, 1100);
 
-  // The same day grows: the live read is fresher, so the stored record is replaced rather than added to.
   await writeTranscript(root, 'a.jsonl', [
     claudeLine({ messageId: 'm1', day: '2026-08-18', output: 100 }),
     claudeLine({ messageId: 'm2', day: '2026-08-18', output: 300 }),
@@ -191,7 +174,6 @@ test('a day the live scan still covers wins over the stored copy', async () => {
   await second.runPass();
   const stored = await readWarehouse(root);
   assert.equal(stored.records.length, 1);
-  // 1100 + 1300 from the two live lines. The stored 1100 was REPLACED, not added to (which would be 3500).
   assert.equal(stored.records[0].tokens, 2400, 'replaced, not double counted');
   const report = second.buildReport({});
   assert.equal(report.daily.length, 1);
@@ -228,17 +210,10 @@ test('a corrupt warehouse starts empty, warns, and never crashes the pass', asyn
   const pass = await scanner.runPass();
   assert.equal(pass.partial, false, 'the pass completed regardless');
   assert.ok(warnings.some((message) => message.includes('warehouse')), `warned: ${warnings.join(' | ')}`);
-  // The live scan is still authoritative, so the file is rebuilt from what it can see.
   const stored = await readWarehouse(root);
   assert.deepEqual(stored.records.map((record) => record.day), ['2026-08-18']);
 });
 
-/*
- * `fsPromises` is a real injected dep of createUsageScanner, so the broken write below genuinely reaches
- * writeWarehouseFile. The third assertion is what keeps this test from ever passing vacuously: if the
- * injection stopped taking effect, the REAL write would succeed, the file would exist, and no warning
- * would have been emitted.
- */
 test('an unwritable warehouse path degrades to a warning, not a failed scan', async () => {
   const root = await makeTempRoot();
   await writeTranscript(root, 'a.jsonl', [claudeLine({ messageId: 'm1', day: '2026-08-18' })]);
@@ -254,7 +229,6 @@ test('an unwritable warehouse path degrades to a warning, not a failed scan', as
   assert.equal(await warehouseExists(root), false, 'the injected failure really did block the write');
 });
 
-// Pins the write-chain catch: without it a throwing logger inside a failed write fails the scan pass.
 test('a throwing logger during a failed write still does not fail the scan', async () => {
   const root = await makeTempRoot();
   await writeTranscript(root, 'a.jsonl', [claudeLine({ messageId: 'm1', day: '2026-08-18' })]);
@@ -277,7 +251,6 @@ test('no warehousePath means the feature is inert: nothing read, nothing written
   assert.equal(report.daily.every((row) => row.source === undefined), true);
 });
 
-// Only the write path is broken, so the read/walk half behaves normally.
 function brokenWriteFs(): NonNullable<UsageScannerOptions['fsPromises']> {
   return {
     ...fs,

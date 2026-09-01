@@ -1,12 +1,3 @@
-// M2 of docs/plan-agent-adapters.md: every Claude-only feature now asks the session's adapter first.
-// Each test below turns exactly ONE capability off and pins that the feature is inert - no flag on the
-// argv, no key in the settings file, no --add-dir, no injected context - while everything else about
-// the spawn is unchanged. The claude-code side of each pair is the control: with the reference adapter
-// every one of these still fires, which is what makes the gate a gate rather than a deletion.
-//
-// The fake adapter is a spread of the real one with capabilities overridden, injected through the
-// Session `adapter` seam, because claude-code is still the only registered id.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -21,7 +12,6 @@ import { fakePty } from './helpers/fake-pty.ts';
 import type { AgentAdapter, AgentCapabilities } from '../session/adapters/index.ts';
 import type { SessionOptions } from '../session/sessions.ts';
 
-// Only the two branches these capability gates read; the injector's own tests pin the whole file.
 interface HookSettingsFile {
   statusLine?: { type?: string };
   hooks: Record<string, unknown>;
@@ -37,8 +27,6 @@ delete process.env[CLAUDE_MD_ENV];
 
 const RESUME_ID = '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5';
 
-// A second agent that is claude-code in every way except the capabilities named here, so a difference
-// in the spawn can only have come from the gate under test.
 function agentWithout(...disabled: (keyof AgentCapabilities)[]): AgentAdapter {
   const capabilities: AgentCapabilities = { ...claudeCode.capabilities };
   for (const capability of disabled) capabilities[capability] = false;
@@ -209,7 +197,6 @@ test('the snapshot names the agent, defaulting to claude-code', async () => {
   }
 });
 
-// The M2 acceptance pin: turning the seam on cost a Claude Code recording exactly one header field.
 test('a claude-code recording differs only by the header agent field', async () => {
   const recorderBase = await fsp.mkdtemp(path.join(os.tmpdir(), 'glissa-cap-rec-'));
   const { session } = makeSession({ id: 'rec', name: 'rec' });

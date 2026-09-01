@@ -1,11 +1,3 @@
-// Session-card DOM construction and per-card chrome: the card builder, the
-// state badge, the inline rename flow, and the debug overlay. These build or
-// mutate a single card's DOM; cross-card lifecycle (create/remove/applyState)
-// lives in lifecycle.js.
-//
-// Must NOT import dialogs.js: dialogs.js imports naming helpers from this
-// package. The confirm prompt every card action needs therefore lives in
-// session-card/modal.js, which both sides can reach without a cycle.
 
 import { STATES } from '#shared/states.ts';
 import { sendControlMsg } from '../control-ws.ts';
@@ -14,8 +6,6 @@ import type { SessionUi } from './card-registry.ts';
 import { findSessionUi, sessionUIs } from './card-registry.ts';
 import { showErrorToast } from './toast.ts';
 
-// Debug overlay visibility - toggled by applyTerminalSettings (lifecycle) via
-// setDebugMode so the lets that drive terminal options can stay in terminal.js.
 let _debugMode = false;
 
 export function setDebugMode(on: boolean) {
@@ -23,11 +13,7 @@ export function setDebugMode(on: boolean) {
   updateDebugVisibility();
 }
 
-// ── Card DOM builder ─────────────────────────────────────────
 
-// The persistent tag strip, in render order. Every badge is always built and stays hidden until the
-// card carries its matching data-* attribute (set live by the setSessionX handlers in lifecycle.js),
-// so a delta never has to rebuild the header.
 interface TagBadgeSpec {
   cls: string;
   text?: string;
@@ -37,17 +23,13 @@ interface TagBadgeSpec {
 }
 
 const TAG_BADGES: TagBadgeSpec[] = [
-  // Which agent CLI the card supervises. Shown only for a non-default agent, so a Claude Code
-  // dashboard looks exactly as it did (session/adapters, and setSessionAgent in lifecycle.js).
   { cls: 'agent-badge', title: 'Agent CLI this session supervises' },
   { cls: 'worktree-badge', text: 'worktree', title: 'Running in a linked git worktree', ariaLabel: 'Linked git worktree' },
   { cls: 'resume-badge', text: 'resumed', title: 'Resumes a saved conversation on next start', ariaLabel: 'Resumes a saved conversation' },
   { cls: 'post-turn-badge', ariaHidden: true },
-  // Why a card can stay Working after the main turn's Stop: background sub-agents are still running.
   { cls: 'agents-badge', title: 'Background sub-agents still running' },
   { cls: 'usage-badge', title: 'Tokens and estimated API list-price cost for this conversation' },
   { cls: 'pack-badge', text: 'pack stale' },
-  // Advisory and self-expiring: an Esc-cancelled wakeup fires no hook, so the chip ages out.
   { cls: 'wakeup-badge' },
   { cls: 'prompt-badge', title: 'Waiting on a permission or input prompt' },
 ];
@@ -60,7 +42,6 @@ function buildTagBadge({ cls, text = '', title, ariaLabel, ariaHidden }: TagBadg
   return badge;
 }
 
-// Built straight from a control-channel delta, whose fields are unvalidated wire values.
 export interface CardOptions {
   skipPerms?: boolean;
   worktree?: boolean;
@@ -78,12 +59,8 @@ export function buildCardDOM(sessionId: string, sessionName: string, initialStat
   if (options.skipPerms) card.dataset.skipPerms = '';
   if (options.worktree) card.dataset.worktree = '';
   if (options.resume) card.dataset.resume = '';
-  // The session's project root. The Focus rail groups pills by this (basename = group label).
-  // Durable on-DOM home so the DORMANT close-out rebuild can re-read it (nothing inherits through
-  // that rebuild automatically - app.js reads dataset.path back by hand, same as skipPerms).
   if (options.path) card.dataset.path = String(options.path);
 
-  // Header
   const header = el('div', 'session-card-header');
 
   const nameEl = el('span', 'session-name', sessionName);
@@ -91,17 +68,11 @@ export function buildCardDOM(sessionId: string, sessionName: string, initialStat
   if (permsBadge) permsBadge.title = 'Running with --dangerously-skip-permissions';
   const spacer = el('span', 'session-header-spacer');
 
-  // Time-in-current-state readout on the card header (trailing the name), shown in the Focus center:
-  // "how long has this been working / waiting". Empty for settled states, so :empty hides it. Ticked by
-  // session-tick.js. aria-hidden so a per-second text change never spams a screen reader (the rail pill
-  // and the toolbar accent strip carry the state itself).
   const elapsedEl = el('span', 'card-elapsed');
   elapsedEl.setAttribute('aria-hidden', 'true');
 
-  // Action buttons
   const actions = el('div', 'session-actions');
 
-  // Overflow menu (Restart + Remove tucked away to prevent accidental clicks)
   const overflow = el('div', 'session-overflow');
   const btnOverflow = el('button', 'btn-action btn-overflow visible', '\u22ee');
   btnOverflow.title = 'More actions';
@@ -117,7 +88,6 @@ export function buildCardDOM(sessionId: string, sessionName: string, initialStat
   btnRestart.setAttribute('role', 'menuitem');
   const btnRestartFresh = el('button', 'overflow-item overflow-restart-fresh', 'Restart fresh');
   btnRestartFresh.setAttribute('role', 'menuitem');
-  // Resume a prior Claude conversation (including one started in a different worktree) into this card.
   const btnResume = el('button', 'overflow-item overflow-resume', 'Resume conversation...');
   btnResume.setAttribute('role', 'menuitem');
 
@@ -131,21 +101,12 @@ export function buildCardDOM(sessionId: string, sessionName: string, initialStat
   btnDebug.setAttribute('aria-label', 'Debug session state');
 
   actions.append(btnDebug, overflow);
-  // Order matters for layout stability. The name and its trailing elapsed clock sit in the LEFT
-  // zone; the spacer then absorbs the clock's width changes, so the persistent tags + actions in
-  // the RIGHT zone never reflow when the timer ticks. (Status is not shown here: it lives on the
-  // Focus rail pill and the toolbar accent strip.)
-  // The tags share one shrinkable, clipping strip so a narrow card sheds badges from the right instead
-  // of pushing the action cluster out of the box (twelve possible badges, and the actions must survive).
   const tags = el('div', 'session-card-tags');
   const tagChildren = TAG_BADGES.map((spec) => buildTagBadge(spec));
   if (permsBadge) tagChildren.push(permsBadge);
   tags.append(...tagChildren);
   header.append(nameEl, elapsedEl, spacer, tags, actions);
 
-  // The worktree review gate moved to the right review sidebar (sidebar/review-sidebar.js), the single
-  // home for diff + merge/discard. The card keeps only data-merge (set by setSessionMergeStatus) for the
-  // remove-warning; it no longer renders an inline review bar.
   const termWrap = el('div', 'terminal-wrap');
 
   card.append(header, termWrap);
@@ -153,13 +114,7 @@ export function buildCardDOM(sessionId: string, sessionName: string, initialStat
   return { card, header, nameEl, elapsedEl, btnRename, btnRestart, btnRestartFresh, btnResume, btnRemove, btnDebug, btnOverflow, overflowMenu, termWrap };
 }
 
-// ── Inline rename ────────────────────────────────────────────
 
-// The rename field's class, and the predicate ANY surface must consult before repainting a name into
-// an element that can be a rename target. Both live here because startInlineRename owns the field's
-// lifecycle. A repaint that replaces the node mid-edit either loses what the operator typed outright
-// (Chrome does not reliably fire blur on a removed focused node) or fires blur and commits a
-// half-typed name, so this guard is load-bearing, not cosmetic.
 const RENAME_INPUT_CLASS = 'session-rename-input';
 
 export function isRenameInProgress(targetEl: Element | null | undefined) {
@@ -167,21 +122,11 @@ export function isRenameInProgress(targetEl: Element | null | undefined) {
 }
 
 export function startInlineRename(ui: SessionUi, sessionId: string) {
-  // Resolve the target BEFORE anything reads a name, so the seed, the field and the restore all act on
-  // the same element. The phone Terminal screen borrows the card without its header and parks its own
-  // top-bar name on ui.renameTargetEl; a stale target left disconnected by a layout flip falls back to
-  // the card header rather than editing a node nobody can see.
   const targetEl = ui.renameTargetEl?.isConnected ? ui.renameTargetEl : ui.nameEl;
-  if (!targetEl || isRenameInProgress(targetEl)) return; // also guards double-invoke
+  if (!targetEl || isRenameInProgress(targetEl)) return;
 
-  // card.dataset.session is the one authoritative display name (renameSessionCard writes it when the
-  // server broadcasts). Seeding and restoring from it, rather than from whichever node happened to be
-  // the target, is what keeps the card header and the phone top bar in agreement when a layout flip
-  // moves the target mid-edit.
   const nameBeforeEdit = ui.card?.dataset.session ?? targetEl.textContent ?? '';
 
-  // Repaint every node that shows this name from the authoritative value, so neither surface is left
-  // holding a stale one until its own next repaint.
   function repaintName() {
     const name = ui.card?.dataset.session ?? nameBeforeEdit;
     targetEl.textContent = name;
@@ -206,7 +151,6 @@ export function startInlineRename(ui: SessionUi, sessionId: string) {
       repaintName();
       return;
     }
-    // Check for duplicate name (not id - names are display labels)
     for (const [, other] of sessionUIs) {
       if (other !== ui && other.card.dataset.session === newName) {
         repaintName();
@@ -215,13 +159,6 @@ export function startInlineRename(ui: SessionUi, sessionId: string) {
       }
     }
     sendControlMsg({ type: 'rename-session', id: sessionId, newName });
-    // Repaints the name the session CURRENTLY has, not the one just submitted, so the operator sees the
-    // old name until the server's session-renamed broadcast lands and renameSessionCard applies the new
-    // one. That brief flash is deliberate, not an oversight: the server can refuse this rename and sends
-    // no broadcast when it does, and its name pattern (SESSION_NAME_RE in control-handlers.js) is
-    // stricter than the two checks above, so a name with a slash or a colon reaches here and is rejected.
-    // Painting newName optimistically would leave the card header showing a name the session never took,
-    // with nothing to correct it. Show the state that is known, never the one that was asked for.
     repaintName();
   }
 
@@ -245,7 +182,6 @@ export function startInlineRename(ui: SessionUi, sessionId: string) {
   input.addEventListener('keydown', onKey);
 }
 
-// ── Debug overlay ────────────────────────────────────────────
 
 const DEBUG_CLOSE_BTN = '<button type="button" class="debug-close" aria-label="Close debug overlay" title="Close">×</button>';
 
@@ -259,10 +195,6 @@ function formatSeconds(ms: number | undefined) {
   return `${(Number(ms || 0) / 1000).toFixed(1)}s`;
 }
 
-// What a gate verdict was decided on. 'cancel' has neither figure to report: it fires on a state
-// change or newer activity, where the live count and the quiet window are both irrelevant.
-// The debug-state reply's shapes, mirroring session/core/decision-log.js and the server's debug payload.
-// The control channel hands them over as a ServerMessage field, cast once in handleDebugStateResponse.
 interface DecisionEntry {
   ts?: number;
   kind?: string;
@@ -307,8 +239,6 @@ function gateEvidence(d: DecisionEntry) {
   return '';
 }
 
-// One compact line per decision-trace entry (session/core/decision-log.js): what the session
-// decided, and the evidence it decided on.
 function formatDecision(d: DecisionEntry) {
   const at = `<span class="debug-dim">${formatTimestamp(d.ts)}</span>`;
   if (d.kind === 'signal') {
@@ -343,7 +273,6 @@ function renderDebugOverlay(ui: SessionUi, payload: DebugStatePayload) {
   html += `<div class="debug-field"><span class="debug-label">Current:</span> <span class="debug-value">${escapeHtml(p.state)}</span></div>`;
   html += `</div>`;
 
-  // Transitions
   html += `<div class="debug-section"><div class="debug-section-title">Transitions (last ${p.transitions.length})</div>`;
   if (p.transitions.length === 0) {
     html += `<div class="debug-field debug-dim">No transitions recorded</div>`;
@@ -358,7 +287,6 @@ function renderDebugOverlay(ui: SessionUi, payload: DebugStatePayload) {
   }
   html += `</div>`;
 
-  // Detection (structural signals)
   const det = p.detection || {};
   const ls = det.lastSignal;
   const ts = det.titleState || {};
@@ -369,8 +297,6 @@ function renderDebugOverlay(ui: SessionUi, payload: DebugStatePayload) {
   html += `<div class="debug-field"><span class="debug-label">Title state:</span> <span class="debug-value">${escapeHtml(ts.lastKind || 'none')}${ts.hasSeenSpinner ? ' · spun' : ''}</span></div>`;
   html += `</div>`;
 
-  // Background work + the completion gate: the two inputs that decide whether a turn-end ready
-  // completes the card now, later, or never.
   const agents = det.agents || {};
   const gate = det.gate;
   html += `<div class="debug-section"><div class="debug-section-title">Agents</div>`;
@@ -391,7 +317,6 @@ function renderDebugOverlay(ui: SessionUi, payload: DebugStatePayload) {
     html += `</div>`;
   }
 
-  // Decision trace: why each of the above fired (or stayed silent), newest last.
   const decisions = Array.isArray(p.decisions) ? p.decisions : [];
   html += `<div class="debug-section"><div class="debug-section-title">Decisions (last ${decisions.length})</div>`;
   if (decisions.length === 0) {
@@ -442,7 +367,6 @@ function updateDebugVisibility() {
 export function handleDebugStateResponse(msg: Record<string, unknown>) {
   const ui = typeof msg.id === 'string' ? sessionUIs.get(msg.id) : undefined;
   if (!ui || !ui.debugOpen) return;
-  // The one wire-boundary cast for the debug-state reply, whose shape the server owns.
   renderDebugOverlay(ui, msg.payload as DebugStatePayload);
 }
 

@@ -1,8 +1,3 @@
-// The managed statusLine block in a per-session settings file. Two things make this fragile enough to
-// pin: Claude Code runs the command through git-bash on Windows (a backslash path dies silently with
-// exit 127), and a statusLine here REPLACES the operator's global one rather than adding to it, so the
-// command has to carry their own command along or the feature deletes their HUD.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -40,7 +35,7 @@ test('disabled: no statusLine key at all, and the rest of the file is untouched'
   assert.equal('statusLine' in off, false);
   const explicit = buildHookSettings({ ...BASE, planLimits: false });
   assert.equal('statusLine' in explicit, false);
-  // The opted-out file has to stay byte-identical to the pre-statusline one.
+
   assert.equal(JSON.stringify(off), JSON.stringify(explicit));
 });
 
@@ -54,7 +49,7 @@ test('enabled: a command-type statusLine pointing at the relay with the session 
   assert.ok(command.includes('/hook/sess-1/statusline'), 'posts to the statusline hook route');
   assert.ok(command.includes('t=tok-abc'), 'carries the per-session bearer token');
   assert.ok(command.includes('http://127.0.0.1:4321/'), 'loopback only');
-  // Nothing to chain: the marker, not an empty argument.
+
   assert.ok(command.endsWith(`'${NO_CHAIN}'`), `ends with the no-chain marker: ${command}`);
 });
 
@@ -87,7 +82,7 @@ test('chaining: the operator command is base64 in argv and decodes back verbatim
   const encoded = (command.split(' ').pop() ?? '').replace(/'/g, '');
   assert.notEqual(encoded, NO_CHAIN);
   assert.equal(Buffer.from(encoded, 'base64').toString('utf8'), hud);
-  // Base64 is why a HUD command full of quotes and metacharacters needs no extra escaping here.
+
   assert.equal(command.includes(hud), false, 'the raw command never appears unencoded');
 });
 
@@ -107,7 +102,7 @@ test('readUserStatuslineCommand: best effort, and every failure means nothing to
   assert.equal(readUserStatuslineCommand(userSettings({ statusLine: null })), null);
   assert.equal(readUserStatuslineCommand(userSettings({ statusLine: { type: 'command' } })), null);
   assert.equal(readUserStatuslineCommand(userSettings({ statusLine: { type: 'command', command: '   ' } })), null);
-  // Only a command-type entry can be chained by running it.
+
   assert.equal(readUserStatuslineCommand(userSettings({ statusLine: { type: 'static', command: 'x' } })), null);
   assert.equal(
     readUserStatuslineCommand(userSettings({ statusLine: { type: 'command', command: ' node hud.mjs ' } })),

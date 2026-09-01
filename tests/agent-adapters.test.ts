@@ -1,10 +1,3 @@
-// M1 of docs/plan-agent-adapters.md is a refactor with zero behavior change, so these are the pins
-// that say so: the spawn argv and the injected settings file a claude-code session produces, the
-// hook vocabulary the router now reads off the adapter, the laziness of the command registry that
-// replaced the module-load CLAUDE_CMD global, and the config surface that selects an agent.
-// The argv and settings expectations below were captured by running the PRE-extraction tree
-// (git HEAD before the adapter commit) through the same Session options.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -217,7 +210,6 @@ test('a rejected spawn cleans before PTY exit without double-cleaning on a late 
   }
 });
 
-// The whole Claude Code hook vocabulary in one table, so a moved mapper cannot quietly drop a case.
 const HOOK_CASES: [string, HookPayload, string | null, string | null, string | null][] = [
   ['SessionStart', {}, 'session-start', null, null],
   ['SessionEnd', {}, 'session-end', null, null],

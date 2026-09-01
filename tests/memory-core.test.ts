@@ -1,7 +1,3 @@
-// The pure gates of the long-term memory store (docs/plan-visions-3.md, M12): trust ranks and the
-// lineage cap, lock rules, supersession, retention by segment, per-kind caps, the HMAC and its
-// load-time demotion, the durable secret gates, echo suppression, retrieval and the projection.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { MemoryRecord } from '../server/core/memory-core.ts';
@@ -63,8 +59,6 @@ function build(overrides = {}, now = NOW) {
   return built.record;
 }
 
-// --- Config ---------------------------------------------------------------
-
 test('resolveMemoryConfig defaults to off with a year of retention', () => {
   const resolved = resolveMemoryConfig(null);
   assert.deepEqual(resolved, {
@@ -86,8 +80,6 @@ test('resolveMemoryConfig validates the retention range and falls back rather th
   assert.equal(resolveMemoryConfig({ memoryRetainDays: 90.5 }).retainDays, DEFAULT_MEMORY_RETAIN_DAYS);
   assert.equal(resolveMemoryConfig({ retainDays: 45 }).retainDays, 45);
 });
-
-// --- Trust ranks and lineage ---------------------------------------------
 
 test('lineage is the highest ancestor rank and can only fall', () => {
   assert.equal(computeLineage({ sourceKind: 'operator' }), 'operator');
@@ -119,8 +111,6 @@ test('locked is refused on anything but an operator-lineage operator record', ()
   const correction = build({ source: { kind: 'operator', vendor: 'glissa', sessionId: null }, locked: true });
   assert.equal(correction.locked, true);
 });
-
-// --- Supersession ---------------------------------------------------------
 
 test('only an operator record may supersede a locked one', () => {
   const locked = build({ source: { kind: 'operator', vendor: 'glissa', sessionId: null }, locked: true });
@@ -167,8 +157,6 @@ test('validTo is DERIVED from the supersession chain, never written back into th
   assert.deepEqual(selectValidRecords(applied, { now: NOW + 9000 }).map((r) => r.id), [second.id]);
   assert.equal(first.validTo, null, 'the input record itself is never mutated');
 });
-
-// --- HMAC -----------------------------------------------------------------
 
 test('a signed record verifies and an unsigned one does not', () => {
   const signed = withSignature(build(), KEY);
@@ -242,8 +230,6 @@ test('the signature covers every field a trust decision reads', () => {
   assert.notEqual(signRecord(signed, KEY), signRecord({ ...signed, lineage: 'operator' }, KEY));
 });
 
-// --- Secret gates ---------------------------------------------------------
-
 test('the durable gate reuses the exported ingest scrub rather than a second pattern list', () => {
   const raw = 'rotated the api_key=hunter2SecretValue before the deploy';
   const screened = screenMemoryText(raw, { maxChars: MAX_RECORD_CHARS });
@@ -289,8 +275,6 @@ test('relative day words are absolutized at write time', () => {
   assert.equal(absolutizeDates('nothing relative here', { now: NOW }), 'nothing relative here');
 });
 
-// --- Retention and caps ---------------------------------------------------
-
 test('retention drops whole expired segments and keeps a partially live one', () => {
   const keys = ['202604', '202605', '202606', '202608'];
   assert.deepEqual(expiredSegmentKeys(keys, { now: NOW, retainDays: 90 }), ['202604']);
@@ -324,8 +308,6 @@ test('per-kind caps evict the oldest of the over-full kind only', () => {
   );
 });
 
-// --- Echo suppression -----------------------------------------------------
-
 test('a session quoting its own delivered memory back is dropped before ingestion', () => {
   const delivered = 'The merge gate lives in session/core/merge-gate.js\nNever write else statements';
   const hashes = new Set(deliveredLineHashes(delivered));
@@ -342,8 +324,6 @@ test('a blank line is never a delivered hash', () => {
   assert.deepEqual(deliveredLineHashes('\n\n   \n'), []);
   assert.equal(isEchoedLine('', new Set(deliveredLineHashes('anything at all'))), false);
 });
-
-// --- Retrieval ------------------------------------------------------------
 
 test('retrieval is deterministic, project-filtered and keeps the global layer', () => {
   const mine = build({ text: 'the merge gate demotes a pending review', project: '/repos/glissa' }, NOW - DAY);
@@ -362,8 +342,6 @@ test('a tombstone is never retrieved and never projected', () => {
   assert.deepEqual(retrieveMemories([tombstone], { now: NOW }), []);
   assert.equal(renderProjection([tombstone], { project: null }).includes('m-0000000000000000'), false);
 });
-
-// --- Projection -----------------------------------------------------------
 
 test('the same records render byte-identical markdown', () => {
   const records = [
@@ -445,8 +423,6 @@ test('canonicalProjectPath reads configured projects from a getter for every cal
   assert.equal(canonicalProjectPath(worktreePath, knownProjects), '/repos/glissa');
 });
 
-// --- Forget ---------------------------------------------------------------
-
 test('forget by id removes the record; forget by pattern redacts what survives', () => {
   const target = build({ text: 'the deploy key was pasted into the prompt' });
   const other = build({ text: 'the poller ticks every 15 minutes' }, NOW + 1);
@@ -502,8 +478,6 @@ test('the tombstone names ids only, because the forgotten pattern IS the secret'
   const many = tombstoneText(new Array(25).fill('m-2222222222222222'));
   assert.equal(many.includes('and 5 more'), true);
 });
-
-// --- Security review regressions -----------------------------------------
 
 test('project and layer are signed, so a signed record cannot be retagged into another checkout', () => {
   assert.deepEqual(SIGNED_FIELDS.slice(), [

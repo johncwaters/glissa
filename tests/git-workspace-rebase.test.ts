@@ -1,8 +1,3 @@
-// The eager auto-rebase engine (rebaseOnly) and the shared rerere replay both merge paths now use.
-// rebaseOnly is the unattended half of the worktree lifecycle: it never stashes, never merges anything
-// back, and leaves a worktree it cannot rebase exactly as it found it. The rerere tests record a real
-// resolution in one worktree and prove a second worktree replays it out of the shared rr-cache.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -18,7 +13,6 @@ const GIT = hasGit();
 
 type GitWorkspace = ReturnType<typeof createGitWorkspace>;
 
-// A repo checked out on `develop` with one seeded file, the shape every session worktree forks from.
 function initRepoOnDevelop(seedFile?: string, seedContent?: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-rebase-'));
   try { git(['init', '-b', 'main'], dir); } catch { git(['init'], dir); }
@@ -40,8 +34,6 @@ function commitFile(cwd: string, file: string, content: string, message: string)
   git(['commit', '-m', message], cwd);
 }
 
-// Finish a hand-run conflicted rebase, which is what makes git record the resolution in rr-cache.
-// GIT_EDITOR is forced so the commit-message editor can never block the test.
 function continueRebase(cwd: string): void {
   execFileSync('git', ['rebase', '--continue'], {
     cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GIT_EDITOR: 'true' },
@@ -57,8 +49,6 @@ function rebaseInProgress(wt: string): boolean {
 }
 
 const read = (dir: string, file: string): string => fs.readFileSync(path.join(dir, file), 'utf8').replace(/\r\n/g, '\n');
-
-// --- rebaseOnly ---------------------------------------------------------------------------
 
 test('rebaseOnly (real git): replays the worktree onto a moved develop and leaves develop untouched', { skip: !GIT }, async () => {
   const repo = initRepoOnDevelop();
@@ -102,8 +92,6 @@ test('rebaseOnly (real git): a worktree already on top of develop is upToDate an
   } finally { fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
-// The whole point of the no-stash rule: this runs unattended under a live agent, so uncommitted work
-// is a hard refusal rather than something to shuffle out of the way.
 test('rebaseOnly (real git): a DIRTY worktree is refused and left exactly as it was', { skip: !GIT }, async () => {
   const repo = initRepoOnDevelop();
   try {
@@ -171,11 +159,6 @@ test('rebaseOnly: a non-git workspace is refused without touching git', async ()
   assert.deepEqual(cmds, [], 'no git ran');
 });
 
-// --- rerere: a conflict resolved once is replayed everywhere ---------------------------------
-
-// Two worktrees forked from the same develop tip make the SAME edit, then develop moves under both.
-// Resolving the conflict by hand in the first records it in the common gitdir's rr-cache; the second
-// hits a byte-identical conflict, which is exactly what rerere replays. Returns both workspaces.
 async function seedRecordedResolution(gw: GitWorkspace, repo: string): Promise<{ first: WorkspaceHandle; second: WorkspaceHandle }> {
   const first = await gw.create({ projectPath: repo, teamId: 'session', label: 'first', baseBranch: 'develop' });
   const second = await gw.create({ projectPath: repo, teamId: 'session', label: 'second', baseBranch: 'develop' });
@@ -183,8 +166,6 @@ async function seedRecordedResolution(gw: GitWorkspace, repo: string): Promise<{
   commitFile(first.cwd, 'conflict.txt', 'session-side\n', 'first session edits');
   commitFile(second.cwd, 'conflict.txt', 'session-side\n', 'second session edits');
 
-  // Hand-resolve in the first worktree exactly as the operator would, and let the concluding commit
-  // record the resolution.
   assert.throws(() => git(['rebase', 'develop'], first.cwd), 'the first rebase conflicts');
   fs.writeFileSync(path.join(first.cwd, 'conflict.txt'), 'both-sides\n', 'utf8');
   git(['add', 'conflict.txt'], first.cwd);
@@ -233,8 +214,6 @@ test('rerere (real git): mergeBack completes instead of parking when the resolut
 test('rerere: a rerere:false engine never enables it and never replays a recorded resolution', { skip: !GIT }, async () => {
   const repo = initRepoOnDevelop('conflict.txt', 'base\n');
   try {
-    // Record the resolution with rerere ON, then attempt the identical conflict with a switched-off
-    // engine: the kill switch must refuse to use a cache that is sitting right there.
     const gw = createGitWorkspace();
     const { first, second } = await seedRecordedResolution(gw, repo);
     const gwOff = createGitWorkspace({ rerere: false });
@@ -245,10 +224,6 @@ test('rerere: a rerere:false engine never enables it and never replays a recorde
     assert.deepEqual(off.conflicts ?? [], ['conflict.txt']);
     assert.equal(rebaseInProgress(second.cwd), false, 'the refused rebase was aborted cleanly');
 
-    // rerere.enabled is still true in this repo and the resolution is still in rr-cache, so the engine
-    // flag is the ONLY thing that differed above. Proving that takes running the same call again with
-    // the flag on: asserting on the aborted worktree alone would prove nothing, since an abort restores
-    // it either way.
     const on = await gw.rebaseOnly({ projectPath: repo, workspace: second, targetBranch: 'develop' });
     assert.equal(on.ok, true);
     assert.equal(on.rebased, true);
@@ -260,11 +235,6 @@ test('rerere: a rerere:false engine never enables it and never replays a recorde
   } finally { fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
-// The reason `git rerere remaining` may never be used as the completeness proof. rerere does not track
-// BINARY content conflicts at all, so it reports nothing to do while the path is still unmerged. Staging
-// and continuing there commits git's target-side copy over the session's work, and when the staged tree
-// then equals HEAD the step is silently skipped and the whole commit disappears. The proof is therefore
-// "no unmerged paths remain", which rerere.autoUpdate makes sound.
 test('rerere (real git): a BINARY conflict aborts and never reports success, even beside a replayable one', { skip: !GIT }, async () => {
   const repo = initRepoOnDevelop('conflict.txt', 'base\n');
   fs.writeFileSync(path.join(repo, 'blob.bin'), Buffer.from([0, 1, 2, 3, 0, 4, 5, 6]));
@@ -275,15 +245,13 @@ test('rerere (real git): a BINARY conflict aborts and never reports success, eve
     const first = await gw.create({ projectPath: repo, teamId: 'session', label: 'first', baseBranch: 'develop' });
     const second = await gw.create({ projectPath: repo, teamId: 'session', label: 'second', baseBranch: 'develop' });
 
-    // develop moves BOTH files; both worktrees edit both the same way, so the text conflict is
-    // byte-identical (and therefore replayable) while the binary one can never be.
     fs.writeFileSync(path.join(repo, 'blob.bin'), Buffer.from([0, 9, 9, 9, 0, 9, 9, 9]));
     commitFile(repo, 'conflict.txt', 'develop-side\n', 'develop edits');
     for (const ws of [first, second]) {
       fs.writeFileSync(path.join(ws.cwd, 'blob.bin'), Buffer.from([0, 7, 7, 7, 0, 7, 7, 7]));
       commitFile(ws.cwd, 'conflict.txt', 'session-side\n', 'session edits');
     }
-    // Record a resolution for the TEXT half only, by hand, in the first worktree.
+
     assert.throws(() => git(['rebase', 'develop'], first.cwd), 'the first rebase conflicts');
     fs.writeFileSync(path.join(first.cwd, 'conflict.txt'), 'both-sides\n', 'utf8');
     fs.writeFileSync(path.join(first.cwd, 'blob.bin'), Buffer.from([0, 7, 7, 7, 0, 7, 7, 7]));
@@ -317,7 +285,6 @@ test('rerere (real git): one recorded conflict beside one NEW conflict aborts, r
     const gw = createGitWorkspace();
     const { first, second } = await seedRecordedResolution(gw, repo);
 
-    // A fresh, never-seen conflict on the OTHER file, on top of the already-recorded one.
     commitFile(repo, 'other.txt', 'develop-other\n', 'develop edits the other file');
     commitFile(second.cwd, 'other.txt', 'session-other\n', 'session edits the other file');
 
@@ -335,9 +302,6 @@ test('rerere (real git): one recorded conflict beside one NEW conflict aborts, r
   } finally { fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
-// A recorded resolution that happens to equal the target's own content leaves the step with an empty
-// patch, which `git rebase --continue` refuses ("No changes"). Without the --skip branch the rebase
-// would strand mid-flight instead of completing.
 test('rerere (real git): a replay that empties the patch skips that commit and still completes', { skip: !GIT }, async () => {
   const repo = initRepoOnDevelop('conflict.txt', 'base\n');
   try {
@@ -346,15 +310,12 @@ test('rerere (real git): a replay that empties the patch skips that commit and s
     const second = await gw.create({ projectPath: repo, teamId: 'session', label: 'second', baseBranch: 'develop' });
     commitFile(repo, 'conflict.txt', 'develop-side\n', 'develop edits');
 
-    // The first worktree's commit also touches a second file, so its own patch is NOT empty and the
-    // resolution can be recorded with an ordinary --continue. The second worktree touches only the
-    // conflicting file, so resolving it to develop's content empties its patch entirely.
     fs.writeFileSync(path.join(first.cwd, 'extra.txt'), 'extra\n', 'utf8');
     commitFile(first.cwd, 'conflict.txt', 'session-side\n', 'first session edits');
     commitFile(second.cwd, 'conflict.txt', 'session-side\n', 'second session edits');
 
     assert.throws(() => git(['rebase', 'develop'], first.cwd), 'the first rebase conflicts');
-    fs.writeFileSync(path.join(first.cwd, 'conflict.txt'), 'develop-side\n', 'utf8'); // resolution == develop
+    fs.writeFileSync(path.join(first.cwd, 'conflict.txt'), 'develop-side\n', 'utf8');
     git(['add', 'conflict.txt'], first.cwd);
     continueRebase(first.cwd);
 
@@ -384,9 +345,6 @@ test('rerere: a rerere:false engine writes no rerere config when it creates a wo
   } finally { fs.rmSync(repo, { recursive: true, force: true }); }
 });
 
-// An operator who switched rerere off in their own repo means it. Glissa seeds the key only when it is
-// absent, and never writes rerere.autoUpdate at all (it is forced per invocation instead), so the
-// operator's own merges keep git's default staging behavior.
 test('rerere: an explicit rerere.enabled=false in the repo is respected, not overwritten', { skip: !GIT }, async () => {
   const repo = initRepoOnDevelop();
   git(['config', 'rerere.enabled', 'false'], repo);

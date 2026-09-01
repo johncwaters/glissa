@@ -39,9 +39,9 @@ test('awaiting-input during conflict window cancels a pending ready (no spurious
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const src = createStatusSource({ sessionId: 's1', conflictWindowMs: 80 });
   const out = collect(src);
-  src.ingest({ signal: 'ready', source: 'hook' }); // Stop
+  src.ingest({ signal: 'ready', source: 'hook' });
   t.mock.timers.tick(20);
-  src.ingest({ signal: 'awaiting-input', source: 'hook' }); // Notification(idle/permission)
+  src.ingest({ signal: 'awaiting-input', source: 'hook' });
   t.mock.timers.tick(120);
   assert.deepEqual(out.map((s) => s.signal), ['awaiting-input'], 'ready must be suppressed');
   src.destroy();
@@ -52,7 +52,7 @@ test('double ready (Stop double-fire) collapses to a single emission', (t) => {
   const src = createStatusSource({ sessionId: 's1', conflictWindowMs: 50 });
   const out = collect(src);
   src.ingest({ signal: 'ready', source: 'hook' });
-  src.ingest({ signal: 'ready', source: 'hook' }); // duplicate within window
+  src.ingest({ signal: 'ready', source: 'hook' });
   t.mock.timers.tick(90);
   assert.equal(out.filter((s) => s.signal === 'ready').length, 1);
   src.destroy();
@@ -96,7 +96,7 @@ test('title ready and hook ready collapse (precedence/dedup)', (t) => {
   const src = createStatusSource({ sessionId: 's1', conflictWindowMs: 40, dedupWindowMs: 200 });
   const out = collect(src);
   src.ingest({ signal: 'ready', source: 'hook' });
-  t.mock.timers.tick(60); // hook ready emitted
+  t.mock.timers.tick(60);
   src.ingest({ signal: 'ready', source: 'title' });
   t.mock.timers.tick(60);
   assert.equal(out.filter((s) => s.signal === 'ready').length, 1, 'second ready deduped');
@@ -120,9 +120,9 @@ test('working during the conflict window cancels a pending ready (fast re-prompt
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const src = createStatusSource({ sessionId: 's1', conflictWindowMs: 80 });
   const out = collect(src);
-  src.ingest({ signal: 'ready', source: 'hook' }); // Stop
+  src.ingest({ signal: 'ready', source: 'hook' });
   t.mock.timers.tick(20);
-  src.ingest({ signal: 'working', source: 'title' }); // spinner: the turn did not settle
+  src.ingest({ signal: 'working', source: 'title' });
   t.mock.timers.tick(120);
   assert.deepEqual(out.map((s) => s.signal), ['working'], 'stale ready must not resolve');
   src.destroy();
@@ -132,9 +132,9 @@ test('resume during the conflict window cancels a pending ready (user re-prompte
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const src = createStatusSource({ sessionId: 's1', conflictWindowMs: 80 });
   const out = collect(src);
-  src.ingest({ signal: 'ready', source: 'hook' }); // Stop
+  src.ingest({ signal: 'ready', source: 'hook' });
   t.mock.timers.tick(20);
-  src.ingest({ signal: 'resume', source: 'hook' }); // UserPromptSubmit within the window
+  src.ingest({ signal: 'resume', source: 'hook' });
   t.mock.timers.tick(120);
   assert.deepEqual(out.map((s) => s.signal), ['resume'], 'stale ready must not resolve');
   src.destroy();
@@ -144,7 +144,7 @@ test('an explicit confidence override rides through to the resolved signal', (t)
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const src = createStatusSource({ sessionId: 's1', conflictWindowMs: 30 });
   const out = collect(src);
-  src.ingest({ signal: 'ready', source: 'hook', confidence: 'low' }); // idle_prompt-derived
+  src.ingest({ signal: 'ready', source: 'hook', confidence: 'low' });
   t.mock.timers.tick(60);
   assert.equal(out.length, 1);
   assert.equal(out[0].confidence, 'low', 'hook default must not overwrite the override');

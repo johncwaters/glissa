@@ -21,7 +21,6 @@ import { renderGrokHooksFile, classifyGrokHooksFile } from "../session/core/grok
 import { fakePty } from "./helpers/fake-pty.ts";
 import type { SessionOptions } from "../session/sessions.ts";
 
-// Recorded hook records and fake-fs calls are read back through assertions only.
 type Record_ = Record<string, unknown>;
 
 interface GrokSpawnCall {
@@ -346,8 +345,6 @@ test("the setup core renders seven env-inert hooks and distinguishes managed and
   }), "foreign");
 });
 
-// A published build ships hook-relay.js and a run from source resolves hook-relay.ts, so both spellings
-// have to read as managed or a dev-mode file looks foreign and the refresh leaves it alone.
 test("a .ts relay path is recognized as managed, and a foreign basename still is not", () => {
   const rendered = renderedHooks("/repo/session/hook-relay.ts");
   assert.equal(classifyGrokHooksFile(rendered, {

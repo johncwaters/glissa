@@ -45,9 +45,6 @@ test('integration sync fast-forwards an unchecked strict ancestor', () => {
   );
 });
 
-// Ancestry is tri-state on the pre-update side too, and for the same reason: only a probe that RAN and
-// said no earns 'diverged'. A probe that could not run says nothing about the branch, so it must not
-// harden into a claim that the operator's integration branch forked.
 test('an ancestry probe that could not run is never reported as diverged', () => {
   for (const isAncestor of [null, undefined]) {
     assert.deepEqual(
@@ -72,10 +69,6 @@ test('a successful negative probe is still the one thing that means diverged', (
   );
 });
 
-// The post-refusal read. git refuses a fast-forward for several different reasons and names which only
-// in prose, so the outcome comes from the repo's state afterwards. The guard order matches
-// decideIntegrationSync above, or one repo shape would get two different labels depending on whether the
-// pre-check or the refusal reached it.
 test('a refusal that already reached the remote tip is up-to-date, not a failure', () => {
   assert.deepEqual(
     classifyRefusedIntegrationSync({ currentSha: 'same', remoteSha: 'same', isAncestor: true, checkedOut: false }),
@@ -97,9 +90,6 @@ test('a refusal on a still-fast-forwardable branch someone checked out is checke
   );
 });
 
-// The reason this classifier exists: a stale ref lock or a read-only ref store refuses a fast-forward
-// that is still perfectly legal, and calling that 'diverged' tells the operator their integration branch
-// forked when nothing of the sort happened.
 test('a refusal with the fast-forward still legal is an operational update-failed', () => {
   assert.deepEqual(
     classifyRefusedIntegrationSync({ currentSha: 'local', remoteSha: 'remote', isAncestor: true, checkedOut: false }),
@@ -107,8 +97,6 @@ test('a refusal with the fast-forward still legal is an operational update-faile
   );
 });
 
-// Ancestry is tri-state: an unreadable repo answers null, and an unknown must never harden into a claim
-// about history. It falls through to the operational outcome, which is retried, not to diverged.
 test('an unknown ancestry is never reported as diverged', () => {
   assert.deepEqual(
     classifyRefusedIntegrationSync({ currentSha: 'local', remoteSha: 'remote', isAncestor: null, checkedOut: false }),

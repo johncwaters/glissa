@@ -1,25 +1,9 @@
-// Hook source - the AUTHORITATIVE status signal. Claude Code posts HTTP hooks
-// (injected via --settings at spawn) to Glissa's localhost server. A single
-// parameterized Express route `POST /hook/:glissaId/:event` dispatches here.
-//
-// The router is agent-NEUTRAL transport: the event vocabulary it translates with is the registered
-// session's adapter hook profile (session/adapters/claude-code.js), moved out of here in M1 of
-// docs/plan-agent-adapters.md. A registration that names none gets the Claude Code one.
-//
-// Security: localhost bind + origin guard are not enough (a local curl with no
-// Origin passes the guard). Each session has an unguessable bearer token baked into
-// the injected hook URLs; the router rejects any callback whose token does not match
-// the live session's token. Trust level == "can read this session's settings file"
-// == can read the PTY. See docs/postmortem-terminal-detection.md.
-
 import claudeCode from '../session/adapters/claude-code.ts';
 import { HookEnvelope } from '../shared/contracts/index.ts';
 import type { HookPayload } from '../shared/contracts/index.ts';
 
 const { mapHookToSignal, mapHookConfidence, mapHookPromptKind } = claudeCode;
 
-// Method shorthand on purpose: an adapter's hook profile is a plain JS object whose mappers are
-// inferred, and bivariant parameter checking is what lets every adapter satisfy one type.
 export interface HookProfile {
   mapSignal(event: string, payload?: HookPayload): string | null;
   mapConfidence(event: string, payload?: HookPayload): string | null;
@@ -27,15 +11,13 @@ export interface HookProfile {
   mapPayload?(event: string, payload: HookPayload): HookPayload;
 }
 
-// A type alias rather than an interface: the StatusSource ingest boundary takes an indexable signal,
-// and only an alias carries the implicit index signature that makes one assignable to the other.
 export type HookSignal = {
   signal: string;
   source: 'hook';
   confidence?: string;
   promptKind?: string;
   ts: number;
-  // The router always carries both; every consumer guards their absence, so a synthesized signal may not.
+
   event?: string;
   payload?: HookPayload;
 };
@@ -54,10 +36,15 @@ export interface HookHandleResult {
 }
 
 class HookRouter {
-  _sessions: Map<string, { token: string; onSignal: (signal: HookSignal) => void; hooks: HookProfile }>;
+  _sessions: Map<string, {
+    token: string;
+    onSignal: (signal: HookSignal) => void;
+    onEvent: ((event: string, payload: Record<string, unknown>) => void) | null;
+    hooks: HookProfile;
+  }>;
 
   constructor() {
-    this._sessions = new Map(); // glissaId -> { token, onSignal, onEvent, hooks }
+    this._sessions = new Map();
   }
 
   register(glissaId: string, { token, onSignal, onEvent = null, hooks = claudeCode.hooks }: HookRegistration): void {
@@ -71,8 +58,6 @@ class HookRouter {
     this._sessions.delete(glissaId);
   }
 
-  // Handle one inbound hook callback. Returns { status, signal, reason }.
-  // status: HTTP status to reply with. Never throws.
   handle(envelope: unknown): HookHandleResult {
     const parsedEnvelope = HookEnvelope.safeParse(envelope);
     if (!parsedEnvelope.success) {

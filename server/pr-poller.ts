@@ -5,17 +5,6 @@ import { createTickLoop } from './lane-runner.ts';
 import type { TickOutcome } from './lane-runner.ts';
 import type { NormalizedPr, PrGh } from './pr-gh.ts';
 
-// The GitHub PR auto-review poller. IO-FREE by construction: every side effect (gh/git calls,
-// worktree ops, session spawn, telegram, state persistence, timers) is injected, so the tick logic
-// is unit-testable with fakes (mirrors server/lane-runner.ts). Backend wires the real dependencies.
-//
-// Per-PR lifecycle (state persisted across ticks, keyed by `owner/repo#N`):
-//   new / new-head  -> spawn a review session (clean lane in the repo dir, conflict lane in a
-//                      throwaway worktree) -> CLEAN/RESOLVED -> awaiting-checks, CHANGES -> done,
-//                      ERROR -> error.
-//   awaiting-checks -> merged once gh checks are green and no workflow file is touched.
-// A PR that vanishes from the open list (merged/closed elsewhere) is pruned.
-
 interface PrEntry extends ReviewStateEntry {
   wasConflicting?: boolean;
   pingedError?: boolean;
@@ -75,8 +64,7 @@ interface PrPollerDependencies {
   telegram?: (message: string) => void;
   readState?: () => Promise<PrState>;
   writeState?: (state: PrState) => Promise<void>;
-  // The narrow call shapes createTickLoop and raceWithAbort declare, not the globals: setInterval's and
-  // setTimeout's __promisify__ members make those types unimplementable by a hand-fired test timer.
+
   setIntervalFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
   clearIntervalFn?: (handle: NodeJS.Timeout) => void;
   setTimeoutFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
@@ -235,9 +223,6 @@ function createPrPoller(deps: PrPollerDependencies) {
       await finishReview(key, 'ERROR', { reason: firstLine(errorMessage(e)) }, pr, conflicting);
     } finally {
       if (workspace) {
-        // A timeout resolves the verdict while the aborted session is still being killed, and a
-        // surviving process holding a handle inside the worktree makes the discard fail (leaking the
-        // checkout and the branch). Bounded, so a session that resists kill costs a delay, not a leak.
         await drainPending(pendingSpawn);
         await gitWorkspace.discard({ projectPath, workspace });
         await gh.deleteBranch(pr.headRefName);
@@ -249,16 +234,14 @@ function createPrPoller(deps: PrPollerDependencies) {
     const key = pr.key;
     const entry = state[key];
     if (!entry) return false;
-    // Only ever merge the exact head that was reviewed. A commit pushed after the CLEAN/RESOLVED
-    // verdict must be re-reviewed (planReviews picks it up because reviewedHead != headRefOid) before
-    // it can merge - a green check on an unreviewed head must never auto-merge.
+
     if (entry.reviewedHead !== pr.headRefOid) return false;
     const status = await gh.checksStatus(pr.number);
     if (status === 'pending') return false;
 
     if (status === 'green') {
       const wf = await gh.touchesWorkflows(pr.number);
-      if (wf === null) return false; // gh files query failed: fail closed, defer to next tick, never merge blind
+      if (wf === null) return false;
       if (wf) {
         entry.phase = 'done';
         entry.reason = 'touches workflow files, merge manually';
@@ -288,7 +271,6 @@ function createPrPoller(deps: PrPollerDependencies) {
       return false;
     }
 
-    // phase/reason land before the pingedError gate so the dashboard row keeps the current reason
     entry.phase = 'error';
     entry.reason = status === 'none' ? 'no CI checks; merge manually' : 'checks failing';
     if (entry.pingedError) return false;
@@ -308,9 +290,6 @@ function createPrPoller(deps: PrPollerDependencies) {
     return dirty;
   }
 
-  // One dashboard row per live PR: the gh data this tick already fetched (title, url, head) merged
-  // with the lane's own state entry. A key that is in state but no longer live was pruned above, so
-  // iterating the live list is what omits it.
   function summarizePrs(prs: KeyedPr[], slug: string) {
     return prs.map((pr) => {
       const entry = state[pr.key] || {};
@@ -357,8 +336,7 @@ function createPrPoller(deps: PrPollerDependencies) {
       state[pr.key] = entry;
       dirty = true;
       slots -= 1;
-      // runReview's finally block awaits gitWorkspace.discard, which can reject; the .catch here keeps
-      // this a never-rejecting tracking promise so stop()'s Promise.allSettled always resolves promptly.
+
       loop.track(runReview(gh, projectPath, slug, pr).catch((e: unknown) => {
         log.warn(`[pr-poller] review crashed for ${pr.key}: ${errorMessage(e)}`);
       }));
@@ -392,9 +370,7 @@ function createPrPoller(deps: PrPollerDependencies) {
     }
     if (dirty) await persist();
     onTickComplete({ type: 'pr-status', ts: now(), projects: summaries });
-    // EVERY project failing is a gh or network outage, not one bad repo, and re-polling it at full
-    // cadence for the length of the outage is what the backoff exists to stop. One project failing
-    // among several is that repo's problem and must not slow the others down.
+
     if (projects.length > 0 && failures === projects.length) return { failed: true };
     return undefined;
   }

@@ -1,6 +1,3 @@
-// Automatic editor wiring, one rule: a file we own is written whole, and a file the operator maintains
-// is edited only inside a marked block or by the single key that names our server.
-
 const MARKER_NAME = 'glissa-visions';
 const SERVER_ID = 'glissa-visions';
 const HELIX_BEGIN = `# >>> ${MARKER_NAME}`;
@@ -95,8 +92,6 @@ function helixFullBlock(invocation: WireInvocation): string {
   ].join('\n');
 }
 
-// Helix keeps language servers in a per-language list, so ours is added to the markdown entry the
-// operator already has rather than a second entry that would silently replace theirs.
 function addToHelixMarkdown(text: string): { lines: string[]; sawMarkdownLanguage: boolean; changed: boolean } {
   const lines = text.split('\n');
   let inMarkdown = false;
@@ -132,8 +127,6 @@ function helixMerge(existingText: unknown, invocation: WireInvocation): WireResu
   const split = splitMarked(text, HELIX_BEGIN, HELIX_END);
   if (split.unterminated) return { text, changed: false, reason: 'unterminated-block' };
 
-  // Detection runs on the file MINUS our own block, or the markdown entry we wrote last time reads as
-  // the operator's and our block shrinks to a server definition their file no longer carries.
   const beforeEdit = addToHelixMarkdown(split.before);
   const afterEdit = addToHelixMarkdown(split.after);
   const ownsMarkdown = beforeEdit.sawMarkdownLanguage || afterEdit.sawMarkdownLanguage;
@@ -156,7 +149,7 @@ function removeFromHelixMarkdown(text: string): { text: string; changed: boolean
   let changed = false;
   for (let index = 0; index < lines.length; index += 1) {
     if (!/^\s*language-servers\s*=\s*\[/.test(lines[index]) || !lines[index].includes(`"${SERVER_ID}"`)) continue;
-    // Sole entry included: dropping it leaves an empty list, which is what the operator had.
+
     lines[index] = lines[index].replace(new RegExp(`\\s*,\\s*"${SERVER_ID}"|"${SERVER_ID}"\\s*,\\s*|"${SERVER_ID}"`), '');
     changed = true;
   }
@@ -166,8 +159,7 @@ function removeFromHelixMarkdown(text: string): { text: string; changed: boolean
 function helixRemove(existingText: unknown): WireResult {
   const text = typeof existingText === 'string' ? existingText : '';
   const split = splitMarked(text, HELIX_BEGIN, HELIX_END);
-  // A half-written block is refused whole, or unwiring would strip our server from their language list
-  // and leave the dangling block that names it behind.
+
   if (split.unterminated) return { text, changed: false, reason: 'unterminated-block' };
   const stripped = split.hasBlock ? `${split.before.trimEnd()}\n${split.after.replace(/^\n+/, '')}` : text;
   const cleaned = removeFromHelixMarkdown(stripped);
@@ -220,12 +212,10 @@ function parseJsonSettings(existingText: unknown):
     if (!value || typeof value !== 'object' || Array.isArray(value)) return { ok: false, reason: 'not-an-object' };
     return { ok: true, value: value as Record<string, unknown> };
   } catch {
-    // Sublime and Kate both tolerate comments the strict parser does not, and a rewrite would drop them.
     return { ok: false, reason: 'unparseable' };
   }
 }
 
-// Only the one key naming our server is written; every sibling setting round-trips untouched.
 function jsonSettingsMerge(existingText: string, { path: keyPath, value }: JsonSettingsTarget): WireResult {
   const parsed = parseJsonSettings(existingText);
   if (!parsed.ok) return { text: existingText, changed: false, reason: parsed.reason };

@@ -1,7 +1,3 @@
-// Unit tests for the relocated state-machine tables (session/core/state-machine.ts).
-// Locks the matrix shape (every state's allowed events -> target states), the two
-// guards, and the entry/exit hooks against the engine in sessions.js that consumes them.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -15,7 +11,6 @@ import type { HookSession } from '../session/core/state-machine.ts';
 import { STATES, KILLABLE_STATES } from '../shared/states.ts';
 import type { SessionState } from '../shared/states.ts';
 
-// A missing hook is a table regression, not a reason for an optional call: fail loudly instead.
 function entryHookFor(state: SessionState) {
   const hook = ENTRY_HOOKS[state];
   assert.ok(hook, `${state} must have an entry hook`);
@@ -124,15 +119,14 @@ test('GUARDS.user_restart only allows from DONE or FAILED', () => {
 });
 
 test('GUARDS.user_reset requires DONE/FAILED + dead PTY + no worktree', () => {
-  // Allowed: finished, PTY dead, worktree already merged/discarded.
   assert.equal(GUARDS.user_reset({ state: STATES.DONE, ptyProcess: null, worktreeDir: null }), true);
   assert.equal(GUARDS.user_reset({ state: STATES.FAILED, ptyProcess: null, worktreeDir: null }), true);
-  // Rejected: wrong state.
+
   assert.equal(GUARDS.user_reset({ state: STATES.RUNNING, ptyProcess: null, worktreeDir: null }), false);
   assert.equal(GUARDS.user_reset({ state: STATES.COMPLETE, ptyProcess: null, worktreeDir: null }), false);
-  // Rejected: PTY still alive.
+
   assert.equal(GUARDS.user_reset({ state: STATES.DONE, ptyProcess: {}, worktreeDir: null }), false);
-  // Rejected: worktree still on disk (unmerged work).
+
   assert.equal(GUARDS.user_reset({ state: STATES.DONE, ptyProcess: null, worktreeDir: '/tmp/wt' }), false);
 });
 
@@ -147,7 +141,7 @@ test('ENTRY_HOOKS emit the right lifecycle events with the session name', () => 
     ['session-failed', { name: 'sess-A' }],
     ['session-done', { name: 'sess-A' }],
   ]);
-  // COMPLETE/WAITING/FAILED/DONE have entry hooks.
+
   assert.equal(Object.keys(ENTRY_HOOKS).length, 4);
 });
 

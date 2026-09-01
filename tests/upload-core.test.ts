@@ -1,7 +1,3 @@
-// Pure rules behind POST /upload/:sessionId: which content types are images Glissa will store, the
-// on-disk name it gives them, the size cap, the bracketed-paste framing of the saved path, and which
-// older uploads a session's retention sweep drops.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 

@@ -433,8 +433,6 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
     return fixedLanes.get(name) || null;
   }
 
-  // current() is the stringly-typed snapshot reader the control plane uses; these two are the typed
-  // readers, so a caller that needs the lane's own API does not have to assert its way back to it.
   const currentIngest = () => ingestLane;
   const currentVisions = () => visionsLane;
 

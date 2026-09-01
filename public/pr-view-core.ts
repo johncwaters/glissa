@@ -1,12 +1,7 @@
-// ── PR review view core (pure) ───────────────────────────────
-// Attention ordering and severity mapping for the PR auto-review rows. No DOM, no IO.
-
 import { attentionSignature } from './attention-ack-core.ts';
 import { numberOr, textOr } from './coerce-core.ts';
 import { lanePlaceholder } from './lane-placeholder-core.ts';
 
-// Rank is attention-first and deliberately coarser than severity: an errored PR and one whose review
-// asked for changes both need the operator, but only the error is a lane failure.
 export interface PrRow {
   number?: number;
   phase?: string | null;
@@ -71,8 +66,6 @@ const PHASE_LABEL: Record<string, string> = {
 
 const UNKNOWN_RANK = 99;
 
-// The lane has no state entry for a PR it has not reached yet, and sends a null phase for it. That is
-// a known state (nothing has happened), not an unrecognized one.
 export const PENDING_PHASE = 'pending';
 
 export function prStatusPlaceholder(status: PrStatusSnapshot | null | undefined) {
@@ -83,8 +76,6 @@ export function normalizePhase(phase: string | null | undefined) {
   return phase == null ? PENDING_PHASE : phase;
 }
 
-// An unrecognized phase renders as its raw string rather than a guess; `known` lets a view mark that
-// row so the styling can say "this came from a lane we do not have vocabulary for".
 export function phaseLabel(phase: string | null | undefined) {
   const key = normalizePhase(phase);
   const label = PHASE_LABEL[key];
@@ -92,9 +83,6 @@ export function phaseLabel(phase: string | null | undefined) {
   return { label: String(key), known: false };
 }
 
-// pingedError outranks the phase: the lane already told the operator something broke, so the row says
-// so even while the phase string still reads as an ordinary state. An unrecognized phase stays dim
-// rather than guessing, but a review in flight is at least worth an info stripe.
 export function severityFor(phase: string | null | undefined, { inFlight = false, pingedError = false }: { inFlight?: boolean; pingedError?: boolean } = {}) {
   if (pingedError) return 'crit';
   const mapped = PHASE_SEVERITY[normalizePhase(phase)];
@@ -103,13 +91,10 @@ export function severityFor(phase: string | null | undefined, { inFlight = false
   return 'dim';
 }
 
-// THE errors predicate: what the summary line counts and what the attention signature is built from,
-// so the stat and the dot cannot come to disagree about which PR is broken.
 export function prHasError(pr: PrRow | null | undefined) {
   return Boolean(pr?.pingedError) || pr?.phase === 'error';
 }
 
-// One pass for the per-project summary line and the tab attention dot.
 export function summarizePrs(prs: unknown) {
   const list: PrRow[] = Array.isArray(prs) ? prs : [];
   let inReview = 0;
@@ -121,9 +106,6 @@ export function summarizePrs(prs: unknown) {
   return { open: list.length, inReview, errors };
 }
 
-// What the PRs dot is acknowledged against: which PRs are broken, and how. Identity plus phase, so a
-// resolved error empties the signature and a new one (or the same PR moving to a different broken
-// phase) re-lights the dot the operator already cleared.
 export function prAttentionSignature(snapshot: PrStatusSnapshot | null | undefined) {
   const projects: (PrProject | null)[] = Array.isArray(snapshot?.projects) ? snapshot.projects : [];
   const parts: string[] = [];
@@ -138,11 +120,6 @@ export function prAttentionSignature(snapshot: PrStatusSnapshot | null | undefin
   return attentionSignature(parts);
 }
 
-// Phases that mean a carbon unit has to do something: the lane failed, the review asked for changes,
-// or the branch is conflicting and nothing is resolving it yet. `resolving-conflicts` is deliberately
-// absent (the lane is working on it), and so is a historical `wasConflicting` flag on a PR whose phase
-// has moved on: that is resolved history, not an open ask. This is THE needs-action vocabulary; the
-// Radar summary and any future consumer read it here rather than re-deriving phase meanings.
 const NEEDS_ACTION_PHASES = new Set(['error', 'done', 'changes-requested', 'conflicting']);
 
 export function prNeedsAction(pr: PrRow | null | undefined) {
@@ -156,8 +133,6 @@ function rankFor(pr: PrRow | null | undefined) {
   return rank == null ? UNKNOWN_RANK : rank;
 }
 
-// Returns a new array; the input is never mutated. Ties fall to the newest PR first, then to the order
-// the backend sent, so a steady poll does not reshuffle rows.
 export function sortPrsByAttention(prs: unknown): PrRow[] {
   if (!Array.isArray(prs)) return [];
   return (prs as PrRow[])

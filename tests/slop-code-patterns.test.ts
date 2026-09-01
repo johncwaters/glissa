@@ -1,7 +1,3 @@
-// Unit tests for the in-house code-slop detector (session/core/slop-code-patterns.ts).
-// Repo convention (MEMORY dash-literals-roundtrip): NO literal em/en dash or ellipsis in
-// this file; build them via String.fromCharCode for the no-dash source assertions.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -13,12 +9,9 @@ const EM_DASH = String.fromCharCode(0x2014);
 const EN_DASH = String.fromCharCode(0x2013);
 const ELLIPSIS = String.fromCharCode(0x2026);
 
-// Subrule ids present in a detect() run.
 function subrules(content: string, relPath?: string) {
   return detectCodeSlop(content, relPath).map((f) => f.subrule);
 }
-
-// --- extOf ----------------------------------------------------------------
 
 test('extOf lowercases the extension and ignores dotfiles/no-ext', () => {
   assert.equal(extOf('a/b/c.TS'), '.ts');
@@ -27,8 +20,6 @@ test('extOf lowercases the extension and ignores dotfiles/no-ext', () => {
   assert.equal(extOf('.gitignore'), '');
   assert.equal(extOf(undefined), '');
 });
-
-// --- swallowed exception (lies) -------------------------------------------
 
 test('flags empty and comment-only catch blocks, not handled ones', () => {
   assert.ok(subrules('try { f() } catch (e) {}', 'a.js').includes('swallowed-exception'));
@@ -39,8 +30,6 @@ test('flags empty and comment-only catch blocks, not handled ones', () => {
   );
 });
 
-// --- opener comments (noise) ----------------------------------------------
-
 test('flags AI narration openers, not ordinary comments', () => {
   assert.ok(subrules('// Now we initialize the cache', 'a.js').includes('opener-comment'));
   assert.ok(subrules('// This function returns the total', 'a.js').includes('opener-comment'));
@@ -48,8 +37,6 @@ test('flags AI narration openers, not ordinary comments', () => {
   assert.equal(subrules('// returns the total', 'a.js').includes('opener-comment'), false);
   assert.equal(subrules('// TODO: clean this up', 'a.js').includes('opener-comment'), false);
 });
-
-// --- placeholder (lies) ---------------------------------------------------
 
 test('flags placeholder hand-waving but not normal prose', () => {
   assert.ok(subrules('// in a real implementation this calls the API', 'a.js').includes('placeholder'));
@@ -62,8 +49,6 @@ test('bare TODO/FIXME is not flagged', () => {
   assert.equal(found.includes('placeholder'), false);
 });
 
-// --- debug leftovers (noise) ----------------------------------------------
-
 test('flags console.* and debugger, not lookalikes', () => {
   assert.ok(subrules('console.log("x")', 'a.js').includes('debug-leftover'));
   assert.ok(subrules('  debugger;', 'a.ts').includes('debug-leftover'));
@@ -75,23 +60,17 @@ test('python print is flagged only on .py', () => {
   assert.equal(subrules('print("x")', 'a.js').includes('debug-print-py'), false);
 });
 
-// --- hedge comments (soul) ------------------------------------------------
-
 test('flags hedging comments, not confident ones', () => {
   assert.ok(subrules('// this should work for most cases', 'a.js').includes('hedge-comment'));
   assert.ok(subrules('# probably fine', 'a.py').includes('hedge-comment'));
   assert.equal(subrules('// validated against the schema', 'a.js').includes('hedge-comment'), false);
 });
 
-// --- type escapes (soul, TS only) -----------------------------------------
-
 test('type-escape fires on TS files only', () => {
   assert.ok(subrules('const x = y as any;', 'a.ts').includes('type-escape'));
   assert.ok(subrules('// @ts-ignore\nfoo();', 'a.tsx').includes('type-escape'));
   assert.equal(subrules('const x = y as any;', 'a.js').includes('type-escape'), false);
 });
-
-// --- shape + ordering -----------------------------------------------------
 
 test('findings carry subrule, axis, and ascending index', () => {
   const content = 'console.log(1)\n// in a real implementation we skip this';
@@ -112,13 +91,11 @@ test('empty or non-string content yields no findings', () => {
   assert.deepEqual(detectCodeSlop(null, 'a.js'), []);
 });
 
-// --- cap + idempotency (perf hardening) -----------------------------------
-
 test('detectCodeSlop caps total findings (default and explicit)', () => {
-  const content = 'console.log(1)\n'.repeat(500); // 500 candidate matches
+  const content = 'console.log(1)\n'.repeat(500);
   assert.equal(detectCodeSlop(content, 'a.js').length, DEFAULT_FINDINGS_CAP);
   assert.equal(detectCodeSlop(content, 'a.js', 50).length, 50);
-  assert.equal(detectCodeSlop(content, 'a.js', 10000).length, 500); // below cap: all
+  assert.equal(detectCodeSlop(content, 'a.js', 10000).length, 500);
 });
 
 test('detectCodeSlop is idempotent (no shared-regex lastIndex leak)', () => {
@@ -126,12 +103,10 @@ test('detectCodeSlop is idempotent (no shared-regex lastIndex leak)', () => {
   const first = detectCodeSlop(content, 'a.js');
   const second = detectCodeSlop(content, 'a.js');
   assert.deepEqual(first, second);
-  // Interleave a TS file (runs the type-escape subrule) then re-run the JS file.
+
   detectCodeSlop('const x = y as any;', 'a.ts');
   assert.deepEqual(detectCodeSlop(content, 'a.js'), first);
 });
-
-// --- no-dash source guard (dash-literals-roundtrip) -----------------------
 
 test('new slop source files contain no literal em/en dash or ellipsis', () => {
   const files = ['session/core/slop-code-patterns.ts', 'session/core/anti-slop-prompt.ts'];

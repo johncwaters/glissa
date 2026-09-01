@@ -1,17 +1,3 @@
-// Dev-only synthetic load harness for terminal-responsiveness measurement.
-//
-// BROWSER-RUN: open `/perf.html` under `npm run dev`. It is NOT part of the
-// production build (perf.html is not a build entry, so this module is never
-// bundled into index) and is NOT headlessly verified: it is a manual
-// measurement tool for the Phase 1 / Phase 2 gate.
-//
-// It drives K real xterm terminals with dense ANSI corpus at a controlled rate
-// and reports the two browser-side gate metrics:
-//   T8 = longest main-thread task during the burst (PerformanceObserver longtask)
-//   T9 = echo latency p95 (a small write timed through parse-drain + next paint,
-//        while all K terminals are under bulk load)
-// It writes via `term.write(data, cb)`, so it also exercises the parse-drain
-// callback that the Phase 2 backpressure design is built on.
 
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
@@ -27,13 +13,11 @@ function makeTerminal(mountInto: HTMLElement, useWebgl: boolean) {
   if (useWebgl) {
     try {
       const addon = new WebglAddon();
-      // Mirror the dashboard: on context loss, dispose so xterm falls back to
-      // its canvas/DOM renderer instead of freezing (what an uncapped run does).
-      addon.onContextLoss(() => { try { addon.dispose(); } catch { /* ignore */ } });
+      addon.onContextLoss(() => { try { addon.dispose(); } catch {  } });
       term.loadAddon(addon);
-    } catch { /* canvas fallback */ }
+    } catch {  }
   }
-  try { fit.fit(); } catch { /* ignore */ }
+  try { fit.fit(); } catch {  }
   return term;
 }
 
@@ -57,7 +41,6 @@ export interface StressOptions {
   budgetPerFrame?: number;
 }
 
-// Drive K terminals for `durationMs`; resolves to the metrics object.
 export function runStress(opts: StressOptions = {}) {
   const {
     sessions = 6,
@@ -66,9 +49,9 @@ export function runStress(opts: StressOptions = {}) {
     seed = 1,
     echoEveryMs = 120,
     container = document.body,
-    webglCap = 12, // mirror MAX_WEBGL_CONTEXTS in session-card.js; set >= sessions to reproduce the uncapped freeze
-    strategy = 'naive', // 'naive' = write every terminal every frame; 'gated' = callback-gated round-robin
-    budgetPerFrame = sessions, // 'gated' only: max terminals serviced per frame (= sessions -> Option B; < sessions -> Option A bounded)
+    webglCap = 12,
+    strategy = 'naive',
+    budgetPerFrame = sessions,
   } = opts;
 
   const grid = document.createElement('div');
@@ -87,7 +70,6 @@ export function runStress(opts: StressOptions = {}) {
     terms.push(makeTerminal(cell, useWebgl));
   }
 
-  // T8: longest main-thread task.
   let maxTask = 0;
   let taskCount = 0;
   let obs: PerformanceObserver | null = null;
@@ -99,9 +81,8 @@ export function runStress(opts: StressOptions = {}) {
       }
     });
     obs.observe({ entryTypes: ['longtask'] });
-  } catch { /* longtask unsupported in this browser */ }
+  } catch {  }
 
-  // One dense chunk per terminal (re-parsed each frame = sustained load).
   const corpus: string[] = [];
   for (let i = 0; i < sessions; i++) corpus.push(generateCorpus(linesPerTick, seed + i));
 
@@ -109,30 +90,17 @@ export function runStress(opts: StressOptions = {}) {
   let frames = 0;
   const echoLatencies: number[] = [];
   let lastEcho = 0;
-  // Sub-50ms jank signals the longtask API (50ms floor) cannot see:
-  // frame gaps far above the refresh interval = dropped frames; write-loop
-  // time = synchronous dispatch cost per frame.
   let prevTs = 0;
   let maxFrameGap = 0;
   const frameGaps: number[] = [];
   let maxWriteLoop = 0;
-  // Per-terminal input vs parse-drain. (written - drained) = bytes still queued
-  // in that terminal's internal xterm write buffer = its real backlog depth.
   const bytesWritten: number[] = new Array(sessions).fill(0);
   const bytesDrained: number[] = new Array(sessions).fill(0);
-  // 'gated' strategy state: per-terminal source backlog + one-in-flight gate.
   const bytesSource: number[] = new Array(sessions).fill(0);
   const pending: string[] = new Array(sessions).fill('');
   const inFlight: boolean[] = new Array(sessions).fill(false);
   let rrPointer = 0;
 
-  // Feed one frame's worth of source into the terminals per the chosen strategy.
-  // 'naive': write every terminal every frame regardless of whether it kept up
-  //   (models an unthrottled feed -> N parsers flood the main thread).
-  // 'gated': source accrues per terminal; each frame service up to budgetPerFrame
-  //   terminals round-robin, each only when its prior write has DRAINED (one
-  //   in-flight). budget == sessions is Option B (per-session backpressure);
-  //   budget < sessions adds Option A's bounded per-frame coordination.
   function feedFrame() {
     if (strategy === 'naive') {
       for (let i = 0; i < terms.length; i++) {
@@ -177,8 +145,8 @@ export function runStress(opts: StressOptions = {}) {
         sourceKB: round2(bytesSource[i] / 1024),
         writtenKB: round2(bytesWritten[i] / 1024),
         drainedKB: round2(bytesDrained[i] / 1024),
-        pendingKB: round2((bytesSource[i] - bytesWritten[i]) / 1024), // held by the scheduler, not yet fed (terminal lag)
-        xtermBacklogKB: round2((bytesWritten[i] - bytesDrained[i]) / 1024), // fed but not yet parsed
+        pendingKB: round2((bytesSource[i] - bytesWritten[i]) / 1024),
+        xtermBacklogKB: round2((bytesWritten[i] - bytesDrained[i]) / 1024),
         lines: t.buffer?.active?.length ?? 0,
       }));
       let maxBacklogKB = 0;
@@ -187,20 +155,20 @@ export function runStress(opts: StressOptions = {}) {
         sessions,
         strategy,
         budgetPerFrame: strategy === 'gated' ? budgetPerFrame : null,
-        webglTerms, // on WebGL; the rest (sessions - webglTerms) use canvas
+        webglTerms,
         canvasTerms: sessions - webglTerms,
-        maxBacklogKB, // worst per-terminal undrained xterm buffer
+        maxBacklogKB,
         perTerm,
         durationMs: Math.round(now - start),
         frames,
-        longestTaskMs: round2(maxTask), // T8 (only tasks > 50ms; 0 = none crossed the floor)
+        longestTaskMs: round2(maxTask),
         longTaskCount: taskCount,
-        maxWriteLoopMs: round2(maxWriteLoop), // synchronous write-dispatch cost / frame
-        maxFrameGapMs: round2(maxFrameGap), // worst dropped-frame gap (jank below the 50ms floor)
+        maxWriteLoopMs: round2(maxWriteLoop),
+        maxFrameGapMs: round2(maxFrameGap),
         p95FrameGapMs: round2(percentile(frameGaps.slice().sort((a, b) => a - b), 95)),
         mbWritten: round2(totalBytes / 1048576),
         echoP50Ms: round2(percentile(sorted, 50)),
-        echoP95Ms: round2(percentile(sorted, 95)), // T9
+        echoP95Ms: round2(percentile(sorted, 95)),
         echoSamples: sorted.length,
       };
       console.table(metrics);
@@ -219,8 +187,6 @@ export function runStress(opts: StressOptions = {}) {
       feedFrame();
       const wDur = performance.now() - w0;
       if (wDur > maxWriteLoop) maxWriteLoop = wDur;
-      // Echo probe: time a small write through parse-drain + next paint while
-      // every terminal is under bulk load.
       if (now - lastEcho >= echoEveryMs) {
         lastEcho = now;
         const t0 = performance.now();

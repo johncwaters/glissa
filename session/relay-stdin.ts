@@ -1,4 +1,3 @@
-// Structural rather than node:stream's Readable, so a relay test can hand main() a plain emitter.
 interface StdinLike {
   on(event: string, listener: (chunk: Buffer | string) => void): unknown;
 }

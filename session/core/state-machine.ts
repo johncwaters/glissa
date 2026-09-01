@@ -1,14 +1,7 @@
 import { STATES } from "../../shared/states.ts";
 import type { SessionState } from "../../shared/states.ts";
 
-// Pure state-machine tables for the Session lifecycle, extracted from sessions.js
-// (relocated verbatim, behavior-preserving). The transition() engine in sessions.js
-// consumes these. Guards/hooks receive the `session` instance as a parameter and call
-// session.emit / read session.path|state|name; they never import Session, so there is
-// no require cycle.
 
-// The structural slices of Session the tables touch, so the tables can be typed without importing it.
-// A guard reads state and liveness; a hook only emits, and reads the fields it names in the payload.
 interface GuardSession {
   state?: SessionState;
   ptyProcess?: unknown;
@@ -37,12 +30,6 @@ const TRANSITIONS: TransitionTable = Object.freeze({
     user_kill: STATES.DONE,
   },
   [STATES.STARTING]: {
-    // First PTY output means Claude's TUI is up, NOT that it is working. A freshly
-    // spawned session sits at its prompt on the idle glyph with no turn submitted, so
-    // it lands in IDLE ("Idle"), not RUNNING ("Working"). It wakes to RUNNING on the
-    // first real work signal: `resume` (UserPromptSubmit hook) or the title `working`
-    // spinner, both of which map IDLE -> new_output -> RUNNING. The title source's
-    // _hasSeenSpinner guard keeps the startup idle glyph from arming a spurious `ready`.
     first_output: STATES.IDLE,
     process_exit: STATES.FAILED,
     user_kill: STATES.DONE,
@@ -57,7 +44,6 @@ const TRANSITIONS: TransitionTable = Object.freeze({
   [STATES.WAITING]: {
     user_input: STATES.RUNNING,
     user_dismiss: STATES.RUNNING,
-    // Authoritative late `ready` (Stop/idle hook) while WAITING -> COMPLETE.
     task_complete: STATES.COMPLETE,
     user_kill: STATES.DONE,
     process_exit_ok: STATES.DONE,
@@ -66,7 +52,6 @@ const TRANSITIONS: TransitionTable = Object.freeze({
   [STATES.IDLE]: {
     new_output: STATES.RUNNING,
     prompt_detected: STATES.WAITING,
-    // Authoritative late `ready` while IDLE -> COMPLETE.
     task_complete: STATES.COMPLETE,
     process_exit_ok: STATES.DONE,
     process_exit_fail: STATES.FAILED,
@@ -82,9 +67,6 @@ const TRANSITIONS: TransitionTable = Object.freeze({
   },
   [STATES.DONE]: {
     user_restart: STATES.INITIALIZING,
-    // Close-out: a finished session whose worktree has been merged/discarded is reset to DORMANT so
-    // its card parks for reuse (a fresh start re-forks a worktree off the now-updated integration
-    // branch). Guarded (user_reset) so it never fires on a live PTY or unmerged work.
     user_reset: STATES.DORMANT,
   },
   [STATES.FAILED]: {
@@ -95,7 +77,6 @@ const TRANSITIONS: TransitionTable = Object.freeze({
   },
 });
 
-// Guards: return true if transition is allowed, false otherwise
 const GUARDS: GuardTable = {
   spawn_success(_session, detail) {
     return (detail as { spawnCwdExists?: unknown } | null | undefined)?.spawnCwdExists === true;
@@ -104,9 +85,6 @@ const GUARDS: GuardTable = {
     return session.state === STATES.DONE || session.state === STATES.FAILED;
   },
   user_reset(session) {
-    // Allowed only once a finished session is fully settled: the PTY is dead AND the worktree has
-    // already been merged/discarded (worktreeDir null). This prevents resetting a session whose work
-    // is still on disk or whose PTY is alive, preserving "no implicit state mutation" and no data loss.
     return (
       (session.state === STATES.DONE || session.state === STATES.FAILED) &&
       session.ptyProcess == null &&
@@ -115,15 +93,11 @@ const GUARDS: GuardTable = {
   },
 };
 
-// Entry/exit hooks keyed by state
 const ENTRY_HOOKS: StateHookTable = {
   [STATES.COMPLETE](session) {
-    // Turn ended, process still alive: the pre-/commit checkpoint. Emit-only
-    // (purity contract); the backend listener runs the async post-turn checker.
     session.emit("post-turn-check", {
       id: session.id,
       name: session.name,
-      // The worktree when isolated, so the auto-fixer edits the worktree, never the real checkout.
       path: session.worktreeDir || session.path,
     });
   },

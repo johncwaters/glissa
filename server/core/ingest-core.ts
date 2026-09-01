@@ -1,12 +1,3 @@
-/*
- * Pure core of the ingestion pipeline (docs/plan-ingestion.md, M6): the config resolver, event
- * normalization, the publish-time scrub, the per-source bounded rings, and the context digest the
- * Visions lane's dispatch prompt carries. No IO, no timers, no clock: the caller passes `now` in and gets
- * a verdict, an event, or a string back.
- *
- * The scrub runs HERE, at publish time, before ring insertion, so a secret never sits in a ring, a
- * snapshot, an activity delta, or a digest.
- */
 
 import { positiveInt } from './ingest-number-core.ts';
 
@@ -62,7 +53,6 @@ export interface IngestStore {
 
 const SOURCE_NAMES: readonly SourceName[] = ['terminal', 'agentLogs', 'git', 'fs', 'shellHistory', 'editor'];
 
-// The Sources table in docs/plan-ingestion.md. These are the load-bearing bound, not tuning hints.
 const SOURCE_DEFAULTS = Object.freeze({
   terminal: Object.freeze({
     maxEntries: 200,
@@ -83,8 +73,6 @@ const SOURCE_DEFAULTS = Object.freeze({
   editor: Object.freeze({ maxEntries: 100, maxBytes: 32 * 1024, digestQuota: 6 }),
 });
 
-// A source may only publish the kinds it declared, so a typo becomes a dropped event rather than a
-// category nobody consumes.
 const KINDS_BY_SOURCE: Readonly<Record<string, readonly string[]>> = Object.freeze({
   terminal: Object.freeze(['output']),
   agentLogs: Object.freeze(['agent-turn', 'agent-tool']),
@@ -101,14 +89,7 @@ const DEFAULT_DIGEST_BUDGET_CHARS = 2000;
 const SCRUB_PLACEHOLDER = '[scrubbed]';
 const DIGEST_HEADER = 'Recent activity on this machine, newest first:';
 
-// --- Config ---------------------------------------------------------------
 
-/*
- * The two non-numeric source options: `sources.fs.roots`, a list of directories widening the fs source
- * beyond the projects with active sessions, and `sources.shellHistory.shells`, naming which shells to
- * tail. They need their own branch because every other option resolves through positiveInt, which would
- * silently turn a configured list back into the empty default.
- */
 const LIST_KEYS: Partial<Record<SourceName, string>> = Object.freeze({ fs: 'roots', shellHistory: 'shells' });
 
 function stringList(raw: unknown): string[] {
@@ -145,11 +126,6 @@ function resolveSource(name: SourceName, raw: unknown): IngestSourceConfig {
   return resolved as IngestSourceConfig;
 }
 
-/**
- * config.ingest, normalized, visions-style: absent, malformed, or anything other than
- * `enabled: true` resolves to the disabled shape, and each source needs its own `enabled: true` on top
- * of that. This is what makes the lane cost nothing until it is asked for.
- */
 function resolveIngestConfig(raw: unknown): IngestConfig {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return disabledConfig();
   const rawConfig = raw as Record<string, unknown>;
@@ -168,88 +144,36 @@ function enabledSourceNames(config: IngestConfig | null | undefined): SourceName
   return SOURCE_NAMES.filter((name) => config.sources[name] && config.sources[name].enabled === true);
 }
 
-// --- Scrub ----------------------------------------------------------------
 
-/*
- * PSReadLine's own sensitive-word list, plus the two shapes it does not cover: a bearer header and a
- * url with credentials in it. Every value pattern stops at a line break, so one secret on one line of a
- * multi-line terminal chunk costs that line and nothing else.
- */
 const SECRET_WORD = '(?:password|passwd|pwd|token|api[_-]?key|secret|credential|auth[_-]?token|access[_-]?key|secret[_-]?key|private[_-]?key|client[_-]?secret|connection[_-]?string)';
 const QUOTED_OR_BARE = '(?:"[^"\\r\\n]*"|\'[^\'\\r\\n]*\'|[^\\s\\r\\n]+)';
-// Horizontal whitespace only. A plain \s would let the gap between the name and its value swallow a
-// newline, and one secret assignment would then scrub the innocent line under it.
 const GAP = '[^\\S\\r\\n]';
-/*
- * How far a command-anchored pattern may reach for its flag. Some short flags are a credential in one
- * command and a port, a listing or a uid everywhere else (`-p`, `-u`), so the COMMAND NAME is what makes
- * them safe to match at all; the reach is bounded so the lazy walk can never cost a whole line per start.
- *
- * It stops at a command SEPARATOR, which is what keeps `curl ... | sh && docker run -u 1000:1000` from
- * handing curl's anchor to a flag on the other side of the pipe. A separator can only appear inside a
- * credential value when the value is quoted, and a quoted value is matched by its own alternative, which
- * reaches through all three characters happily.
- */
 const FLAG_REACH = '[^\\r\\n;&|]{0,200}?';
 const MYSQL_TOOLS = '(?:mysql|mysqldump|mysqladmin|mysqlshow|mariadb|mariadb-dump)';
 
 const SCRUB_PATTERNS = [
-  // name = value, name: value, name => value. Also covers npm `:_authToken=`, `aws_secret_access_key=`,
-  // `set NAME=value`, and an assignment quoted inside an `echo "token=abc" > .env`.
   new RegExp(`(${SECRET_WORD}${GAP}*(?:=>|[:=])${GAP}*)${QUOTED_OR_BARE}`, 'gi'),
-  // --token value, -Password value, docker login --password value
   new RegExp(`((?:^|\\s)--?${SECRET_WORD}${GAP}+)${QUOTED_OR_BARE}`, 'gi'),
-  /*
-   * -pwSecret, -pw secret, -pw=secret. Single dash only, so `--password value` stays with the pattern
-   * above it, and the lookahead is what makes `-pw`/`-pwd` a COMPLETE flag: without it `-pwfile` reads as
-   * `-pw` plus a value and a bare `-pwd` backtracks into `-pw` plus `d`. Case sensitive, because under an
-   * `i` flag that lookahead would also refuse the uppercase start of `-pwSecret`; the separated forms of
-   * `pwd` are covered case-insensitively by the two patterns above regardless.
-   */
   new RegExp(`((?:^|\\s)-(?:pwd|pw)(?![a-z])${GAP}*=?${GAP}*)${QUOTED_OR_BARE}`, 'g'),
-  // PowerShell's own plaintext-credential idiom
   new RegExp(`(-AsPlainText${GAP}+)${QUOTED_OR_BARE}`, 'gi'),
-  // Windows `setx NAME value`, whose value is positional where `set NAME=value` is an assignment.
   new RegExp(`((?:^|\\s)setx${GAP}+[^\\s\\r\\n]*${SECRET_WORD}[^\\s\\r\\n]*${GAP}+)${QUOTED_OR_BARE}`, 'gi'),
-  // Authorization: Bearer <token>
   new RegExp(`(\\bBearer${GAP}+)[A-Za-z0-9._~+/=-]{8,}`, 'gi'),
-  // Authorization: Basic <base64>. The header is the anchor, because `Basic` alone opens ordinary prose.
   new RegExp(`(\\bauthorization${GAP}*:${GAP}*Basic${GAP}+)[A-Za-z0-9+/=_-]{8,}`, 'gi'),
-  // `docker login -p secret`: -p is a port mapping everywhere else in docker, so `login` is the anchor.
-  // Both separators, since pflag takes `-p=secret` as readily as `-p secret`.
   new RegExp(`(\\bdocker${GAP}+login\\b${FLAG_REACH}${GAP}-p(?:${GAP}+|=))${QUOTED_OR_BARE}`, 'gi'),
-  // `curl -u user:pass`: -u is a uid:gid in docker and a plain username elsewhere, so curl is the anchor.
   new RegExp(`(\\bcurl\\b${FLAG_REACH}${GAP}(?:--user|-u)(?:${GAP}+|=)[^\\s:\\r\\n]+:)${QUOTED_OR_BARE}`, 'gi'),
-  /*
-   * `mysql -pHunter2`: this family attaches the password to -p with no space. Case SENSITIVE on purpose,
-   * because -P is that same family's port flag and a case-insensitive match would eat the port number.
-   */
   new RegExp(`(\\b${MYSQL_TOOLS}\\b${FLAG_REACH}${GAP}-p)${QUOTED_OR_BARE}`, 'g'),
-  // scheme://user:password@host
   /\b([a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:)[^\s@/]+(?=@)/gi,
 ];
 
-/*
- * Shapes that ARE the secret. These carry no name to anchor on, so there is no prefix to keep and the
- * whole match goes; every one of them is an issued-credential shape whose own prefix identifies its
- * issuer, which is what keeps a git sha, a UUID or a bare `eyJ` out of them.
- */
 const SECRET_SHAPE_PATTERNS = [
-  // AWS access key id
   /\bAKIA[0-9A-Z]{16}\b/g,
-  // GitHub: ghp_ (personal), gho_ (oauth), ghu_/ghs_ (app), ghr_ (refresh), plus the fine-grained shape
   /\bgh[pousr]_[A-Za-z0-9]{16,}\b/g,
   /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
-  // Slack bot, user, app and legacy tokens
   /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/g,
-  // A JWT is the period-separated triplet, never a bare eyJ
   /\beyJ[A-Za-z0-9_=-]{6,}\.[A-Za-z0-9_=-]{6,}\.[A-Za-z0-9_=-]{4,}/g,
-  // The header announcing a private key. Its BODY is a documented limit, not a pattern.
   /-----BEGIN(?:[A-Z0-9 ]+)? PRIVATE KEY-----/g,
 ];
 
-// Named patterns keep their leading group (the name, the flag, the scheme) and replace only the value;
-// a shape pattern is the value, so the match goes whole.
 function scrubText(text: unknown): string {
   if (typeof text !== 'string' || !text) return typeof text === 'string' ? text : '';
   let scrubbed = text;
@@ -264,7 +188,6 @@ function scrubText(text: unknown): string {
   return scrubbed;
 }
 
-// Detail is small and structured by contract, so one shallow pass covers it.
 function scrubDetail(detail: unknown): Record<string, string | number | boolean> | null {
   if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return null;
   const scrubbed: Record<string, string | number | boolean> = {};
@@ -282,7 +205,6 @@ function scrubDetail(detail: unknown): Record<string, string | number | boolean>
   return scrubbed;
 }
 
-// --- Events ---------------------------------------------------------------
 
 function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -294,11 +216,6 @@ function normalizeScope(raw: unknown): IngestScope {
   return { root: nonEmptyString(rawScope.root), sessionId: nonEmptyString(rawScope.sessionId) };
 }
 
-/**
- * One raw adapter push, checked and scrubbed. An unknown source, an undeclared kind, or an empty
- * summary is rejected (null) rather than stored half-formed: the rings only ever hold the one shape
- * every consumer reads. `seq` is stamped by the caller and is the sole ordering key; `ts` is display.
- */
 function normalizeEvent(raw: unknown, { seq, now }: { seq: number; now: number }): IngestEvent | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const rawEvent = raw as Record<string, unknown>;
@@ -306,12 +223,6 @@ function normalizeEvent(raw: unknown, { seq, now }: { seq: number; now: number }
   if (!source || !KINDS_BY_SOURCE[source]) return null;
   const kind = nonEmptyString(rawEvent.kind);
   if (!kind || !KINDS_BY_SOURCE[source].includes(kind)) return null;
-  /*
-   * Scrub, then FOLD, then slice. The scrub runs first because its value patterns are line-aware and
-   * folding would let one cross a break; the fold runs because a summary is one line by contract and
-   * digestLine renders it as one, so a multi-line summary from any adapter would otherwise inject bare
-   * lines into the fenced DATA block a dispatch prompt carries.
-   */
   const summary = scrubText(typeof rawEvent.summary === 'string' ? rawEvent.summary : '')
     .replace(/\s+/g, ' ')
     .trim()
@@ -333,18 +244,11 @@ function eventBytes(event: IngestEvent): number {
   return Buffer.byteLength(JSON.stringify(event), 'utf8');
 }
 
-// --- Rings ----------------------------------------------------------------
 
 function createRing({ maxEntries, maxBytes }: { maxEntries: number; maxBytes: number }): IngestRing {
   return { entries: [], totalBytes: 0, maxEntries, maxBytes };
 }
 
-/**
- * Bounded by entry count AND total bytes, evicting oldest first. Both bounds matter: 500 one-word file
- * events and one 256KB terminal burst are the same ring pressure from two directions. A single entry
- * larger than the whole byte cap is kept (an empty ring reports nothing at all), so the loop stops at
- * one survivor.
- */
 function pushToRing(ring: IngestRing, event: IngestEvent): IngestEvent {
   const bytes = eventBytes(event);
   ring.entries.push({ event, bytes });
@@ -363,37 +267,24 @@ function createIngestStore(config: IngestConfig | null | undefined): IngestStore
   return { config: resolved, rings, seq: 0 };
 }
 
-/**
- * The one write path. A push to a disabled (or unknown) source is dropped, the event is normalized and
- * scrubbed, seq is stamped monotonically, and the ring evicts to stay inside both of its bounds. Returns
- * the stored event, or null when nothing was stored.
- */
 function publishEvent(store: IngestStore, raw: unknown, now: number): IngestEvent | null {
   const rawEvent = (raw ?? null) as { source?: unknown } | null;
   const source = nonEmptyString(rawEvent?.source);
   if (!source) return null;
   const ring = store.rings.get(source);
   if (!ring) return null;
-  // Stamped only once the event is known to be storable: a seq burnt on a rejected push would read as
-  // machine movement to anyone gating on latestSeq.
   const event = normalizeEvent(raw, { seq: store.seq + 1, now });
   if (!event) return null;
   store.seq += 1;
   return pushToRing(ring, event);
 }
 
-/*
- * The newest seq the store has stamped, 0 before anything is published. This is the machine's movement
- * signal (docs/plan-ingestion.md, M7.5): seq only ever advances on a NEW event, so a consumer gating on
- * it cannot be fooled by a digest whose relative times merely aged.
- */
 function latestSeq(store: { seq?: unknown } | null | undefined): number {
   const seq = Number(store?.seq);
   if (!Number.isFinite(seq)) return 0;
   return seq;
 }
 
-// Newest first across every ring, which is the order both the feed and the digest read in.
 function snapshotEvents(store: IngestStore, { limit = 200 }: { limit?: number } = {}): IngestEvent[] {
   const all: IngestEvent[] = [];
   for (const ring of store.rings.values()) {
@@ -411,7 +302,6 @@ function ringStats(store: IngestStore): { source: string; events: number; bytes:
   return stats;
 }
 
-// --- Digest ---------------------------------------------------------------
 
 const SOURCE_LABELS: Readonly<Record<string, string>> = Object.freeze({
   terminal: 'terminal',
@@ -422,8 +312,6 @@ const SOURCE_LABELS: Readonly<Record<string, string>> = Object.freeze({
   editor: 'editor',
 });
 
-// Coarse on purpose and derived from `now`, because source clocks disagree and the reader only needs to
-// know whether something happened seconds or hours ago.
 function ageText(ts: number, now: number): string {
   const seconds = Math.max(0, Math.floor((now - ts) / 1000));
   if (seconds < 60) return `${seconds}s ago`;
@@ -434,10 +322,6 @@ function ageText(ts: number, now: number): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-/*
- * shellHistory records no cwd, so its events cannot be correlated to a project and the line says so
- * rather than letting a reader assume this project ran the command (docs/plan-ingestion.md redline).
- */
 function digestLine(event: IngestEvent, now: number): string {
   const label = SOURCE_LABELS[event.source] || event.source;
   const scope = event.scope.root ? '' : ' (machine scope)';
@@ -446,17 +330,10 @@ function digestLine(event: IngestEvent, now: number): string {
 
 function matchesScopes(event: IngestEvent, scopes: string[] | null): boolean {
   if (!Array.isArray(scopes) || scopes.length === 0) return true;
-  // A machine-scope event belongs to no project, so no project filter can exclude it.
   if (!event.scope.root) return true;
   return scopes.includes(event.scope.root);
 }
 
-/**
- * The cross-source context section, built exactly once per visions dispatch. Synchronous and pure:
- * one pass over the rings with no await between reads, newest first by seq, a per-source quota so one
- * noisy source cannot starve the rest, and a hard char budget. Empty rings produce an empty string,
- * which every consumer renders as absent.
- */
 function buildContextDigest(
   store: IngestStore,
   {
@@ -480,7 +357,6 @@ function buildContextDigest(
   const lines = [DIGEST_HEADER];
   let used = DIGEST_HEADER.length;
   for (const event of candidates) {
-    // The scrub already ran at publish time; this second pass is defense in depth, not the guarantee.
     const line = scrubText(digestLine(event, now));
     if (used + line.length + 1 > budget) break;
     lines.push(line);

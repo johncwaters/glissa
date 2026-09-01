@@ -1,8 +1,3 @@
-// Stays plain .js: npm runs this inside node_modules on git installs, where Node refuses type stripping.
-//
-// Three Vite passes land in one dist/: the browser dashboard, the node processes, and the VS Code
-// extension. This script owns the clean, so each config leaves emptyOutDir off.
-
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -44,8 +39,6 @@ function nodeOutputFiles(directory, found = []) {
   return found;
 }
 
-// server/runtime-paths.ts locates every shipped asset from import.meta.url, so an output where Vite
-// rewrote import.meta would resolve the relays, the packs and the dashboard against the wrong root.
 function assertImportMetaSurvived() {
   const resolvers = nodeOutputFiles(distDir)
     .map((filePath) => ({ filePath, source: fs.readFileSync(filePath, 'utf8') }))
@@ -64,7 +57,6 @@ await build({ configFile: path.join(repoRoot, 'vite.server.config.ts') });
 assertImportMetaSurvived();
 await build({ configFile: path.join(repoRoot, 'vite.extension.config.ts') });
 
-// Nearest package.json wins for module type, and the root one has no "type" while dist/ is all ESM.
 fs.writeFileSync(path.join(distDir, 'package.json'), `${JSON.stringify({ type: 'module' }, null, 2)}\n`);
 
 const missing = REQUIRED_OUTPUTS.filter((relativePath) => !fs.existsSync(path.join(distDir, relativePath)));

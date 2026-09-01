@@ -1,14 +1,3 @@
-// Server lifecycle (restart / shutdown), extracted from backend.ts so the re-entry guard, the
-// reap-before-exit ordering, and the detached-respawn spawn flags are unit-testable behind injected
-// side effects (mirrors the spawnCommand/ptySpawn/killProc seams in sessions.ts). No backend state
-// here; createBackend wires its shutdown(), httpServer, and the child_process spawn into it.
-//
-// WHY this exists: a menu restart used to spawn the replacement DETACHED with no windowsHide (its own
-// console window, separate process group => invisible and unkillable by closing the visible window),
-// with no re-entry guard (two restart messages => two replacements => a config-reload respawn storm),
-// and it exited BEFORE the async kill reaped the PTY tree (orphaned cmd/claude/conhost on Windows, an
-// orphaned process group off it). The guard + windowsHide + awaited reap below close all three.
-
 import type { SpawnOptions } from 'node:child_process';
 import { SUPERVISED_RESTART_EXIT_CODE, decideRestartStrategy } from './core/restart-strategy.ts';
 import {
@@ -31,8 +20,6 @@ interface ClosableServer {
   closeAllConnections?: () => void;
 }
 
-// The respawn seam, declared by what this module does with the child (unref it and let it outlive the
-// process) rather than by the whole child-process-safe surface, so a suite can inject a double.
 type RespawnFn = (file: string, args: string[], options: SpawnOptions) => { unref(): unknown };
 
 interface LifecycleOptions {
@@ -55,22 +42,10 @@ interface Lifecycle {
   requestRestart(): Promise<void>;
 }
 
-// Bounded wait for the pending PTY reaps a shutdown started, so the process does not exit (or respawn)
-// before the tree is reaped: taskkill's cmd/claude/conhost on Windows, the killed process group off it.
-// Capped so a child that resists kill cannot hang the lifecycle; the POSIX reap's own budget is set
-// below that cap (sessions.ts KILL_REAP_MAX_WAIT_MS). Returns a promise that always resolves.
 function awaitReaps(pendingReaps: unknown, options: BoundedWaitOptions = {}): Promise<void> {
   return awaitBounded(pendingReaps as Array<Promise<unknown> | null | undefined>, options).then(() => {});
 }
 
-/**
- * Bounded wait for the lanes' async stop() drains, the sibling of awaitReaps. Awaited CONCURRENTLY
- * with the reaps, not after them: they bound different things (a PTY tree that resists kill, a lane
- * still writing state) and serializing would double the worst-case exit delay for no benefit.
- *
- * A lane that fails or overruns the bound is reported and then left behind. The process is exiting; a
- * shutdown that hangs waiting for a wedged lane is strictly worse than one that says so and goes.
- */
 function awaitStoppers(
   stoppers: unknown,
   { capMs = 3000, warn = console.warn, ...timerOptions }: StopperWaitOptions = {},
@@ -87,30 +62,18 @@ function awaitStoppers(
     });
 }
 
-// Everything shutdown() started, awaited under its own bound. Always resolves.
 function awaitTeardown(result: unknown, options?: StopperWaitOptions): Promise<void> {
   const { reaps, stoppers } = normalizeShutdownResult(result);
   return Promise.all([awaitReaps(reaps, options), awaitStoppers(stoppers, options)]).then(() => {});
 }
 
-// Secondary listeners (remote mode's cookie-gated server) are closed alongside the primary, with
-// their sockets forced shut: the primary's close is what gates exit, and a lingering remote listener
-// would keep its port bound past a restart's respawn.
 function closeExtraServers(extraServers: ClosableServer[]): void {
   for (const server of extraServers) {
-    try { server.close(); } catch { /* not listening */ }
-    try { if (server.closeAllConnections) server.closeAllConnections(); } catch { /* older node */ }
+    try { server.close(); } catch {  }
+    try { if (server.closeAllConnections) server.closeAllConnections(); } catch {  }
   }
 }
 
-// Build the restart/shutdown handlers. Every side effect is injected so the ordering and flags can be
-// asserted without launching a real process:
-//   shutdown      - tears the backend down; returns { reaps, stoppers } (or, historically, just the
-//                   array of in-flight PTY reap promises) for awaitTeardown to await under its bound.
-//   httpServer    - { close(cb) }: closes the listener, then runs cb (spawn-and-exit / exit).
-//   onRestart     - dev (Vite) restarts in-process via this; when null, production respawns detached.
-//   spawn         - child-process-safe spawn (the production respawn).
-//   exit/getArgv/cwd/env - process seams (defaulted to process.*) so tests observe instead of exiting.
 function createLifecycle({
   shutdown,
   httpServer,
@@ -125,8 +88,6 @@ function createLifecycle({
   capMs = 3000,
   closeTimeoutMs = 2000,
 }: LifecycleOptions): Lifecycle {
-  // Single re-entry guard across BOTH transitions: once a restart or shutdown is underway, any further
-  // restart/shutdown message is ignored, so a double click can never spawn a second replacement.
   let requested = false;
 
   function fallbackTimer(fn: () => void): NodeJS.Timeout {
@@ -158,10 +119,7 @@ function createLifecycle({
     requested = true;
     await awaitTeardown(shutdown(), { capMs, warn: log });
     closeExtraServers(extraServers);
-    // Dev mode (Vite) restarts the server in-process; no detached respawn, no new console window.
-    // Release the guard and rethrow if the in-process restart throws, so a thrown onRestart does not
-    // latch `requested` and permanently no-op every later restart/shutdown. Production never reaches
-    // here (it exits below), so the guard latching on the production path is moot by design.
+
     const restartInPlace = onRestart;
     if (restartInPlace) {
       try {
@@ -172,17 +130,10 @@ function createLifecycle({
       }
       return;
     }
-    // Production: close the listener so the port is released, then hand off to the replacement. WHO
-    // starts that replacement depends on whether anything supervises this process (see
-    // core/restart-strategy.ts): under systemd the self-respawn silently bricks the service, so the
-    // process exits NON-ZERO and lets `Restart=on-failure` start the unit again. Unsupervised, the
-    // original respawn is the only thing that can bring Glissa back, so it is kept verbatim: detached
-    // so it outlives this process, windowsHide so it does NOT pop its own console window. Shutdown
-    // stays exit 0 in BOTH worlds - "Shut Down" must stay down, and a zero exit is what keeps
-    // `Restart=on-failure` from reviving it.
+
     const strategy = decideRestartStrategy(env);
     let handedOff = false;
-    // Idempotent across the close callback and the fallback timer (exactly one hand-off).
+
     const handOffAndExit = () => {
       if (handedOff) return;
       handedOff = true;

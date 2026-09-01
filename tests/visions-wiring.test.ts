@@ -1,11 +1,3 @@
-// The visions lane, at both altitudes: the wiring driven directly on injected timers (debounce
-// coalescing, save boundary, cleanup, malformed frames), and a REAL backend boot proving the
-// /visions upgrade is served on the local listener when enabled, inert when the config says nothing,
-// and refused on the remote listener even when enabled.
-//
-// SAFETY: every boot points at a throwaway temp config with ZERO projects via GLISSA_CONFIG, like
-// every other backend boot test (the boot worktree reconcile would otherwise touch real repos).
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -38,7 +30,6 @@ interface Diagnostic {
   range?: { start: { line: number; character: number }; end: { line: number; character: number } };
 }
 
-// Every frame this suite reads off a connection's send() or the control broadcast.
 interface LaneFrame {
   type: string;
   id?: unknown;
@@ -52,7 +43,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-// A frame's params walked by path, so an assertion states the field it means in one line.
 function paramAt(frame: LaneFrame | undefined, dottedPath: string): unknown {
   let cursor: unknown = frame?.params;
   for (const key of dottedPath.split('.')) {
@@ -73,7 +63,6 @@ function frameAt(frames: LaneFrame[], index: number): LaneFrame {
   return frame;
 }
 
-// The lane broadcasts findings with the diagnostics at the top level rather than under params.
 function broadcastDiagnostics(frame: LaneFrame): Diagnostic[] {
   const { diagnostics } = frame;
   if (!Array.isArray(diagnostics)) throw new Error('the broadcast carries no diagnostics array');
@@ -93,7 +82,6 @@ function diagAt(frames: LaneFrame[], index: number): Diagnostic {
   return diagnostic;
 }
 
-// The one diagnostic a test names by code, so the assertions below read plain fields.
 function diagnosticNamed(diagnostics: Diagnostic[], code: string): Diagnostic {
   const diagnostic = diagnostics.find((candidate) => candidate.code === code);
   if (!diagnostic) throw new Error(`no diagnostic coded ${code}`);
@@ -117,15 +105,10 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => { setTimeout(resolve, ms).unref(); });
 }
 
-// Only the uris the tab currently has a findings section for, which is what the sweep tests assert on.
 function findingSections(wiring: Wiring) {
   return wiring.documentsSnapshot().filter((entry) => entry.diagnostics.length > 0);
 }
 
-// --- Wiring driven directly (injected timers, no sockets) ---
-
-// Drain semantics: runPending fires what is queued and empties it. The handle is a real unref-ed timer
-// that never runs, because the seam is typed against NodeJS.Timeout.
 function fakeTimers() {
   const pendingByHandle = new Map<NodeJS.Timeout, () => void>();
   return {
@@ -154,8 +137,6 @@ const FIXED_TS = 1700000000000;
 
 type DrivenHarness = ReturnType<typeof drivenConnection>;
 
-// A dispatch outcome the test settles by hand. The executor runs synchronously, so settle is replaced
-// before deferredOutcome returns.
 function deferredOutcome(): { promise: Promise<DispatchOutcome>; settle: (outcome: DispatchOutcome) => void } {
   let resolveOutcome: (outcome: DispatchOutcome) => void = () => {};
   const promise = new Promise<DispatchOutcome>((resolve) => { resolveOutcome = resolve; });
@@ -191,7 +172,6 @@ function actionAt(actions: CodeAction[], index: number): CodeAction {
   return action;
 }
 
-// A code action's first diagnostic, which is what identifies the fix it offers.
 function actionDiagnostic(action: CodeAction): Diagnostic {
   const diagnostic = action.diagnostics?.[0];
   if (!diagnostic) throw new Error('the code action carries no diagnostic');
@@ -204,14 +184,12 @@ function documentChangesOf(edit: { documentChanges?: DocumentChange[] } | undefi
   return changes;
 }
 
-// The workspace/applyEdit request the lane sent, narrowed to the edit it carries.
 function requestedEdit(frame: LaneFrame): { documentChanges?: DocumentChange[]; label?: unknown } {
   const edit = paramAt(frame, 'edit');
   if (!isRecord(edit)) throw new Error('the applyEdit request carries no edit');
   return { documentChanges: Array.isArray(edit.documentChanges) ? edit.documentChanges : undefined };
 }
 
-// The id of an lsp-request the lane sent, which the suite answers.
 function requireServer(server: http.Server | null): http.Server {
   if (!server) throw new Error('the remote listener never came up');
   return server;
@@ -223,21 +201,18 @@ function requestIdOf(frame: LaneFrame | undefined): string {
   return id;
 }
 
-// A visions-fix broadcast's fix block.
 function fixOf(frame: LaneFrame): Record<string, unknown> {
   const { fix } = frame;
   if (!isRecord(fix)) throw new Error('the visions-fix broadcast carries no fix block');
   return fix;
 }
 
-// An lsp-response's result, when the caller expects a list back.
 function resultRows(frame: LaneFrame | undefined): unknown[] {
   const rows = frame?.result;
   if (!Array.isArray(rows)) throw new Error('the response carries no result array');
   return rows;
 }
 
-// A findings or comments broadcast counted by how much it carries.
 function broadcastRowCount(frame: LaneFrame, field: 'diagnostics' | 'comments'): number {
   const rows = frame[field];
   return Array.isArray(rows) ? rows.length : 0;
@@ -249,7 +224,6 @@ function callAt(calls: DispatchArgs[], index: number): DispatchArgs {
   return args;
 }
 
-// A dispatch's findings ride as unknown[]; only the code is read here.
 function findingCodes(args: DispatchArgs): unknown[] {
   return (args.findings ?? []).map((finding) => (isRecord(finding) ? finding.code : undefined));
 }
@@ -309,21 +283,11 @@ function rangedChangeParams(uri: string, version: number, contentChanges: unknow
   return { textDocument: { uri, version }, contentChanges };
 }
 
-/*
- * A buffer opened AND edited: since M19 a freshly opened document is an orientation (intent and hand
- * only), so every dispatch test that wants comments or an edit-classified trigger types first. The
- * open is version 0 so the tests' own didChange versions still count upward from 2.
- */
 function openEdited(lsp: (method: string, params: unknown) => void, uri: string, text: string): void {
   lsp('textDocument/didOpen', { textDocument: { uri, languageId: 'markdown', version: 0, text: '#\n' } });
   lsp('textDocument/didChange', didChangeParams(uri, 1, text));
 }
 
-/*
- * The staleness defect this pins: an incremental didChange used to be refused outright, so the mirrored
- * buffer stayed frozen at its didOpen text, no sweep was ever scheduled, and every tier below read a
- * document the carbon unit had already moved on from.
- */
 test('a didChange carrying ranges is applied and sweeps the spliced text', (t) => {
   const { wiring, timers, sent, warnings, lsp } = drivenConnection();
   t.after(() => wiring.stop());
@@ -363,8 +327,6 @@ test('a malformed range is refused with the uri, version, change index and range
   assert.equal(sent.length, 1, 'a refused frame publishes nothing new');
 });
 
-// Per-keystroke chatter is debug-gated, and even then it carries SIZES: buffer content never reaches
-// a log line, at any level.
 test('the didChange and debounced-sweep lines are debug-gated and name sizes rather than text', (t) => {
   const secret = '# Title\n\nA sentence nothing should ever log.\n';
   const quiet = drivenConnection();
@@ -386,7 +348,6 @@ test('the didChange and debounced-sweep lines are debug-gated and name sizes rat
   assert.equal(loud.notes.some((line) => line.includes('nothing should ever log')), false);
 });
 
-// A logging decision must never fault the frame it rode in on.
 test('a debug getter that throws reads as debug off rather than dropping the frame', (t) => {
   const { wiring, timers, sent, warnings, notes, lsp } = drivenConnection({
     debug: () => { throw new Error('settings unavailable'); },
@@ -401,7 +362,6 @@ test('a debug getter that throws reads as debug off rather than dropping the fra
   assert.equal(sent.length, 1, 'the sweep still published');
 });
 
-// A save is operator-paced, so it keeps the one always-visible sweep marker.
 test('a save sweep is reported at note level even with debug off', (t) => {
   const { wiring, notes, lsp } = drivenConnection();
   t.after(() => wiring.stop());
@@ -535,8 +495,6 @@ test('malformed frames are dropped with a log line, never a throw', (t) => {
   assert.equal(sent.length, 1, 'the connection still works afterwards');
 });
 
-// --- Tab feed: the control-WS broadcast and the connect-time snapshot ---
-
 test('a sweep that publishes also broadcasts the findings for that uri', (t) => {
   const { wiring, timers, broadcasts, sent, lsp } = drivenConnection();
   t.after(() => wiring.stop());
@@ -655,16 +613,9 @@ test('a lane with no broadcast injected still sweeps and still tracks findings',
   assert.deepEqual(findingSections(wiring).map((entry) => entry.uri), [MARKDOWN_URI]);
 });
 
-// --- Tier 3 model dispatch (docs/archive/plan-navigator.md, M4), spawner injected ---
-
 const COMMENT = { line: 3, message: 'The repeat is a symptom; the sentence is doing two jobs.', basis: 'edit' };
 const MODEL_DIAGNOSTIC = { line: 1, message: 'The title is missing a concrete noun.' };
 
-/**
- * A lane whose dispatch is a fake: it records what it was asked and answers whatever the test says.
- * NOTHING here spawns claude; the real spawn is covered by tests/visions-dispatch.test.js.
- */
-// `dispatch` here is the lane CONFIG block, not the dispatch function: this harness builds the function.
 type DispatchingOptions = Omit<VisionsWiringOptions, 'dispatch'> & {
   dispatch?: Record<string, unknown>;
   respond?: ((args: DispatchArgs, callCount: number) => Promise<DispatchOutcome>) | null;
@@ -689,8 +640,6 @@ function dispatchingConnection({
   };
 }
 
-// The publish arms the quiet window, so a lane driven by the fake timers needs two rounds: one for the
-// sweep, one for the dispatch that sweep armed.
 function runSweepThenDispatch(timers: ReturnType<typeof fakeTimers>): void {
   timers.runPending();
   timers.runPending();
@@ -1051,7 +1000,7 @@ test('a dispatch comment reaches the editor and dies with the next keystroke', a
   const comment = diagnosticNamed(withComment, 'comment');
   assert.equal(comment.message, COMMENT.message);
   assert.equal(comment.range?.start.line, COMMENT.line - 1);
-  // Information, not a warning: a suggestion must not read as something broken.
+
   assert.equal(comment.severity, 3);
 
   lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, `${REPEATED_WORD_MARKDOWN}\nmore text\n`));
@@ -1542,8 +1491,6 @@ test('didClose clears a standing hand', async (t) => {
   assert.deepEqual(wiring.documentsSnapshot(), []);
 });
 
-// --- The intent model as threads (docs/plan-visions-4-focus.md, M20) ---
-
 function intentBroadcasts(broadcasts: LaneFrame[]): LaneFrame[] {
   return broadcasts.filter((message) => message.type === 'visions-intent');
 }
@@ -1904,7 +1851,6 @@ test('a thread nobody advanced within the ttl retires on the next dispatch read,
   assert.ok(notes.some((line) => line.includes('intent threads retired on read')));
 });
 
-// The M3 lane, byte for byte: an absent config.visions.dispatch must cost nothing at all.
 test('with no dispatch config the lane arms no dispatch timer and calls nothing', async (t) => {
   const calls: DispatchArgs[] = [];
   const { wiring, connection, timers, lsp } = drivenConnection({
@@ -1933,8 +1879,6 @@ test('a dispatch config that is present but not enabled is just as inert', () =>
   assert.equal(wiring.dispatchEnabled, false);
   wiring.stop();
 });
-
-// --- Tier 1 silent fixes (docs/archive/plan-navigator-2.md, M6) ---
 
 const TWO_REPEATS_AND_A_FENCE = '# Title\n\nA line with with a repeat.\n\nAnd a a second one.\n\n```js\nconst answer = 42;\n';
 
@@ -2018,7 +1962,6 @@ test('a fix set is never served against text the buffer has already moved on fro
   harness.timers.runPending();
   assert.equal(requestCodeActions(harness, { id: 'ca-fresh' }).length, 1);
 
-  // The keystroke landed; its sweep has not run yet, so the stored set describes text that is gone.
   harness.lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, `${REPEATED_WORD_MARKDOWN}More.\n`));
   assert.deepEqual(requestCodeActions(harness, { id: 'ca-stale' }), []);
 });
@@ -2192,8 +2135,6 @@ test('an empty lane still carries a fixes field on its snapshot', (t) => {
   assert.deepEqual(harness.wiring.snapshotMessage().fixes, []);
 });
 
-// --- Real backend boots ---
-
 interface BootedBackend {
   dir: string;
   backend: ReturnType<typeof createBackend> | null;
@@ -2277,12 +2218,6 @@ async function waitForDiagnostics(client: ReturnType<typeof visionsClient>, uri:
   return null;
 }
 
-/**
- * Asks the SERVER what it did with a socket rather than inferring it from the client side (the trick
- * tests/backend-remote-enabled.test.js uses): a second 'upgrade' listener runs right after the
- * backend's, so socket.destroyed says whether the backend closed it or left it for another listener.
- * Destroying it here is also what keeps an accepted upgrade from leaking a detached handle.
- */
 function backendDestroyedUpgrade(server: http.Server, port: number, requestPath: string): Promise<boolean> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`no upgrade event for ${requestPath}`)), 5000);
@@ -2306,7 +2241,7 @@ function backendDestroyedUpgrade(server: http.Server, port: number, requestPath:
       ].join('\r\n'));
     });
     client = socketToServer;
-    socketToServer.on('error', () => { /* the server end closing is the expected outcome */ });
+    socketToServer.on('error', () => {  });
   });
 }
 
@@ -2397,8 +2332,6 @@ test('visions is echoed by getSettings and applied as a restart-required setting
   }
 });
 
-// --- The ingest context digest (docs/plan-ingestion.md, M6) ---
-
 test('with no ingest lane injected the dispatch carries an empty digest and nothing is ever called', async (t) => {
   const { wiring, timers, calls, lsp } = dispatchingConnection();
   t.after(() => wiring.stop());
@@ -2469,13 +2402,6 @@ test('a digest that is not a string is treated as absent rather than stringified
   assert.equal(callAt(calls, 0).digest, '');
 });
 
-// --- Activity-driven dispatch (docs/plan-ingestion.md, M7.5) ---
-
-/*
- * The lane as it stands on the operator's machine when the bug bites: one markdown buffer open, nobody
- * typing, and the only thing still moving is the ingest timeline. `machine.seq` stands in for the ingest
- * lane's latestSeq(), and noteActivity() for the poke its batch delivers.
- */
 function pokableConnection({ dispatch: overrides = {}, respond = null }: DispatchingOptions = {}) {
   const machine = { seq: 0 };
   const context = dispatchingConnection({
@@ -2552,7 +2478,6 @@ test('activity alone re-dispatches an edited buffer, and the belief it comes bac
   await wiring.whenDispatchSettled();
   assert.equal(calls.length, 1);
 
-  // Nobody typed: the buffer is the same text, and only the machine around it moved.
   clock.now += 60000;
   machine.seq = 4;
   wiring.noteActivity();
@@ -2676,7 +2601,6 @@ test('the machine cannot poke its way past its own quota, and typing still gets 
   assert.equal(calls.length, 2, 'one activity dispatch, which is the whole quota');
   assert.ok(notes.some((line) => line.includes('activity-cap')));
 
-  // What the quota exists to protect: the carbon unit saves, and the budget is still there for them.
   clock.now += 1000;
   lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, '# Title\n\nA sentence they just typed.\n'));
   lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
@@ -2684,12 +2608,6 @@ test('the machine cannot poke its way past its own quota, and typing still gets 
   assert.equal(calls.length, 3, 'an edit answers to the total budget only');
 });
 
-/*
- * The cold start at the wiring altitude (M19): a buffer nobody has edited since it was opened is an
- * orientation, charged to the machine whatever armed it. The activity quota is zero here, which makes
- * the classification directly visible: 'activity-cap' can only be reached by a dispatch classified as
- * the machine's, and 'hour-cap' is what a misread would say.
- */
 test('a buffer nobody has edited is charged to the machine, whether a sweep or a poke armed it', async (t) => {
   const otherUri = 'file:///tmp/other.md';
   const {
@@ -2754,8 +2672,6 @@ test('a refusal is logged when the gate changes, not once per quiet window forev
   assert.equal(unchangedLines(), 2, 'a dispatch happened in between, so the next refusal is news again');
 });
 
-// The operator's own save being turned away is the one refusal that must always reach the log, even
-// when a poke was already refused by the same cap moments earlier.
 test('a save refused by the same cap as a poke is logged, not swallowed as a repeat', async (t) => {
   const otherUri = 'file:///tmp/other.md';
   const {
@@ -2807,11 +2723,6 @@ test('a seq that is not a finite number is read as no lane rather than as moveme
   assert.equal(wiring.latestContextSeq(), null);
 });
 
-/*
- * The union the tab renders carries this lane's OWN hand, so feeding it back as the standing tier 2
- * findings told the next session not to repeat the hand; it obeyed, and the empty answer lowered a hand
- * nobody had resolved. That is the failure the whole tier 4 surface exists to prevent.
- */
 test('a raised hand never returns as a standing finding the next prompt says not to repeat', async (t) => {
   const HAND = 'the outline and the conclusion argue different plans';
   let seq = 1;
@@ -2829,8 +2740,6 @@ test('a raised hand never returns as a standing finding the next prompt says not
   await wiring.whenDispatchSettled();
   assert.equal(wiring.documentsSnapshot()[0].hand, HAND);
 
-  // No didChange, so nothing dropped the hand: this is the activity-triggered dispatch that used to be
-  // handed its own standing hand back.
   seq += 1;
   clock.now += 1000;
   lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
@@ -2842,8 +2751,6 @@ test('a raised hand never returns as a standing finding the next prompt says not
   assert.deepEqual(findingCodes(callAt(calls, 1)), ['repeated-word'], 'the rule findings alone');
 });
 
-// A memory store or a digest that falls over says nothing about the CLI, and three of them used to open
-// a half-hour backoff on a lane that had never been asked to spawn.
 test('a throw before the spawn is logged and never counts toward the lane backoff', async (t) => {
   let promptAttempts = 0;
   const { wiring, timers, calls, warnings, lsp, clock } = dispatchingConnection({
@@ -2871,8 +2778,6 @@ test('a throw before the spawn is logged and never counts toward the lane backof
   assert.equal(warnings.filter((line) => line.includes('threw')).length, 3, 'and every one of them was said out loud');
 });
 
-// The buffer is untrusted text: text that induces the session to answer ERROR must not be able to
-// silence tier 3 for every open document for half an hour.
 test('a session-authored ERROR leaves the lane healthy, and a transport failure still backs it off', async (t) => {
   const laneOf = (errorSource: string) => dispatchingConnection({
     dispatch: { cooldownMs: 1 },
@@ -2903,8 +2808,6 @@ test('a session-authored ERROR leaves the lane healthy, and a transport failure 
   assert.equal(transportLane.calls.length, 3, 'three failures to reach the CLI open the cooling period');
   assert.ok(transportLane.warnings.some((line) => line.includes('failed in a row')));
 });
-
-// --- Focus (docs/plan-visions-4-focus.md, M19 and M21) ---
 
 test('a freshly opened buffer orients once: intent and hand land, comments and diagnostics never do', async (t) => {
   const { wiring, timers, calls, notes, broadcasts, lsp, clock, machine } = pokableConnection({

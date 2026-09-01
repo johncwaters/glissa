@@ -1,9 +1,3 @@
-// The hook relay (M2 of docs/plan-agent-adapters.md): the standalone process a non-Claude agent CLI
-// runs as a command hook. Its contract is narrow and every clause is security-relevant, so the pure
-// decisions are tested exhaustively and main() is driven against a real loopback listener with a fake
-// stdin: the payload must arrive byte-identical on the existing route shape, and every refusal must
-// still exit 0 without a socket.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -96,7 +90,7 @@ test('normalizeEvent lowercases the argv token and refuses anything that is not 
   assert.equal(normalizeEvent('Stop'), 'stop');
   assert.equal(normalizeEvent(' UserPromptSubmit '), 'userpromptsubmit');
   assert.equal(normalizeEvent('Pre_Tool-Use'), 'pre_tool-use');
-  // A path segment, a query, or a traversal would repoint the POST at another route.
+
   assert.equal(normalizeEvent('stop/../upload'), null);
   assert.equal(normalizeEvent('stop?t=x'), null);
   assert.equal(normalizeEvent('..'), null);
@@ -123,7 +117,7 @@ test('decideRelayPost: the whole verdict, refusal by refusal', () => {
   assert.deepEqual(decideRelayPost({ env, event: 'Stop', payloadBytes: 12 }), {
     post: true, url: 'http://127.0.0.1:41234/hook/sess-1/stop?t=deadbeef', reason: 'ok',
   });
-  // No variable in the env is the INERT case: an installed hooks file must do nothing outside Glissa.
+
   assert.deepEqual(decideRelayPost({ env: {}, event: 'Stop' }), { post: false, url: null, reason: 'no-hook-url' });
   assert.equal(decideRelayPost({ env, event: 'sto p' }).reason, 'bad-event');
   assert.equal(decideRelayPost({ env, event: 'Stop', payloadBytes: MAX_PAYLOAD_BYTES }).post, true);
@@ -218,7 +212,6 @@ test('an oversized response reaches decideHookStdout with only the overflow sent
 test('the relay POSTs the stdin bytes untouched to /hook/:glissaId/:event', async () => {
   const { server, received, port } = await startIngress();
   try {
-    // camelCase and a vendor-only field: the relay must not translate, reshape or validate any of it.
     const payload = '{"sessionId":"abc","backgroundTasks":[],"toolInput":{"file_path":"C:\\\\x"}}';
     const result = await main(['Stop'], fakeStdin(payload), {
       [HOOK_URL_ENV]: `http://127.0.0.1:${port}/hook/sess-42?t=tok123`,
@@ -267,7 +260,6 @@ test('an oversize payload is dropped locally rather than cut off mid-JSON by the
   }
 });
 
-// The "Glissa is down" case: a hook must never fail the turn it was called from.
 test('nothing listening still exits 0', async () => {
   const result = await main(['Stop'], fakeStdin('{}'), { [HOOK_URL_ENV]: 'http://127.0.0.1:1/hook/s?t=t' });
   assert.equal(result.code, 0);

@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-// attention-ack-core is ESM (.mjs); dynamic-import it so the suite drives the shipped module.
 const importCore = () => import('../public/attention-ack-core.ts');
 
 test('attentionSignature: sorts and dedupes, so the same facts in any order are one signature', async () => {

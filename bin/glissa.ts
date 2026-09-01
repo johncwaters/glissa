@@ -67,8 +67,6 @@ if (portArg) {
   process.env.GLISSA_PORT = portArg;
 }
 
-// Dispatched BEFORE importing ../server/main.ts so the CLI never boots a server, and AFTER --config is
-// bridged into the env so it resolves the same ~/.glissa root the server would.
 if (args[0] === 'pair') {
   const { runPairCli } = await import('../server/pair-cli.ts');
   process.exit(runPairCli(args.slice(1)));
@@ -80,7 +78,6 @@ if (isAgentCommand) {
   process.exit(runAgentSetupCli(args.slice(1)));
 }
 
-// Async, so they cannot process.exit inline the way `pair` does; the server boot is skipped instead.
 function runAsyncCommand(run: Promise<number | never>): void {
   run.then(
     (code) => process.exit(code),
@@ -122,9 +119,6 @@ function firstLineOf(error: unknown): string {
   return messageOf(error).split('\n')[0];
 }
 
-// Read-only replica of config-store.ts resolveConfigPath precedence. Reports the
-// path WITHOUT creating or seeding anything (the real resolver has side effects),
-// so `glissa doctor` stays safe to run.
 function resolveConfigPathReadOnly(): string {
   const decided = decideConfigPath({
     env: process.env,
@@ -136,9 +130,6 @@ function resolveConfigPathReadOnly(): string {
   return `${decided.homePath} (created on first run)`;
 }
 
-// `glissa doctor`: print a read-only diagnosis of why `glissa` may not be found
-// and whether the install is healthy. Must not start the server or throw, so the
-// node-pty probe is wrapped and nothing here has side effects.
 async function runDoctor(): Promise<void> {
   const platform = process.platform;
   const homedir = os.homedir();
@@ -157,7 +148,7 @@ async function runDoctor(): Promise<void> {
   line('package dir', packageRoot);
 
   console.log('\nPATH registration');
-  // Resolved lazily, and only when the env alone cannot answer: `npm prefix -g` can stall ~2s cold.
+
   const envNpmBin = npmGlobalBinDir({ env: process.env, platform, homedir });
   const npmBin = envNpmBin || npmGlobalBinDir({ env: process.env, platform, homedir, resolvedPrefix: resolveNpmGlobalPrefix(execSync) });
   const npmOn = npmBin ? onPath(npmBin, { pathEnv, platform }) : false;
@@ -170,8 +161,7 @@ async function runDoctor(): Promise<void> {
   }
 
   console.log('\nAgents');
-  // Per-agent binary resolution, so an operator sees which supervised CLIs the Add Session picker
-  // will offer and where each one resolves (session/adapters).
+
   try {
     const { listAgentIds, getAdapter, commandFor } = await import('../session/adapters/index.ts');
     for (const id of listAgentIds()) {
@@ -233,7 +223,6 @@ function resolveNpmGlobalPrefix(exec: typeof execSync): string | null {
   return null;
 }
 
-// npm 12 blocks rebuild scripts under its allowScripts policy (verified 12.0.2), hence the broad flag in the hint.
 function nodePtyRebuildHint(platform: NodeJS.Platform): string {
   if (platform === 'linux') return 'install build tools: sudo apt install build-essential python3; then rebuild: npm rebuild node-pty --dangerously-allow-all-scripts (the flag is required on npm 12, unknown-but-harmless on older npm)';
   if (platform === 'win32') return 'install Visual Studio Build Tools, then rebuild: npm rebuild node-pty --dangerously-allow-all-scripts (the flag is required on npm 12, unknown-but-harmless on older npm)';

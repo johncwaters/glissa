@@ -1,6 +1,3 @@
-// Glissa edits config files the operator maintains, so these pin the two properties that make that
-// safe: a second run changes nothing, and unwiring restores the file byte for byte.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -31,7 +28,7 @@ test('an existing markdown entry keeps its own servers and settings', () => {
   const merged = helixMerge(existing, INVOCATION);
   assert.match(merged.text, /language-servers = \["marksman", "glissa-visions"\]/);
   assert.match(merged.text, /auto-format = true/);
-  // Only the server definition is ours here, since their language entry already exists.
+
   assert.equal((merged.text.match(/\[\[language\]\]/g) as RegExpMatchArray).length, 1);
   assert.equal(helixMerge(merged.text, INVOCATION).changed, false);
   assert.equal(helixRemove(merged.text).text, existing);
@@ -59,7 +56,6 @@ test('an unterminated block is refused by both directions rather than guessed at
   assert.equal(merged.changed, false);
   assert.equal(merged.reason, 'unterminated-block');
 
-  // Removing here would strip our server from their list and leave the block that names it behind.
   const removed = helixRemove(broken);
   assert.equal(removed.changed, false);
   assert.equal(removed.text, broken);

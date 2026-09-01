@@ -1,11 +1,3 @@
-// ── Radar view ───────────────────────────────────────────────
-// The one "everything outside your sessions that needs you" surface. Three sections fed by three
-// existing control-WS broadcasts: PostHog issues (`posthog-status`), ops (`update-available` plus the
-// anomaly block of `health-snapshot`) and the PR auto-review lane (`pr-status`). Radar is an ADDITIONAL
-// consumer of the last three: the update banner, the health footer and the PRs tab all keep receiving
-// them and rendering them in full. The tab is always present; only its content varies, so an operator
-// who has configured none of the lanes still finds the surface and is told where to switch them on.
-
 import type { ServerMessage } from '#shared/contracts/control-messages.ts';
 import { createAttentionAck } from './attention-ack-core.ts';
 import { buildPanelSection, buildStatChip, el, externalLink, isPanelHidden, projectsOf } from './dom-helpers.ts';
@@ -59,9 +51,7 @@ interface InvestigationRow {
 
 let _latest: RadarSnapshotWithClock | null = null;
 let _health: RadarHealthFeed | null = null;
-// The anomaly shape of the last health snapshot. A snapshot lands every ten seconds and is almost
-// always all-zero, and a full repaint on each one would drop hover state and reset the poll tickers
-// for nothing, so only a CHANGE in which anomalies are live repaints the board.
+
 let _healthKey = '';
 let _update: RadarUpdateFeed | null = null;
 let _prs: PrStatusSnapshot | null = null;
@@ -76,17 +66,8 @@ const _attention = createAttentionAck({
   isLooking: () => !isPanelHidden(_root),
 });
 
-// Rows are rebuilt wholesale on every broadcast and a row action's outcome line lives inside a row,
-// so a broadcast landing mid-request is held (see radar-hold-core.mjs for the whole state machine and
-// why it owns its own timer).
 const _hold = createRenderHold({ render });
 
-// Records the operator archived in THIS page session. The server drops an archived record from the
-// next payload, so this set is normally redundant - but it is the one thing that does not depend on
-// a broadcast arriving, in the right order, and winning the render-hold race. A row the operator
-// dismissed must not be able to come back from a snapshot, and the connect-time replay of a cached
-// posthog-status can hand a reconnecting tab exactly that. Pruned on every snapshot that no longer
-// carries the record, so it cannot grow for the life of the page.
 const _archivedLocally = new Set<string>();
 
 const _pollTicker = createPollAgoTicker(() => _root);
@@ -138,10 +119,6 @@ function openIssueReport(issue: { issueId?: unknown; title?: unknown }) {
     });
 }
 
-// Per-row actions, shared by the issue rows and the investigations inbox. Labels are constant for the
-// control's whole lifecycle (no "Resolving...", no counts): the sibling status line carries progress
-// and outcome, and every button is disabled while a request is in flight so a row cannot be
-// double-fired.
 function createActionCluster() {
   const wrap = el('div', 'radar-issue-actions');
   const status = el('span', 'radar-issue-action-status');
@@ -166,9 +143,6 @@ function createActionCluster() {
     return button;
   };
 
-  // `onOk` is the seam for a request whose success the panel must remember beyond the reply (the
-  // archive: see _archivedLocally). It runs before the outcome line is written, so the repaint the
-  // hold releases already sees it.
   const request = (
     token: string,
     type: string,
@@ -241,8 +215,6 @@ function buildIssueRow(issue: RadarIssue, projectId: unknown) {
 
   const change = el('span', 'radar-change', CHANGE_LABEL[issue.change ?? ''] || String(issue.change || 'unknown'));
 
-  // Issue titles come from a third-party service: built as text, never markup.
-  // A placeholder title is not worth a tooltip that repeats it.
   const title = externalLink('radar-issue-title', String(issue.title || 'Untitled issue'), issue.url as string | null | undefined, String(issue.title || ''));
 
   const occurrences = el('span', 'radar-metric');
@@ -293,7 +265,6 @@ function buildIssueRow(issue: RadarIssue, projectId: unknown) {
       row.setAttribute('aria-label', `View investigation report for ${String(issue.title || issue.issueId)}`);
       row.title = 'View investigation report';
       row.addEventListener('click', (event) => {
-        // The action buttons live inside the row, so a click on one must not also open the report.
         if (!(event.target instanceof Element)) return;
         if (event.target.closest('a, button')) return;
         openIssueReport(issue);
@@ -312,15 +283,12 @@ function buildIssueRow(issue: RadarIssue, projectId: unknown) {
 
 const summaryStat = (label: string, value: string, tone?: string | null) => buildStatChip('radar', label, value, tone);
 
-// The only per-project time still rendered, and only for the projects that earned a card by being
-// stale or errored: the section's one global clock covers the healthy case.
 function alertTextOf(entry: RadarProjectEntry) {
   if (entry.error) return `poll failed: ${entry.error}`;
   if (entry.staleMs > 0) return `stale ${formatDuration(entry.staleMs)}`;
   return '';
 }
 
-// Project names come from PostHog: text only, never markup; title tooltip keeps the raw value reachable.
 function appendProjectLabel(
   parent: HTMLElement,
   project: RadarProject,
@@ -361,8 +329,6 @@ function buildProject(entry: RadarProjectEntry, showHost: boolean) {
   return wrap;
 }
 
-// One row per healthy project, in one bordered block: a state dot, the name, and the count. No host,
-// no clock, no "No tracked issues." - the row's existence already says the project is being watched.
 function buildQuietRow(entry: RadarProjectEntry, showHost: boolean) {
   const project = entry.project;
   const row = el('div', 'radar-quiet-row');
@@ -397,10 +363,6 @@ function buildErrorsSection(projects: RadarProject[]) {
   return section;
 }
 
-// ── Investigations inbox ─────────────────────────────────────
-// One row per completed, unarchived investigation. Deliberately independent of the Errors section: a
-// resolved issue's row is gone from there, and this is where its verdict survives. Quiet review
-// material by design, so it contributes nothing to the attention count.
 function buildInvestigationActions(row: InvestigationRow) {
   const { addButton, request, wrap } = createActionCluster();
 
@@ -429,7 +391,6 @@ function buildInvestigationRow(row: InvestigationRow) {
   const verdict = el('span', 'radar-verdict', verdictLabel(row.verdict));
   verdict.dataset.verdict = row.verdict;
 
-  // Titles and summaries come from a third-party service and a headless agent: text, never markup.
   const title = externalLink('radar-issue-title', row.title, row.url);
 
   const copy = el('span', 'radar-issue-copy');
@@ -439,8 +400,7 @@ function buildInvestigationRow(row: InvestigationRow) {
     summary.textContent = row.summaryLine;
     copy.append(summary);
   }
-  // An auto-fix job's durable output. The url is validated in radar-core, so an absent one means the
-  // job opened no pull request rather than that the link was dropped.
+
   if (row.prUrl) {
     const pr = el('a', 'radar-investigation-pr', 'fix PR');
     pr.href = row.prUrl;
@@ -451,8 +411,7 @@ function buildInvestigationRow(row: InvestigationRow) {
   }
 
   item.append(verdict);
-  // Which job produced this row. Only the fix lane is tagged: an investigation is the default job and
-  // labelling every row with it would say nothing.
+
   if (row.mode === 'fix') {
     const mode = el('span', 'radar-verdict', 'fix');
     mode.dataset.mode = 'fix';
@@ -490,8 +449,7 @@ function buildOpsSection(rows: { kind: string; key: string; text: string; detail
     const stripe = el('span', 'radar-stripe');
     stripe.setAttribute('aria-hidden', 'true');
     item.append(stripe, el('span', 'radar-ops-text', row.text));
-    // The update command is copy-pasteable text, exactly as the banner shows it; Radar mirrors the
-    // notice quietly rather than owning a second copy button for it.
+
     if (row.detail) item.append(el('code', 'radar-ops-detail', row.detail));
     list.append(item);
   }
@@ -511,7 +469,7 @@ function buildPrRow(row: { severity: string; phase: string; number: number | nul
   stripe.setAttribute('aria-hidden', 'true');
   const { label: phaseText } = phaseLabel(row.phase);
   const numbered = row.number === null ? row.title : `#${row.number} ${row.title}`;
-  // Titles and repo slugs come from GitHub: built as text, never markup.
+
   const title = el('span', 'radar-pr-title');
   title.textContent = numbered;
   title.title = numbered;
@@ -547,8 +505,7 @@ function render() {
   const investigations = investigationRows(_latest, _archivedLocally);
   const ops = opsRows({ update: _update, health: _health });
   const prs = needsActionPrRows(_prs);
-  // Nothing configured anywhere: the bare hint, with no section chrome to make an empty board look
-  // like a broken one.
+
   if (projects.length === 0 && investigations.length === 0 && ops.length === 0 && prs.length === 0) {
     const empty = el('p', 'radar-unconfigured', radarPlaceholder(_latest));
     const link = createSettingsLink('lanes-posthog', 'posthog-enabled', 'Enable PostHog');
@@ -562,8 +519,6 @@ function render() {
   if (prs.length > 0) _root.append(buildPrsSection(prs));
 }
 
-// Every feed repaints through here, so an in-flight per-issue action still holds the board: a health
-// snapshot landing mid-request must not wipe an outcome line either.
 function renderOrDefer() {
   _hold.request();
 }
@@ -578,16 +533,11 @@ export function acknowledgeRadarAttention() {
   refreshActivity();
 }
 
-// The tab-activity seam (defined in pr-panel.js): the view owns the condition, app.js owns the dot element.
-// PR facts are deliberately not part of it (see radarAttentionSignature): the PRs tab and the phone PRS
-// row own them, so one failing PR raises one dot rather than three.
 export function setRadarActivityCallback(callback: (unseen: boolean) => void) {
   _activityCallback = callback;
   refreshActivity();
 }
 
-// A PR row is a pointer, not a second PR view: app.js owns the navigation (desktop tab vs phone
-// screen), Radar only knows that the operator asked to go there.
 export function setRadarNavigateToPrs(navigate: () => void) {
   _navigateToPrs = navigate;
 }
@@ -604,15 +554,12 @@ export function mountRadarView(parent: HTMLElement) {
 
 export function applyPosthogStatus(msg: unknown) {
   _latest = msg as RadarSnapshotWithClock;
-  // Forget the ids this payload no longer carries: the server has confirmed the archive, so the
-  // local guard has nothing left to guard and the set stays bounded.
+
   retainKnownInvestigationIds(_latest, _archivedLocally);
   renderOrDefer();
   refreshActivity();
 }
 
-// A health snapshot lands every ten seconds; only a change in which anomalies are live is worth a
-// repaint, and an all-zero snapshot renders nothing at all.
 export function applyHealthSnapshot(stats: unknown) {
   _health = stats as RadarHealthFeed;
   const key = healthAnomalyRows(_health).map((row) => row.key).join(',');

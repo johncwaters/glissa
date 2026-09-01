@@ -1,8 +1,3 @@
-// config-store owns config.json load/save and ensureProjectIds (the stable session identity every
-// Map/route/control-message keys off). Every test points createConfigStore at a FRESH temp config via
-// GLISSA_CONFIG; it must never fall through to the repo's real config.json (resolveConfigPath order:
-// env > local config.json > home).
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -24,8 +19,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-// The settings projection answers its Mill and secret blocks as plain records, so a read of one
-// narrows here rather than at each assertion.
 function block(value: unknown): Record<string, unknown> {
   if (!isRecord(value)) throw new Error('the settings projection carries no block here');
   return value;
@@ -56,8 +49,6 @@ function richConfig(overrides: ConfigFileContent = {}): ConfigFileContent {
   };
 }
 
-// Runs fn with GLISSA_CONFIG pointed at a temp config, then restores env + disk. storeOpts is
-// passed straight to createConfigStore (the per-launch settingsDefaults the dev server uses).
 function withStore<T>(
   cfg: ConfigFileContent,
   fn: (store: ConfigStore, configPath: string) => T,
@@ -290,8 +281,6 @@ test('getSettings projects only dashboard-settable mill measurement fields', () 
   });
 });
 
-// The dev server (vite.config.js) turns debugMode on this way: a fallback for a key config.json
-// omits, never a persisted value, and never a win over an explicit setting.
 test('settingsDefaults overlays a key the config file omits', () => {
   withStore({ projects: [] }, (store) => {
     assert.equal(DEFAULT_CONFIG.debugMode, false, 'the production default is off');
@@ -464,8 +453,6 @@ test('a partial branchGc config merges over the defaults', () => {
   });
 });
 
-// The reload debounce is 500ms and a self-write suppresses for 500ms after it, so every wait here is
-// a generous multiple of that: these poll to a deadline rather than sleeping a fixed amount.
 const WATCH_DEADLINE_MS = 15000;
 
 function sleep(ms: number): Promise<void> {
@@ -481,7 +468,6 @@ async function waitFor(predicate: () => boolean, message: string): Promise<void>
   assert.fail(`${message} (waited ${WATCH_DEADLINE_MS}ms)`);
 }
 
-// Runs fn with GLISSA_CONFIG pointed at a temp config, awaiting it before cleanup.
 async function withStoreAsync<T>(
   cfg: ConfigFileContent,
   fn: (store: ConfigStore, configPath: string) => Promise<T>,
@@ -498,17 +484,13 @@ async function withStoreAsync<T>(
   }
 }
 
-// The regression this guards: save() commits by tmp+rename, replacing the inode. fs.watch on the
-// FILE is an inotify watch on that inode, so on Linux the watcher silently followed the dead file
-// and no later hand-edit of config.json ever reloaded. Watching the parent directory survives it.
 test('watchForChanges still sees a hand-edit after a save replaced the file inode', async () => {
   await withStoreAsync({ projects: [] }, async (store, p) => {
     const reloads: GlissaConfig[] = [];
     const stop = store.watchForChanges((cfg) => { reloads.push(cfg); });
     try {
       store.save((cfg) => { cfg.projects.push({ id: 'from-save', name: 's', path: 'C:/s' }); });
-      // Past both the debounce and the self-write suppression window, so the save itself is settled
-      // and cannot be mistaken for the hand-edit below.
+
       await sleep(1200);
       assert.equal(reloads.length, 0, 'a self-write does not reload');
 
@@ -567,17 +549,13 @@ test('watchForChanges returns a closer that releases the fs.watch handle', () =>
   });
 });
 
-// The self-write suppression was a 500ms window, and the window WAS the bug: an operator editing
-// config.json right after a hook-driven persist (resumeSessionId is written on every hook payload
-// carrying a new session id) had their edit silently dropped until they saved again. Suppression is
-// now by written-content signature, so it swallows exactly the echo (2026-08 review, section 7).
 test('a hand-edit landing immediately after a self-write is applied, not swallowed', async () => {
   await withStoreAsync({ projects: [] }, async (store, p) => {
     const reloads: GlissaConfig[] = [];
     const stop = store.watchForChanges((cfg) => { reloads.push(cfg); });
     try {
       store.save((cfg) => { cfg.projects.push({ id: 'from-save', name: 's', path: 'C:/s' }); });
-      // No pause at all: this is the race the time window lost.
+
       fs.writeFileSync(p, JSON.stringify({
         projects: [{ id: 'from-save', name: 's', path: 'C:/s' }], port: 4321,
       }, null, 2), 'utf8');
@@ -605,10 +583,6 @@ test('a self-write is still suppressed, however many events it produces', async 
   });
 });
 
-// The signature must not outlive the state it describes. A hand-edit reload changes memory without
-// writing anything, so a signature still naming the LAST WRITTEN bytes made an operator's revert back
-// to exactly those bytes look like Glissa's own echo: silently dropped, with memory and file left
-// disagreeing and no way to notice.
 test('reverting a hand-edit back to previously written bytes still reloads', async () => {
   await withStoreAsync({ projects: [] }, async (store, p) => {
     const reloads: GlissaConfig[] = [];
@@ -619,13 +593,11 @@ test('reverting a hand-edit back to previously written bytes still reloads', asy
       assert.equal(reloads.length, 0, 'the save itself is suppressed');
       const written = fs.readFileSync(p, 'utf8');
 
-      // The operator edits away from what Glissa wrote...
       fs.writeFileSync(p, JSON.stringify({
         projects: [{ id: 'from-save', name: 's', path: 'C:/s' }], port: 4321,
       }, null, 2), 'utf8');
       await waitFor(() => reloads.length > 0, 'the hand-edit never reloaded');
 
-      // ...and then reverts, byte for byte, to what Glissa had written earlier.
       fs.writeFileSync(p, written, 'utf8');
       await waitFor(() => reloads.length > 1, 'the revert was swallowed as a stale self-write');
       assert.equal(reloads[reloads.length - 1].port, undefined, 'the reverted content is what was applied');
@@ -643,7 +615,7 @@ test('a duplicate event for content already applied is not re-applied', async ()
       const edited = JSON.stringify({ projects: [{ id: 'hand', name: 'h', path: 'C:/h' }] }, null, 2);
       fs.writeFileSync(p, edited, 'utf8');
       await waitFor(() => reloads.length > 0, 'the hand-edit never reloaded');
-      // Same bytes again: a second fs event for one logical edit changes nothing.
+
       fs.writeFileSync(p, edited, 'utf8');
       await sleep(1200);
       assert.equal(reloads.length, 1);
@@ -653,8 +625,6 @@ test('a duplicate event for content already applied is not re-applied', async ()
   });
 });
 
-// The escalation ladder's delay is an operator-facing timeout like every other one, not a constant
-// buried in the manager.
 test('phoneEscalationMs is a settable timeout key with the five-minute default', async () => {
   assert.equal('phoneEscalationMs' in ConfigUpdate.shape, true);
   assert.equal(DEFAULT_CONFIG.phoneEscalationMs, 300000);
@@ -666,10 +636,6 @@ test('phoneEscalationMs is a settable timeout key with the five-minute default',
   });
 });
 
-// The mirror of the revert case above, on the other signature. A save moves live state relative to
-// whatever was last APPLIED, so a signature still naming those older bytes made an operator's editor
-// undo back to them look like a re-apply of state already live: silently dropped, with memory holding
-// the saved state and the file holding the reverted one.
 test('reverting to bytes that were applied before a save still reloads', async () => {
   await withStoreAsync({ projects: [] }, async (store, p) => {
     const reloads: GlissaConfig[] = [];
@@ -681,12 +647,10 @@ test('reverting to bytes that were applied before a save still reloads', async (
       fs.writeFileSync(p, handEdited, 'utf8');
       await waitFor(() => reloads.length > 0, 'the hand-edit never reloaded');
 
-      // A dashboard settings save now writes something else and moves live state with it.
       store.save((cfg) => { cfg.port = 4200; });
       await sleep(1200);
       assert.equal(reloads.length, 1, 'the save itself is still suppressed');
 
-      // Editor undo: back to exactly the bytes that were applied before that save.
       fs.writeFileSync(p, handEdited, 'utf8');
       await waitFor(() => reloads.length > 1, 'the revert was swallowed as a stale applied-signature');
       assert.equal(reloads[reloads.length - 1].port, 4100, 'the reverted content is what was applied');
@@ -696,12 +660,9 @@ test('reverting to bytes that were applied before a save still reloads', async (
   });
 });
 
-// config.json holds the telegram bot token and the PostHog API key. Seeded and saved with no mode, it
-// inherited the umask (0644 on a typical Linux box), so every account on a shared host could read those
-// credentials. The modes are advisory on Windows, hence the gate.
 test('a saved config.json, and its backup, are owner-only', { skip: process.platform === 'win32' }, async () => {
   await withStoreAsync(richConfig(), async (store, p) => {
-    fs.chmodSync(p, 0o644); // as an older Glissa (or an operator's editor) would have left it
+    fs.chmodSync(p, 0o644);
     assert.ok(store.save((cfg) => { cfg.port = 4999; }), 'the save succeeded');
 
     assert.equal(fs.statSync(p).mode & 0o777, CONFIG_FILE_MODE, 'the save repairs a world-readable config');

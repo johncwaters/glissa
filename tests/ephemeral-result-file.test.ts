@@ -1,9 +1,3 @@
-// The private result directory every dispatched lane job writes its verdict into. Before this, each
-// lane composed a predictable name directly under the system temp dir (glissa-pr-<slug>-<n>-<pid>.json
-// and friends). A private %TEMP% made that safe on Windows; on a multi-user POSIX box the name is
-// guessable, so another account could pre-plant a symlink there and redirect the write of a session
-// running as the operator.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -57,19 +51,14 @@ test('cleanup removes the whole directory, result file and all, and is safe to r
 
   await file.cleanup();
   assert.ok(!fs.existsSync(dir), 'directory gone');
-  await file.cleanup(); // an already-cleaned job (timeout then exit) must not throw
+  await file.cleanup();
 });
 
-// Ownership travels in the cleanup CLOSURE, never in the path. An earlier cut of this seam shipped a
-// remove-by-path helper that inferred ownership from basename === 'result.json', so any caller-supplied
-// directory holding a file by that name would have been deleted recursively - invisible at the call
-// site, and reachable through the distiller's injected seam.
 test('a caller-supplied directory is unreachable: the seam exposes no remove-by-path verb', async () => {
   assert.equal(typeof ephemeralSession.createJobResultFile, 'function');
   assert.equal('removeJobResultFile' in ephemeralSession, false,
     'no path-based remover exists to be handed a foreign path');
 
-  // Exactly the shape the old basename check misread as owned.
   const foreignDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-foreign-'));
   fs.writeFileSync(path.join(foreignDir, JOB_RESULT_FILENAME), '{}', 'utf8');
   fs.writeFileSync(path.join(foreignDir, 'keep.txt'), 'keep\n', 'utf8');

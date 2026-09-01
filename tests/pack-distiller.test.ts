@@ -1,7 +1,3 @@
-// The distiller lane with every side effect faked: which entry drifts, what the spawned session is
-// told, how a verdict is re-checked against the file actually written, that distills are serialized,
-// that stop() drains one in flight, and that the whole lane is inert while disabled. No fs, no timers,
-// no real session.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -47,7 +43,6 @@ interface DistillEntryFixture {
   instructions?: string;
 }
 
-// A spec is JSON on disk, so a fixture states the keys these tests set and leaves the rest open.
 interface SpecFixture {
   name: string;
   distill?: DistillEntryFixture[];
@@ -95,7 +90,6 @@ interface Harness {
   releaseHungSpawn: () => void;
 }
 
-// The one distill entry every fixture spec carries, so a test editing it does not restate the shape.
 function entryOf(spec: SpecFixture): DistillEntryFixture {
   const entry = spec.distill?.[0];
   if (!entry) throw new Error('this fixture spec declares no distill entry');
@@ -121,19 +115,12 @@ function specWithDistill(overrides: Record<string, unknown> = {}): SpecFixture {
   };
 }
 
-// A timer seam the suite drives by hand. The handle is a REAL unref'd timer that never runs a callback
-// of its own, because the lane's seams are typed against NodeJS.Timeout.
 function parkedTimer(): NodeJS.Timeout {
   const handle = setTimeout(() => {}, 2 ** 30);
   handle.unref();
   return handle;
 }
 
-/**
- * files    fake disk: output path -> content
- * verdicts queued result-file verdicts, consumed one per spawn
- * onSpawn  optional side effect (usually writing the output into `files`)
- */
 function harness({
   specs = [{ name: 'house-rules', specPath: '/specs/house-rules.pack.json' }],
   specByPath = { '/specs/house-rules.pack.json': specWithDistill() },
@@ -192,8 +179,6 @@ function harness({
       concurrent += 1;
       maxConcurrent = Math.max(maxConcurrent, concurrent);
       try {
-        // The real spawn resolves only once the destroyed PTY tree is reaped, so an aborted fake must
-        // settle too rather than hanging: that is what the caller's drain waits for.
         if (hangForever) {
           await new Promise<void>((resolve) => {
             if (!args.signal) { resolve(); return; }
@@ -207,8 +192,6 @@ function harness({
         concurrent -= 1;
       }
     },
-    // One dep carrying its own cleanup: the closure owns the directory, so nothing has to infer
-    // ownership from the path (see createJobResultFile in server/ephemeral-session.ts).
     createResultFile: (packName: string, index: number) => {
       if (createResultFileOverride) return createResultFileOverride();
       const resultPath = `/tmp/${packName}-${index}.json`;
@@ -249,9 +232,6 @@ function harness({
   };
 }
 
-// ---------------------------------------------------------------------------
-// drift detection
-// ---------------------------------------------------------------------------
 
 test('an output whose stamp matches its sources is current, and nothing is spawned', async () => {
   const h = harness({ files: { '/packs/sources/house-rules/derived/brief.md': stampedFile() } });
@@ -272,9 +252,6 @@ test('a missing output spawns one distill session and reports the written file',
   assert.equal(report.output, 'sources/house-rules/derived/brief.md');
 });
 
-// The result directory is a real mkdtemp in production, so a distill that skips its cleanup leaks one
-// per entry per pass. It is minted INSIDE the guarded region and released in a finally, so the verdict
-// cannot decide whether it happens.
 test('every distill releases its result file, on a clean verdict and on ERROR alike', async () => {
   const distilled = harness();
   await distilled.distiller.runOnce();
@@ -305,9 +282,6 @@ test('a dry run reports the drift and its reason, and spawns nothing', async () 
   assert.equal(h.spawns.length, 0);
 });
 
-// ---------------------------------------------------------------------------
-// the spawned session
-// ---------------------------------------------------------------------------
 
 test('the prompt file names the target as read-only context and the spawn runs from its directory', async () => {
   const h = harness();
@@ -396,9 +370,6 @@ test('the spawned Session receives the shared posture and never skips permission
   assert.deepEqual(constructed[0].extraClaudeArgs, ['-p', ...LANE_ENVIRONMENT_ARGS]);
 });
 
-// ---------------------------------------------------------------------------
-// verdicts are re-checked against the file on disk
-// ---------------------------------------------------------------------------
 
 test('a successful result that cannot be written is an ERROR, not a success', async () => {
   const h = harness({ onWrite: () => {} });
@@ -558,7 +529,6 @@ test('an ERROR verdict is reported once and never retried inside the pass', asyn
 test('a hung session is aborted by the timeout and reported as an error', async () => {
   const h = harness({ hangForever: true });
   const pass = h.distiller.runOnce();
-  // The lane arms one timeout per distill; firing it is what a real timer would do at the deadline.
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(h.timeouts.length, 1);
   assert.equal(h.timeouts[0].ms, 60000);
@@ -570,7 +540,6 @@ test('a hung session is aborted by the timeout and reported as an error', async 
   assert.equal(h.spawns[0].signal?.aborted, true);
 });
 
-// The serialization promise: the result dir is released and the next entry started only after the aborted spawn settles (drainPending).
 test('a timed-out distill waits for the killed session before releasing its result file or starting the next entry', async () => {
   const h = harness({
     specByPath: {
@@ -604,9 +573,6 @@ test('a timed-out distill waits for the killed session before releasing its resu
   assert.equal(reports[1].status, 'distilled');
 });
 
-// ---------------------------------------------------------------------------
-// entries that never reach a session
-// ---------------------------------------------------------------------------
 
 test('an output path that escapes the packs directory errors before any spawn', async () => {
   const h = harness({
@@ -692,9 +658,6 @@ test('a name filter runs only that pack', async () => {
   assert.equal(reports[0].pack, 'other');
 });
 
-// ---------------------------------------------------------------------------
-// serialization, the interval, and stop
-// ---------------------------------------------------------------------------
 
 test('two stale entries distill one at a time, never concurrently', async () => {
   const h = harness({
@@ -724,7 +687,6 @@ test('two overlapping passes queue behind each other rather than racing the same
 
   assert.equal(h.maxConcurrent(), 1);
   assert.equal(first[0].status, 'distilled');
-  // The second pass finds the file the first one wrote, so it never spawns again.
   assert.equal(second[0].status, 'current');
   assert.equal(h.spawns.length, 1);
 });
@@ -788,9 +750,6 @@ test('stop() drains a distill that is already running', async () => {
   assert.equal(report.status, 'distilled');
 });
 
-// ---------------------------------------------------------------------------
-// the result file
-// ---------------------------------------------------------------------------
 
 test('readDistillResult distinguishes unreadable files from invalid JSON', async () => {
   const missing = await readDistillResult('/no/such/glissa-distill-result.json');
@@ -878,7 +837,6 @@ test('the prompt permits one structured result file and reserves target renderin
 });
 
 test('the post-verify is the same drift check the lane started from', () => {
-  // Pins the reuse rather than a second, drifting implementation of "is this current".
   assert.equal(needsDistill(HASHES, stampedFile()).stale, false);
   assert.equal(needsDistill(HASHES, null).stale, true);
 });

@@ -1,6 +1,5 @@
 import { STATES } from "../../shared/states.ts";
 
-// node-pty reports a numeric signal, a kill path may report its name, and a clean exit reports none.
 type ExitSignal = number | string | null | undefined;
 
 interface ExitTransition {
@@ -8,10 +7,6 @@ interface ExitTransition {
   detail: { exitCode: number; signal: ExitSignal; reason?: string };
 }
 
-// Maps a real PTY exit (current state + exit code/signal + whether the STARTING PTY ever
-// produced output) to the lifecycle event/detail to fire. Side-effect free: the caller
-// performs the actual this.transition(event, detail) and reads detail.reason (only ever
-// set on the no-output branch) for its own "exit" emit.
 function decideExitTransition(
   state: string,
   exitCode: number,

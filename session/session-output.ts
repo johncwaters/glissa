@@ -14,10 +14,6 @@ interface StateChange {
   to: SessionState;
 }
 
-/**
- * The two Session events this module binds. Spelled as an overload rather than `unknown[]`, so a
- * state-change listener keeps its payload type instead of re-asserting it.
- */
 interface SessionEventBinder {
   (event: "state-change", listener: (change: StateChange) => void): void;
   (event: "exit", listener: () => void): void;
@@ -36,7 +32,6 @@ interface SessionOutputOptions {
   off: SessionEventBinder;
 }
 
-// An alias, not an interface: the worktree lifecycle's paste port takes an indexable result.
 type PasteResult = {
   ok: boolean;
   reason?: string;

@@ -1,9 +1,3 @@
-// `glissa pack` - build and inspect context packs.
-//
-// Lives in server/ for the same reason server/pair-cli.ts does: package.json "files" whitelists bin
-// entries one by one but ships server/ wholesale, so a new bin/ module would be missing from the
-// published tarball and scripts/check-package-files.js would fail.
-
 import path from 'node:path';
 
 import { DEFAULT_AGENT_ID, commandFor } from '../session/adapters/index.ts';
@@ -33,10 +27,6 @@ function reportLine(report: BuildReport): string {
   return `${name}ok    version ${shortVersion(report.version)}  files ${report.fileCount}  tokens ${report.tokenEstimate}/${report.budgetTokens}`;
 }
 
-/*
- * The projects a group spec derives its per-project variants from. Best effort: an install with no
- * config yet still builds every plain pack, and every group's base, which is what a manual build is for.
- */
 function variantProjects() {
   try {
     return packVariantProjects(loadConfigFile(resolveConfigPath(), { exitOnError: false }).config);
@@ -97,9 +87,6 @@ const DISTILL_STATUS_LABEL: Record<string, string | undefined> = {
   error: 'ERROR',
 };
 
-// The manual trigger, always allowed: config.packDistiller.enabled gates the scheduled lane only, and
-// an operator running this command IS the authorization. `claude` must be resolvable for a real run;
-// a dry run only reads and hashes, so it works on a machine without it.
 async function runDistill(
   name: string | null,
   { dryRun }: { dryRun: boolean },
@@ -136,7 +123,6 @@ async function runDistill(
   return 0;
 }
 
-/** `args` is argv after the `pack` subcommand; the return value is the process exit code. */
 async function runPackCli(
   args: string[],
   deps: { makeDistiller?: () => PackDistiller } = {},

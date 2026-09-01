@@ -1,5 +1,3 @@
-// One switch: the transition wires, the reverse transition unwires, a save that changed nothing does
-// neither, and enabling writes the lanes Visions implies without touching what the operator set.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -102,7 +100,6 @@ test('the LIVE config object is the one mutated, and the lanes are told once', a
   const disk: TestConfig = { visions: { enabled: true } };
   const pokes: unknown[] = [];
   const setup = createVisionsSetup({
-    // A getter, exactly as backend.ts hands it over: the same object the lanes read.
     getConfig: () => config,
     configStore: {
       save(mutator) {
@@ -119,7 +116,6 @@ test('the LIVE config object is the one mutated, and the lanes are told once', a
   await setup.maybeApply();
   assert.deepEqual(config.ingest, IMPLIED_INGEST);
   assert.deepEqual(disk.ingest, IMPLIED_INGEST);
-  // The poke lands AFTER the live mutation, or the rebuild would compare against a config still saying off.
   assert.deepEqual(pokes, [IMPLIED_INGEST]);
 });
 

@@ -1,6 +1,3 @@
-// Every control connection is told its own trust so the dashboard can stop offering server-machine
-// actions a paired phone cannot act on. Display metadata only; nothing is enforced on it.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 

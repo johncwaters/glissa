@@ -1,12 +1,3 @@
-// Control-WS dispatch for the update-settings PR-review/telegram extension: validates the optional
-// nested prReview/telegram objects (server/control-handlers.ts validatePrReview/validateTelegram),
-// persists a sanitized copy (unknown keys like a stray projectChoices echo are dropped), and echoes
-// the result via settings-updated.
-//
-// The store under the harness is the real one: what a client is echoed is what getSettings answers,
-// which is why a secret-bearing block is compared against that projection rather than against the
-// raw config the save persisted.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -42,7 +33,7 @@ function harness(cfg: GlissaConfig, store: ConfigStore = testConfigStore(cfg)): 
     broadcastControl: (message) => { broadcasts.push(message); },
   }));
   const connection = connectControl<SettingsFrame>(server);
-  connection.sent.length = 0; // drop the connect preamble
+  connection.sent.length = 0;
   return { send: connection.send, sent: connection.sent, broadcasts, reloadCalls, cfg, store };
 }
 
@@ -271,13 +262,6 @@ test('visions validation rejects wrong scalar types and ranges', () => {
   }
 });
 
-// ---------------------------------------------------------------------------
-// The posthog block (server/control-handlers.ts validatePosthog/sanitizePosthog), same contract as
-// prReview above: validated on the way in, persisted sanitized, echoed back, and hot-applied via
-// applySettingsReload (which calls the lane's restartIfConfigChanged).
-// ---------------------------------------------------------------------------
-
-// Exactly what the Settings dialog's PostHog tab sends (public/dialogs.ts save()).
 function posthogPayload(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     enabled: true,
@@ -393,9 +377,6 @@ test('a non-positive posthog numeric field is rejected with settings-error', () 
   }
 });
 
-// The traffic spike lane's keys. They ride the same whitelist as the rest of the posthog block, but
-// their bounds are their own: a spike multiplier under 1 would fire on every quiet hour, and the
-// baseline window has to stay inside what the HogQL query clamps to.
 test('a traffic spike multiplier below 1 is rejected', () => {
   const h = harness({ projects: [] });
   h.send({ type: 'update-settings', settings: { posthog: posthogPayload({ trafficSpikeMultiplier: 0.5 }) } });
@@ -439,8 +420,6 @@ test('trafficSpikeEnabled: false persists rather than being dropped as falsy', (
   assert.equal(blockOf(h.cfg.posthog, 'trafficSpikeEnabled'), false);
 });
 
-// The auto-fix dispatch. It pushes branches and opens pull requests, so it is opted into explicitly
-// and its longer ceiling is bounded on both sides rather than left as a bare positive number.
 test('posthog.autoFix persists both ways and is rejected when it is not a boolean', () => {
   const on = harness({ projects: [] });
   on.send({ type: 'update-settings', settings: { posthog: posthogPayload({ autoFix: true }) } });
@@ -480,8 +459,6 @@ test('a non-object posthog.projectMap is rejected with settings-error', () => {
   assert.ok(h.sent.find((m) => m.type === 'settings-error' && /projectMap/.test(String(m.message))));
 });
 
-// allowStatusWrites/dailyDigest were removed: nothing in the lane consumed them, and persisting a
-// key implies behavior behind it.
 test('retired posthog keys are dropped rather than persisted', () => {
   const h = harness({ projects: [] });
   h.send({
@@ -492,9 +469,6 @@ test('retired posthog keys are dropped rather than persisted', () => {
   assert.equal(holdsKey(h.cfg.posthog, 'dailyDigest'), false);
 });
 
-// The recurrence-dedupe keys are hand-edited today (the dialog does not render them), so they have to
-// survive a save that never mentions them: the dialog spreads the hydrated object, and only a
-// whitelisted key makes it back through sanitizePosthog.
 test('the recurrence dedupe keys round-trip, and the kill switch is validated as a boolean', () => {
   const h = harness({ projects: [] });
   h.send({
@@ -563,13 +537,6 @@ test('posthog validation leaves prReview, telegram and remote alone', () => {
   assert.equal(h.cfg.telegram, undefined, 'telegram not written by a posthog-only save');
 });
 
-// ---------------------------------------------------------------------------
-// Launch defaults (the dev server's debugMode overlay) through the REAL config store: the dialog
-// sends every boolean on every save, so an unrelated change must not write this launch's default
-// into config.json, which would leak the dev overlay into `npm start` from the same repo config.
-// ---------------------------------------------------------------------------
-
-// Runs fn against a real config store over a temp config.json, then restores env + disk.
 function withRealStore(
   seed: Record<string, unknown>,
   storeOpts: { settingsDefaults?: Partial<DefaultConfig> } | undefined,
@@ -592,7 +559,6 @@ function withRealStore(
 
 test('an unrelated save never materializes an untouched launch default', () => {
   withRealStore({ projects: [] }, { settingsDefaults: { debugMode: true } }, (h, store, readDisk) => {
-    // Exactly what the dialog sends: the changed setting plus the echoed-back debugMode.
     h.send({ type: 'update-settings', settings: { debugMode: true, cursorBlink: true } });
 
     const onDisk = readDisk();
@@ -609,7 +575,6 @@ test('flipping the checkbox away from the launch default persists it, and it win
     assert.equal(readDisk().debugMode, false, 'an explicit choice is persisted');
     assert.equal(store.getSettings().debugMode, false, 'and beats the launch default in the echo');
 
-    // Now that the key exists, re-checking it persists normally: no guard once the value is real.
     h.send({ type: 'update-settings', settings: { debugMode: true } });
     assert.equal(readDisk().debugMode, true);
     assert.equal(store.getSettings().debugMode, true);

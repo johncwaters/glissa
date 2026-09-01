@@ -1,8 +1,5 @@
-// Pure rules behind the agent chip and Add Session picker (M2/M6 of docs/plan-agent-adapters.md).
-
 export const DEFAULT_AGENT_ID = 'claude-code';
 
-// Short badge labels; wire carries only id (M2), unmapped ids render as-is.
 const BADGE_LABELS: Record<string, string> = { codex: 'Codex', grok: 'Grok' };
 
 export function agentBadgeText(agent: unknown) {
@@ -12,7 +9,6 @@ export function agentBadgeText(agent: unknown) {
   return BADGE_LABELS[id] || id;
 }
 
-// Filters to resolvable agents; hides picker for a single option; defaults to defaultId or first resolvable.
 export interface AgentOption {
   id?: unknown;
   label?: unknown;

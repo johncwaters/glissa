@@ -1,6 +1,3 @@
-// Hand-rolled cookie parse/serialize. Glissa takes no dependency for this: the whole surface is one
-// header in and one header out, and the auth path must not grow a supply chain.
-
 const COOKIE_NAME = 'glissa_device';
 
 export interface SetCookieOptions {
@@ -30,7 +27,7 @@ function parseCookieHeader(header: unknown): Record<string, string> {
     const name = part.slice(0, eq).trim();
     if (name === '') continue;
     const value = part.slice(eq + 1).trim();
-    if (name in out) continue; // first wins, so a trailing forged duplicate cannot override
+    if (name in out) continue;
     out[name] = value;
   }
   return out;
@@ -53,10 +50,6 @@ function serializeSetCookie(name: string, value: string | undefined, opts: SetCo
   return parts.join('; ');
 }
 
-/**
- * Cookie value is "<deviceId>.<secret>". The id is the lookup key; the secret is compared against a
- * stored hash. Split on the FIRST dot only, so a secret containing one cannot shift the boundary.
- */
 function readDeviceCookie(header: unknown, cookieName: string = COOKIE_NAME): DeviceCookie | null {
   const jar = parseCookieHeader(header);
   const raw = jar[cookieName];
@@ -66,15 +59,6 @@ function readDeviceCookie(header: unknown, cookieName: string = COOKIE_NAME): De
   return { id: raw.slice(0, dot), secret: raw.slice(dot + 1) };
 }
 
-/**
- * Secure comes from X-Forwarded-Proto because the remote listener itself speaks plain http behind
- * tailscale serve; forging that header can only ADD Secure, which locks the forger out rather than
- * in. The proxy's word WINS whenever it speaks, GLISSA_INSECURE_BIND included: a browser genuinely
- * on TLS must get a Secure cookie, and letting a wider bind veto that would strip the flag from
- * every proxied request. With no header the listener is itself what the browser reached, and it
- * serves plain http in both the loopback and the insecure-bind case, so Secure is off either way -
- * which is why the bind mode is not an input here at all.
- */
 function decideCookieFlags({ forwardedProto }: { forwardedProto?: unknown; [key: string]: unknown } = {}): CookieFlags {
   const first = typeof forwardedProto === 'string' ? forwardedProto.split(',')[0].trim().toLowerCase() : '';
   return { secure: first === 'https', sameSite: 'Lax' };

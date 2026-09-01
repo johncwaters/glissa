@@ -1,14 +1,3 @@
-/*
- * `memory.enabled` implies the agent-log SOURCE and nothing else (docs/plan-visions-3.md, M14, operator
- * decision 2026-08-22). This is the pin for the half that could go wrong quietly: with memory on and
- * `config.ingest` absent, the source must be running, and yet NO ingest frame may reach the control WS
- * and no dispatch digest may exist. One switch, not three, and no widening of what leaves the machine.
- *
- * SAFETY: every boot points at a throwaway temp config via GLISSA_CONFIG with zero projects, and the
- * three vendor transcript homes are redirected to empty temp directories, so no test here reads the
- * operator's own conversations.
- */
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -101,8 +90,6 @@ test('with ingest off no ingest frame reaches the control WS', async () => {
 });
 
 test('the dispatch digest stays unwired, so memory alone never widens a prompt', async () => {
-  // Visions implies the ingest lane, so the opt-out is explicit: what this pins is that MEMORY alone
-  // never builds one.
   const booted = await boot({ memory: { enabled: true }, visions: { enabled: true }, ingest: { enabled: false } });
   try {
     assert.equal(ingestLane(booted.backend), null);
@@ -110,7 +97,7 @@ test('the dispatch digest stays unwired, so memory alone never widens a prompt',
     const ingest = memoryIngestLane(booted.backend);
     assert.ok(visions, 'the visions lane is running');
     assert.ok(ingest, 'the memory ingest consumer exists');
-    // Null is what the Visions lane reports when it was handed no digest and no movement signal at all.
+
     assert.equal(visions.latestContextSeq(), null);
     assert.notEqual(ingest.source, null);
   } finally {

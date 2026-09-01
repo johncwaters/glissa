@@ -1,12 +1,3 @@
-// ── Usage view ────────────────────────────────────────────────
-// Token and estimated-cost insight over the Claude Code transcripts on this machine, fed by two
-// control-WS messages: `usage-sessions` (small, pushed whenever a session's totals move) and
-// `usage-report` (the full roll-up, pulled with `request-usage-report`). The panel is DOM only: every
-// string it shows is built in usage-view-core.mjs, which is where the no-dash wording lives.
-//
-// The tab is always present, so an operator who has switched usage tracking off still finds the surface
-// and is told where to switch it back on.
-
 import { createAttentionAck } from './attention-ack-core.ts';
 import { buildPanelSection, el, isPanelHidden } from './dom-helpers.ts';
 import { createPollAgoTicker, formatAgo } from './poll-ago.ts';
@@ -153,8 +144,6 @@ const _attention = createAttentionAck({
   isLooking: () => !isPanelHidden(_root),
 });
 
-// Elements the shared tick repaints in place, so a report that has not changed is never rebuilt just to
-// advance a clock.
 let _reportAgeEl: HTMLParagraphElement | null = null;
 let _sessionsTsEl: HTMLParagraphElement | null = null;
 let _planAgeEl: HTMLParagraphElement | null = null;
@@ -165,8 +154,6 @@ let _refreshButtonEl: HTMLButtonElement | null = null;
 let _refreshStatusEl: HTMLSpanElement | null = null;
 
 const _ticker = createPollAgoTicker(() => _root);
-
-// ── Small builders ──
 
 const buildSection = (title: string, hint?: string | null) => buildPanelSection('usage', title, hint);
 
@@ -207,8 +194,6 @@ function paintMeter(meter: HTMLElement | null, pct: unknown) {
   if (fill) fill.style.width = `${value}%`;
 }
 
-// The by-model table is eight columns wide, so it scrolls inside its own box rather than letting the
-// page scroll sideways on a narrow window or a phone.
 function buildTable(headings: TableHeading[], sort: SortState | null, onSort: (key: string) => void, tableId: string) {
   const wrap = el('div', 'usage-table-scroll');
   wrap.dataset.usageTable = tableId;
@@ -229,8 +214,7 @@ function buildTable(headings: TableHeading[], sort: SortState | null, onSort: (k
     button.type = 'button';
     button.dataset.sortKey = sortKey;
     button.addEventListener('click', () => {
-      // Sorting rebuilds the table, so the control the operator just activated has to be handed its
-      // focus back or a keyboard sort drops them to the top of the document.
+
       _focusAfterRender = { kind: 'sort', table: tableId, key: sortKey };
       onSort(sortKey);
     });
@@ -254,8 +238,6 @@ function appendCells(row: HTMLElement, cells: TableCell[]) {
   }
 }
 
-// Share of the whole, as a number and a bar: an absolute cost says nothing about whether a row is the
-// one worth acting on.
 function buildShareCell(pct: number | null) {
   const wrap = el('div', 'usage-share');
   if (!Number.isFinite(pct)) {
@@ -269,10 +251,6 @@ function buildShareCell(pct: number | null) {
   wrap.append(bar, el('span', 'usage-share-text', formatPercent(pct)));
   return wrap;
 }
-
-// ── Tick painters ──
-// Each reads module state rather than a captured value, so a targeted update and the shared tick can
-// share one painter and neither can go stale.
 
 function paintReportAge() {
   if (!_reportAgeEl?.isConnected) return;
@@ -293,8 +271,6 @@ function paintBlockProgress() {
   if (_blockRemainingEl?.isConnected) _blockRemainingEl.textContent = `${formatMinutes(progress.remainingMinutes)} left`;
   if (_blockMeterEl?.isConnected) paintMeter(_blockMeterEl, progress.pct);
 }
-
-// ── Header ──
 
 function daysForRange(value: string) {
   const option = RANGE_OPTIONS.find((entry) => entry.value === value);
@@ -320,14 +296,11 @@ function buildControls() {
   });
   rangeLabel.append(select);
 
-  // Constant label, always: the in-flight state lives on the disabled attribute and the status span
-  // beside the button, never in its text.
   const button = el('button', 'usage-refresh', 'Refresh');
   button.type = 'button';
   button.title = 'Re-read every transcript from the start';
   button.addEventListener('click', () => requestUsageReport({ force: true }));
-  // Deliberately not a live region: a pull also fires on every turn end while the tab is open, and
-  // announcing each one would talk over the operator for a background refresh they did not ask for.
+
   const status = el('span', 'usage-refresh-status', '');
   _refreshButtonEl = button;
   _refreshStatusEl = status;
@@ -354,10 +327,6 @@ function buildHeaderSection() {
   return section;
 }
 
-// ── Plan limits ──
-// The official account rate limits, first on the page because they are the only hard ceiling here: every
-// other number is arithmetic about spend, this one is how much of the plan is gone. Kept visible when
-// stale, with its age, rather than hidden or silently swapped for the estimate.
 function buildPlanLimitsSection() {
   if (!hasOfficialPlanLimits(_planLimits)) return null;
   const claudeOnly = claudeOnlyHint(_report?.totals);
@@ -392,13 +361,11 @@ function buildPlanWindow(spec: { key: 'fiveHour' | 'sevenDay'; label: string }, 
   const countdown = el('span', 'usage-plan-reset', '');
   head.append(countdown);
   row.append(head);
-  // No meter for a window that reported only a reset time: a zero-width bar would read as 0% used,
-  // which is the one thing an absent percentage does not mean.
+
   if (Number.isFinite(window.pct)) {
     row.append(buildMeter(window.pct, tokenLimitTone(window.pct), `${spec.label} plan limit used`));
   }
-  // The countdown is the one part that moves on its own, so it rides the shared tick and reads the
-  // window it was built from.
+
   const paint = () => {
     if (!countdown.isConnected) return;
     countdown.textContent = resetCountdownText(window.resetsAtMs);
@@ -414,11 +381,6 @@ function paintPlanAge() {
   _planAgeEl.textContent = age ? `Plan ${age}` : '';
 }
 
-/*
- * Glissa lanes: what the automation cost, as opposed to what the operator cost. This is the one usage answer
- * that needs a tool which SPAWNED the sessions, so it is the section with no equivalent anywhere else.
- * Hidden entirely until a non-interactive lane has spend, since otherwise it just restates the totals.
- */
 function buildLanesSection() {
   if (!hasLaneAttribution(_report)) return null;
   const rows = laneRows(_report);
@@ -452,15 +414,11 @@ function buildLanesSection() {
   return section;
 }
 
-// ── Current block ──
-// Promoted above the totals: "am I burning too fast right now" is the only question here with a clock
-// on it, and its two rate numbers get tile weight rather than a sentence.
 function buildActiveBlockSection() {
   const block = _report?.activeBlock;
   const blockHours = _report?.blockHours;
   const hours = typeof blockHours === 'number' && Number.isFinite(blockHours) ? blockHours : 5;
-  // The 5h window is a Claude subscription concept, so the block numbers exclude other vendors. Said out
-  // loud, because otherwise they read as inconsistent with the multi-vendor totals below.
+
   const claudeOnly = claudeOnlyHint(_report?.totals);
   const section = buildSection('Current block', claudeOnly ? `${hours}h window, ${claudeOnly}` : `${hours}h window`);
   if (!block) {
@@ -501,8 +459,7 @@ function buildActiveBlockSection() {
 
   const limit = tokenLimitLine(_report?.tokenLimit);
   if (!limit) return section;
-  // The heuristic reference. Always labelled as the estimate it is, because with official plan limits on
-  // the page above it an unlabelled percentage would read as a second official ceiling.
+
   const currentPct = limitPct(_report?.tokenLimit);
   const heuristicTone = blockAttentionTone(_report);
   section.append(buildMeter(currentPct, heuristicTone, 'Share of the largest completed block seen, estimated'));
@@ -519,11 +476,6 @@ function buildActiveBlockSection() {
   return section;
 }
 
-/*
- * Whether today (or this block) is out of line with the recent past. Present either way: a quiet
- * confirmation is worth one muted line, because an alarm that only ever appears cannot be trusted to be
- * working. Compared against a 30 day baseline server-side; the wording always names the comparison.
- */
 function buildAnomalyLine() {
   const anomaly = _report?.anomaly;
   if (!hasAnomaly(anomaly)) return null;
@@ -532,7 +484,6 @@ function buildAnomalyLine() {
   return line;
 }
 
-// ── Block history ──
 function buildBlockHistorySection() {
   const rows = blockHistoryRows(_report?.blocks);
   if (rows.length === 0) return null;
@@ -556,7 +507,6 @@ function buildBlockHistorySection() {
   return section;
 }
 
-// ── Totals ──
 function buildTotalsSection() {
   const totals = _report?.totals || {};
   const today = dailyRowForDay(_report?.daily, reportDayKey(_report));
@@ -569,8 +519,7 @@ function buildTotalsSection() {
   section.append(tiles);
   const composition = buildCompositionRow(totals);
   if (composition) section.append(composition);
-  // The per-vendor split, only once a non-Claude vendor has data: on an all-Claude machine it would just
-  // restate the totals above.
+
   const vendorRows = hasMultiVendorUsage(totals) ? vendorTotalsRows(totals) : [];
   if (vendorRows.length > 0) {
     const vendorTiles = el('div', 'usage-tiles usage-vendor-tiles');
@@ -586,17 +535,11 @@ function buildTotalsSection() {
   return section;
 }
 
-/*
- * Where the tokens went, as one stacked bar over a legend instead of four equal tiles. The usual
- * story here is cache reads dwarfing everything else, and a bar states that at a glance where a row
- * of same-sized tiles just adds numbers to compare. The legend order matches the bar order, so the
- * mapping never rides on color alone.
- */
 function buildCompositionRow(totals: UsageTotals | null | undefined) {
   const parts = compositionParts(totals);
   if (parts.length === 0) return null;
   const wrap = el('div', 'usage-compo');
-  // The legend carries every value, so the bar itself is presentation only.
+
   const bar = el('div', 'usage-compo-bar');
   bar.setAttribute('aria-hidden', 'true');
   for (const part of parts) {
@@ -619,11 +562,6 @@ function buildCompositionRow(totals: UsageTotals | null | undefined) {
   return wrap;
 }
 
-/*
- * What the token-saving systems are worth, beside what was spent. Absent entirely when neither half has
- * anything to report, and each tile is omitted on its own: a machine without rtk still gets the cache
- * figure, and an rtk figure is shown on a machine whose Claude rows carry no cache reads.
- */
 function buildSavingsSection() {
   const savings = _report?.savings;
   if (!hasSavings(savings)) return null;
@@ -637,16 +575,11 @@ function buildSavingsSection() {
   return section;
 }
 
-/*
- * The operator's own spend ceilings, beside the plan limits because both are ceilings: the plan is the
- * account's, the budget is the operator's. Absent entirely with no budget configured: an unset budget
- * must not render as a zero one.
- */
 function buildBudgetsSection() {
   const rows = budgetRows(_report);
   if (rows.length === 0) return null;
   const section = buildSection('Budgets', 'your own ceilings');
-  // Tones come from usage-budget-core, so the meter colour and the alert ladder agree.
+
   const wrap = el('div', 'usage-budgets');
   const settingsLink = createSettingsLink('machine-usage', 'usage-daily-budget', 'Budget settings');
   wrap.appendChild(settingsLink);
@@ -664,9 +597,6 @@ function buildBudgetsSection() {
   return section;
 }
 
-// ── Over time ──
-// One table, three period views, all derived from the same merged daily series so a week total can never
-// disagree with the days under it. Sorting and the per-period model breakdown carry across the switch.
 function buildDailySection() {
   const daily = _report?.daily || [];
   const periodView = _periodView;
@@ -700,7 +630,7 @@ function buildDailySection() {
     const tr = el('tr', 'usage-row');
     if (row.source === 'history') tr.dataset.source = 'history';
     const models = sortModelRows(row.models);
-    // Namespaced by view: weeks are keyed by their Monday, the same string as that day's Day-view key.
+
     const expandKey = `${periodView}:${day}`;
     const toggle = buildBreakdownToggle(expandKey, models.length);
     appendCells(tr, [
@@ -718,8 +648,6 @@ function buildDailySection() {
   return section;
 }
 
-// Three stable labels with aria-pressed, not one control that renames itself: the pressed state is the
-// indicator, and every button always says which view it selects.
 function buildPeriodSwitch() {
   const group = el('div', 'usage-period');
   group.setAttribute('role', 'group');
@@ -740,7 +668,6 @@ function buildPeriodSwitch() {
   return group;
 }
 
-// A remembered row reads differently from an observed one, so history is tagged in the table too.
 function buildPeriodCell(row: UsageWireRow, periodView: string) {
   const wrap = el('span', 'usage-period-cell');
   wrap.append(el('span', null, periodLabel(row.day, periodView)));
@@ -748,9 +675,6 @@ function buildPeriodCell(row: UsageWireRow, periodView: string) {
   return wrap;
 }
 
-// ── Heatmap ──
-// A CSS grid, one column per week, Monday to Sunday down each column. No canvas and no library: the whole
-// thing is 112 spans whose only variable is a tone attribute.
 function buildHeatmap(daily: unknown) {
   const { cells, max } = heatmapCells(daily);
   if (cells.length === 0 || max <= 0) return null;
@@ -774,8 +698,6 @@ function buildHeatmap(daily: unknown) {
   return wrap;
 }
 
-// Stable label, state on aria-expanded (the chevron is a CSS response to that attribute), so the
-// control never renames itself between open and closed.
 function buildBreakdownToggle(expandKey: string, modelCount: number) {
   if (modelCount === 0) return null;
   const button = el('button', 'usage-toggle', 'Models');
@@ -811,8 +733,6 @@ function buildBreakdownRow(models: UsageWireRow[]) {
   return breakdown;
 }
 
-// A muted vendor prefix, added only once the page shows more than one vendor: "gpt-5.5" alone does not
-// say where it came from, and on an all-Claude machine the prefix would be on every row for nothing.
 function buildModelCell(row: UsageWireRow, totals: UsageTotals) {
   const wrap = el('span', 'usage-model-name-wrap');
   const prefix = modelRowPrefix(row, totals);
@@ -821,7 +741,6 @@ function buildModelCell(row: UsageWireRow, totals: UsageTotals) {
   return wrap;
 }
 
-// ── Per model ──
 function buildModelsSection() {
   const rows = sortModelRows(_report?.models, _modelSort);
   const totals = _report?.totals || {};
@@ -867,9 +786,6 @@ function buildModelsSection() {
   return section;
 }
 
-// ── Per session ──
-// A transcript Glissa never managed still counts real cost, and is labelled by its project rather than
-// hidden.
 function buildSessionsSection() {
   const rows = sortSessionRows(_report?.sessions, _sessionSort);
   const visible = visibleSessionRows(rows, _sessionsExpanded);
@@ -934,10 +850,6 @@ function buildSessionsOverflow(hiddenCount: number) {
   return wrap;
 }
 
-// ── Unavailable ──
-// An error report carries no totals at all, so the sections below it would each print a confident zero
-// for a lane that is switched off or cannot see its transcripts. Radar's precedent: the bare reason,
-// with no section chrome to make an off lane look like an empty one.
 function buildUnavailableSection() {
   const section = buildSection('Not available', '');
   section.append(el('p', 'usage-empty', usageErrorLine(_report)));
@@ -956,9 +868,6 @@ function clearRefs() {
   _refreshStatusEl = null;
 }
 
-// A push while another tab is open is dropped; the surface rebuilds when it is next looked at, which is
-// also when it asks for a fresh report. Scroll position has to be carried across a rebuild by hand:
-// emptying the content collapses the scroller, so the browser clamps it back to the top.
 function render({ force = false }: { force?: boolean } = {}) {
   if (!_root) return;
   if (!force && isPanelHidden(_root)) return;
@@ -972,8 +881,6 @@ function render({ force = false }: { force?: boolean } = {}) {
   restoreFocusAfterRender();
 }
 
-// Sorting and expanding both rebuild the subtree that held the control, so the equivalent control in the
-// fresh DOM takes the focus back.
 function restoreFocusAfterRender() {
   const target = _focusAfterRender;
   _focusAfterRender = null;
@@ -994,17 +901,10 @@ function selectorForFocusTarget(target: FocusTarget) {
   return null;
 }
 
-/*
- * The page reads in three altitudes rather than one flat stack: the ceilings (plan limits, budgets,
- * the burning block), then the spend (totals, savings), then the history and breakdowns (over time,
- * recent blocks, lanes, models, sessions). Each altitude is a band: on a wide window the short
- * qualifying sections sit in a column beside the section they qualify instead of pushing it down.
- */
 function buildBody() {
   if (!_root) return;
   _root.append(buildHeaderSection());
-  // Plan limits come from the statusLine relay, not the transcript scan, so they are shown even when the
-  // report itself is missing or unavailable.
+
   const plan = buildPlanLimitsSection();
   if (isUsageUnavailable(_report)) {
     if (plan) _root.append(plan);
@@ -1027,8 +927,6 @@ function buildBody() {
   _root.append(buildModelsSection(), buildSessionsSection());
 }
 
-// A band pairs one main section with a column of short sections beside it. With nothing for the
-// column the main section stands alone, so the grid never draws an empty track.
 function bandOf(
   className: string,
   main: HTMLElement,
@@ -1070,7 +968,7 @@ function setRefreshPending(pending: boolean) {
     _refreshTimer = null;
   }
   if (!pending) return;
-  // A reply that never arrives must not leave the control disabled forever.
+
   _refreshTimer = setTimeout(() => {
     _refreshTimer = null;
     _refreshPending = false;
@@ -1078,15 +976,11 @@ function setRefreshPending(pending: boolean) {
   }, REFRESH_STATUS_TIMEOUT_MS);
 }
 
-// The tab-activity seam (defined in pr-panel.js): the view owns the condition, app.js owns the dot
-// element. The condition is the token limit, both where the block is and where it is heading.
 export function setUsageActivityCallback(callback: (isActive: boolean) => void) {
   _activityCallback = callback;
   refreshActivity();
 }
 
-// app.js owns the socket; the panel owns what it asks for (range, force) and which reply is still
-// current, so every request goes through here.
 export function setUsageRequestSender(send: (message: Record<string, unknown>) => void) {
   _sendRequest = send;
 }
@@ -1113,16 +1007,13 @@ export function mountUsageView(parent: HTMLElement) {
   return root;
 }
 
-// Called when the Usage surface becomes visible. On the phone the screen is still hidden at that point,
-// so the render is forced rather than deferred again.
 export function refreshUsageView() {
   render({ force: true });
 }
 
 export function applyUsageSessions(msg: unknown) {
   _sessions = msg as UsageSessionsPush;
-  // The only thing a session push changes on a rendered report is its own freshness line, so a full
-  // rebuild of every table is not worth paying for.
+
   if (_report && !isUsageUnavailable(_report) && _sessionsTsEl?.isConnected) {
     paintSessionsTs();
     return;
@@ -1130,8 +1021,6 @@ export function applyUsageSessions(msg: unknown) {
   render();
 }
 
-// Official plan limits, broadcast only when a rounded percentage or a reset time actually moved, and
-// replayed on connect. Machine-wide, so there is nothing per session to reconcile here.
 export function applyPlanLimits(msg: unknown) {
   _planLimits = msg as PlanLimits;
   render();
@@ -1146,8 +1035,6 @@ export function applyUsageReport(msg: unknown) {
   refreshActivity();
 }
 
-// The Settings dialog's read-only Usage line: the pricing source and the last scan, sourced from the
-// same report the panel is showing rather than a second request.
 export function usageStatusLines() {
   const pricing = _report?.pricing || (_sessions ? { source: _sessions.pricingSource } : null);
   const fetchedAt = Number(pricing?.fetchedAt);

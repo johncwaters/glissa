@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-// ime-core is ESM (.mjs); dynamic-import it so the suite drives the shipped module.
 const importCore = () => import('../public/session-card/ime-core.ts');
 
 const DEL = '\x7f';
@@ -25,13 +24,13 @@ test('bytesForSoftKeyboardEdit: a suggestion that extends the word types only th
 
 test('bytesForSoftKeyboardEdit: autocorrect erases the replaced tail before typing the correction', async () => {
   const { bytesForSoftKeyboardEdit } = await importCore();
-  // xterm 6.0.0 sends "the" straight after "teh" here and the line reads "tehthe".
+
   assert.equal(bytesForSoftKeyboardEdit('teh', 'the'), `${DEL}${DEL}he`);
 });
 
 test('bytesForSoftKeyboardEdit: deleting a word costs one delete per character removed', async () => {
   const { bytesForSoftKeyboardEdit } = await importCore();
-  // xterm 6.0.0 collapses any shrink to a single DEL regardless of how much went away.
+
   assert.equal(bytesForSoftKeyboardEdit('hello', ''), DEL.repeat(5));
   assert.equal(bytesForSoftKeyboardEdit('git status', 'git '), DEL.repeat(6));
 });

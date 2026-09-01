@@ -1,6 +1,3 @@
-// Touched ranges (docs/plan-visions-4-focus.md, M19): which lines of an open buffer the carbon unit edited
-// since it was opened, fed from the applied changes of each didChange batch.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -15,7 +12,6 @@ function range(startLine: number, startCharacter: number, endLine: number, endCh
   return { start: { line: startLine, character: startCharacter }, end: { line: endLine, character: endCharacter } };
 }
 
-// Drives the buffer store the way the wiring does, so the pairs are exactly what applyDidChange hands over.
 function editor(text: string) {
   const store = createDocStore();
   const touch = createTouchState();

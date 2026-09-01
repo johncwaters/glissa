@@ -18,8 +18,6 @@ test('every loopback literal passes, with or without a port', () => {
   }
 });
 
-// A Host header brackets IPv6, so the bare spelling is not a form this ever has to accept - and it
-// cannot be split from a port unambiguously anyway.
 test('a bare unbracketed IPv6 literal is not treated as loopback', () => {
   assert.equal(decideHostAllowed('::1', []), false);
 });
@@ -39,8 +37,6 @@ test('a host wildcard matches below the apex only, same rule as the origin list'
   assert.equal(decideHostAllowed('evilts.net', ['*.ts.net']), false);
 });
 
-// Rebinding always carries a name, so an absent Host cannot be the attack; refusing it would only
-// break HTTP/1.0 clients.
 test('an absent Host is allowed, an empty-after-parse one is not', () => {
   assert.equal(decideHostAllowed(undefined, []), true);
   assert.equal(decideHostAllowed('', []), true);

@@ -1,8 +1,3 @@
-// queryTag throws when a selector no longer matches its tag, which is the point: a renamed id used to
-// surface as an undefined read somewhere downstream. The trade is that a selector typo now hard-fails a
-// dialog at wiring time, and no browser runs in this suite. This pins each selector against the markup
-// that has to satisfy it: the component HTML plus the innerHTML literals the JS builds its rows from.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -31,9 +26,6 @@ function markupCorpus(): string {
   return [...html, ...scripts].join('\n');
 }
 
-// Elements reach the DOM two ways here: written as markup (component HTML, innerHTML literals) and
-// built by dom-helpers el(tag, className). Both count as a declaration of the element this selector
-// expects to find.
 function elementsMatching(corpus: string, tag: string): string[] {
   const written = [...corpus.matchAll(new RegExp(`<${tag}\\b[^>]*>`, 'g'))].map((match) => match[0]);
   const built = [...corpus.matchAll(new RegExp(`\\bel\\('${tag}',\\s*'([^']*)'`, 'g'))]

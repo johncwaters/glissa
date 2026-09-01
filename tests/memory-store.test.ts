@@ -1,7 +1,3 @@
-// The IO shell around the memory core (docs/plan-visions-3.md, M12) on the M12b database substrate: boot
-// load with signature verification and monthly retention, batched appends, the forget transaction, the
-// mill-style versioned projection, the FTS5 retrieval index, and a stop() that drains rather than drops.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -21,7 +17,6 @@ import { projectVariantSlug } from '../server/core/pack-core.ts';
 
 type MemoryStore = NonNullable<ReturnType<typeof createMemoryStore>>;
 
-// What a suite hands append(): the store mints the id, timestamps and signature itself.
 interface KnowledgeInput {
   kind: string;
   layer: string;
@@ -47,19 +42,15 @@ function tempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memory-'));
 }
 
-// A row as it goes in by hand: recordToRow leaves `seq` to the database, which assigns it on insert.
 type PlantedRow = Omit<MemoryRow, 'seq'> & { seq?: number | null };
 
 const openedStores: MemoryStore[] = [];
 
-// The store answers a nullable record by design (a refused append, a missing id); every read here
-// expects the record to be there, so the refusal is stated once.
 function requireRecord(record: MemoryRecord | null | undefined, what: string): MemoryRecord {
   if (!record) throw new Error(`the store holds no ${what}`);
   return record;
 }
 
-// forget() answers null when the store is already stopped; every case here expects its outcome.
 type ForgetOutcome = NonNullable<Awaited<ReturnType<MemoryStore['forget']>>>;
 
 function requireForget(outcome: ForgetOutcome | null): ForgetOutcome {
@@ -138,17 +129,14 @@ test('a canonical project lookup distinguishes colliding legacy plan signature v
   assert.notStrictEqual(splitProject, separatorProject);
 });
 
-// json-file.js writes `<target>.tmp.<pid>.<n>` beside its target, so a read racing a rename sees one.
 function readdirStable(dirPath: string): string[] {
   return fs.readdirSync(dirPath).filter((name) => !/\.tmp\.\d+\.\d+$/.test(name));
 }
 
-// Everything but the database's own files, which come and go with the WAL.
 function readdirNoDb(dirPath: string): string[] {
   return readdirStable(dirPath).filter((name) => !name.startsWith('glissa.db'));
 }
 
-// Raw bytes, because the point is what survives BELOW the API: a grep -a over the file finds it or not.
 function fileHoldsCanary(file: string, canary: string): boolean {
   try {
     return fs.readFileSync(file).includes(canary);
@@ -186,7 +174,6 @@ function readCanon(dir: string): MemoryRecord[] {
   return withRawDb(dir, (raw) => raw.prepare('SELECT * FROM memory_records ORDER BY ts, id').all().map((row) => rowToRecord(asMemoryRow(row))));
 }
 
-// Stands in for a row another local process wrote by hand, the database twin of a hand-appended line.
 function plantRow(dir: string, record: MemoryRecord, overrides: Partial<MemoryRow> = {}): PlantedRow {
   const row = { ...recordToRow(record), ...overrides };
   withRawDb(dir, (raw) => {
@@ -564,11 +551,6 @@ test('forget with nothing to match writes no tombstone', async () => {
   }
 });
 
-/*
- * The forget is ONE transaction, which is what replaced the cross-process lockfile: a failure after the
- * redactions and before the tombstone must leave the canon byte-identical, not half-expunged with no
- * audit trail. The tombstone insert is the last write, so failing it is the sharpest place to cut.
- */
 test('a forget that fails partway leaves the canon untouched', async () => {
   const dir = tempDir();
   try {
@@ -674,13 +656,6 @@ test('a store that was stopped accepts no further writes', async () => {
   }
 });
 
-// --- The M12b substrate ---------------------------------------------------
-
-/*
- * Operator decision, 2026-08-23: no migration. The file-era segments are ignored and left where they are,
- * and the database starts empty; importing them through verify-or-demote was dropped with the file
- * substrate itself.
- */
 test('a directory holding file-era canon segments boots EMPTY and never touches them', async () => {
   const dir = tempDir();
   try {
@@ -701,12 +676,6 @@ test('a directory holding file-era canon segments boots EMPTY and never touches 
   }
 });
 
-/*
- * Security review, 2026-08-23 (HIGH): the file-era forget rewrote the segment through tmp+rename, so the
- * expunged plaintext was gone from the file. The database substrate regressed that three ways at once, and
- * all three parts are needed: secure_delete zeroes the freed row, FTS5's own rebuild frees the term data a
- * DELETE only tombstones, and the checkpoint reclaims the WAL frames the commit left behind.
- */
 test('a forgotten secret leaves no readable trace in the database, its WAL, or a superseded build', async () => {
   const dir = tempDir();
   const canary = 'zebrafishpassphrase';
@@ -715,7 +684,7 @@ test('a forgotten secret leaves no readable trace in the database, its WAL, or a
     await store.append(knowledge(`${canary} was pasted into the prompt`));
     await store.append(knowledge('the poller ticks every 15 minutes'));
     await store.flushProjection();
-    // A second build, so the rotation has a previous/ holding the pre-forget text to drop.
+
     await store.append(knowledge('a later fact that forces a second build'));
     await store.flushProjection();
     const before = filesUnder(dir).filter((file) => fileHoldsCanary(file, canary));
@@ -754,10 +723,6 @@ test('a locked-diff build held for review is dropped by a forget, not left holdi
   }
 });
 
-/*
- * Security review, 2026-08-23 (MEDIUM): the version was sampled AFTER the read and after the commit, so a
- * commit landing in that window was stamped as already-loaded and this store short-circuited on it forever.
- */
 test('a commit landing between a read and an append is not swallowed by the version stamp', async () => {
   const dir = tempDir();
   try {
@@ -765,7 +730,6 @@ test('a commit landing between a read and an append is not swallowed by the vers
     await server.append(knowledge('the poller ticks every 15 minutes'));
     assert.equal(server.records().length, 1);
 
-    // Another process commits inside the window: after this store's last read, before its next write.
     const other = openStore(dir, { startAt: START + 100000 });
     await other.append(knowledge('a fact recorded by another process'));
     await other.stop();
@@ -790,7 +754,7 @@ test('a store that cannot open the database stays off with one warning rather th
   const dir = tempDir();
   try {
     const lines: string[] = [];
-    // Not openStore: this is the one case whose whole point is the null the factory answers with.
+
     const store = createMemoryStore({
       dir,
       dbPath: dbPathFor(dir),
@@ -833,8 +797,6 @@ test('a forget by another process reaches a live store on its next read', async 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
-
-// --- The FTS5 retrieval index ---------------------------------------------
 
 const CANDIDATES = [
   'the rebase gate refuses a dirty worktree before it replays anything',
@@ -898,8 +860,6 @@ test('a dropped index falls back to the lexical path silently and a rebuild rest
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
-
-// --- Security review regressions -----------------------------------------
 
 const SKIP_ON_WINDOWS = { skip: process.platform === 'win32' ? 'POSIX modes and uids only' : false };
 

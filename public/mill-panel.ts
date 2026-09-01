@@ -1,13 +1,3 @@
-// ── Mill view ─────────────────────────────────────────────────
-// The context mill (AGENTS.md "Context Packs") as a surface: what each pack spec asks for, what its
-// last build produced, how much of its token budget that spent, which live sessions were spawned
-// against it and whether they ever read it, which derived files have drifted, and which config keys
-// name it.
-//
-// A PULL surface like Usage: the report is assembled on demand (`request-mill-report`) rather than
-// broadcast, because nothing about it changes on its own between a rebuild and a spawn. The panel is
-// DOM only; every string and tone comes from mill-view-core.mjs.
-
 import { createAttentionAck } from './attention-ack-core.ts';
 import { buildPanelSection, buildStatChip, el, isPanelHidden } from './dom-helpers.ts';
 import { getMillAttentionAck, setMillAttentionAck } from './ui-prefs.ts';
@@ -98,8 +88,6 @@ function buildLine(className: string, text: string | null | undefined, tone?: st
   return line;
 }
 
-// ── Sections ──
-
 function buildTotalsSection() {
   const section = buildSection('Context mill', MILL_HINT);
   const chips = el('div', 'mill-stats');
@@ -159,12 +147,6 @@ function buildMeasurementBlock(pack: MillPack) {
   return wrap;
 }
 
-/*
- * The one WRITE on this tab: which projects a pack is delivered to. A toggle sends one delta
- * (`set-project-packs`), and the server's broadcast pulls a fresh report, which is what re-renders the
- * boxes. The box is disabled while that round trip is out, so a double click cannot send two toggles
- * for the same pack.
- */
 function buildDeliverToBlock(pack: MillPack) {
   const wrap = el('div', 'mill-deliver');
   wrap.append(el('p', 'mill-deliver-title', DELIVER_TO_TITLE));
@@ -254,8 +236,7 @@ function buildNoticeSection(text: string) {
 
 function buildBody() {
   if (!_root) return;
-  // A missing or failed report has no totals, so the chips above would each print a confident zero for
-  // a mill nobody has read yet.
+
   if (!_report) {
     _root.append(buildNoticeSection(MILL_LOADING_TEXT));
     return;
@@ -273,8 +254,6 @@ function buildBody() {
   for (const pack of packs) _root.append(buildPackSection(pack));
 }
 
-// Scroll position has to be carried across a rebuild by hand: emptying the content collapses the
-// scroller, so the browser clamps it back to the top.
 function render({ force = false }: { force?: boolean } = {}) {
   if (!_root) return;
   if (!force && isPanelHidden(_root)) return;
@@ -300,7 +279,6 @@ export function acknowledgeMillAttention() {
   refreshActivity();
 }
 
-// app.js owns the socket; the panel owns which reply is still current, so every request goes here.
 export function setMillRequestSender(send: (message: Record<string, unknown>) => void) {
   _sendRequest = send;
 }
@@ -327,8 +305,6 @@ export function mountMillView(parent: HTMLElement) {
   return root;
 }
 
-// Called when the Mill surface becomes visible. On the phone the screen is still hidden at that point,
-// so the render is forced rather than deferred again.
 export function refreshMillView() {
   render({ force: true });
 }

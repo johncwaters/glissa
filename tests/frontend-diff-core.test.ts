@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-// diff-core is ESM (.mjs); dynamic-import it so the suite drives the shipped module.
 const importCore = () => import('../public/sidebar/diff-core.ts');
 
 test('parseUnifiedDiff: empty input returns []', async () => {
@@ -127,7 +126,7 @@ test('parseUnifiedDiff: handles CRLF line endings', async () => {
   assert.equal(f.path, 'f.js');
   assert.equal(f.added, 1);
   assert.equal(f.removed, 1);
-  // No stray CR left on the line text.
+
   assert.equal(f.hunks[0].lines[1].text, 'b');
 });
 
@@ -170,14 +169,14 @@ test('summarizeFiles: rolls up file count and add/remove totals', async () => {
 
 test('shouldDropDiffCache: drops on merged/none and on parked -> pending-review, keeps otherwise', async () => {
   const { shouldDropDiffCache } = await importCore();
-  // Worktree gone: any cached diff is stale regardless of where it came from.
+
   assert.equal(shouldDropDiffCache('pending-review', 'merged'), true);
   assert.equal(shouldDropDiffCache('parked', 'merged'), true);
   assert.equal(shouldDropDiffCache('parked', 'none'), true);
   assert.equal(shouldDropDiffCache(undefined, 'none'), true);
-  // A parked merge handed back as mergeable: the resolve rebase moved HEAD, the cache is stale.
+
   assert.equal(shouldDropDiffCache('parked', 'pending-review'), true);
-  // Everything else keeps the cache.
+
   assert.equal(shouldDropDiffCache('parked', 'merging'), false);
   assert.equal(shouldDropDiffCache('none', 'pending-review'), false);
   assert.equal(shouldDropDiffCache(undefined, 'pending-review'), false);

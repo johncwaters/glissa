@@ -1,18 +1,14 @@
-// Baseline uses the project's p90 so one past spike cannot hide the next one.
-
 import { toCount } from './posthog-core.ts';
 
 const DEFAULT_TRAFFIC_SPIKE_MULTIPLIER = 3;
 const DEFAULT_TRAFFIC_SPIKE_MIN_USERS = 10;
 const DEFAULT_TRAFFIC_SPIKE_COOLDOWN_MINUTES = 360;
 const DEFAULT_TRAFFIC_BASELINE_DAYS = 7;
-// Below a day of hourly samples the p90 is mostly one part of one daily cycle, so a normal morning
-// reads as a spike against a quiet night. Day one of a lane reports nothing rather than lying.
+
 const MIN_BASELINE_SAMPLE_HOURS = 24;
-// An active spike that has doubled again since the last ping is climbing, not merely continuing.
+
 const ESCALATION_GROWTH_FACTOR = 2;
-// Per-project traffic state, parked under an underscore key so a server that iterates issue keys
-// (everything not starting with '_') loads a newer state file unharmed.
+
 const TRAFFIC_KEY = '_traffic';
 
 export interface TrafficBaseline {
@@ -56,7 +52,6 @@ function median(sortedValues: number[]): number {
   return (sortedValues[mid - 1] + sortedValues[mid]) / 2;
 }
 
-/** The project's own normal, from its hourly unique-user counts. Empty input reports zeroes. */
 function computeBaseline(buckets: unknown): TrafficBaseline {
   const values = sortedUserCounts(buckets);
   return {
@@ -78,25 +73,20 @@ function normalizeState(prev: unknown): TrafficState {
   };
 }
 
-// The floor of 1 keeps a project whose baseline hour is genuinely 0 users from making every single
-// visitor a 3x spike; it also keeps the ratio finite.
 function baselineFloor(baseline: { p90?: unknown } | null | undefined): number {
   return Math.max(toCount(baseline?.p90, 0), 1);
 }
 
-/** How many times its own normal the current window is running at. */
 function spikeMultiple(currentUsers: unknown, baseline: { p90?: unknown } | null | undefined): number {
   return toCount(currentUsers, 0) / baselineFloor(baseline);
 }
 
-/** Compact multiple for a ping line: 12x, 3.4x, 1.5x. */
 function formatMultiple(multiple: unknown): string {
   const value = toCount(multiple, 0);
   if (value >= 10) return `${Math.round(value)}x`;
   return `${(Math.round(value * 10) / 10)}x`;
 }
 
-/** The one-line body of a traffic ping. Every number the operator needs to judge it, no prose. */
 function spikeSummaryLine({ currentUsers, baseline, multiple }: {
   currentUsers?: unknown;
   baseline?: { p90?: unknown } | null;
@@ -114,7 +104,6 @@ function nextTrafficState(state: TrafficState, users: number, overrides: Partial
   return { ...state, peakUsers: Math.max(state.peakUsers, users), ...overrides };
 }
 
-// The clear action is silent downstream: it only re-arms future spike pings.
 function decideTrafficSpike({ currentUsers, baseline, prev, now, cfg }: {
   currentUsers?: unknown;
   baseline?: { p90?: unknown; sampleHours?: unknown } | null;
@@ -155,8 +144,6 @@ function decideTrafficSpike({ currentUsers, baseline, prev, now, cfg }: {
 
   if (!isSpiking) return verdict('none', 'no-spike', state, multiple);
 
-  // Inside the cooldown the spike is still recorded as active, so the tick it ends still clears and
-  // the next genuine takeoff pings; only the buzz is withheld.
   if (state.lastPingAt > 0 && nowMs - state.lastPingAt < cooldownMinutes * 60000) {
     const held = nextTrafficState(state, users, { active: true, lastPingedUsers: users });
     return verdict('none', 'cooldown', held, multiple);

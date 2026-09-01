@@ -102,7 +102,6 @@ async function removeQuietly(target: string): Promise<void> {
   try {
     await fsp.rm(target, { recursive: true, force: true });
   } catch {
-    // best-effort temp cleanup: a leftover file must never turn a successful install into a failure
   }
 }
 
@@ -183,7 +182,7 @@ async function installRtk({
 
     const target = installTargetPath(homeDir, platform);
     await fsp.mkdir(path.dirname(target), { recursive: true });
-    // Windows rename refuses an existing destination, so clear it first.
+
     await removeQuietly(target);
     await moveIntoPlace(extracted, target, renameImpl);
 

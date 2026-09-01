@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-// triage-core is a browser module; dynamic-import it so the suite drives the shipped source.
 const importCore = () => import('../public/phone/triage-core.ts');
 
 interface TriageRow {

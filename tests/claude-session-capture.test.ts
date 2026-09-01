@@ -1,10 +1,3 @@
-// Crash-safe capture of the live Claude session_id off MAIN-AGENT hook payloads (see AGENTS.md,
-// "Auto-Resume and Shutdown"). Resume assigns Claude a NEW session id each time, so every hook
-// must re-capture. Keying this off SessionStart alone left the whole chain dead: Claude Code
-// 2.1.220 fires no SessionStart hook at startup (probe: an interactive PTY run received only
-// SessionEnd; a headless run received UserPromptSubmit/Stop/SessionEnd), while every main-agent
-// payload carries `session_id` and that value names the resumable transcript.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Session } from '../session/sessions.ts';
@@ -21,8 +14,6 @@ function hook(s: Session, signal: string, payload: HookPayload) {
   s.ingestHookSignal({ signal, source: 'hook', ts: Date.now(), payload });
 }
 
-// The regression: with no SessionStart ever delivered, these are the only hooks that can carry
-// the id, so the capture must key off any main-agent hook rather than one event name.
 for (const signal of ['resume', 'ready', 'awaiting-input', 'session-end']) {
   test(`a ${signal} hook payload captures the live session id`, () => {
     const s = makeSession();
@@ -57,8 +48,6 @@ test('a resume after /clear re-captures the new id', () => {
   s.destroy();
 });
 
-// Background-agent hooks are tracking-only and may describe a DIFFERENT Claude session than the
-// one this card resumes, so they must never rebind the resume id.
 for (const signal of ['subagent-start', 'subagent-stop', 'task-created', 'task-completed', 'teammate-idle']) {
   test(`a ${signal} hook never rebinds the resume id`, () => {
     const s = makeSession();
@@ -80,7 +69,7 @@ for (const source of ['startup', 'resume', 'clear', 'compact', 'fork']) {
     sessionStart(s, { session_id: id, source });
     assert.equal(s.resumeSessionId, id, 'mirrored into the live resume binding');
     assert.equal(events.length, 1, 'emitted claude-session-id once');
-    // The event carries the M5 fields beside the back-compat `id`: vendor (claude here) plus sessionId.
+
     assert.deepEqual(events[0], { id, source, vendor: 'claude', sessionId: id });
     s.destroy();
   });
@@ -118,7 +107,7 @@ test('a malformed session_id (fails the shared shape check) is a no-op', () => {
   const s = makeSession();
   const events: unknown[] = [];
   s.on('claude-session-id', (e) => events.push(e));
-  sessionStart(s, { session_id: 'nope', source: 'startup' }); // too short
+  sessionStart(s, { session_id: 'nope', source: 'startup' });
   sessionStart(s, { session_id: 'has spaces in it 1234', source: 'startup' });
   assert.equal(s.resumeSessionId, null);
   assert.equal(events.length, 0);

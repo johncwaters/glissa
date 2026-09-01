@@ -81,8 +81,7 @@ const clientVariants = [
   loose('request-mill-report', { requestId }),
   loose('set-project-packs', { projectId: z.string(), pack: z.string(), deliver: z.boolean(), requestId }),
   loose('request-hooks-report', { requestId }),
-  // The record itself is validated by the handler (session/core/user-hooks-core.js), which is what
-  // turns a bad field into a named refusal instead of a generic contract error.
+
   loose('save-hook', { hook: z.record(z.string(), z.unknown()), requestId }),
   loose('delete-hook', { id: z.string(), requestId }),
   loose('shutdown'),
@@ -246,7 +245,7 @@ const serverVariants = [
   loose('session-packs', { id: sessionId, packs: z.array(z.object({ name: z.string(), version: z.string() })) }),
   loose('session-wakeup', { id: sessionId, pendingWakeup: PendingWakeup.nullable(), timestamp }),
   loose('session-prompt', { id: sessionId, pendingPromptKind: nullableString, timestamp }),
-  // TODO(server/backend.js relay): type session-sleep and session-wake when the browser consumes them.
+
   loose('session-sleep'),
   loose('session-wake'),
   loose('session-merge-status', {
@@ -397,7 +396,7 @@ const serverVariants = [
   }),
   loose('posthog-archive-investigation-result', { requestId, ok: z.boolean(), error: optionalError }),
   loose('pr-status', { ts: timestamp, projects: z.array(opaqueObject) }),
-  // TODO(server/branch-gc-poller.js runTick): type the payload when the browser consumes it.
+
   loose('branch-gc-status'),
   loose('usage-sessions', {
     ts: timestamp,

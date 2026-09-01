@@ -19,7 +19,6 @@ test('isFocusAltShortcut: matches the digit shortcuts 0-9', () => {
 });
 
 test('isFocusAltShortcut: rejects keys the terminal should keep', () => {
-  // Plain letters (Alt+b/f word nav in readline), other arrows, and non-key strings stay with the PTY.
   for (const k of ['a', 'b', 'f', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape', '', '10']) {
     assert.equal(isFocusAltShortcut(k), false, k);
   }

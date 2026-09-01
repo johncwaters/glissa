@@ -232,7 +232,7 @@ function createSessionRegistry(dependencies: SessionRegistryDependencies): Sessi
     const session = sessions.get(id);
     if (!session) return false;
     dependencies.closeSessionDataClients(id);
-    // Acknowledge before destroy because destroy removes the listeners that complete notification cleanup.
+
     dependencies.notificationManager.acknowledge(id);
     // Same reason: a removed session never transitions to DONE, so the measurement lane is told here or
     // its accumulator is stranded and the pack scorecard keeps counting a delivery that is long gone.

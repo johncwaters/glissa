@@ -1,12 +1,3 @@
-/*
- * M12b of docs/plan-visions-3.md: the long-term memory tenant of the machine-wide database. It owns the
- * DDL, the prepared statements and the row-to-record mapping, and nothing else: every decision about
- * what may be remembered, what a forget expunges and how a record is ranked stays in
- * server/core/memory-core.ts, and the shell that applies those decisions is server/memory-store.ts.
- *
- * The canon is append-only in the same sense the JSONL segments were: rows are inserted, never rewritten,
- * except by the one sanctioned expunge. `validTo` is derived at read time from the supersession chain.
- */
 
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 
@@ -52,7 +43,6 @@ const SCHEMA = Object.freeze([
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   )`,
-  // Derived and rebuildable: any doubt about its consistency with memory_records is answered by a rebuild.
   'CREATE VIRTUAL TABLE IF NOT EXISTS memory_records_fts USING fts5(id UNINDEXED, body)',
 ]);
 
@@ -61,11 +51,8 @@ const PROJECT_TAG_SCHEMA_KEY = 'memory.schema.projectTags';
 const PROJECT_TAG_SCHEMA_VERSION = 2;
 const DISTILL_CURSOR_KEY = 'memory.distill.cursorSeq';
 const DISTILL_FAILURE_KEY = 'memory.distill.failures';
-// A high water mark prevents a forgotten newest row from letting a new record fall behind the cursor.
 const SEQ_HIGH_KEY = 'memory.seq.high';
 
-// The memory_records column set, in the types sqlite hands back for it. A type alias rather than an
-// interface so a raw result row narrows to it without laundering through unknown.
 type MemoryRow = {
   id: string;
   ts: number;
@@ -152,8 +139,6 @@ function recordToRow(record: MemoryRecord): Omit<MemoryRow, 'seq'> {
   };
 }
 
-// Deliberately unvalidated: the caller runs it through validateMemoryRecord and verifyOrDemote, exactly
-// as it ran a canon LINE through them, so a row a local process wrote by hand is trusted no further.
 function rowToRecord(row: MemoryRow): MemoryRecord {
   return {
     id: row.id,
@@ -173,20 +158,15 @@ function rowToRecord(row: MemoryRow): MemoryRecord {
   };
 }
 
-// The one narrowing site for a memory_records result row; every column is declared NOT NULL or nullable
-// exactly as MemoryRow states, so the shape is the schema's, not a guess.
 function asMemoryRow(row: ResultRow): MemoryRow {
   return row as MemoryRow;
 }
 
-// Terms are [a-z0-9]+ from the pure tokenizer, so quoting each one leaves FTS5 no operator to read.
-// The doubled quote is belt and braces: it keeps the escaping correct here if that tokenizer ever widens.
 function ftsMatchExpression(terms: unknown): string | null {
   if (!Array.isArray(terms) || terms.length === 0) return null;
   return terms.map((term) => `"${String(term).replace(/"/g, '""')}"`).join(' OR ');
 }
 
-// Existing tables need widening before the schema adds an index over the new column.
 function ensureSeqColumn(db: DatabaseSync): boolean {
   const columns = db.prepare('PRAGMA table_info(memory_records)').all();
   if (columns.length === 0 || columns.some((column) => column.name === 'seq')) return false;
@@ -226,8 +206,6 @@ function createMemoryDb({ dbPath, busyTimeoutMs }: { dbPath: string; busyTimeout
     insertFts: db.prepare('INSERT INTO memory_records_fts (id, body) VALUES (?, ?)'),
     deleteFts: db.prepare('DELETE FROM memory_records_fts WHERE id = ?'),
     clearFts: db.prepare('DELETE FROM memory_records_fts'),
-    // FTS5's own rebuild: it DISCARDS every segment and re-derives from the index's content rows, which
-    // is what actually frees the term data a plain DELETE only tombstones.
     scrubFts: db.prepare("INSERT INTO memory_records_fts(memory_records_fts) VALUES('rebuild')"),
     countFts: db.prepare('SELECT count(*) AS total FROM memory_records_fts'),
     search: db.prepare(`SELECT id FROM memory_records_fts WHERE memory_records_fts MATCH ?
@@ -263,7 +241,6 @@ function createMemoryDb({ dbPath, busyTimeoutMs }: { dbPath: string; busyTimeout
       try {
         db.exec('ROLLBACK');
       } catch {
-        // A rollback that cannot run leaves the failing error as the one worth reporting.
       }
       throw error;
     }
@@ -274,7 +251,6 @@ function createMemoryDb({ dbPath, busyTimeoutMs }: { dbPath: string; busyTimeout
     return Number.isFinite(value) ? Math.floor(value) : 0;
   }
 
-  // The write lock and row max keep hand-edited or pre-migration databases from receiving a dead seq.
   function allocateSeq(): number {
     const next = Math.max(
       readMetaInteger(SEQ_HIGH_KEY),
@@ -284,7 +260,6 @@ function createMemoryDb({ dbPath, busyTimeoutMs }: { dbPath: string; busyTimeout
     return next;
   }
 
-  // Returns the ordinal it assigned rather than a bare true, so an in-memory copy can carry it too.
   function insertRecord(record: MemoryRecord): number | false {
     const row = { ...recordToRow(record), seq: allocateSeq() };
     const outcome = statements.insertRecord.run(row);
@@ -306,7 +281,6 @@ function createMemoryDb({ dbPath, busyTimeoutMs }: { dbPath: string; busyTimeout
     statements.deleteFts.run(id);
   }
 
-  // A pre-M18 database carries backfilled ordinals with no high water mark, and a fresh one carries none.
   function ensureSeqHighWater(): void {
     const rowMax = Number(requiredAggregateRow(statements.maxSeq.get()).high) || 0;
     if (rowMax <= readMetaInteger(SEQ_HIGH_KEY)) return;
@@ -332,16 +306,10 @@ function createMemoryDb({ dbPath, busyTimeoutMs }: { dbPath: string; busyTimeout
     });
   }
 
-  /*
-   * A deleted or redacted row leaves its words in the index's existing SEGMENTS, which a DELETE only
-   * marks rather than frees, so an expunged secret stays greppable in the database file. This is the
-   * second of the three parts that close that (secure_delete and the WAL checkpoint are the others).
-   */
   function scrubSearchIndex(): void {
     statements.scrubFts.run();
   }
 
-  // Re-derived from the CANON, not from the index's own content rows, so it also repairs a divergence.
   function rebuildSearchIndex(): number {
     statements.clearFts.run();
     for (const row of statements.listRecords.all()) statements.insertFts.run(row.id, row.body);
@@ -349,7 +317,6 @@ function createMemoryDb({ dbPath, busyTimeoutMs }: { dbPath: string; busyTimeout
     return Number(requiredAggregateRow(statements.countFts.get()).total);
   }
 
-  // Frees the WAL frames a committed expunge left behind; a reader holding the log only defers it.
   function checkpoint(): boolean {
     try {
       db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
@@ -394,10 +361,6 @@ function createMemoryDb({ dbPath, busyTimeoutMs }: { dbPath: string; busyTimeout
     });
   }
 
-  /*
-   * Mirrored in memory because the echo check runs once per LINE of every ingested event, on the one
-   * event loop every session shares. The rows stay the durable copy; the mirror is dropped on write.
-   */
   let deliveredCache: Set<string> | null = null;
 
   function deliveredSet(): Set<string> {
@@ -418,7 +381,6 @@ function createMemoryDb({ dbPath, busyTimeoutMs }: { dbPath: string; busyTimeout
     return Number(requiredAggregateRow(statements.countDelivered.get()).total);
   }
 
-  // The FTS table is derived, so a count that disagrees with the canon is answered by a rebuild, not a repair.
   function ensureSearchIndex(): number {
     const records = Number(requiredAggregateRow(statements.countRecords.get()).total);
     if (records === Number(requiredAggregateRow(statements.countFts.get()).total)) return 0;
@@ -433,7 +395,6 @@ function createMemoryDb({ dbPath, busyTimeoutMs }: { dbPath: string; busyTimeout
     dataVersion: () => dataVersion(db),
     dbPath,
     deleteRecord,
-    // Retention drops remembered text too, so it scrubs exactly the way forget does.
     deleteSegments(keys: Iterable<string>) {
       let removed = 0;
       transaction(() => {

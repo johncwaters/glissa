@@ -1,13 +1,3 @@
-// Unit tests for the child-process-safe wrapper: every spawn form must inject
-// windowsHide:true (the burst-of-CMD-windows fix) while preserving the file,
-// args, options, callback, return value, and the promisified {stdout,stderr}
-// contract that server/git-workspace.ts depends on.
-//
-// The wrapper calls cp.<fn>(...) at CALL TIME on the shared node:child_process
-// module object, so swapping a property on that object captures exactly what the
-// wrapper forwards to the real implementation. The module is reached through
-// createRequire because an ESM namespace object is sealed. Each spy is restored in finally.
-
 import { test } from "node:test";
 import assert from "node:assert";
 import { createRequire } from "node:module";
@@ -46,7 +36,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 test("hide() forces windowsHide:true, merged last, preserving other options", () => {
   assert.deepEqual(safe.hide(undefined), { windowsHide: true });
   assert.deepEqual(safe.hide({ cwd: "x", timeout: 5 }), { cwd: "x", timeout: 5, windowsHide: true });
-  // A caller cannot opt out: windowsHide is forced on even if explicitly false.
+
   assert.equal(safe.hide({ windowsHide: false }).windowsHide, true);
 });
 

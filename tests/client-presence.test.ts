@@ -1,7 +1,3 @@
-// Per-connection focus suppression (server/core/client-presence.js). The rule remote mode forced:
-// a notification is held ONLY while every open control connection reports focused. The failure this
-// replaces is a dashboard focused at the desk suppressing a paired phone forever.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 

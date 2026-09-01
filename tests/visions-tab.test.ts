@@ -1,17 +1,3 @@
-/*
- * The Visions tab's feed, end to end over the REAL sockets: an editor relay on /visions publishes a
- * sweep, and every dashboard on /control hears about it.
- *
- * The reconnect-repair decision is pinned here too. Findings are CURRENT STATE per open buffer, not the
- * one-shot moments control-replay-core retains (notify, session-error, post-turn-result), so
- * 'visions-findings' is deliberately NOT replayable: a client that missed a gap is repaired with one
- * 'visions-snapshot' of the whole map instead, which is the plan-limits precedent and the only shape
- * that can also express a uri closed while the client was away.
- *
- * SAFETY: the boot points at a throwaway temp config with ZERO projects via GLISSA_CONFIG, like every
- * other backend boot test (the boot worktree reconcile would otherwise touch real repos).
- */
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -51,7 +37,6 @@ interface IntentState {
   threads: IntentThread[];
 }
 
-// Every control frame this suite reads. Anything else arrives as the bare `type` member.
 type ControlFrame =
   | { type: 'visions-snapshot'; documents: VisionsDocument[]; intent: { byProject: Record<string, unknown>; unowned: IntentThread[] } }
   | { type: 'visions-findings'; uri: string; ts: number; diagnostics: Diagnostic[] }
@@ -130,14 +115,12 @@ test('a sweep reaches every connected dashboard, and a later one is repaired by 
   assert.deepEqual(pushed.diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word']);
   assert.ok(Number.isFinite(pushed.ts) && pushed.ts > 0);
 
-  // The reconnect: a second dashboard connects after the sweep and is told the current state in one frame.
   const reconnected = await openRecordingSocket<ControlFrame>(dash, '/control');
   track(reconnected.ws);
   const repaired = await waitForMessage(reconnected.received, isSnapshot, 'visions-snapshot');
   assert.deepEqual(repaired.documents.map((document) => document.uri), [MARKDOWN_URI]);
   assert.deepEqual(repaired.documents[0].diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word']);
 
-  // And closing the buffer empties both surfaces: the live push, and the next client's repair frame.
   sendLsp(relay.ws, 'textDocument/didClose', { textDocument: { uri: MARKDOWN_URI } });
   const cleared = await waitForMessage(
     dashboard.received,
@@ -204,8 +187,6 @@ test('a control client connecting with the lane off is told nothing about the vi
   }
 });
 
-// The other half of the decision, stated where it can fail: adding either visions type to
-// REPLAYABLE_EXACT would break this and force the choice to be made again on purpose.
 test('visions messages are not on the control replay retention list', () => {
   const log = createReplayLog();
   log.stamp({ type: 'visions-findings', uri: MARKDOWN_URI, diagnostics: [], ts: 1 });

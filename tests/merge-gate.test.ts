@@ -1,8 +1,3 @@
-// Pure review-gate demotion matrix (session/core/merge-gate.ts), extracted from
-// Session.checkWorktreeChange / Session.getDiff. The Session-level wiring (emit
-// ordering, dedup interplay) stays covered by sessions-worktree tests; this pins
-// the decision table itself.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 

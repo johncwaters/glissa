@@ -1,14 +1,3 @@
-/*
- * Pure document store for the Visions lane. Both LSP sync kinds land here: a contentChange with no
- * range replaces the whole buffer, one with a range splices UTF-16 code units between two positions,
- * and a batch applies in order with each change reading the text the previous one left behind.
- *
- * One deliberate divergence from the LSP reference implementation: a character past the end of its line
- * clamps to the end of that line's CONTENT, where the reference clamps past the break to the start of
- * the next line. No conforming client sends such a position, and on a CRLF line this direction can
- * never land between the \r and the \n, which the other one can.
- */
-
 export interface Position {
   line: number;
   character: number;
@@ -77,20 +66,17 @@ function applyDidOpen(store: DocStore, params: TextDocumentParams | null | undef
   return { applied: true };
 }
 
-// Where each line begins, on VS Code's own split: \r\n, a lone \r, or a lone \n each end a line.
 function lineStartOffsets(text: string): number[] {
   const starts = [0];
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index];
     if (char === '\n') starts.push(index + 1);
-    // A \r that a \n follows is half of one break, and that break ends on the \n above.
+
     if (char === '\r' && text[index + 1] !== '\n') starts.push(index + 1);
   }
   return starts;
 }
 
-// The inverse of offsetOfPosition: which 1-based line an offset falls on, by binary search over the
-// same line starts.
 function lineOfOffset(lineStarts: number[], offset: number): number {
   let low = 0;
   let high = lineStarts.length - 1;
@@ -112,20 +98,13 @@ function isPositionShape(position: unknown): position is Position {
   return typeof candidate.character === 'number' && Number.isInteger(candidate.character) && candidate.character >= 0;
 }
 
-// Where the content of the line ending at this break stops: before the \r of a \r\n, otherwise before
-// the single break character.
 function lineEndBeforeBreak(text: string, nextLineStart: number): number {
   const breakIndex = nextLineStart - 1;
-  // The bounds check is index math, not CR semantics: index 0 simply has no character before it.
+
   if (breakIndex > 0 && text[breakIndex] === '\n' && text[breakIndex - 1] === '\r') return breakIndex - 1;
   return breakIndex;
 }
 
-/**
- * A position as a UTF-16 code unit offset, which is what JS string indexing already counts. Both LSP
- * clamps apply: a line past the last one lands at the end of the document, and a character past its
- * line's content (VS Code legitimately sends end positions at line length) lands at the line break.
- */
 function offsetOfPosition(text: string, lineStarts: number[], position: Position): number {
   if (position.line >= lineStarts.length) return text.length;
   const lineStart = lineStarts[position.line];
@@ -134,13 +113,6 @@ function offsetOfPosition(text: string, lineStarts: number[], position: Position
   return Math.min(lineStart + position.character, lineEnd);
 }
 
-/**
- * One contentChange against the text standing before it, as { ok: true, text } or the reason its shape
- * is malformed. A change with no range is a whole-buffer replacement, and keeps its long-standing
- * tolerance for a missing text field; a RANGED change with no string to splice is refused instead,
- * because coercing it to '' would silently delete the range the editor asked to replace. rangeLength is
- * deprecated and never read, since the range alone already says what is being replaced.
- */
 function applyContentChange(
   text: string,
   change: ContentChange | null | undefined,
@@ -161,7 +133,6 @@ function applyContentChange(
   return { ok: true, text: text.slice(0, start) + change.text + text.slice(end) };
 }
 
-// One log line's worth of range: `3:7-3:12`, or `<none>` for a change that carried none.
 function formatRange(range: Range | null | undefined): string {
   if (!range || typeof range !== 'object') return '<none>';
   return `${formatPosition(range.start)}-${formatPosition(range.end)}`;
@@ -190,7 +161,7 @@ function applyDidChange(store: DocStore, params: TextDocumentParams | null | und
   for (let index = 0; index < changes.length; index += 1) {
     const change = changes[index];
     const spliced = applyContentChange(text, change);
-    // A malformed change abandons the whole batch, so the mirror never holds a half-applied buffer.
+
     if (!spliced.ok) {
       return {
         applied: false, reason: spliced.reason, index, range: change?.range ?? null,
@@ -243,7 +214,6 @@ function isBoundaryInsertion(
   return isLineBlankAtOffset(nextText, insertionOffset + insertedText.length);
 }
 
-// The minimal span a whole-buffer replacement changed: one prefix and suffix walk, or null for no change.
 function replacedSpanOfWholeTextChange(
   previousText: unknown,
   nextText: unknown,

@@ -1,15 +1,10 @@
 @import "tailwindcss" layer(tailwind);
 
-/* Disable preflight to avoid conflicts with existing reset and xterm.css */
 @layer base {
-  /* Tailwind's preflight is neutralized by the layer ordering */
 }
 
 @layer tailwind {
   @theme {
-    /* Colors reference CSS variables set by theme.js on :root.
-       This ensures Tailwind utilities (bg-bg, text-text-head, etc.)
-       resolve to whatever theme is currently active. */
     --color-bg: var(--bg);
     --color-bg-card: var(--bg-card);
     --color-bg-header: var(--bg-header);
@@ -32,8 +27,6 @@
     --color-state-initializing: var(--state-initializing);
     --font-family-mono: 'Cascadia Code', 'Fira Code', 'Consolas', 'Menlo', monospace;
     --font-family-ui: 'Segoe UI', system-ui, sans-serif;
-    /* Match style.css :root. The components layer wins for var(--radius) anyway, so 6px/10px
-       here was dead; no rounded-* utilities are used in markup. One source of truth. */
     --radius: 4px;
     --radius-lg: 5px;
   }

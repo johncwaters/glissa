@@ -1,5 +1,3 @@
-// No watcher and no timer: the Visions relay already carries every notification this source maps.
-
 import { applyEditorNotification, createEditorState } from './core/ingest-editor-core.ts';
 import type { EditorEvent } from './core/ingest-editor-core.ts';
 import { createLaneLog } from './lane-log.ts';
@@ -57,7 +55,7 @@ function createEditorIngest({
     state = applied.state;
     const event = applied.event;
     if (!event) return null;
-    // Debug only: one line per open, save and close on every mirrored buffer.
+
     debugNote(() => `${event.kind} ${event.summary}`);
     return publishEvent(event);
   }

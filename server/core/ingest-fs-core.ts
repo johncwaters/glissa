@@ -1,21 +1,3 @@
-/*
- * Pure core of the fs ingest source (docs/plan-ingestion.md, M9): the ignore set, the root set (config
- * normalization, canonical dedupe, the nesting collapse), the session-to-root derivation, the per-file
- * coalescing state machine, and the decision of which events a settled batch owes. No IO, no timers, no
- * clock: the shell hands in watcher events and a `now` and gets a verdict back.
- *
- * COALESCING is the load-bearing piece. @parcel/watcher already coalesces in C++, but one `npm install`
- * still touches thousands of paths and one `git checkout` rewrites a working tree, and since M7.5 every
- * published event advances the Visions lane's movement signal, so a per-event publish would spend real
- * dispatch budget on churn nobody typed. Two bounds therefore sit here: one event per FILE per window,
- * and one event for the whole WINDOW once its file count says a burst happened rather than an edit.
- *
- * The ignore set is the other half, and it runs TWICE by design. The glob forms go to the watcher, which
- * applies them before registration, so a storm inside an ignored tree never reaches this process at all
- * (and on Linux never costs an inotify watch). The predicate here re-checks what did arrive, which is
- * what covers the daemon's own state files: they sit beside the resolved config file, which in a dev
- * checkout is inside the very repo a session is working in.
- */
 
 import crypto from 'node:crypto';
 import path from 'node:path';
@@ -24,38 +6,15 @@ import { SOURCE_DEFAULTS, scrubText } from './ingest-core.ts';
 const SOURCE = 'fs';
 const KIND = 'file-change';
 
-// The config resolver owns this number; re-exporting it keeps the shell's fallback from drifting.
 const DEFAULT_BATCH_MS = SOURCE_DEFAULTS.fs.batchMs;
 
-/*
- * Above this many distinct files in one window the batch publishes ONE burst event instead of a line per
- * file. The number is the fs digest quota (docs/plan-ingestion.md Sources table): a window that produced
- * more per-file events than the digest could ever render is pure ring churn and dispatch budget, and a
- * carbon unit saving a file does not touch nine of them at once.
- */
 const MAX_FILES_PER_BATCH = SOURCE_DEFAULTS.fs.digestQuota;
-/*
- * The per-window bound on DISTINCT tracked files. Past it the batch keeps counting but stops remembering
- * names, so a checkout of a 50000-file tree costs one number rather than a map of every path in it.
- */
 const MAX_TRACKED_FILES = 2000;
-/*
- * Past MAX_TRACKED_FILES the count still has to be of DISTINCT FILES, not of events: @parcel/watcher
- * reports a create and an update for one written file, so counting events would report a 3000-file
- * checkout as 6000. Names are no longer worth holding at that scale, so what is held is a short hash per
- * path, itself capped: past this many the batch can no longer tell a new file from a repeat, and says so
- * by reporting its total as a floor rather than a count.
- */
 const MAX_UNTRACKED_KEYS = 10000;
 const UNTRACKED_KEY_CHARS = 16;
 const MAX_ROOT_ENTRIES = 32;
 const MAX_SAMPLE_FILES = 5;
 const MAX_REL_PATH_CHARS = 200;
-/*
- * Appended to a path this batch had to truncate. Two files sharing a 200-char prefix still merge, which
- * truncation cannot avoid, but the published path now says it names no exact file instead of reading as a
- * real one. Three ASCII periods, never the ellipsis character (house rule).
- */
 const TRUNCATED_SUFFIX = '...';
 
 export type FsChangeKind = 'create' | 'update' | 'delete';
@@ -81,13 +40,6 @@ export type FsIngestEvent = {
   detail: Record<string, string | number | boolean>;
 }
 
-/*
- * Directories a watcher must never descend into. Two costs, not one: a dependency tree or a build output
- * floods the ring and spends dispatch budget on churn, and on Linux every subdirectory of a recursive
- * watch costs an inotify watch, which is what exhausts fs.inotify.max_user_watches. `.glissa` is in the
- * list because the daemon's own home (recordings, uploads, built packs, every state file) lives there,
- * and an operator who names a wide explicit root would otherwise watch glissa watching itself.
- */
 const IGNORED_DIR_NAMES: readonly string[] = Object.freeze([
   '.git',
   'node_modules',
@@ -112,17 +64,9 @@ const IGNORED_DIR_NAMES: readonly string[] = Object.freeze([
   'coverage',
 ]);
 
-// Editor scratch and OS droppings: a write here is a side effect of a save, never the save itself.
 const IGNORED_FILE_SUFFIXES: readonly string[] = Object.freeze(['~', '.swp', '.swx', '.swo', '.tmp', '.temp', '.lock']);
 const IGNORED_FILE_NAMES: readonly string[] = Object.freeze(['.DS_Store', 'Thumbs.db', 'desktop.ini', '4913']);
 
-/*
- * What the daemon itself writes beside its resolved config file. In a dev checkout that file IS the
- * in-repo config.json, so these sit inside a root a glissa session is working in, and the config save
- * that persists `resumeSessionId` fires on every hook of every turn. Without this the daemon's own
- * bookkeeping would publish an event that pokes the next visions dispatch, which is the feedback loop
- * M7.5 made expensive rather than merely noisy.
- */
 const DAEMON_CONFIG_SIBLINGS: readonly string[] = Object.freeze([
   'usage-lanes.json',
   'usage-warehouse.json',
@@ -137,9 +81,6 @@ const DAEMON_CONFIG_SIBLINGS: readonly string[] = Object.freeze([
   'memory',
 ]);
 
-// The states in which a session is a live checkout worth following. DORMANT has never started and
-// DONE/FAILED have exited, which is exactly the "first session in a root starts / last one exits" edge
-// the plan's ref-counting rule is written against.
 const ACTIVE_SESSION_STATES: readonly string[] = Object.freeze(['INITIALIZING', 'STARTING', 'RUNNING', 'WAITING', 'IDLE', 'COMPLETE']);
 
 const CHANGE_KINDS: readonly string[] = Object.freeze(['create', 'update', 'delete']);
@@ -153,13 +94,7 @@ function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-// --- Ignore rules ---------------------------------------------------------
 
-/**
- * The `ignore` array for @parcel/watcher. A bare name only matches at the watched root (verified against
- * 2.6.0), so every name also ships as the two glob forms that reach a nested copy: the directory itself
- * and everything under it.
- */
 function buildIgnorePatterns(extraDirNames: unknown[] = []): string[] {
   const names: string[] = [];
   for (const raw of [...IGNORED_DIR_NAMES, ...(Array.isArray(extraDirNames) ? extraDirNames : [])]) {
@@ -187,20 +122,6 @@ function isIgnoredFileName(base: string): boolean {
   return IGNORED_FILE_SUFFIXES.some((suffix) => base.endsWith(suffix));
 }
 
-/**
- * What the daemon writes, derived from the one path it already knows: the exact siblings it owns by name,
- * plus the PREFIX rule that covers everything config-store derives from the config file's own name.
- *
- * The prefix half is not a nicety. Every content-changing save writes `<config>.bak`, boot writes
- * `<config>.boot.bak`, a parse failure writes `<config>.invalid.bak`, and every save stages through
- * `<config>.tmp.<pid>` before its rename. None of those is a path an exact list can hold (the pid is new
- * each run) and none is inside the config file, so an exact-match rule lets a `wasActive` flip publish
- * `updated config.json.bak`. The prefix is `<basename>.` and the directory must match, so a repo file
- * named `configuration.json` or `config.json5` beside it is still real activity.
- *
- * Null when there is no config path, so a source constructed without one keeps the segment rules and
- * nothing else rather than guessing at a directory.
- */
 function daemonWriteRules(configPath: unknown): DaemonWriteRules | null {
   const resolvedPath = nonEmptyString(configPath);
   if (!resolvedPath) return null;
@@ -213,8 +134,6 @@ function daemonWriteRules(configPath: unknown): DaemonWriteRules | null {
   };
 }
 
-// A sibling of the config file whose name config-store derived from it: a backup, a boot copy, an invalid
-// copy, or the per-pid temp file a save stages through.
 function isDaemonDerivedSibling(rules: DaemonWriteRules, absolutePath: string): boolean {
   const resolved = path.resolve(absolutePath);
   if (foldCase(path.dirname(resolved)) !== foldCase(rules.dir)) return false;
@@ -225,11 +144,6 @@ function foldCase(value: unknown): string {
   return process.platform === 'win32' ? String(value).toLowerCase() : String(value);
 }
 
-/**
- * True when `child` is `parent` itself or lives under it. Case-folded on Windows only, for the same
- * reason shared/paths.ts folds there: two producers routinely spell one directory two ways, and folding
- * elsewhere would silently equate paths a case-sensitive filesystem keeps apart.
- */
 function isPathInside(parent: unknown, child: unknown): boolean {
   const from = nonEmptyString(parent);
   const to = nonEmptyString(child);
@@ -242,11 +156,6 @@ function isPathInside(parent: unknown, child: unknown): boolean {
   return !toPosix(relative).startsWith('../');
 }
 
-/**
- * The relative path of a watcher event inside its root, POSIX-spelled, or null when the event names
- * something outside the root at all (a watcher reporting the root's own parent on a rename, which the
- * shell must drop rather than publish as an empty path).
- */
 function relativeWithin(root: unknown, absolutePath: unknown): string | null {
   const from = nonEmptyString(root);
   const to = nonEmptyString(absolutePath);
@@ -258,11 +167,6 @@ function relativeWithin(root: unknown, absolutePath: unknown): string | null {
   return posix;
 }
 
-/**
- * Whether a change is noise. The segment and filename rules cover what the watcher's own ignore already
- * handles (defense in depth, and the one place a platform whose glob matching differs still lands right);
- * the daemon rules cover the state files glissa writes into whichever directory its config resolved to.
- */
 function isIgnoredChange({
   relPath,
   absolutePath = null,
@@ -279,13 +183,7 @@ function isIgnoredChange({
   return isDaemonDerivedSibling(daemonRules, absolute);
 }
 
-// --- Roots ----------------------------------------------------------------
 
-/**
- * `sources.fs.roots` from config: strings only, trimmed, deduped by spelling, capped. Canonicalization is
- * deliberately NOT done here, because it is sync `realpathSync.native` and belongs to the shell that owns
- * a filesystem; this only normalizes the shape a hand-edited config can be in.
- */
 function normalizeRoots(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   const roots: string[] = [];
@@ -298,14 +196,6 @@ function normalizeRoots(raw: unknown): string[] {
   return roots;
 }
 
-/**
- * The subscription set for a wanted set of canonical roots: duplicates gone and every root that lives
- * inside another one dropped. Nesting is the whole point: a project root and a session subdirectory of it
- * are one watch, and subscribing to both would report every change under the child twice, which reads on
- * the wire and in the digest as two separate edits to one file.
- *
- * Shortest first, so the survivor is always the widest root rather than whichever one was named first.
- */
 function dedupeRoots(roots: unknown): string[] {
   const named: string[] = [];
   for (const entry of Array.isArray(roots) ? roots : []) {
@@ -323,11 +213,6 @@ function dedupeRoots(roots: unknown): string[] {
   return kept;
 }
 
-/**
- * The directories one session contributes. Both halves of a worktree session count, exactly as the git
- * source counts them: the agent edits in the worktree while merges land in the project checkout, and
- * neither directory can see the other's writes.
- */
 function deriveSessionRoots(session: { path?: unknown; worktreeDir?: unknown } | null | undefined): string[] {
   const dirs: string[] = [];
   for (const dir of [session?.path, session?.worktreeDir]) {
@@ -342,28 +227,18 @@ function isActiveSessionState(state: unknown): boolean {
   return ACTIVE_SESSION_STATES.includes(nonEmptyString(state) || '');
 }
 
-// --- Batching -------------------------------------------------------------
 
 function createBatch(): FsBatch {
   return { files: new Map(), untracked: new Set(), floored: false };
 }
 
-// A short digest of a path, held instead of the path itself once a window is past the point where names
-// are worth keeping. 64 bits over at most 10000 entries makes a collision (one file counted as a repeat)
-// vanishingly unlikely, and the consequence of one would be a burst total off by one.
 function untrackedKey(relPath: string): string {
   return crypto.createHash('sha1').update(relPath, 'utf8').digest('hex').slice(0, UNTRACKED_KEY_CHARS);
 }
 
-// A path too long to hold in full, marked as truncated so the published summary cannot be read as naming
-// an exact file. Paths this long are pathological; the marker is what keeps one from lying quietly.
 function truncatePath(relPath: string): string {
   if (relPath.length <= MAX_REL_PATH_CHARS) return relPath;
-  // Scrubbed BEFORE the cut, and only here: a cut taken ahead of the publish-time scrub can split a
-  // quoted value out of its closing quote, and the common path pays nothing for this.
   const scrubbed = scrubText(relPath);
-  // The scrub can shrink a path back inside the bound, and a marker on a path nothing cut would say this
-  // names no exact file when it names one exactly.
   if (scrubbed.length <= MAX_REL_PATH_CHARS) return scrubbed;
   return `${scrubbed.slice(0, MAX_REL_PATH_CHARS)}${TRUNCATED_SUFFIX}`;
 }
@@ -374,12 +249,6 @@ function normalizeChangeKind(type: unknown): FsChangeKind | null {
   return kind as FsChangeKind;
 }
 
-/**
- * Two changes to one file inside one window, as one. The interesting rows are the pairs an atomic save
- * produces: a create followed by a delete is a temp file that no longer exists and is dropped entirely,
- * and a delete followed by a create is a file that was REPLACED, which is an update rather than two
- * events claiming the file both vanished and appeared.
- */
 function mergeChange(previous: FsChangeKind | null | undefined, next: FsChangeKind): FsChangeKind | null {
   if (!previous) return next;
   if (previous === 'create' && next === 'delete') return null;
@@ -388,10 +257,6 @@ function mergeChange(previous: FsChangeKind | null | undefined, next: FsChangeKi
   return 'update';
 }
 
-/**
- * Fold one watcher event into a batch. Returns false for anything the batch refused (ignored path,
- * unknown change kind), so the shell can tell a dropped storm from a recorded one.
- */
 function recordChange(batch: FsBatch, relPath: unknown, type: unknown): boolean {
   const kind = normalizeChangeKind(type);
   const relative = nonEmptyString(relPath);
@@ -404,8 +269,6 @@ function recordChange(batch: FsBatch, relPath: unknown, type: unknown): boolean 
     return true;
   }
   if (batch.files.size >= MAX_TRACKED_FILES) {
-    // Distinct FILES, never events: one written file arrives as a create and an update, and counting
-    // both would report a 3000-file checkout as 6000.
     const digest = untrackedKey(key);
     if (batch.untracked.has(digest)) return true;
     if (batch.untracked.size >= MAX_UNTRACKED_KEYS) {
@@ -453,26 +316,14 @@ function burstSummary(batch: FsBatch): { summary: string; counts: Record<FsChang
   if (counts.delete) parts.push(`${counts.delete} deleted`);
   const total = batchSize(batch);
   const tail = parts.length > 0 ? `: ${parts.join(', ')}` : '';
-  // Past the untracked bound the batch can no longer tell a new file from a repeat, so it reports what it
-  // can still stand behind: a floor, said out loud rather than a total that is quietly short.
   const lead = batch.floored ? `at least ${total}` : `${total}`;
   return { summary: `${lead} files changed${tail}`, counts, total };
 }
 
-// Newest names are no better than oldest ones here, so insertion order is kept: it is the order the
-// watcher reported, which is the closest thing to the order the work happened in.
 function sampleOf(batch: FsBatch): string {
   return [...batch.files.keys()].slice(0, MAX_SAMPLE_FILES).join(', ');
 }
 
-/**
- * What a settled window owes, and nothing more.
- *
- * Under the file threshold each file gets its own line, which is what makes an ordinary edit readable.
- * Over it the window was a burst (an install, a checkout, a build), and one summarized event carries it:
- * the alternative is thousands of ring entries evicting everything else in the fs ring and thousands of
- * seq stamps telling the Visions lane the machine moved thousands of times for one action.
- */
 function decideFsEvents(batch: FsBatch, { root = null, now = 0 }: { root?: string | null; now?: number } = {}): FsIngestEvent[] {
   const total = batchSize(batch);
   if (total === 0) return [];
@@ -490,8 +341,6 @@ function decideFsEvents(batch: FsBatch, { root = null, now = 0 }: { root?: strin
     summary,
     detail: {
       files: total,
-      // True means `files` is a floor rather than a count, so a reader is never told an exact number the
-      // batch could not stand behind.
       atLeast: batch.floored,
       created: counts.create,
       updated: counts.update,

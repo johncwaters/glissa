@@ -1,16 +1,3 @@
-/*
- * The fs ingest source, IO shell (docs/plan-ingestion.md, M9), in two halves.
- *
- * An INJECTED watcher carries every rule that decides whether this source is cheap and safe: the batch
- * window, the ref-counted roots and their subscribe/unsubscribe edges, the nesting collapse, a stop()
- * landing mid-batch and mid-subscribe, and the two grades of degradation. A real watcher would prove none
- * of those, because it would prove them by timing.
- *
- * ONE REAL @parcel/watcher subscription carries the thing no fake can: that the dependency actually loads
- * on this platform, that a write in a real directory arrives, and that a storm inside an ignored tree is
- * refused before it ever reaches this process. It is skipped, not failed, where the native module cannot
- * load, matching how the suite treats git.
- */
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -45,7 +32,6 @@ type SubscribeCallback = Parameters<WatcherModule['subscribe']>[1];
 type WatchEvent = Parameters<SubscribeCallback>[1][number];
 type ChangeKind = WatchEvent['type'];
 
-// --- Harness --------------------------------------------------------------
 
 interface FakeTimers {
   delays: number[];
@@ -55,15 +41,12 @@ interface FakeTimers {
   readonly timeoutCount: number;
 }
 
-// A real unref'd timer that never runs a callback of its own: the seams are typed against NodeJS.Timeout.
 function parkedTimer(): NodeJS.Timeout {
   const handle = setTimeout(() => {}, 2 ** 30);
   handle.unref();
   return handle;
 }
 
-// Timers the suite fires by hand. Each handle is a REAL unref'd timer that never runs a callback of its
-// own, because the source's seams are typed against NodeJS.Timeout.
 function fakeTimers(): FakeTimers {
   const timeouts = new Map<NodeJS.Timeout, () => void>();
   const delays: number[] = [];
@@ -95,11 +78,6 @@ interface FakeWatcher {
   module: WatcherModule;
 }
 
-/**
- * A recording @parcel/watcher. `emit(root, events)` drives the callback the way the native module would,
- * and `hold()` parks every subsequent subscribe on a promise, which is the only way to observe a stop()
- * that lands while a subscription is still being established.
- */
 function fakeWatcher({ failOn = (_root: string) => false }: { failOn?: (root: string) => boolean } = {}): FakeWatcher {
   const subscribed: { root: string; options: unknown }[] = [];
   const unsubscribed: string[] = [];
@@ -144,20 +122,16 @@ function fakeWatcher({ failOn = (_root: string) => false }: { failOn?: (root: st
   };
 }
 
-// Lets the promise chain advance one turn, which is how a test observes the difference between a
-// subscription that is QUEUED and one that is already in flight inside the watcher.
 function tick(): Promise<void> {
   return new Promise((resolve) => { setImmediate(resolve); });
 }
 
-// The ignore list the source registers with, which the native module receives as opaque options.
 function subscribeIgnores(entry: { options: unknown } | undefined): string[] {
   const options = entry?.options;
   if (typeof options !== 'object' || options === null || !('ignore' in options)) return [];
   return Array.isArray(options.ignore) ? options.ignore.map(String) : [];
 }
 
-// lane.fs is null when the source is off; every case reading it has it on.
 function fsOf(lane: ReturnType<typeof createIngestLane>) {
   if (!lane.fs) throw new Error('the fs source is off on this lane');
   return lane.fs;
@@ -180,8 +154,6 @@ function injectedSource({ watcher, timers, published, sourceConfig = {}, overrid
     publish: (event) => published.push(event),
     sourceConfig: { batchMs: 500, ...sourceConfig },
     loadWatcher: () => watcher.module,
-    // The spelling collapse is shared/paths.ts's contract, not this source's; skipping it keeps the
-    // injected half free of any filesystem at all.
     canonicalize: (dir) => dir,
     logger: { warn: () => {} },
     setTimeoutFn: timers.setTimeoutFn,
@@ -190,7 +162,6 @@ function injectedSource({ watcher, timers, published, sourceConfig = {}, overrid
   });
 }
 
-// --- Batching -------------------------------------------------------------
 
 test('a window of writes to one file publishes one event when the batch fires, and not before', async (t) => {
   const watcher = fakeWatcher();
@@ -229,8 +200,6 @@ test('an event storm inside an ignored directory arms no window at all', async (
   t.after(() => source.stop());
   await source.start();
 
-  // The native ignore already refuses these before this process sees them; the shell re-checks, which is
-  // what covers a platform whose glob matching differs and the daemon's own files below.
   const storm: WatchEvent[] = [];
   for (let file = 0; file < 500; file += 1) storm.push(change(PROJECT, `node_modules/dep/file-${file}.js`, 'create'));
   watcher.emit(PROJECT, storm);
@@ -256,8 +225,6 @@ test('the daemon\'s own state writes are refused, and the watcher is told to ign
   assert.ok(ignore.includes('**/.git/**'));
   assert.ok(ignore.includes('**/.glissa/**'), 'the daemon home is refused at registration time');
 
-  // Every write one `wasActive` flip or `resumeSessionId` capture actually makes: the config file, the
-  // backup written beside it, and the per-pid temp file the save stages through before its rename.
   watcher.emit(PROJECT, [
     change(PROJECT, 'config.json', 'update'),
     change(PROJECT, 'config.json.bak', 'update'),
@@ -269,7 +236,6 @@ test('the daemon\'s own state writes are refused, and the watcher is told to ign
   ]);
   assert.equal(timers.timeoutCount, 0, 'glissa writing its own bookkeeping is not project activity');
 
-  // A repo file that merely begins the same way is a carbon unit's own file and still publishes.
   watcher.emit(PROJECT, [
     change(PROJECT, 'src/app.js', 'update'),
     change(PROJECT, 'configuration.json', 'update'),
@@ -298,7 +264,6 @@ test('a burst past the file threshold publishes one summarized event', async (t)
   assert.equal(published[0].detail.files, MAX_FILES_PER_BATCH + 1);
 });
 
-// --- Ref-counted roots ----------------------------------------------------
 
 test('a root is subscribed when its first holder arrives and unsubscribed when its last one leaves', async (t) => {
   const watcher = fakeWatcher();
@@ -348,8 +313,6 @@ test('re-registering the same roots costs nothing, which is what makes a per-tra
   await source.settle();
   assert.equal(canonicalizeCalls, 1);
 
-  // A session state-change fires on every transition of every session, so this path must not put a sync
-  // realpath (or a resubscribe) on the shared event loop each time.
   for (let transition = 0; transition < 25; transition += 1) source.addRoots('session-a', [PROJECT]);
   await source.settle();
   assert.equal(canonicalizeCalls, 1, 'an unchanged holder never re-canonicalizes');
@@ -369,7 +332,6 @@ test('a worktree session widens its own hold to both halves of its checkout', as
   await source.settle();
   assert.deepEqual(source.roots, [PROJECT]);
 
-  // Exactly what worktree-ready does: the directory the agent will edit in did not exist a moment ago.
   source.addRoots('session-a', [PROJECT, worktree]);
   await source.settle();
   assert.deepEqual(source.roots.sort(), [PROJECT, worktree].sort());
@@ -396,7 +358,6 @@ test('a root inside another root is never watched twice, and the wider one wins 
   assert.deepEqual(source.roots, [PROJECT], 'a session inside a watched project joins that watch');
   assert.equal(watcher.subscribed.length, 1);
 
-  // An explicit fs.roots entry covering both replaces them rather than doubling every event under it.
   source.addRoots('config:fs.roots', [parent]);
   await source.settle();
   assert.deepEqual(source.roots, [parent]);
@@ -428,7 +389,6 @@ test('the root cap drops the overflow and warns once, never once per reconcile',
   assert.equal(warnings.filter((line) => line.includes('watch set is full')).length, 1, 'the warning is once per key');
 });
 
-// --- Lifecycle and degradation --------------------------------------------
 
 test('stop() mid-batch leaks neither a timer nor an event', async (t) => {
   const watcher = fakeWatcher();
@@ -474,12 +434,6 @@ test('stop() landing mid-subscribe closes the handle it was about to receive', a
   assert.equal(source.rootCount, 0);
 });
 
-/*
- * stop() is terminal, and the contract says so rather than half working. The lane never restarts an
- * adapter (a daemon restart re-arms everything), and stop() drops every session hold on the way down, so
- * a start() that came back would be watching only the config roots while every live session went
- * unreported: strictly worse than being inert, because it looks like it is working.
- */
 test('start() after stop() stays inert and warns once', async (t) => {
   const watcher = fakeWatcher();
   const timers = fakeTimers();
@@ -510,7 +464,6 @@ test('start() after stop() stays inert and warns once', async (t) => {
   await source.start();
   assert.equal(warnings.filter((line) => line.includes('start() after stop()')).length, 1, 'warned once');
 
-  // And a session arriving after the teardown cannot quietly re-arm it either.
   assert.equal(source.addRoots('session-b', [PROJECT]), false);
   await source.settle();
   assert.equal(source.rootCount, 0);
@@ -570,11 +523,6 @@ test('a watcher error on a live root warns once and keeps the subscription', asy
   assert.equal(published.length, 1, 'a transient error costs a warning, not the root');
 });
 
-/*
- * The failure mode the plan's watcher decision record exists for: this is the one source with a native
- * dependency, so a platform with no prebuild is a load-time throw. It must cost the SOURCE and nothing
- * else, which is why the require is lazy and injected.
- */
 test('a @parcel/watcher that cannot load disables the source and nothing else', async (t) => {
   const timers = fakeTimers();
   const published: FsIngestEvent[] = [];
@@ -596,7 +544,6 @@ test('a @parcel/watcher that cannot load disables the source and nothing else', 
   assert.match(warnings[0], /fs source disabled/);
   assert.match(warnings[0], /No prebuild found/);
 
-  // And it stays inert rather than retrying on every session that starts.
   source.addRoots('session-a', [PROJECT]);
   await source.settle();
   assert.equal(source.rootCount, 0);
@@ -620,7 +567,6 @@ test('a module that loads but exports nothing usable is the same graded failure'
   assert.match(warnings[0], /no subscribe export/);
 });
 
-// --- The lane -------------------------------------------------------------
 
 test('the fs source off constructs nothing, and on it follows session state', async (t) => {
   const off = createIngestLane({
@@ -655,7 +601,6 @@ test('the fs source off constructs nothing, and on it follows session state', as
   await fsOf(lane).settle();
   assert.deepEqual(fsOf(lane).roots, [PROJECT]);
 
-  // A published event rides the lane's own publish path, so it is normalized, scrubbed and seq-stamped.
   watcher.emit(PROJECT, [change(PROJECT, 'src/app.js', 'update')]);
   timers.runTimeouts();
   const [event] = lane.recentEvents();
@@ -690,21 +635,13 @@ test('an fs event surfaces in the digest as one line', async (t) => {
   assert.match(lane.buildDigest({}), /- files 0s ago: updated docs\/plan\.md/);
 });
 
-// --- The real watcher -----------------------------------------------------
 
-/*
- * The one test that proves the dependency itself: a real subscription on a real temp directory, a real
- * write, and a real event. It also proves the registration-time ignore, which is the entire reason this
- * watcher was chosen over recursive fs.watch: 200 writes inside node_modules must never reach this
- * process, on any platform.
- */
 test('a real @parcel/watcher subscription reports a real write and refuses an ignored tree', { skip: !PARCEL }, async (t) => {
   const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-ingest-fs-')));
   t.after(() => {
     try {
       fs.rmSync(dir, { recursive: true, force: true });
     } catch {
-      // A Windows watcher can still hold the directory; a leaked temp dir is not a failed test.
     }
   });
   const published: FsIngestEvent[] = [];
@@ -728,13 +665,6 @@ test('a real @parcel/watcher subscription reports a real write and refuses an ig
     await new Promise((resolve) => { setTimeout(resolve, 50).unref(); });
   }
 
-  /*
-   * At least one event, deliberately not exactly one: a real create-plus-update pair can straddle the
-   * batch window, and pinning the count here would make this test flake on timing rather than fail on
-   * behavior. What it must prove is that the real subscription DELIVERS and that its registration-time
-   * ignore HOLDS, so every event that arrived names the one file outside node_modules. The exact
-   * coalescing and burst arithmetic live in the injected-watcher tests, where the clock is controlled.
-   */
   assert.ok(published.length >= 1, 'the real subscription delivered nothing');
   for (const event of published) {
     assert.equal(event.detail.path, 'notes.md', `an ignored tree leaked through: ${event.summary}`);

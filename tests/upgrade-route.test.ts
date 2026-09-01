@@ -1,7 +1,3 @@
-// Tests for the pure upgrade-target classifier (server/core/upgrade-route.ts). The bug it exists to
-// prevent: '/control?since=<seq>' (what the dashboard sends on EVERY in-page reconnect) classified as
-// an unknown path, so only a full page reload could reconnect.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 

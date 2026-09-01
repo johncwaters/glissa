@@ -1,8 +1,3 @@
-// ── PR review view ───────────────────────────────────────────
-// Renders GitHub PR auto-review status from `pr-status` control-WS broadcasts into its own top-level
-// dashboard tab. The tab is always present; only its content varies, so an operator who has not
-// configured the PR lane still finds the surface and is told where to switch it on.
-
 import { createAttentionAck } from './attention-ack-core.ts';
 import { buildStatChip, el, externalLink, isPanelHidden, projectsOf } from './dom-helpers.ts';
 import type { PrProject, PrRow, PrStatusSnapshot } from './pr-view-core.ts';
@@ -40,7 +35,7 @@ function buildPrRow(pr: PrRow) {
 
   const label = pr.title || 'Untitled pull request';
   const numbered = Number.isFinite(pr.number) ? `#${pr.number} ${label}` : label;
-  // PR titles come from GitHub: built as text, never markup.
+
   const title = externalLink('pr-title', numbered, pr.url);
 
   row.append(stripe, phase, title);
@@ -66,7 +61,7 @@ function buildProject(project: PrProject) {
   const counts = summarizePrs(prs);
 
   const head = el('div', 'pr-project-head');
-  // Project names are operator-supplied: text only, never markup.
+
   head.append(el('h3', 'pr-project-name', project.name || project.projectId || 'project'));
   if (project.repoSlug) head.append(el('span', 'pr-project-repo', project.repoSlug));
   wrap.append(head);
@@ -115,7 +110,6 @@ function render() {
   for (const project of projects) _root.append(buildProject(project));
 }
 
-// The tab-activity seam shared by every view that raises a dot: the view owns the condition, app.js owns the dot element.
 export function setPrActivityCallback(callback: (isActive: boolean) => void) {
   _activityCallback = callback;
   refreshActivity();

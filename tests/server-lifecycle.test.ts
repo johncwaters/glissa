@@ -1,10 +1,3 @@
-// server-lifecycle.ts owns restart/shutdown. These tests lock in the three regressions behind the
-// "menu restart -> unkillable popping cmd loop" bug, all via injected side effects (no real spawn/exit):
-//   1. the production respawn is spawned with windowsHide:true + detached:true (no popping console window);
-//   2. a double restart/shutdown spawns the replacement AT MOST ONCE (re-entry guard);
-//   3. the PTY reaps are AWAITED before the respawn/exit (no orphaned cmd/claude/conhost);
-// plus the dev (onRestart) path and the awaitReaps cap.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { awaitReaps, createLifecycle } from '../server/server-lifecycle.ts';
@@ -19,12 +12,9 @@ interface SpawnCall {
   opts: Record<string, unknown>;
 }
 
-// Every test injects env explicitly: the restart hand-off branches on it, and the suite itself may run
-// under a supervisor whose INVOCATION_ID would otherwise leak into these assertions.
 const UNSUPERVISED = {};
 const SYSTEMD = { INVOCATION_ID: 'a1b2c3d4e5f64718a9bc0d1e2f3a4b5c' };
 
-// httpServer fake: close(cb) releases the listener and runs the spawn-and-exit / exit callback now.
 function fakeHttpServer() {
   return {
     closes: 0,
@@ -41,7 +31,6 @@ function deferredResolve(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve: () => settle() };
 }
 
-// One macrotask, long enough for every already-settled microtask chain to run.
 function tick(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -176,7 +165,7 @@ test('dev restart releases the guard when onRestart throws, so a later restart p
     exit: () => {},
   });
   await assert.rejects(() => lc.requestRestart(), /vite boom/, 'the thrown onRestart propagates');
-  await lc.requestRestart(); // guard was released by the throw, so this in-process restart runs again
+  await lc.requestRestart();
   assert.equal(calls, 2, 'guard reset after the throw allowed a second in-process restart');
 });
 
@@ -196,8 +185,6 @@ test('requestShutdown closes the server and exits once', async () => {
   assert.deepEqual(exits, [0], 'exited exactly once');
 });
 
-// Under systemd the self-respawn bricked the service: the clean exit 0 did not trigger
-// Restart=on-failure and the detached child died with the cgroup, leaving nothing listening.
 test('decideRestartStrategy: INVOCATION_ID present means the supervisor restarts us', () => {
   assert.equal(decideRestartStrategy({ INVOCATION_ID: 'abc123' }), 'exit-for-supervisor');
   assert.equal(decideRestartStrategy({}), 'respawn');
@@ -242,7 +229,7 @@ test('supervised SHUTDOWN still exits 0 so the unit stays down', async () => {
 
 test('awaitReaps resolves when a reap never settles (bounded cap)', async () => {
   const never = new Promise(() => {});
-  // capMs small so the test is fast; assert it resolves despite the never-settling reap.
+
   await awaitReaps([never], { capMs: 20 });
   assert.ok(true, 'awaitReaps resolved via the cap, not the hung reap');
 });
@@ -253,9 +240,6 @@ test('awaitReaps with no pending reaps resolves immediately', async () => {
   assert.ok(true);
 });
 
-// The shutdown coordinator (2026-08 review, section 6). Two independent review passes named the
-// unawaited lane stops as the biggest systemic risk in the codebase: a restart could bring a fresh
-// backend up while the old one was still discarding a worktree or writing the same state file.
 test('the lifecycle awaits every named lane stopper before releasing the listener', async () => {
   const order: string[] = [];
   const laneStopped = deferredResolve();
@@ -339,8 +323,6 @@ test('a restart awaits the lane drains too, not only the PTY reaps', async () =>
   assert.equal(spawn.calls.length, 1);
 });
 
-// The historical shape (a bare array of PTY reaps) still works, so a caller or test that predates the
-// coordinator needs no change.
 test('a shutdown that returns a plain reap array is still awaited', async () => {
   const order: string[] = [];
   const reap = deferredResolve();

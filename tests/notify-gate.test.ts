@@ -1,18 +1,9 @@
-// Tests for the once-per-work-cycle notification gate (session/core/notify-gate.ts) and its
-// backend wiring contract, plus a NotificationManager regression guard that the 'waiting'
-// escalation ping-pong is untouched by the gate change (the gate sits at the call site,
-// BEFORE the manager; the manager's debounce/suppression/escalation are unchanged).
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createNotifyGate, decideNotification, explainNotification } from '../session/core/notify-gate.ts';
 import { STATES } from '../shared/states.ts';
 import { NotificationManager } from '../notifications/notification-manager.ts';
-
-// ---------------------------------------------------------------------------
-// Gate unit behavior
-// ---------------------------------------------------------------------------
 
 test('fire returns true once per category per cycle, false on repeats', () => {
   const gate = createNotifyGate();
@@ -45,14 +36,6 @@ test('a falsy category never fires', () => {
   assert.equal(gate.fire(undefined), false);
 });
 
-// ---------------------------------------------------------------------------
-// Backend wiring contract. These sequences execute the SAME decideNotification
-// the backend state-change listener calls (no hand-mirrored copy to drift), so
-// a logic change in the production decision breaks these tests directly.
-// Self-transitions never reach the listener (sessions.js transition() returns
-// early without emitting), so each sequence below lists only real entered states.
-// ---------------------------------------------------------------------------
-
 function runSequence(states: string[]) {
   const gate = createNotifyGate();
   const fired: string[] = [];
@@ -70,7 +53,6 @@ test('wiring contract: the reset states exist in shared/states.js', () => {
 });
 
 test('AC1 reproduced bug: dismiss-opened IDLE window re-complete notifies once', () => {
-  // RUNNING -> COMPLETE (notify) -> dismiss -> IDLE -> late ready -> COMPLETE (suppressed)
   const fired = runSequence([STATES.RUNNING, STATES.COMPLETE, STATES.IDLE, STATES.COMPLETE]);
   assert.deepEqual(fired, ['complete']);
 });
@@ -81,7 +63,6 @@ test('AC2 exit pair: COMPLETE then DONE notifies once regardless of elapsed time
 });
 
 test('AC3 per-category: a waiting notification does not consume the cycle complete', () => {
-  // Turn ends at a prompt ('waiting' fires), then a late Stop completes it.
   const fired = runSequence([STATES.RUNNING, STATES.WAITING, STATES.COMPLETE]);
   assert.deepEqual(fired, ['waiting', 'complete']);
 });
@@ -109,21 +90,19 @@ test('AC6b restart after a completed exit re-arms complete', () => {
     STATES.RUNNING, STATES.COMPLETE, STATES.DONE,
     STATES.INITIALIZING, STATES.STARTING, STATES.IDLE, STATES.COMPLETE,
   ]);
-  // The post-restart late-ready IDLE -> COMPLETE is a fresh cycle and must notify.
+
   assert.deepEqual(fired, ['complete', 'complete']);
 });
 
 test('user_kill never notifies: killing a RUNNING session is not "finished working"', () => {
   const gate = createNotifyGate();
-  assert.equal(decideNotification(STATES.RUNNING, gate), null); // cycle opens
+  assert.equal(decideNotification(STATES.RUNNING, gate), null);
   assert.equal(decideNotification(STATES.DONE, gate, 'user_kill'), null, 'kill is silent');
-  // The category was NOT spent: a later real completion in a new cycle still notifies.
+
   assert.equal(decideNotification(STATES.COMPLETE, gate), 'complete');
 });
 
 test('DORMANT transitivity: DORMANT needs no reset entry because user_start passes INITIALIZING', () => {
-  // DONE -> DORMANT (user_reset) does not reset; the only exit from DORMANT is
-  // user_start -> INITIALIZING, which does. Do not add DORMANT to the reset set.
   const fired = runSequence([
     STATES.RUNNING, STATES.COMPLETE, STATES.DONE, STATES.DORMANT,
     STATES.INITIALIZING, STATES.STARTING, STATES.IDLE, STATES.COMPLETE,
@@ -131,16 +110,9 @@ test('DORMANT transitivity: DORMANT needs no reset entry because user_start pass
   assert.deepEqual(fired, ['complete', 'complete']);
 });
 
-// ---------------------------------------------------------------------------
-// User-driven RUNNING reset (opts: { signal, hookSeen }). A RUNNING entry only starts a new
-// work cycle when the user actually drove it (answered a prompt, or an authoritative resume);
-// a self-wake (an orchestrator lead's title flipping to 'working' after it auto-resumes on a
-// teammate's mailbox message, which fires no UserPromptSubmit) must NOT re-arm 'complete'.
-// ---------------------------------------------------------------------------
-
 test('RUNNING self-wake (signal: working, hookSeen: true) does not reset: the spent category stays spent', () => {
   const gate = createNotifyGate();
-  assert.equal(decideNotification(STATES.RUNNING, gate), null); // opens the first cycle (no opts = legacy)
+  assert.equal(decideNotification(STATES.RUNNING, gate), null);
   assert.equal(decideNotification(STATES.COMPLETE, gate), 'complete');
   const category = decideNotification(STATES.RUNNING, gate, undefined, { signal: 'working', hookSeen: true });
   assert.equal(category, null);
@@ -183,31 +155,20 @@ test('omitted opts on RUNNING preserves legacy behavior (always resets)', () => 
   const gate = createNotifyGate();
   assert.equal(decideNotification(STATES.RUNNING, gate), null);
   assert.equal(decideNotification(STATES.COMPLETE, gate), 'complete');
-  decideNotification(STATES.RUNNING, gate); // no opts at all, exactly like the old call sites
+  decideNotification(STATES.RUNNING, gate);
   assert.equal(decideNotification(STATES.COMPLETE, gate), 'complete');
 });
 
 test('MEDIUM fix: an out-of-band gate.reset() (the user-prompt listener) re-arms complete even when the RUNNING transition lost the race to a title working signal', () => {
-  // Both 'working' (title) and 'resume' (hook) are immediate in status-source.js, so the
-  // racing title spinner can win the IDLE/COMPLETE->RUNNING transition and carry signal
-  // 'working' in its detail even though a real UserPromptSubmit is also in flight. The gate
-  // must still notify again once the session's 'user-prompt' event calls gate.reset()
-  // directly (see server/backend.js), independent of the transition's own decideNotification.
   const gate = createNotifyGate();
   assert.equal(decideNotification(STATES.RUNNING, gate), null);
   assert.equal(decideNotification(STATES.COMPLETE, gate), 'complete');
   const category = decideNotification(STATES.RUNNING, gate, undefined, { signal: 'working', hookSeen: true });
   assert.equal(category, null, 'the transition itself does not reset: title working lost the resume race');
   assert.equal(decideNotification(STATES.COMPLETE, gate), null, 'still spent: the transition alone never re-armed it');
-  gate.reset(); // the backend's sess.on('user-prompt', () => notifyGate.reset()) listener
+  gate.reset();
   assert.equal(decideNotification(STATES.COMPLETE, gate), 'complete', 're-armed by the out-of-band reset, not by the transition');
 });
-
-// ---------------------------------------------------------------------------
-// explainNotification: the same decision plus the reason the decision trace records
-// (session/core/decision-log.ts). decideNotification is its category-only wrapper, so these
-// mirror the cases above and additionally pin the reason each branch reports.
-// ---------------------------------------------------------------------------
 
 test('explainNotification reports the reset reason for INITIALIZING and a user-driven RUNNING', () => {
   const gate = createNotifyGate();
@@ -261,11 +222,6 @@ test('decideNotification is exactly explainNotification().category (same gate si
   }
 });
 
-// ---------------------------------------------------------------------------
-// NotificationManager regression: 'waiting' escalation ping-pong is untouched.
-// First direct coverage for notification-manager.js.
-// ---------------------------------------------------------------------------
-
 test('waiting escalation still re-delivers on the interval and stops on acknowledge', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const manager = new NotificationManager({ escalationIntervalMs: 1000, debounceMs: 0 });
@@ -277,11 +233,11 @@ test('waiting escalation still re-delivers on the interval and stops on acknowle
   manager.trigger('s1', 'waiting', 'needs input');
   assert.equal(deliveries.length, 1);
 
-  t.mock.timers.tick(1000); // DELIVERED -> ESCALATED re-delivery
+  t.mock.timers.tick(1000);
   assert.equal(deliveries.length, 2);
   assert.equal(deliveries[1].escalationCount, 1);
 
-  t.mock.timers.tick(1000); // ESCALATED -> DELIVERED ping-pong re-delivery
+  t.mock.timers.tick(1000);
   assert.equal(deliveries.length, 3);
 
   manager.acknowledge('s1');

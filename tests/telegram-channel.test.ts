@@ -1,6 +1,3 @@
-// The opt-in off-dashboard notification channel (notifications/channels/telegram.ts): its gating
-// rule, its message shape, and the fire-and-forget discipline it inherits from the shared transport.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 

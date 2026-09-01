@@ -18,7 +18,7 @@ function harness() {
   const reportDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-posthog-reports-'));
   const server = createControlServer(controlDeps({ projects: [] }, { posthogReportsDir: reportDir }));
   const connection = connectControl<ReportFrame>(server);
-  connection.sent.length = 0; // drop the connect preamble
+  connection.sent.length = 0;
   return { reportDir, sent: connection.sent, send: connection.send };
 }
 

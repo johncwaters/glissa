@@ -76,10 +76,6 @@ test('feedFrameBytes reports malformed JSON and recovers for the next frame', ()
   assert.deepEqual(messages, [{ parseError: true, raw: '{"x":}' }, next]);
 });
 
-/*
- * A headerless block is unframeable and an editor's own LSP client never sends one, so the buffered
- * bytes are dropped rather than scanned for a header that might follow them.
- */
 test('feedFrameBytes reports a missing Content-Length and drops what it cannot frame', () => {
   const next = { jsonrpc: '2.0', method: 'next' };
   const badHeader = Buffer.from('Content-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n');
@@ -93,7 +89,6 @@ test('feedFrameBytes reports a missing Content-Length and drops what it cannot f
   ]);
   assert.equal(state.buffer.length, 0);
 
-  // The stream reads cleanly again from the next well-formed frame.
   assert.deepEqual(feedAll([serializeFrame(next)], state).messages, [next]);
 });
 

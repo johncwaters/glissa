@@ -1,12 +1,3 @@
-// Operator-defined Claude Code hooks (the Hooks tab). Pure: the catalog of events an operator may hook,
-// the normalization every write goes through before it touches config.json, the list edits, the
-// per-project scoping at spawn, and the translation into the `hooks` block of a per-session settings
-// file. No IO, no clock, no Session; the IDs a caller mints come in from outside.
-//
-// A record is deliberately a subset of what Claude Code accepts: one event, one optional matcher, one
-// handler of type `command` or `http`. Anything richer (prompt-type hooks, per-hook `if` clauses) stays
-// a hand edit of ~/.claude/settings.json, which Claude Code still honors for a Glissa-spawned session.
-
 const MAX_NAME_LENGTH = 64;
 const MAX_MATCHER_LENGTH = 200;
 const MAX_COMMAND_LENGTH = 4000;
@@ -15,11 +6,6 @@ const MAX_TIMEOUT_SEC = 600;
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const HTTP_URL_RE = /^https?:\/\/\S+$/i;
 
-
-// Every event Claude Code fires that an operator can usefully subscribe to, with what its matcher
-// matches (null: the event takes no matcher and one is refused) and `http: false` where Claude Code
-// runs command handlers only. Kept as data so the dashboard renders the picker from the report rather
-// than carrying a second copy of this list.
 interface HookEventEntry {
   name: string;
   matcher: string | null;
@@ -109,7 +95,6 @@ interface HooksBlockEntry {
 
 type HooksBlock = Record<string, HooksBlockEntry[]>;
 
-// A stored record this build may not be able to normalize; only its id is ever read by a list edit.
 interface StoredHookRecord {
   id?: unknown;
 }
@@ -122,9 +107,6 @@ function trimmedString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-// The three optional fields are read STRICTLY: a coerced one is worse than a refused one, because
-// `enabled: "false"` reads as on, a non-string matcher erases the guard's scope and makes a Bash-only
-// hook global, and `timeout: true` becomes a one second deadline.
 function optionalMatcher(
   input: HookInput,
   catalogEntry: HookEventEntry,
@@ -171,10 +153,6 @@ function optionalProjects(
   return { ok: true, projects };
 }
 
-/**
- * Turn whatever the dashboard sent into a record config.json may hold, or say what is wrong with it.
- * `id` is minted by the caller for a new hook; an existing one keeps its own.
- */
 function normalizeHook(
   input: HookInput | null | undefined,
   { id, knownProjectIds = null }: { id: string; knownProjectIds?: ReadonlySet<string> | null },
@@ -218,9 +196,6 @@ function normalizeHook(
   return { ok: true, hook };
 }
 
-// The records config.json holds, defensively: a hand edit that left something unreadable is dropped
-// here rather than crashing a spawn or the tab. Each surviving record is re-normalized so the shape
-// the rest of the code sees is the one normalizeHook writes.
 function readStoredHooks(stored: unknown): UserHook[] {
   if (!Array.isArray(stored)) return [];
   const hooks: UserHook[] = [];
@@ -238,10 +213,6 @@ function readStoredHooks(stored: unknown): UserHook[] {
   return hooks;
 }
 
-// The two list edits run over the RAW stored array, not the normalized read: a record this build
-// cannot normalize (an event a newer Claude Code added, a hand edit) must survive an unrelated save or
-// delete rather than be erased by the write that rewrites the list.
-/** Replace the record with this id, or append when it is new. */
 function upsertHook<T extends { id?: unknown }, U extends { id?: unknown }>(
   hooks: readonly T[],
   hook: U,
@@ -255,12 +226,10 @@ function removeHook<T extends { id?: unknown }>(hooks: readonly T[], id: string)
   return hooks.filter((entry) => !entry || entry.id !== id);
 }
 
-/** The raw records config.json holds, untouched, as the two list edits above want them. */
 function rawStoredHooks(stored: unknown): StoredHookRecord[] {
   return Array.isArray(stored) ? stored : [];
 }
 
-// The hooks one spawn should carry: enabled, and either global or naming this project.
 function hooksForProject(stored: unknown, projectId: string | null): UserHook[] {
   return readStoredHooks(stored).filter((hook) => {
     if (!hook.enabled) return false;
@@ -269,10 +238,6 @@ function hooksForProject(stored: unknown, projectId: string | null): UserHook[] 
   });
 }
 
-// A record with no timeout of its own gets NO timeout key, so Claude Code applies its own default. The
-// 5s Glissa uses for its own status callbacks is a promise about an instant 200, not about an operator
-// shell command, and stamping it here killed every blank-timeout hook at five seconds.
-/** One Claude Code handler object. */
 function toClaudeHandler(hook: UserHook): ClaudeHookHandler {
   const handler: ClaudeHookHandler = hook.type === 'http'
     ? { type: 'http', url: hook.url }
@@ -281,10 +246,6 @@ function toClaudeHandler(hook: UserHook): ClaudeHookHandler {
   return handler;
 }
 
-/**
- * Append operator hooks to a settings `hooks` block IN PLACE, after whatever Glissa already put there,
- * so Glissa's own status callbacks keep firing first and an operator hook can never displace one.
- */
 function appendUserHooks(hooksBlock: HooksBlock, userHooks: readonly UserHook[]): HooksBlock {
   for (const hook of userHooks) {
     const entry: HooksBlockEntry = { hooks: [toClaudeHandler(hook)] };

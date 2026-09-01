@@ -1,15 +1,9 @@
-// Error notices, stacked top-right so they never overlap the terminals or the
-// bottom dock. Leaf module: depends only on the DOM-element helper, so any
-// session-card module can import it without creating an import cycle.
-
 import { el, queryTag } from '../dom-helpers.ts';
 
-// Transient notices clear themselves; persistent ones (real failures) wait for
-// the operator to dismiss them.
 const AUTO_DISMISS_MS = 6000;
-// Safety net if `transitionend` never fires (e.g. element detached mid-exit).
+
 const EXIT_FALLBACK_MS = 400;
-const CLOSE_GLYPH = String.fromCharCode(0x00d7); // multiplication sign as an x
+const CLOSE_GLYPH = String.fromCharCode(0x00d7);
 
 interface ToastState {
   message: string;
@@ -42,9 +36,6 @@ function dismiss(notice: Element) {
   setTimeout(() => notice.remove(), EXIT_FALLBACK_MS);
 }
 
-// showErrorToast(message, { persist }) - persist:true keeps the notice until the
-// operator dismisses it (default false = auto-dismiss). Identical back-to-back
-// messages collapse into a single notice with an xN counter.
 export function showErrorToast(rawMessage: unknown, opts: { persist?: boolean } = {}) {
   const message = typeof rawMessage === 'string' ? rawMessage : String(rawMessage);
   const persist = opts.persist === true;
@@ -84,9 +75,8 @@ export function showErrorToast(rawMessage: unknown, opts: { persist?: boolean } 
   close.addEventListener('click', () => dismiss(notice));
 
   notice.append(glyph, body, counter, close);
-  region.prepend(notice); // newest on top
+  region.prepend(notice);
 
-  // Animate in on the next frame so the entry transition runs.
   requestAnimationFrame(() => notice.classList.add('is-visible'));
 
   if (!persist) {

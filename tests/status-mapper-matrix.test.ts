@@ -1,28 +1,3 @@
-// Exhaustive signal x state x confidence x activeAgents matrix for the pure
-// decision function session/core/status-mapper.ts mapSignalToEvent. Expected
-// outcomes are derived from the documented semantics (AGENTS.md "Status
-// Detection" section) and the module's own inline comments, laid out as an
-// explicit data table so a future semantic change fails with a readable
-// per-case diff instead of one opaque assertion.
-//
-// Documented rules exercised here:
-//  - working/resume wakes a quiescent card: IDLE/COMPLETE -> new_output,
-//    WAITING -> user_input, anything else -> null. Confidence/activeAgents
-//    are irrelevant to this signal.
-//  - ready (Stop) completes a turn, but is gated:
-//      * activeAgents > 0 always suppresses to null (background sub-agent
-//        still running; the main agent will auto-resume).
-//      * RUNNING always completes regardless of confidence (authoritative
-//        hook mid-turn Stop, or title fallback that only ever fires from a
-//        seen spinner).
-//      * WAITING/IDLE only complete on confidence 'high' (idle_prompt is
-//        demoted to 'low' and may only confirm quiescence from RUNNING).
-//      * every other state -> null.
-//  - awaiting-input (authoritative-only) fires prompt_detected from
-//    RUNNING/IDLE/COMPLETE, null elsewhere.
-//  - session-start/session-end and any unrecognized signal are pure
-//    telemetry: always null, regardless of state/confidence/activeAgents.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -34,8 +9,6 @@ const ALL_STATES = Object.values(STATES);
 const CONFIDENCES = ['high', 'low'];
 const ACTIVE_AGENTS = [0, 1];
 
-// Independent re-derivation of the documented decision table (not a copy of
-// the source switch) so the test is an oracle, not a tautology.
 function expectedEvent(
   signal: string, state: string, confidence: string, activeAgents: number,
 ): LifecycleEvent | null {
@@ -54,7 +27,7 @@ function expectedEvent(
     if (state === STATES.RUNNING || state === STATES.IDLE || state === STATES.COMPLETE) return 'prompt_detected';
     return null;
   }
-  // session-start, session-end, and any unrecognized signal: telemetry only.
+
   return null;
 }
 
@@ -74,8 +47,6 @@ for (const signal of SIGNALS) {
     }
   }
 }
-
-// Targeted call-outs for the semantics most likely to regress silently.
 
 test('low-confidence ready only ever confirms quiescence from RUNNING, never from WAITING or IDLE', () => {
   assert.equal(mapSignalToEvent('ready', STATES.RUNNING, 'low', 0), 'task_complete');

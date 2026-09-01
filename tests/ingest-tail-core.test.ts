@@ -1,12 +1,3 @@
-/*
- * The pure halves of the agent-log source (docs/plan-ingestion.md, M7): the shared tail state that
- * composes usage-scan-core's offset rules, and the vendor line mapping that turns one transcript line
- * into at most a few summarized events.
- *
- * The load-bearing rule pinned here is the EOF start: a tail that began at zero would replay a finished
- * conversation of hundreds of megabytes into a ring built for recent activity.
- */
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -28,14 +19,12 @@ function ctx(overrides = {}) {
   return { root: '/repo', sessionId: 'sess-1', now: NOW, ...overrides };
 }
 
-// --- Tail state -----------------------------------------------------------
-
 test('first sight of a file starts at end of file, so no history is ever replayed', () => {
   const state = createTailState(fakeStat({ size: 4096 }), { path: '/logs/a.jsonl' });
   assert.equal(state.offset, 4096);
   assert.equal(state.size, 4096);
   assert.equal(state.carry, '');
-  // Nothing has changed since that sighting, so there is nothing to read.
+
   assert.equal(planRead(state, fakeStat({ size: 4096 })).action, 'skip');
 });
 
@@ -65,11 +54,6 @@ test('a line split across two reads arrives whole exactly once', () => {
   assert.equal(state.carry, '');
 });
 
-/*
- * The shellHistory source asks for the empty lines a transcript read is right to drop: PSReadLine
- * writes an embedded newline as a trailing backtick, so a command ending in a newline finishes on an
- * empty physical line, and losing it glues that command to the next one (docs/plan-ingestion.md, M10).
- */
 test('keepEmptyLines preserves the interior empty lines the transcript read drops', () => {
   const stat = fakeStat({ size: 20, mtimeMs: 2000 });
   const dropped = createTailState(fakeStat({ size: 0 }));
@@ -122,7 +106,7 @@ test('a size shrink is a truncation: the offset resets and the carry goes with i
 test('a file recreated at the same path is a new file, not a continuation of the old one', () => {
   const state = createTailState(fakeStat({ size: 500, ino: 7, birthtimeMs: 500 }));
   state.vendorState = { pendingText: 'from the file that is gone' };
-  // Same size and mtime as the old file, so only the identity says this is a different file.
+
   const recreated = fakeStat({ size: 500, ino: 9, birthtimeMs: 900 });
   assert.notEqual(fileIdentity(recreated), state.identity);
 
@@ -238,13 +222,11 @@ test('a listing taken while its directory mtime was still fresh is never trusted
   assert.equal(canTrustCachedListing({ mtimeMs: NOW, listedAtMs: NOW }), false);
   assert.equal(canTrustCachedListing({ mtimeMs: NOW, listedAtMs: NOW + LISTING_SETTLE_MS - 1 }), false);
   assert.equal(canTrustCachedListing({ mtimeMs: NOW, listedAtMs: NOW + LISTING_SETTLE_MS }), true);
-  // Future-stamped mtime (clock skew, restored backup) settles by waiting, never trusted early.
+
   assert.equal(canTrustCachedListing({ mtimeMs: NOW + 60000, listedAtMs: NOW }), false);
   assert.equal(canTrustCachedListing({}), false);
   assert.equal(canTrustCachedListing(), false);
 });
-
-// --- Claude mapping -------------------------------------------------------
 
 function claudeLine({ text = null, tools = [], sessionId = 'claude-1', cwd = 'C:\\repo' }: { text?: string | null; tools?: { name: string; input: Record<string, unknown> }[]; sessionId?: string; cwd?: string } = {}) {
   const content: Record<string, unknown>[] = [];
@@ -311,8 +293,6 @@ test('an unknown vendor maps to nothing rather than throwing at the shell', () =
   assert.deepEqual(mapAgentLine({ vendor: 'gemini', rawLine: claudeLine({ text: 'hello' }), ctx: ctx() }).events, []);
 });
 
-// --- Codex mapping --------------------------------------------------------
-
 test('a Codex session_meta line carries the cwd every later event is scoped to', () => {
   const rawLine = JSON.stringify({
     timestamp: '2026-08-21T16:32:56.173Z',
@@ -359,8 +339,6 @@ test('a Codex response_item/message is skipped, because it is the raw request it
   assert.deepEqual(mapAgentLine({ vendor: 'codex', rawLine, ctx: ctx() }).events, []);
 });
 
-// --- Grok mapping ---------------------------------------------------------
-
 function grokLine(update: Record<string, unknown>, sessionId = 'grok-1') {
   return JSON.stringify({ timestamp: 1786136976, method: '_x.ai/session/update', params: { sessionId, update } });
 }
@@ -396,11 +374,6 @@ test('Grok message chunks accumulate and only the completed turn publishes', () 
   assert.equal(done.vendorState, null, 'the held text is spent, not carried into the next turn');
 });
 
-/*
- * The held text is bounded by the INCOMING chunk being cut to the remaining budget, not by a check taken
- * after it landed. One chunk is one transcript line's text, which nothing bounds below the tail's own
- * catch-up read, so a bound checked afterwards would overshoot by a whole one of those.
- */
 test('a Grok chunk larger than the whole bound cannot push the held text past it', () => {
   const chunk = (text: string) => grokLine({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } });
   let vendorState = mapAgentLine({ vendor: 'grok', rawLine: chunk('x'.repeat(MAX_RAW_CHARS * 3)), ctx: ctx() }).vendorState;
@@ -437,7 +410,6 @@ test('an aborted Grok turn does not surface as the NEXT turn summary', () => {
   const chunk = (text: string) => grokLine({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } });
   let vendorState = mapAgentLine({ vendor: 'grok', rawLine: chunk('half of an abandoned answer'), ctx: ctx() }).vendorState;
 
-  // The turn never completes: the run was aborted, and the carbon unit types a fresh prompt.
   const boundary = mapAgentLine({
     vendor: 'grok',
     rawLine: grokLine({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'a new question' } }),
@@ -481,8 +453,6 @@ test('a Grok turn that completed with nothing held still says the turn ended', (
   assert.equal(done.events[0].summary, 'grok: turn complete (rate_limit)');
 });
 
-// --- The workdir shape rule -----------------------------------------------
-
 test('a dispatch workdir is recognized as a raw cwd, an encoded dir name, and a percent-encoded one', () => {
   const workDir = 'C:\\Users\\johnw\\AppData\\Local\\Temp\\glissa-visions-AbC123';
   assert.equal(isDispatchWorkdir(workDir), true, 'the raw cwd a line carries');
@@ -519,8 +489,6 @@ test('the shape rule is a segment match, so ordinary glissa paths are untouched'
   }
 });
 
-// --- Shared helpers -------------------------------------------------------
-
 test('timestamps arrive as ISO strings from two vendors and whole seconds from the third', () => {
   assert.equal(parseTimestamp('2026-08-21T17:23:50.963Z'), Date.parse('2026-08-21T17:23:50.963Z'));
   assert.equal(parseTimestamp(1786136976), 1786136976000);
@@ -529,13 +497,6 @@ test('timestamps arrive as ISO strings from two vendors and whole seconds from t
   assert.equal(parseTimestamp(null), null);
 });
 
-/*
- * The target leaves here RAW: unfolded and unsliced. normalizeEvent scrubs, THEN folds, THEN slices to
- * 400, and a cut taken here would run ahead of the scrub, which is how a quoted secret in a `command`
- * target loses its closing quote and publishes the rest of its value (docs/plan-ingestion.md, M11). The
- * one bound left prefers a LINE break, which no value pattern can span, and a line with no break to cut
- * at is handed on WHOLE rather than split mid-value: every consumer cuts line-aligned after its scrub.
- */
 test('a tool target is the first meaningful input field, handed on raw under one line-aligned bound', () => {
   assert.equal(toolTarget({ file_path: 'a.js', command: 'rm -rf' }), 'a.js');
   assert.equal(toolTarget({ command: 'npm run\n  build' }), 'npm run\n  build');
@@ -547,8 +508,7 @@ test('a tool target is the first meaningful input field, handed on raw under one
   );
   const lines = `${'x'.repeat(MAX_RAW_CHARS - 10)}\n${'y'.repeat(500)}`;
   assert.equal(toolTarget({ command: lines }).length, MAX_RAW_CHARS - 10, 'the bound cuts at the line break');
-  // Both break characters count: a bare carriage return is a line boundary, and a CRLF cut on the
-  // newline alone would leave the carriage return dangling on the end of the summary.
+
   const returns = `${'x'.repeat(MAX_RAW_CHARS - 10)}\r${'y'.repeat(500)}`;
   assert.equal(toolTarget({ command: returns }).length, MAX_RAW_CHARS - 10, 'a bare CR is a line break too');
   const crlf = `${'x'.repeat(MAX_RAW_CHARS - 11)}\r\n${'y'.repeat(500)}`;

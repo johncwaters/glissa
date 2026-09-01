@@ -12,7 +12,7 @@ type SetupFileSystem = Pick<
   "readFileSync" | "lstatSync" | "mkdirSync" | "chmodSync" | "writeFileSync" | "renameSync" | "rmSync" | "existsSync"
 >;
 type DirectoryFileSystem = Pick<typeof fs, "lstatSync" | "mkdirSync" | "chmodSync">;
-// Structural rather than a Pick of node:fs, so a test can hand it a string-path double.
+
 interface AtomicWriteFileSystem {
   writeFileSync(filePath: string, contents: string, options: { encoding: BufferEncoding; mode: number; flag: string }): void;
   renameSync(source: string, target: string): void;

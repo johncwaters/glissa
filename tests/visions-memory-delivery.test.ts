@@ -1,7 +1,3 @@
-// M16 of docs/plan-visions-3.md: the dispatch prompt's memory section, driven through the real store so
-// the delivery and the echo-suppression registry it feeds are exercised on one path. The negative half
-// (a memory-off prompt is byte-identical, a throwing provider costs the section only) is pinned here too.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -41,9 +37,6 @@ const FIXED_TS = Date.UTC(2026, 7, 22, 12, 0, 0);
 const RESULT_PATH = '/tmp/glissa-visions-result.json';
 const QUIET = { log() {}, warn() {} };
 
-// Drain semantics: runPending fires what is queued and empties the queue, so two calls walk the sweep
-// timer and then the dispatch timer it schedules. The handle is a real unref-ed timer that never fires,
-// because the seam is typed against NodeJS.Timeout.
 function fakeTimers() {
   const pendingByHandle = new Map<NodeJS.Timeout, () => void>();
   return {
@@ -179,7 +172,7 @@ test('records for the active project and the global layer ride in their own fenc
       const fenced = prompt.slice(prompt.indexOf(`<<<${marker}`), prompt.indexOf(`>>>${marker}`));
       assert.match(fenced, /the merge gate lives in session\/core\/merge-gate\.js/);
       assert.match(fenced, /the operator prefers early returns/);
-      // Outside the fence: headings, counts, ids. Never a remembered byte.
+
       const outside = prompt.replace(fenced, '').replace(`>>>${marker}`, '');
       assert.equal(outside.includes('the merge gate lives in'), false);
       assert.equal(outside.includes('BUFFER'), true);
@@ -240,7 +233,7 @@ test('every delivered line is registered, so the feedback loop closes: a session
         ts: FIXED_TS,
       };
       assert.equal(memoryInputFromEvent(event, { deliveredHashes: hashes }), null);
-      // The same event without the registry is what the loop would have written.
+
       assert.notEqual(memoryInputFromEvent(event, {}), null);
     } finally {
       await driver.wiring.stop();

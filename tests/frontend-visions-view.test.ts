@@ -1,20 +1,13 @@
-// The Visions tab's pure half: which sections exist, in what order, and what the counts read as.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import type { IntentThread, VisionsComment, VisionsFixEntry } from '../public/visions-view-core.ts';
 
-// visions-view-core is a browser module; dynamic-import it so the suite drives the shipped source.
 const importCore = () => import('../public/visions-view-core.ts');
 
-// A control frame off the wire carries its own envelope alongside the fields a reader needs, so a
-// fixture is stated as the record it is rather than as the reader's narrow view of it.
 type WireFrame = Record<string, unknown>;
 const wire = (frame: WireFrame): WireFrame => frame;
 
-// The whole LSP diagnostic, not just the fields the view reads, so the core is exercised against
-// what actually arrives.
 function finding(line: number, character: number, code: string, message: string): WireFrame {
   return {
     range: { start: { line, character }, end: { line, character: character + 1 } },
@@ -135,8 +128,6 @@ test('the totals and the arrival test read the same feed', async () => {
   assert.equal(VISIONS_EMPTY_TEXT, 'No findings. Open a markdown file in a connected editor.');
 });
 
-// --- Tier 3 model comments (docs/archive/plan-navigator.md, M4) ---
-
 function comment(line: number, message: string): VisionsComment {
   return { line, message };
 }
@@ -241,8 +232,6 @@ test('comment lines are already 1-based, unlike the LSP ranges beside them', asy
   assert.equal(hasComments({ comments: [comment(1, 'x')] }), true);
   assert.equal(hasComments({}), false);
 });
-
-// --- The intent block as threads (docs/plan-visions-4-focus.md, M20) ---
 
 const NOW = 1700000000000;
 const PROJECT = 'e1f4c0de-0000-4000-8000-000000000001';
@@ -400,8 +389,6 @@ test('a repaint fires when a thread moves or the active one changes, and never o
   assert.equal(hasIntentStateChanged(emptyIntentState(), state), true);
   assert.equal(hasIntentStateChanged(null, emptyIntentState()), false);
 });
-
-// --- Tier 1 fix changelog (docs/archive/plan-navigator-2.md, M6) ---
 
 const APPLIED_FIX = {
   type: 'visions-fix',

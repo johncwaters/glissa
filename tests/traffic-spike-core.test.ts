@@ -16,12 +16,9 @@ import {
 
 const HOUR_MS = 3600000;
 
-// A baseline of `count` hours all reporting `users`, i.e. a perfectly flat project.
 function flatBuckets(users: number, count = 48) {
   return Array.from({ length: count }, (_, i) => ({ bucket: `h${i}`, users }));
 }
-
-// --- computeBaseline -------------------------------------------------------
 
 test('computeBaseline reports the p90, the median and the sample size', () => {
   const buckets = Array.from({ length: 10 }, (_, i) => ({ bucket: `h${i}`, users: i + 1 }));
@@ -53,8 +50,6 @@ test('computeBaseline takes an odd-length median from the middle sample', () => 
   assert.equal(computeBaseline([{ users: 1 }, { users: 7 }, { users: 3 }]).median, 3);
 });
 
-// --- decideTrafficSpike: the unreliable-baseline gate ----------------------
-
 test('a baseline shorter than a day never decides anything', () => {
   const verdict = decideTrafficSpike({
     currentUsers: 5000,
@@ -78,8 +73,6 @@ test('exactly a day of samples is enough to decide', () => {
   });
   assert.equal(verdict.action, 'ping');
 });
-
-// --- decideTrafficSpike: the spike boundary --------------------------------
 
 test('a spike needs BOTH the multiplier and the absolute floor', () => {
   const baseline = computeBaseline(flatBuckets(10));
@@ -110,8 +103,6 @@ test('a zero baseline is floored at one user so a single visitor is not a spike'
   assert.equal(decideTrafficSpike({ currentUsers: 3, baseline, prev: null, now: 1, cfg: {} }).action, 'none');
   assert.equal(decideTrafficSpike({ currentUsers: 12, baseline, prev: null, now: 1, cfg: {} }).action, 'ping');
 });
-
-// --- decideTrafficSpike: an already-reported spike -------------------------
 
 test('a spike already reported stays quiet and tracks its peak', () => {
   const baseline = computeBaseline(flatBuckets(10));
@@ -154,8 +145,6 @@ test('an active entry with no pinged count cannot escalate off zero', () => {
   const verdict = decideTrafficSpike({ currentUsers: 0, baseline, prev, now: 2 * HOUR_MS, cfg: {} });
   assert.notEqual(verdict.action, 'escalate');
 });
-
-// --- decideTrafficSpike: clearing ------------------------------------------
 
 test('traffic falling under half the multiplier clears the spike silently', () => {
   const baseline = computeBaseline(flatBuckets(10));
@@ -215,8 +204,6 @@ test('a zero cooldown never mutes a spike', () => {
   assert.equal(verdict.action, 'ping');
 });
 
-// --- defaults and formatting ----------------------------------------------
-
 test('the defaults are the documented ones and apply when cfg is empty', () => {
   assert.equal(DEFAULT_TRAFFIC_SPIKE_MULTIPLIER, 3);
   assert.equal(DEFAULT_TRAFFIC_SPIKE_MIN_USERS, 10);
@@ -225,7 +212,7 @@ test('the defaults are the documented ones and apply when cfg is empty', () => {
   assert.equal(MIN_BASELINE_SAMPLE_HOURS, 24);
 
   const baseline = computeBaseline(flatBuckets(2));
-  // 3x of a p90 of 2 is 6 users, under the default floor of 10.
+
   assert.equal(decideTrafficSpike({ currentUsers: 9, baseline, prev: null, now: 1 }).action, 'none');
   assert.equal(decideTrafficSpike({ currentUsers: 10, baseline, prev: null, now: 1 }).action, 'ping');
 });

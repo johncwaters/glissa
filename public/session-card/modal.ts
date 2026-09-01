@@ -1,8 +1,3 @@
-// Shared modal overlay scaffold: overlay/backdrop creation, Escape-to-close (hoisted handler,
-// removed on close), backdrop-click-to-close, and close() teardown (remove overlay, refocus the
-// opener). Lives in session-card/ rather than dialogs.js so card-dom.js can use it too without a
-// dialogs.js <-> card-dom.js cycle (see the header note in card-dom.js).
-
 import { el } from '../dom-helpers.ts';
 
 export function createModalOverlay({ dialogClass = 'dialog', closeOnBackdrop = true } = {}) {
@@ -39,7 +34,6 @@ export function createModalOverlay({ dialogClass = 'dialog', closeOnBackdrop = t
   return { overlay, dialog, close };
 }
 
-// The dialog role + focus trap every overlay applies once its labelling title exists.
 export function applyDialogAria(dialog: HTMLElement, titleId: string) {
   dialog.setAttribute('role', 'dialog');
   dialog.setAttribute('aria-modal', 'true');
@@ -47,8 +41,6 @@ export function applyDialogAria(dialog: HTMLElement, titleId: string) {
   trapFocus(dialog);
 }
 
-// Overlay plus the chrome every hand-built dialog repeats: a labelled title, an actions row, and the
-// cancel button that closes it. The caller appends its own body between the two.
 export function buildDialogShell({ title, dialogClass = 'dialog', cancelLabel = 'Cancel' }: {
   title: string;
   dialogClass?: string;
@@ -69,9 +61,6 @@ export function buildDialogShell({ title, dialogClass = 'dialog', cancelLabel = 
   return { overlay, dialog, close, titleEl, actions, btnCancel };
 }
 
-// The confirm prompt every destructive action goes through. It lives here, beside the overlay
-// scaffold, because both dialogs.js and card-dom.js need it and card-dom.js may not import
-// dialogs.js (see the header note there); each used to carry its own copy of this builder.
 export function openConfirmDialog({ title, message, confirmLabel = 'Confirm', danger = false, onConfirm }: {
   title: string;
   message: string;
@@ -94,9 +83,6 @@ export function openConfirmDialog({ title, message, confirmLabel = 'Confirm', da
   requestAnimationFrame(() => btnCancel.focus());
 }
 
-// Tab-key focus trap: keeps keyboard focus cycling within the dialog's focusable elements instead
-// of escaping to the page behind the overlay. Reached through applyDialogAria, which every dialog on
-// this scaffold calls.
 function trapFocus(dialog: HTMLElement) {
   dialog.addEventListener('keydown', (e) => {
     if (e.key !== 'Tab') return;

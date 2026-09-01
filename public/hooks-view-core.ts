@@ -1,8 +1,3 @@
-// ── Hooks view: pure formatting, ordering and draft rules ─────
-// Every string the Hooks panel renders and every rule the editor applies before a save is built here,
-// so the panel is DOM only and the wording is testable without a browser. The event catalog arrives
-// in the report (the server is its one home); nothing here hard-codes an event name.
-
 export const HOOKS_HINT = 'Claude Code hooks injected into every session Glissa spawns.';
 export const HOOKS_LOADING_TEXT = 'Loading hooks';
 export const HOOKS_EMPTY_TEXT = 'No hooks yet. A hook runs a command, or calls a URL, when a Claude Code event fires in a Glissa session. Start from one of these, or add your own.';
@@ -15,7 +10,7 @@ export const DUPLICATE_LABEL = 'Duplicate';
 export const DISCARD_TITLE = 'Discard changes';
 export const DISCARD_TEXT = 'Close the editor and lose the unsaved changes?';
 export const SHORTCUT_HINT = 'Esc cancels. Ctrl+Enter saves.';
-// Below this many hooks a filter box is noise; above it the list needs one.
+
 export const FILTER_MIN_COUNT = 4;
 export const HOOKS_APPLY_NOTE = 'A change reaches a session at its next start or restart. Claude Code sessions only; Codex and Grok sessions do not read this file.';
 export const BUILTIN_TITLE = "Glissa's own hooks";
@@ -27,7 +22,7 @@ export const EDITOR_HINT = 'Saved to config.json.';
 export const ALL_PROJECTS_LABEL = 'All projects';
 export const NO_MATCHER_TEXT = 'This event takes no matcher.';
 export const DEFAULT_TIMEOUT_TEXT = "Blank uses Claude Code's default for the event.";
-// The ceiling the server enforces, used only until a report states its own.
+
 export const DEFAULT_MAX_TIMEOUT_SEC = 600;
 
 export interface HookRecord {
@@ -46,7 +41,7 @@ export interface HookRecord {
 export interface HookEvent {
   name: string;
   description: string;
-  // null is what the catalog stores for an event that takes no matcher, and it rides the wire as null.
+
   matcher?: string | null;
   http?: boolean;
 }
@@ -98,8 +93,6 @@ export const HOOK_TYPE_OPTIONS = Object.freeze([
   { value: 'http', label: 'HTTP', hint: 'POST the event JSON to a URL.' },
 ]);
 
-// Recipes an operator reaches for first. Each is a draft the editor opens pre-filled, so a template is
-// exactly as editable as a blank form; nothing is saved until the operator says so.
 export const HOOK_TEMPLATES: readonly HookTemplate[] = Object.freeze([
   { id: 'lint', label: 'Lint after edits', summary: 'PostToolUse on Edit|Write', draft: { name: 'Lint after edits', event: 'PostToolUse', matcher: 'Edit|Write', type: 'command', command: 'npx biome check --write "$(jq -r .tool_input.file_path)"' } },
   { id: 'notify', label: 'Notify on Stop', summary: 'Stop, command', draft: { name: 'Notify on Stop', event: 'Stop', matcher: '', type: 'command', command: 'notify-send "Claude finished a turn"' } },
@@ -127,13 +120,11 @@ export const hooksOf = (report: HooksReport | null | undefined) => listOf(report
 export const builtinOf = (report: HooksReport | null | undefined) => listOf(report, 'builtin') as HookBuiltinRow[];
 export const eventsOf = (report: HooksReport | null | undefined) => listOf(report, 'events') as HookEvent[];
 
-// The limits the server states about itself; the fallback only covers a report from an older backend.
 export function maxTimeoutOf(report: HooksReport | null | undefined) {
   const value = report?.limits?.maxTimeoutSec;
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : DEFAULT_MAX_TIMEOUT_SEC;
 }
 
-// A report that arrived out of order (an older request answered after a newer one) is dropped.
 export function shouldApplyHooksReport(msg: unknown, latestRequestId: unknown) {
   if (!msg || typeof msg !== 'object') return false;
   const requestId = (msg as { requestId?: unknown }).requestId;
@@ -151,7 +142,6 @@ export function totalsChips(report: HooksReport | null | undefined): { label: st
   ];
 }
 
-// Event order is the catalog's (lifecycle order), then name, so the list reads like a session.
 export function sortHooks(hooks: HookRecord[], events: HookEvent[]): HookRecord[] {
   const rank = new Map(events.map((entry, index): [string, number] => [entry.name, index]));
   const rankOf = (hook: HookRecord) => rank.get(hook.event) ?? events.length;
@@ -162,7 +152,6 @@ export function sortHooks(hooks: HookRecord[], events: HookEvent[]): HookRecord[
   });
 }
 
-// A plain substring filter across what a row shows, so what the operator can see is what they can find.
 export function filterHooks(hooks: HookRecord[], query: unknown): HookRecord[] {
   const needle = String(query || '').trim().toLowerCase();
   if (!needle) return hooks;
@@ -174,7 +163,6 @@ export function showsFilter(hooks: readonly unknown[]) {
   return hooks.length >= FILTER_MIN_COUNT;
 }
 
-// Already-sorted hooks bucketed by event, in the order they arrive, so a long list reads as a session.
 export function groupHooksByEvent(sortedHooks: HookRecord[]) {
   const groups: { event: string; hooks: HookRecord[] }[] = [];
   for (const hook of sortedHooks) {
@@ -185,14 +173,11 @@ export function groupHooksByEvent(sortedHooks: HookRecord[]) {
   return groups;
 }
 
-// The Claude Code settings entry a record becomes: the same shape session/core/user-hooks-core.js
-// writes, shown so an operator can compare it with a hand-written hook or paste it elsewhere.
 export function settingsEntryPreview(hook: HookRecord) {
   const handler: { type: string; url?: string; command?: string; timeout?: number } = hook.type === 'http'
     ? { type: 'http', url: hook.url || '' }
     : { type: 'command', command: hook.command || '' };
-  // No timeout key when the record has none, exactly as the injector writes it: Claude Code's own
-  // default applies, and the preview must not promise a number nothing writes.
+
   if (Number.isInteger(hook.timeout) && Number(hook.timeout) > 0) handler.timeout = hook.timeout;
   const entry = hook.matcher ? { matcher: hook.matcher, hooks: [handler] } : { hooks: [handler] };
   return JSON.stringify({ hooks: { [hook.event]: [entry] } }, null, 2);
@@ -248,15 +233,11 @@ export function builtinLine(row: HookBuiltinRow) {
   return `${row.event} / ${row.matcher}`;
 }
 
-// A hook that is wired to a project no longer in config still shows, so it can be repointed or removed.
 export function missingProjectIds(hook: HookRecord, projects: HookProject[]) {
   const ids: string[] = Array.isArray(hook.projects) ? hook.projects : [];
   const known = new Set(projects.map((project) => project.id));
   return ids.filter((id) => !known.has(id));
 }
-
-// ── Drafts ──
-// The editor works on a flat draft of strings; toDraft/fromDraft are the only two conversions.
 
 export function emptyDraft(events: HookEvent[]): HookDraft {
   const first = events[0];
@@ -289,8 +270,6 @@ export function toDraft(hook: HookRecord): HookDraft {
   };
 }
 
-// What the client can tell BEFORE asking the server; the server re-checks everything, so a rule that
-// only it can judge (an unknown project, a duplicate id) is not repeated here.
 export function draftProblem(draft: HookDraft, events: HookEvent[], maxTimeoutSec: number = DEFAULT_MAX_TIMEOUT_SEC) {
   if (!draft.name.trim()) return 'Give the hook a name.';
   const entry = eventEntry(events, draft.event);
@@ -306,7 +285,6 @@ export function draftProblem(draft: HookDraft, events: HookEvent[], maxTimeoutSe
   return null;
 }
 
-// The wire shape of a save. Blank optionals are omitted rather than sent empty.
 export function fromDraft(draft: HookDraft): Record<string, unknown> {
   const hook: Record<string, unknown> = {
     name: draft.name.trim(),

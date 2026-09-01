@@ -54,7 +54,7 @@ interface MergeResult {
   baseSha?: string | null;
   restoreConflict?: boolean;
   warning?: string;
-  // Reported by the engine for the caller's logs; the lifecycle itself reads neither.
+
   branch?: string | null;
   base?: string | null;
   kept?: boolean;
@@ -82,8 +82,6 @@ interface RebaseResult {
   conflicts?: string[];
 }
 
-// Every engine verb takes one option bag; its keys differ per verb and the engine reads them itself,
-// so the seam names the engine's own bag rather than restating each shape.
 type WorkspaceArgs = WorktreeArgs;
 
 interface IntegrationSyncResult {
@@ -169,7 +167,6 @@ interface WorktreeSignature {
 
 type GitOptions = Record<string, unknown>;
 
-// A discriminated pair so `if (failure) return failure` narrows `result` to the merge that ran.
 type MergeEngineOutcome =
   | { result: MergeResult; failure?: undefined }
   | { result?: undefined; failure: MergeResult };
@@ -447,9 +444,7 @@ function createSessionWorktreeLifecycle({
   }
 
   async function syncFreshWorktree(): Promise<void> {
-    // The switch gates BOTH halves. With syncOnStart off there is no sync AND no replay: the operator who
-    // turned the feature off would otherwise still get an unattended rewrite of their worktree in the
-    // spawn gap, which is the half of it they can actually feel.
+
     if (!syncableGitWorkspace()) return;
     const branch = await resolveBaseForStart();
     await syncIntegrationBranchForStart(SPAWN_GAP_TRIGGER, branch);

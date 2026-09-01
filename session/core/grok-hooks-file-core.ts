@@ -39,8 +39,6 @@ function hasOnlyKeys(value: unknown, expectedKeys: string[]): value is Record<st
     && actualKeys.every((key, index) => key === sortedExpectedKeys[index]);
 }
 
-// The relay ships as hook-relay.js in a published build and hook-relay.ts while the repo runs from
-// source, so both spellings must read as Glissa-managed or a dev-mode file looks foreign and is left.
 const MANAGED_RELAY_RE = /(?:^|\/)hook-relay\.(?:js|ts)$/;
 
 function isManagedCommand(command: unknown, event: string): boolean {

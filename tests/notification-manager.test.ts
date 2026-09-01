@@ -1,10 +1,3 @@
-// NotificationManager lifecycle tests for the reliability fixes:
-//   - focus suppression DEFERS (SUPPRESSED state) and delivers on blur, never drops
-//   - trigger validates the transition BEFORE mutating the entry (no category corruption)
-//   - trigger from DELIVERED/ESCALATED replaces the live notification (team re-notify)
-//   - the acknowledge-before-trigger backend ordering delivers on notifying-to-notifying hops
-// The escalation ping-pong and gate interplay live in tests/notify-gate.test.js.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -45,7 +38,7 @@ test('a suppressed notification acknowledged before blur is discarded silently',
   const { manager, deliveries } = makeManager();
   manager.setFocusSuppressed(true);
   manager.trigger('s1', 'waiting', 'needs input');
-  manager.acknowledge('s1'); // the user answered in the terminal while focused
+  manager.acknowledge('s1');
   manager.setFocusSuppressed(false);
   assert.equal(deliveries.length, 0, 'no stale toast after the user already acted');
   assert.equal(manager.getNotificationState('s1'), NS.IDLE);
@@ -70,7 +63,7 @@ test('re-suppression while blurred-held is impossible to double-deliver (idempot
   manager.setFocusSuppressed(true);
   manager.trigger('s1', 'complete', 'finished');
   manager.setFocusSuppressed(false);
-  manager.setFocusSuppressed(false); // duplicate blur event
+  manager.setFocusSuppressed(false);
   assert.equal(deliveries.length, 1);
   manager.destroy();
 });
@@ -78,7 +71,7 @@ test('re-suppression while blurred-held is impossible to double-deliver (idempot
 test('trigger on a DELIVERED entry replaces it (a second team run notifies again)', () => {
   const { manager, deliveries } = makeManager();
   assert.equal(manager.trigger('team:marketing', 'complete', 'run 1 done'), true);
-  // Never acknowledged: team pseudo-sessions have no state-change to clear them.
+
   assert.equal(manager.trigger('team:marketing', 'complete', 'run 2 done'), true);
   assert.equal(deliveries.length, 2);
   assert.equal(deliveries[1].message, 'run 2 done');
@@ -89,7 +82,7 @@ test('trigger replacing a waiting entry clears its escalation timer (no ghost re
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const { manager, deliveries } = makeManager({ escalationIntervalMs: 1000 });
   manager.trigger('s1', 'waiting', 'needs input');
-  manager.trigger('s1', 'complete', 'finished'); // replaces; complete never escalates
+  manager.trigger('s1', 'complete', 'finished');
   t.mock.timers.tick(5000);
   assert.deepEqual(deliveries.map((d) => d.category), ['waiting', 'complete'],
     'no escalation re-fire under the stale waiting timer');
@@ -98,10 +91,9 @@ test('trigger replacing a waiting entry clears its escalation timer (no ghost re
 
 test('backend ordering contract: acknowledge-then-trigger on WAITING -> COMPLETE delivers the completion', () => {
   const { manager, deliveries } = makeManager();
-  // WAITING entry delivered...
+
   manager.trigger('s1', 'waiting', 'needs input');
-  // ...then a late authoritative Stop: the listener acknowledges (leaving WAITING) first,
-  // then triggers 'complete' for the entered state.
+
   manager.acknowledge('s1');
   manager.trigger('s1', 'complete', 'finished working');
   assert.deepEqual(deliveries.map((d) => d.category), ['waiting', 'complete']);
@@ -112,8 +104,8 @@ test('debounce still coalesces rapid same-category re-triggers per session', () 
   const { manager, deliveries } = makeManager({ debounceMs: 60000 });
   manager.trigger('s1', 'complete', 'first');
   manager.acknowledge('s1');
-  manager.trigger('s1', 'complete', 'second'); // within the window -> debounced
-  manager.trigger('s2', 'complete', 'other session'); // never cross-suppressed
+  manager.trigger('s1', 'complete', 'second');
+  manager.trigger('s2', 'complete', 'other session');
   assert.deepEqual(deliveries.map((d) => d.message), ['first', 'other session']);
   manager.destroy();
 });
@@ -122,18 +114,13 @@ test('the debounce map is pruned lazily (no unbounded growth across sessions)', 
   const { manager } = makeManager({ debounceMs: 10 });
   const start = Date.now();
   manager.trigger('s1', 'complete', 'x');
-  // Force the recorded entry past the window, then record another category.
+
   manager._recentCategories.set('s1\0complete', start - 1000);
   manager.acknowledge('s1');
   manager.trigger('s2', 'complete', 'y');
   assert.equal(manager._recentCategories.has('s1\0complete'), false, 'stale key swept');
   manager.destroy();
 });
-
-// ---------------------------------------------------------------------------
-// Ported from the retired test/test-notification-manager.js manual harness: low-level
-// unit behavior not otherwise covered by the scenario tests above or by notify-gate.test.js.
-// ---------------------------------------------------------------------------
 
 test('a failed trigger delivers once with no escalation timer', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
