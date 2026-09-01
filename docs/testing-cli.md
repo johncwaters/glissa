@@ -21,7 +21,7 @@ Test scenarios for Glissa's CLI functionality. Run these before cutting a releas
 ## Test 1: `--help` Flag
 
 ```powershell
-node bin/glissa.js --help
+node bin/glissa.ts --help
 ```
 
 **Expected:**
@@ -50,7 +50,7 @@ Options:
 ## Test 2: `-h` Short Flag
 
 ```powershell
-node bin/glissa.js -h
+node bin/glissa.ts -h
 ```
 
 **Expected:** Same output as `--help`.
@@ -60,7 +60,7 @@ node bin/glissa.js -h
 ## Test 3: `--version` Flag
 
 ```powershell
-node bin/glissa.js --version
+node bin/glissa.ts --version
 ```
 
 **Expected:** matches the `version` field in `package.json`
@@ -72,7 +72,7 @@ node bin/glissa.js --version
 Start the server on a custom port. Press `Ctrl+C` to stop after verifying.
 
 ```powershell
-node bin/glissa.js --port 4567
+node bin/glissa.ts --port 4567
 ```
 
 **Expected output includes:**
@@ -90,7 +90,7 @@ Open `http://localhost:4567` in a browser to verify the dashboard loads. Then `C
 Use the repo's local config explicitly:
 
 ```powershell
-node bin/glissa.js --config ./config.json --port 4568
+node bin/glissa.ts --config ./config.json --port 4568
 ```
 
 **Expected:** Server starts using the specified config, listening on port 4568. `Ctrl+C` to stop.
@@ -100,7 +100,7 @@ node bin/glissa.js --config ./config.json --port 4568
 ## Test 6: `--config` with Nonexistent Path
 
 ```powershell
-node bin/glissa.js --config C:\nonexistent\config.json
+node bin/glissa.ts --config C:\nonexistent\config.json
 ```
 
 **Expected:**
@@ -131,7 +131,7 @@ Run glissa (no flags). Since local `./config.json` exists in the repo, it will u
 
 ```powershell
 Rename-Item config.json config.json.bak
-node bin/glissa.js --port 4569
+node bin/glissa.ts --port 4569
 ```
 
 **Expected output includes:**
@@ -165,10 +165,10 @@ if (Test-Path "$env:USERPROFILE\.glissa\config.json.bak") {
 
 ## Test 8: Local Dev Fallback
 
-Verify `node server.js` still works as before (backward compatibility):
+Verify `node server/main.ts` still works as before (backward compatibility):
 
 ```powershell
-node server.js
+node server/main.ts
 ```
 
 **Expected:** Server starts using `./config.json` from the repo directory. `Ctrl+C` to stop.
@@ -178,7 +178,7 @@ node server.js
 ## Test 9: `glissa doctor`
 
 ```powershell
-node bin/glissa.js doctor
+node bin/glissa.ts doctor
 ```
 
 **Expected:** A read-only report, no server started and nothing written to disk: glissa/node/platform versions, where the CLI is running from, the npm (and pnpm, if present) global bin directory and whether each is on PATH, a `node-pty` load probe, and the resolved config path. When the npm global bin directory is not on PATH, it also prints the one-step fix.
@@ -206,14 +206,14 @@ $pairConfig = Join-Path $pairDir "config.json"
 }
 '@ | Set-Content -Encoding UTF8 $pairConfig
 
-node bin/glissa.js --config $pairConfig --port 3455
+node bin/glissa.ts --config $pairConfig --port 3455
 ```
 
 In a second PowerShell window, mint and redeem a pairing link:
 
 ```powershell
 $pairConfig = Join-Path (Join-Path $env:TEMP "glissa-pair-cli-test") "config.json"
-$mintOutput = node bin/glissa.js --config $pairConfig pair --name Phone
+$mintOutput = node bin/glissa.ts --config $pairConfig pair --name Phone
 $mintOutput
 $pairUrl = ($mintOutput | Select-String "http://127.0.0.1:3456/pair/").Matches.Value
 Invoke-WebRequest $pairUrl -SessionVariable pairedSession | Out-Null
@@ -224,7 +224,7 @@ Invoke-WebRequest $pairUrl -SessionVariable pairedSession | Out-Null
 List the paired device:
 
 ```powershell
-node bin/glissa.js --config $pairConfig pair --list
+node bin/glissa.ts --config $pairConfig pair --list
 ```
 
 **Expected output includes:** a table with `ID`, `NAME`, `PAIRED`, `LAST SEEN`, `STATUS`, and a row whose `NAME` is `Phone`.
@@ -232,8 +232,8 @@ node bin/glissa.js --config $pairConfig pair --list
 Revoke it, replacing `<id>` with the `ID` from the list output:
 
 ```powershell
-node bin/glissa.js --config $pairConfig pair --revoke <id>
-node bin/glissa.js --config $pairConfig pair --list
+node bin/glissa.ts --config $pairConfig pair --revoke <id>
+node bin/glissa.ts --config $pairConfig pair --list
 ```
 
 **Expected output includes:** `Revoked <id>. A running Glissa applies this within 30 seconds, no restart needed.` and the same device row with `revoked` in the `STATUS` column.
@@ -255,12 +255,11 @@ npm pack --dry-run
 **Expected files included** (per the `files` array in `package.json`):
 
 ```
-bin/glissa.js
-bin/path-doctor.js
+bin/glissa.ts
+bin/path-doctor.ts
 scripts/prepare-build.js
 scripts/postinstall-path-check.js
 dist/            (built frontend, excludes dist/AGENTS.md and dist/pictures/)
-server.js
 server/
 session/
 notifications/
@@ -283,7 +282,7 @@ package.json
 node -e "const p=require('./package.json'); console.log(JSON.stringify({bin:p.bin,files:p.files,engines:p.engines},null,2))"
 ```
 
-**Expected:** `bin.glissa` points at `bin/glissa.js`, `engines.node` is `>=22.18.0`, and `files` matches the array above (check `package.json` directly for the current list; it grows as new server-side modules ship).
+**Expected:** `bin.glissa` points at `bin/glissa.ts`, `engines.node` is `>=22.18.0`, and `files` matches the array above (check `package.json` directly for the current list; it grows as new server-side modules ship).
 
 ---
 
@@ -341,7 +340,7 @@ This is a code-level verification: `buildAgentEnv` returns a scrubbed copy of th
 | 5 | `--config ./config.json` uses explicit config | |
 | 6 | `--config <nonexistent>` errors with exit 1 | |
 | 7 | Auto-seeds `~/.glissa/config.json` when none exist | |
-| 8 | `node server.js` still works (backward compat) | |
+| 8 | `node server/main.ts` still works (backward compat) | |
 | 9 | `glissa doctor` prints a read-only report, exits 0 | |
 | 10 | `glissa pair` can mint, list, and revoke a device | |
 | 11 | `npm pack --dry-run` includes correct files | |
@@ -367,5 +366,5 @@ Delete and let it re-seed:
 
 ```powershell
 Remove-Item "$env:USERPROFILE\.glissa\config.json"
-node bin/glissa.js --help
+node bin/glissa.ts --help
 ```

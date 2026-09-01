@@ -51,14 +51,14 @@ test('production restart respawns detached + windowsHide and then exits', async 
     env: UNSUPERVISED,
     spawn,
     exit: (code) => exits.push(code),
-    getArgv: () => ['node.exe', 'server.js'],
+    getArgv: () => ['node.exe', 'server/main.ts'],
     cwd: () => 'C:/work',
   });
   await lc.requestRestart();
   assert.equal(spawn.calls.length, 1, 'replacement spawned exactly once');
   const { file, args, opts } = spawn.calls[0];
   assert.equal(file, 'node.exe');
-  assert.deepEqual(args, ['server.js']);
+  assert.deepEqual(args, ['server/main.ts']);
   assert.equal(opts.detached, true, 'detached so it outlives this process');
   assert.equal(opts.windowsHide, true, 'windowsHide so it does NOT pop its own console window');
   assert.equal(opts.stdio, 'ignore');
@@ -76,7 +76,7 @@ test('double requestRestart spawns the replacement at most once (re-entry guard)
     env: UNSUPERVISED,
     spawn,
     exit: () => {},
-    getArgv: () => ['node.exe', 'server.js'],
+    getArgv: () => ['node.exe', 'server/main.ts'],
   });
   await Promise.all([lc.requestRestart(), lc.requestRestart()]);
   await lc.requestRestart();
@@ -95,7 +95,7 @@ test('restart and shutdown share one guard: shutdown after restart is a no-op', 
     env: UNSUPERVISED,
     spawn,
     exit: (code) => exits.push(code),
-    getArgv: () => ['node.exe', 'server.js'],
+    getArgv: () => ['node.exe', 'server/main.ts'],
   });
   await lc.requestRestart();
   await lc.requestShutdown();
@@ -116,7 +116,7 @@ test('reaps are awaited BEFORE the respawn (no orphaned PTY tree)', async () => 
     env: UNSUPERVISED,
     spawn: wrappedSpawn,
     exit: () => {},
-    getArgv: () => ['node.exe', 'server.js'],
+    getArgv: () => ['node.exe', 'server/main.ts'],
   });
   await lc.requestRestart();
   assert.equal(settledWhenSpawned, true, 'the kill reap resolved before the replacement spawned');
@@ -191,7 +191,7 @@ test('supervised restart exits non-zero WITHOUT respawning (systemd starts the r
     env: SYSTEMD,
     spawn,
     exit: (code) => exits.push(code),
-    getArgv: () => ['node', 'server.js'],
+    getArgv: () => ['node', 'server/main.ts'],
     log: () => {},
   });
   await lc.requestRestart();
@@ -302,7 +302,7 @@ test('a restart awaits the lane drains too, not only the PTY reaps', async () =>
     env: UNSUPERVISED,
     spawn,
     exit: () => order.push('exit'),
-    getArgv: () => ['node', 'server.js'],
+    getArgv: () => ['node', 'server/main.ts'],
   });
   const restarting = lc.requestRestart();
   await tick();

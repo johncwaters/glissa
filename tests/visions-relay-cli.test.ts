@@ -11,7 +11,7 @@ import type { AddressInfo } from 'node:net';
 
 // Every frame read back here is asserted field by field, so one indexable shape covers them.
 type LspRecord = Record<string, unknown>;
-const CLI_PATH = path.join(import.meta.dirname, '..', 'bin', 'glissa.js');
+const CLI_PATH = path.join(import.meta.dirname, '..', 'bin', 'glissa.ts');
 const WAIT_MS = 8000;
 const URI = 'file:///tmp/cli-plan.md';
 

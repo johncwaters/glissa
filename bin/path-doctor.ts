@@ -1,7 +1,5 @@
-'use strict';
-
 // Pure helpers shared by the post-install PATH notice (scripts/postinstall-path-check.js)
-// and `glissa doctor` (bin/glissa.js). They require only node:path, so they load
+// and `glissa doctor` (bin/glissa.ts). They import only node:path, so they load
 // even when the server or the node-pty native module cannot.
 //
 // Why this exists: the npm `bin` field already makes npm create a `glissa` shim,
@@ -10,15 +8,33 @@
 // functions locate that directory and report whether it is reachable so we can
 // TELL the user the one-step fix.
 
-const path = require('node:path');
+import path from 'node:path';
 
-function isWin(platform) {
+interface PlatformScope {
+  pathEnv?: string;
+  platform?: NodeJS.Platform;
+}
+
+interface GlobalBinScope {
+  env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+  homedir?: string;
+  resolvedPrefix?: string | null;
+}
+
+interface PathNoticeScope {
+  installedBinDir?: string | null;
+  onPathFlag?: boolean;
+  platform?: NodeJS.Platform;
+}
+
+function isWin(platform: NodeJS.Platform | undefined): boolean {
   return platform === 'win32';
 }
 
 // Normalize one PATH entry for comparison: trim, drop surrounding quotes, strip a
 // trailing separator, and lowercase on Windows (its filesystem is case-insensitive).
-function normalizeDir(dir, platform) {
+function normalizeDir(dir: string | null | undefined, platform: NodeJS.Platform | undefined): string {
   if (!dir) return '';
   let d = String(dir).trim();
   if (d.length >= 2 && d.startsWith('"') && d.endsWith('"')) {
@@ -31,7 +47,7 @@ function normalizeDir(dir, platform) {
 
 // Is `dir` present in the PATH string? Splits on ';' on Windows and ':' elsewhere,
 // then compares normalized entries. Never throws on missing/empty inputs.
-function onPath(dir, { pathEnv, platform } = {}) {
+function onPath(dir: string | null | undefined, { pathEnv, platform }: PlatformScope = {}): boolean {
   const target = normalizeDir(dir, platform);
   if (!target) return false;
   const sep = isWin(platform) ? ';' : ':';
@@ -44,7 +60,7 @@ function onPath(dir, { pathEnv, platform } = {}) {
 // Where npm places global command shims. On Windows the global PREFIX directory
 // itself holds the .cmd/.ps1/.exe shims (there is no bin/ subdir); on POSIX it is
 // <prefix>/bin. Falls back to the official-installer default on Windows.
-function npmGlobalBinDir({ env = {}, platform, homedir, resolvedPrefix } = {}) {
+function npmGlobalBinDir({ env = {}, platform, homedir, resolvedPrefix }: GlobalBinScope = {}): string | null {
   const prefix = env.npm_config_prefix || resolvedPrefix || null;
   if (isWin(platform)) {
     if (prefix) return prefix;
@@ -57,7 +73,7 @@ function npmGlobalBinDir({ env = {}, platform, homedir, resolvedPrefix } = {}) {
 
 // Best-effort pnpm global-bin directory. pnpm requires `pnpm setup` to put this on
 // PATH, so it is a common "command not found" culprit for pnpm users.
-function pnpmGlobalBinDir({ env = {}, platform, homedir } = {}) {
+function pnpmGlobalBinDir({ env = {}, platform, homedir }: GlobalBinScope = {}): string | null {
   if (env.PNPM_HOME) return env.PNPM_HOME;
   if (!homedir) return null;
   if (isWin(platform)) return path.join(homedir, 'AppData', 'Local', 'pnpm');
@@ -67,7 +83,7 @@ function pnpmGlobalBinDir({ env = {}, platform, homedir } = {}) {
 // Human-readable notice. Pure string (no I/O) so it is unit-testable. Uses the safe
 // registry-preserving PowerShell idiom on Windows (NOT `setx`, which truncates PATH
 // at 1024 chars and writes the expanded value).
-function formatPathNotice({ installedBinDir, onPathFlag, platform } = {}) {
+function formatPathNotice({ installedBinDir, onPathFlag, platform }: PathNoticeScope = {}): string {
   const dir = installedBinDir || '(unknown)';
   if (onPathFlag) {
     return [
@@ -95,9 +111,4 @@ function formatPathNotice({ installedBinDir, onPathFlag, platform } = {}) {
   return lines.join('\n');
 }
 
-module.exports = {
-  onPath,
-  npmGlobalBinDir,
-  pnpmGlobalBinDir,
-  formatPathNotice,
-};
+export { onPath, npmGlobalBinDir, pnpmGlobalBinDir, formatPathNotice };

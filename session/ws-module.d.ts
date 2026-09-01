@@ -16,7 +16,7 @@ declare module "ws" {
     static readonly CLOSED: 3;
     readonly readyState: number;
     readonly bufferedAmount: number;
-    constructor(address: string);
+    constructor(address: string, options?: { origin?: string; headers?: Record<string, string> });
     send(data: string | Buffer): void;
     ping(data?: string | Buffer): void;
     pong(data?: string | Buffer): void;

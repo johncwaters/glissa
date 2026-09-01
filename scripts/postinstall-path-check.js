@@ -1,5 +1,7 @@
 'use strict';
 
+// Stays plain .js: npm runs this inside node_modules on a git install, where Node refuses type stripping.
+//
 // Best-effort PATH notice printed after a GLOBAL `npm install -g github:johncwaters/glissa`.
 //
 // Contract: print-only. It never edits the user's PATH and must NEVER fail an
@@ -11,7 +13,7 @@
 try {
   if (process.env.npm_config_global === 'true') {
     const os = require('node:os');
-    const { npmGlobalBinDir, onPath, formatPathNotice } = require('../bin/path-doctor');
+    const { npmGlobalBinDir, onPath, formatPathNotice } = require('../bin/path-doctor.ts');
 
     const platform = process.platform;
     const binDir = npmGlobalBinDir({ env: process.env, platform, homedir: os.homedir() });

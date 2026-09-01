@@ -45,7 +45,7 @@ test.before(async () => {
 
   server = http.createServer();
   backend = createBackend(server, { staticDir: null });
-  // createBackend returns the Express app; the embedder wires it (mirrors server.js:8).
+  // createBackend returns the Express app; the embedder wires it (mirrors server/main.ts).
   server.on('request', backend.app);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   base = `http://127.0.0.1:${server.address().port}`;

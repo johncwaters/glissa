@@ -10,8 +10,8 @@ Manual smoke tests and harnesses run directly with `node`, separate from the aut
 
 | File | Description |
 |------|-------------|
-| `smoke-dormant-boot.js` | Boots the backend in-process, verifies dormant-by-default boot and the start-session control flow |
-| `probe-codex-session.js` | Live verification of the Codex adapter against a real `codex` binary: boots the backend on a throwaway config and drives one supervised session through spawn, working, awaiting-input, approval, complete and resume. Costs one real codex turn; leaves a recording the replay fixtures are cut from |
+| `smoke-dormant-boot.ts` | Boots the backend in-process, verifies dormant-by-default boot and the start-session control flow |
+| `probe-codex-session.ts` | Live verification of the Codex adapter against a real `codex` binary: boots the backend on a throwaway config and drives one supervised session through spawn, working, awaiting-input, approval, complete and resume. Costs one real codex turn; leaves a recording the replay fixtures are cut from |
 | `ablation/run-pairs.js` | Paired ON/OFF context-pack ablation over real billed Claude sessions; appends one JSONL record per pair and scores them with the pure `ablation/ablation-core.js` |
 | `support/backend-harness.js` | In-process backend scaffolding shared by the probes here: listen, free high port, control socket, throwaway Claude config, bounded shutdown |
 | `container/Dockerfile` | node:24-bookworm image for the Linux-only remote-mode suite (`npm run test:container`) |
@@ -26,7 +26,7 @@ Manual smoke tests and harnesses run directly with `node`, separate from the aut
 - Smoke scripts must shut down cleanly (in-process server, no orphan listeners).
 
 ### Testing Requirements
-- Run directly: `node test/smoke-dormant-boot.js`.
+- Run directly: `node test/smoke-dormant-boot.ts`.
 
 ## Dependencies
 

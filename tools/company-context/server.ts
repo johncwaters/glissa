@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-"use strict";
 
 /**
  * Company-context MCP server (zero-dependency).
@@ -16,10 +15,18 @@
  * make it query-aware later if the corpus grows.
  */
 
-const fs = require("node:fs");
-const path = require("node:path");
+import fs from "node:fs";
+import path from "node:path";
 
-const CONTEXT_DIR = path.join(__dirname, "context");
+type JsonRpcId = string | number | null | undefined;
+
+interface JsonRpcMessage {
+  id?: JsonRpcId;
+  method?: string;
+  params?: Record<string, unknown>;
+}
+
+const CONTEXT_DIR = path.join(import.meta.dirname, "context");
 const SERVER_NAME = "company-context";
 const SERVER_VERSION = "0.1.0";
 const DEFAULT_PROTOCOL = "2025-06-18";
@@ -46,12 +53,17 @@ const TOOL = {
   },
 };
 
-function log(msg) {
+function log(msg: string): void {
   process.stderr.write(`[${SERVER_NAME}] ${msg}\n`);
 }
 
-function readContext() {
-  let files;
+function messageOf(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  return String(error);
+}
+
+function readContext(): string {
+  let files: string[];
   try {
     files = fs
       .readdirSync(CONTEXT_DIR)
@@ -63,7 +75,7 @@ function readContext() {
   if (files.length === 0) {
     return `No .md files in ${CONTEXT_DIR}. Add markdown reference files there.`;
   }
-  const parts = [];
+  const parts: string[] = [];
   for (const f of files) {
     try {
       const body = fs.readFileSync(path.join(CONTEXT_DIR, f), "utf8").trim();
@@ -75,17 +87,17 @@ function readContext() {
   return parts.join("\n\n---\n\n") || "Company-context files are present but empty.";
 }
 
-function send(msg) {
+function send(msg: unknown): void {
   process.stdout.write(`${JSON.stringify(msg)}\n`);
 }
-function sendResult(id, result) {
+function sendResult(id: JsonRpcId, result: unknown): void {
   send({ jsonrpc: "2.0", id, result });
 }
-function sendError(id, code, message) {
+function sendError(id: JsonRpcId, code: number, message: string): void {
   send({ jsonrpc: "2.0", id, error: { code, message } });
 }
 
-function handle(msg) {
+function handle(msg: JsonRpcMessage): void {
   const { id, method, params } = msg;
 
   if (method === "initialize") {
@@ -138,18 +150,18 @@ process.stdin.on("data", (chunk) => {
     buf = buf.slice(nl + 1);
     nl = buf.indexOf("\n");
     if (!line) continue;
-    let msg;
+    let msg: JsonRpcMessage;
     try {
       msg = JSON.parse(line);
     } catch (e) {
-      log(`parse error: ${e.message}`);
+      log(`parse error: ${messageOf(e)}`);
       continue;
     }
     try {
       handle(msg);
     } catch (e) {
-      log(`handler error: ${e.message}`);
-      if (msg && msg.id != null) sendError(msg.id, -32603, String(e.message));
+      log(`handler error: ${messageOf(e)}`);
+      if (msg && msg.id != null) sendError(msg.id, -32603, messageOf(e));
     }
   }
 });

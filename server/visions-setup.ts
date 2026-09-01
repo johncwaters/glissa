@@ -27,7 +27,7 @@ const PACKAGE_ROOT = path.join(import.meta.dirname, '..');
 const EXTENSION_DIR = path.join(PACKAGE_ROOT, 'tools', 'vscode-visions');
 const RELAY_PATH = path.join(PACKAGE_ROOT, 'session', 'visions-relay.ts');
 const LSP_CORE_PATH = path.join(PACKAGE_ROOT, 'server', 'core', 'visions-lsp-core.ts');
-const CLI_PATH = path.join(PACKAGE_ROOT, 'bin', 'glissa.js');
+const CLI_PATH = path.join(PACKAGE_ROOT, 'bin', 'glissa.ts');
 const EDITOR_TIMEOUT_MS = 60000;
 
 interface InstallOutcome extends ExtensionEditorTarget {
@@ -72,11 +72,15 @@ function commandFailureDetail(error: unknown): string | undefined {
   return String(failure.stderr || failure.message || error).trim().split('\n').pop();
 }
 
-// The extension host is CommonJS with no type stripping of its own, so the packed copy of the core is
-// its types erased and its one ESM export rewritten.
-function packedLspCore(source: string): string {
-  const stripped = stripTypeScriptTypes(source, { mode: 'strip' });
-  return stripped.replace(/^export \{([^}]*)\};/m, 'module.exports = {$1};');
+// The extension host is CommonJS with no type stripping of its own, so every packed source is its
+// types erased. The extension's own files are authored CommonJS-style and need nothing more.
+function packedSource(filePath: string): string {
+  return stripTypeScriptTypes(fs.readFileSync(filePath, 'utf8'), { mode: 'strip' });
+}
+
+// The core is the one packed file authored as an ES module, so its single export is rewritten too.
+function packedLspCore(filePath: string): string {
+  return packedSource(filePath).replace(/^export \{([^}]*)\};/m, 'module.exports = {$1};');
 }
 
 function packVsix(): { manifest: VsixManifest; vsix: Buffer } {
@@ -84,9 +88,9 @@ function packVsix(): { manifest: VsixManifest; vsix: Buffer } {
   const manifest = JSON.parse(manifestJson) as VsixManifest;
   const extensionFiles = visionsExtensionFiles({
     manifestJson,
-    extensionJs: fs.readFileSync(path.join(EXTENSION_DIR, 'extension.js'), 'utf8'),
-    convertJs: fs.readFileSync(path.join(EXTENSION_DIR, 'lsp-convert.js'), 'utf8'),
-    lspCoreJs: packedLspCore(fs.readFileSync(LSP_CORE_PATH, 'utf8')),
+    extensionJs: packedSource(path.join(EXTENSION_DIR, 'extension.ts')),
+    convertJs: packedSource(path.join(EXTENSION_DIR, 'lsp-convert.ts')),
+    lspCoreJs: packedLspCore(LSP_CORE_PATH),
     relayPath: RELAY_PATH,
   });
   const vsix = buildVsix({

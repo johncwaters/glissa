@@ -1,25 +1,44 @@
-'use strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
+import { isUnder } from '../server/core/db-path-guard.ts';
+import { resolveMemoryConfig } from '../server/core/memory-core.ts';
+import type { MemoryRecord } from '../server/core/memory-core.ts';
+import { createMemoryStore } from '../server/memory-store.ts';
 
-const { isUnder } = require('../server/core/db-path-guard.ts');
-const { createMemoryStore } = require('../server/memory-store.ts');
-const { resolveMemoryConfig } = require('../server/core/memory-core.ts');
+type MemoryStore = NonNullable<ReturnType<typeof createMemoryStore>>;
+
+interface PurgeOptions {
+  dbPath: string;
+  memoryDir?: string | null;
+  dryRun?: boolean;
+  now?: () => number;
+  out?: Console;
+}
+
+interface PurgeResult {
+  ok: boolean;
+  before: number;
+  after: number;
+  removed: number;
+  tails: number;
+  indexed: number | null;
+  backups: string[];
+}
 
 const FIXTURE_SESSION_ID = /^(?:sess|s)-\d+$/;
 const DB_SIDECAR_SUFFIXES = ['', '-wal', '-shm'];
 const QUIET = { log() {}, warn() {} };
 
-function describeCount(records) {
+function describeCount(records: MemoryRecord[]): string {
   const remembered = records.filter((record) => record.kind !== 'tombstone').length;
   return `${records.length} record(s), ${remembered} of them remembered text`;
 }
 
-function parseArgs(argv) {
-  const rest = [];
-  let memoryDir = null;
+function parseArgs(argv: string[]): { dbPath: string | null; memoryDir: string | null; dryRun: boolean } {
+  const rest: string[] = [];
+  let memoryDir: string | null = null;
   let dryRun = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -37,7 +56,7 @@ function parseArgs(argv) {
   return { dbPath: rest[0] || null, memoryDir, dryRun };
 }
 
-function isExistingDirectory(target) {
+function isExistingDirectory(target: string): boolean {
   try {
     return fs.statSync(target).isDirectory();
   } catch {
@@ -45,7 +64,7 @@ function isExistingDirectory(target) {
   }
 }
 
-function fixtureReason(record) {
+function fixtureReason(record: MemoryRecord): string | null {
   if (record.kind === 'tombstone') return null;
   const sessionId = record.source ? record.source.sessionId : null;
   if (typeof sessionId === 'string' && FIXTURE_SESSION_ID.test(sessionId)) return 'session';
@@ -57,15 +76,15 @@ function fixtureReason(record) {
 }
 
 // Ingest offsets for transcripts that were temp fixtures: dead weight, and a re-read of a gone file is a no-op.
-function staleTempTails(store, tmpDir) {
+function staleTempTails(store: MemoryStore, tmpDir: string): string[] {
   const state = store.tailState();
   const files = state?.files ? Object.keys(state.files) : [];
   return files.filter((file) => isUnder(file, tmpDir) && !fs.existsSync(file));
 }
 
-function backupDatabase(dbPath, now) {
+function backupDatabase(dbPath: string, now: number): string[] {
   const stamp = `.bak-${now}`;
-  const copied = [];
+  const copied: string[] = [];
   for (const suffix of DB_SIDECAR_SUFFIXES) {
     const source = `${dbPath}${suffix}`;
     if (!fs.existsSync(source)) continue;
@@ -76,7 +95,9 @@ function backupDatabase(dbPath, now) {
   return copied;
 }
 
-async function purgeFixtures({ dbPath, memoryDir = null, dryRun = false, now = () => Date.now(), out = console }) {
+async function purgeFixtures({
+  dbPath, memoryDir = null, dryRun = false, now = () => Date.now(), out = console,
+}: PurgeOptions): Promise<PurgeResult> {
   const resolvedDb = path.resolve(dbPath);
   const dir = memoryDir ? path.resolve(memoryDir) : path.join(path.dirname(resolvedDb), 'memory');
   const store = createMemoryStore({
@@ -120,10 +141,10 @@ async function purgeFixtures({ dbPath, memoryDir = null, dryRun = false, now = (
   }
 }
 
-async function main(argv) {
+async function main(argv: string[]): Promise<number> {
   const { dbPath, memoryDir, dryRun } = parseArgs(argv);
   if (!dbPath) {
-    console.error('Usage: node scripts/memory-purge-fixtures.js <db-path> [--memory-dir <dir>] [--dry-run]');
+    console.error('Usage: node scripts/memory-purge-fixtures.ts <db-path> [--memory-dir <dir>] [--dry-run]');
     return 1;
   }
   if (!fs.existsSync(dbPath)) {
@@ -134,8 +155,8 @@ async function main(argv) {
   return result.ok ? 0 : 1;
 }
 
-if (require.main === module) {
+if (process.argv[1] === import.meta.filename) {
   main(process.argv.slice(2)).then((code) => { process.exitCode = code; });
 }
 
-module.exports = { fixtureReason, purgeFixtures };
+export { fixtureReason, purgeFixtures };

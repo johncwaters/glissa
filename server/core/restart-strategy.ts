@@ -1,7 +1,7 @@
 // Pure decision: how a "Restart Server" request should hand control to the replacement process.
 //
 // Glissa's original restart is a self-respawn (spawn argv detached, exit 0), which is right when
-// nothing supervises the process: the operator started `node server.js` from a terminal or a shortcut
+// nothing supervises the process: the operator started `node server/main.ts` from a terminal or a shortcut
 // and only Glissa itself can bring Glissa back. Under a supervisor it is wrong twice over: the clean
 // exit 0 does not satisfy systemd's `Restart=on-failure`, and the detached child is either killed with
 // the unit's cgroup or lives outside it holding the port with no supervision. The unit then sits

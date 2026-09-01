@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const vscode = require('./helpers/vscode-stub');
 const {
   decideEditFreshness, toCodeActions, toDiagnostics, toWorkspaceEdit,
-} = require('../tools/vscode-visions/lsp-convert');
+} = require('../tools/vscode-visions/lsp-convert.ts');
 
 test('a published diagnostic keeps its range, code and source', () => {
   const [diagnostic] = toDiagnostics(vscode, [{

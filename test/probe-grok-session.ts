@@ -1,13 +1,41 @@
-"use strict";
+// Live verification of the Grok adapter, run by hand against a REAL grok binary:
+// node test/probe-grok-session.ts [--keep]
 
-const fs = require("node:fs");
-const http = require("node:http");
-const os = require("node:os");
-const path = require("node:path");
+import fs from "node:fs";
+import http from "node:http";
+import os from "node:os";
+import path from "node:path";
 
-const { createBackend } = require("../server/backend.ts");
-const { runAgentSetupCli } = require("../server/agent-setup-cli.ts");
-const grok = require("../session/adapters/grok.ts").default;
+import { runAgentSetupCli } from "../server/agent-setup-cli.ts";
+import { createBackend } from "../server/backend.ts";
+import grok from "../session/adapters/grok.ts";
+import type { Session } from "../session/sessions.ts";
+import type { HookPayload } from "../shared/contracts/index.ts";
+
+// _packsBuiltRoot and _hookToken are no longer Session fields; the probe still names them, so the
+// shape it writes and reads is declared here rather than pretended into the class.
+interface ProbeSession extends Session {
+  _packsBuiltRoot?: string;
+  _hookToken?: string;
+}
+
+interface SpawnCall {
+  file: string;
+  args: string[];
+  cwd: string | undefined;
+  env: Record<string, string | undefined>;
+}
+
+interface StateChange {
+  from: string;
+  to: string;
+  event: string;
+}
+
+interface HookRecord {
+  event: string | undefined;
+  payload: HookPayload;
+}
 
 const SESSION_ID = "grok-probe-session";
 const PROMPT = "Run the shell command: touch ./grok-probe-approval.txt";
@@ -15,12 +43,12 @@ const PACK_NAME = "live-probe-pack";
 const SENTINEL_WORD = "amberlattice";
 const PACK_PROMPT = "what sentinel word does the glissa context pack data file contain, answer with the word only";
 const STEP_TIMEOUT_MS = 90000;
-const USAGE = "Usage: node test/probe-grok-session.js [--keep]\n--keep retains a sanitized copy of the full authenticated PTY transcript.";
+const USAGE = "Usage: node test/probe-grok-session.ts [--keep]\n--keep retains a sanitized copy of the full authenticated PTY transcript.";
 
 let passed = 0;
 let failed = 0;
 
-function check(label, condition) {
+function check(label: string, condition: boolean): void {
   if (condition) {
     console.log(`  PASS  ${label}`);
     passed += 1;
@@ -30,11 +58,11 @@ function check(label, condition) {
   failed += 1;
 }
 
-function delay(timeoutMs) {
+function delay(timeoutMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, timeoutMs));
 }
 
-function waitForState(session, states, label) {
+function waitForState(session: Session, states: string[], label: string): Promise<string> {
   const wantedStates = new Set(states);
   if (wantedStates.has(session.state)) return Promise.resolve(session.state);
   return new Promise((resolve, reject) => {
@@ -42,7 +70,7 @@ function waitForState(session, states, label) {
       session.off("state-change", onStateChange);
       reject(new Error(`timed out waiting for ${label}, still ${session.state}`));
     }, STEP_TIMEOUT_MS);
-    function onStateChange({ to }) {
+    function onStateChange({ to }: { to: string }): void {
       if (!wantedStates.has(to)) return;
       clearTimeout(timer);
       session.off("state-change", onStateChange);
@@ -52,13 +80,13 @@ function waitForState(session, states, label) {
   });
 }
 
-function linkFile(source, target) {
+function linkFile(source: string, target: string): boolean {
   if (!fs.existsSync(source)) return false;
   fs.symlinkSync(source, target);
   return true;
 }
 
-function makeProbeGrokHome(tempDirectory, nativeBinaryPath) {
+function makeProbeGrokHome(tempDirectory: string, nativeBinaryPath: string): string {
   const grokHome = path.join(tempDirectory, "grok-home");
   const binDirectory = path.join(grokHome, "bin");
   fs.mkdirSync(binDirectory, { recursive: true });
@@ -68,7 +96,7 @@ function makeProbeGrokHome(tempDirectory, nativeBinaryPath) {
   return grokHome;
 }
 
-function writeProbeConfig(configPath, projectDirectory) {
+function writeProbeConfig(configPath: string, projectDirectory: string): void {
   fs.writeFileSync(configPath, JSON.stringify({
     projects: [{
       id: SESSION_ID,
@@ -87,7 +115,7 @@ function writeProbeConfig(configPath, projectDirectory) {
   }, null, 2), "utf8");
 }
 
-function makeProbePack(tempDirectory) {
+function makeProbePack(tempDirectory: string): string {
   const builtRoot = path.join(tempDirectory, "packs", "built");
   const currentDirectory = path.join(builtRoot, PACK_NAME, "current");
   const dataDirectory = path.join(currentDirectory, "data");
@@ -106,7 +134,7 @@ function makeProbePack(tempDirectory) {
   return builtRoot;
 }
 
-function writeClaudeHookProbe(tempDirectory) {
+function writeClaudeHookProbe(tempDirectory: string): { childHome: string; markerPath: string } {
   const childHome = path.join(tempDirectory, "child-home");
   const claudeDirectory = path.join(childHome, ".claude");
   const hookScriptPath = path.join(tempDirectory, "claude-hook-probe.js");
@@ -129,25 +157,27 @@ function writeClaudeHookProbe(tempDirectory) {
   return { childHome, markerPath };
 }
 
-function isUuidV7(value) {
+function isUuidV7(value: unknown): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
 }
 
-function isWorkingTitle(title) {
+function isWorkingTitle(title: unknown): boolean {
   const firstCharacter = String(title || "").charAt(0);
   const codePoint = firstCharacter.codePointAt(0);
+  if (codePoint === undefined) return false;
   return codePoint >= 0x2800 && codePoint <= 0x28ff;
 }
 
-function answerFrom(payload) {
+function answerFrom(payload: HookPayload | undefined): string | null {
   const answer = payload?.lastAssistantMessage;
   return typeof answer === "string" ? answer.trim() : null;
 }
 
-function captureTitles(session, titles) {
-  const originalFeed = session._titleSource.feed.bind(session._titleSource);
+function captureTitles(session: Session, titles: string[]): void {
+  const titleSource = session._titleSource;
+  const originalFeed = titleSource.feed.bind(titleSource);
   let pending = "";
-  session._titleSource.feed = (chunk) => {
+  titleSource.feed = (chunk: string) => {
     pending = `${pending}${String(chunk)}`.slice(-4096);
     const titlePattern = /\x1b\]0;([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
     for (const match of pending.matchAll(titlePattern)) titles.push(match[1]);
@@ -157,7 +187,7 @@ function captureTitles(session, titles) {
   };
 }
 
-function copySanitizedRecording(tempDirectory) {
+function copySanitizedRecording(tempDirectory: string): string | null {
   const recordingsDirectory = path.join(tempDirectory, "recordings");
   if (!fs.existsSync(recordingsDirectory)) return null;
   const recordings = fs.readdirSync(recordingsDirectory);
@@ -172,14 +202,14 @@ function copySanitizedRecording(tempDirectory) {
   return output;
 }
 
-function parseArgs(args) {
+function parseArgs(args: string[]): { keep: boolean; help: boolean } | null {
   if (args.length === 0) return { keep: false, help: false };
   if (args.length === 1 && args[0] === "--keep") return { keep: true, help: false };
   if (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) return { keep: false, help: true };
   return null;
 }
 
-async function main(args = process.argv.slice(2)) {
+async function main(args: string[] = process.argv.slice(2)): Promise<void> {
   const options = parseArgs(args);
   if (!options) {
     console.error(USAGE);
@@ -208,13 +238,14 @@ async function main(args = process.argv.slice(2)) {
   const server = http.createServer();
   const backend = createBackend(server, { staticDir: null });
   server.on("request", backend.app);
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const session = backend.getSession(SESSION_ID);
-  const hookEvents = [];
-  const hookPayloads = [];
-  const rawTitles = [];
-  const stateChanges = [];
-  const spawnCalls = [];
+  await new Promise<void>((resolve) => { server.listen(0, "127.0.0.1", () => resolve()); });
+  const session: ProbeSession | null = backend.getSession(SESSION_ID);
+  if (!session) throw new Error(`the probe config did not produce a session named ${SESSION_ID}`);
+  const hookEvents: string[] = [];
+  const hookPayloads: HookRecord[] = [];
+  const rawTitles: string[] = [];
+  const stateChanges: StateChange[] = [];
+  const spawnCalls: SpawnCall[] = [];
   let ptyOutput = "";
   session._packsBuiltRoot = builtRoot;
   session._spawnEnv = { ...(session._spawnEnv || {}), HOME: claudeHookProbe.childHome };
@@ -223,11 +254,11 @@ async function main(args = process.argv.slice(2)) {
     spawnCalls.push({ file, args: [...spawnArgs], cwd: spawnOptions.cwd, env: { ...spawnOptions.env } });
     return spawnPty(file, spawnArgs, spawnOptions);
   };
-  session.on("state-change", ({ from, to, event }) => {
+  session.on("state-change", ({ from, to, event }: StateChange) => {
     stateChanges.push({ from, to, event });
     console.log(`  [state] ${from} -> ${to} (${event})`);
   });
-  session.on("data", (data) => {
+  session.on("data", (data: string) => {
     ptyOutput = `${ptyOutput}${String(data)}`.slice(-65536);
   });
   const originalIngest = session.ingestHookSignal.bind(session);
@@ -238,7 +269,7 @@ async function main(args = process.argv.slice(2)) {
   };
   captureTitles(session, rawTitles);
 
-  let keptRecording = null;
+  let keptRecording: string | null = null;
   try {
     console.log("\nSpawn:");
     await session.start();
@@ -265,7 +296,7 @@ async function main(args = process.argv.slice(2)) {
     const stopPayload = hookPayloads.findLast((entry) => entry.event === "stop" && entry.payload.reason === "end_turn");
     check("Stop carried reason end_turn", stopPayload?.payload.reason === "end_turn");
     check("the camelCase session id was a UUIDv7", isUuidV7(capturedId));
-    console.log(`  [hook:stop] reason=${stopPayload?.payload.reason || "none"} answer=${answerFrom(stopPayload?.payload) || "none"}`);
+    console.log(`  [hook:stop] reason=${String(stopPayload?.payload.reason || "none")} answer=${answerFrom(stopPayload?.payload) || "none"}`);
 
     console.log("\nResume:");
     session.kill();
@@ -292,7 +323,7 @@ async function main(args = process.argv.slice(2)) {
       console.log(`  [argv:${index + 1}] ${JSON.stringify([call.file, ...call.args])}`);
     }
     check("both spawns carried the --rules pointer", spawnCalls.length === 2 && spawnCalls.every((call) => call.args.includes("--rules")));
-    check("the resumed argv retained the UUIDv7 id", spawnCalls[1]?.args.includes("-r") && spawnCalls[1]?.args.includes(capturedId));
+    check("the resumed argv retained the UUIDv7 id", !!capturedId && !!spawnCalls[1]?.args.includes("-r") && spawnCalls[1].args.includes(capturedId));
     const authenticationLine = ptyOutput.split(/\r?\n/).find((line) => line.toLowerCase().includes("not authenticated"));
     if (authenticationLine) throw new Error(authenticationLine);
     if (options.keep) keptRecording = copySanitizedRecording(tempDirectory);
@@ -302,11 +333,11 @@ async function main(args = process.argv.slice(2)) {
   } finally {
     try {
       session.kill();
-    } catch {}
+    } catch { /* the process is exiting either way */ }
     await delay(1500);
     backend.shutdown();
     server.closeAllConnections();
-    await new Promise((resolve) => server.close(resolve));
+    await new Promise<void>((resolve) => { server.close(() => resolve()); });
     fs.rmSync(tempDirectory, { recursive: true, force: true });
   }
 
@@ -314,7 +345,7 @@ async function main(args = process.argv.slice(2)) {
   process.exit(failed === 0 ? 0 : 1);
 }
 
-main().catch((error) => {
+main().catch((error: unknown) => {
   console.error(error);
   process.exit(1);
 });

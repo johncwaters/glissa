@@ -48,7 +48,7 @@ A source may set `data: true`. Its files are published under `data/<slug>/` as p
 - A pack may NOT be built out of a consumer project's own checkout. Delivery refuses it (`self-referential`, `server/core/pack-core.ts`) and so does assignment: a session already loads those files, and the pack is a lossy copy that drifts silently. Two packs distilled from this repo were retired for exactly that.
 - Adding a source that matches no file fails the build on purpose; fix the pattern rather than dropping the source.
 - These files ship in the npm tarball (`package.json` `files`), so keep them reference material, not scratch notes.
-- A spec whose sources reach OUTSIDE `packs/` is repo-development context and must be excluded from the tarball, or a global install fails its build on every watch fire and every sweep. `scripts/check-package-files.js` enforces that: a shipped spec whose non-optional sources are not in the whitelist fails the release gate.
+- A spec whose sources reach OUTSIDE `packs/` is repo-development context and must be excluded from the tarball, or a global install fails its build on every watch fire and every sweep. The packaged-install job in `.github/workflows/test.yml` is what catches it: a shipped spec whose non-optional sources are not in the whitelist fails that install.
 
 ### Testing Requirements
 - `node --test tests/pack-core.test.ts tests/pack-builder.test.js` covers the format and the builder; `glissa pack build` is the end-to-end check.

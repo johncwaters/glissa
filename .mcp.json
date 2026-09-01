@@ -2,7 +2,7 @@
   "mcpServers": {
     "company-context": {
       "command": "node",
-      "args": ["tools/company-context/server.js"]
+      "args": ["tools/company-context/server.ts"]
     }
   }
 }

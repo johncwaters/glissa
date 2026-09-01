@@ -1,10 +1,11 @@
-'use strict';
+import http from 'node:http';
+import type { Server } from 'node:http';
 
-const http = require('node:http');
-const { createBackend } = require('./server/backend.ts');
-const { createLifecycle } = require('./server/server-lifecycle.ts');
-const { decideBindHost } = require('./server/core/remote-config.ts');
-const { buildTitleSequence, buildTitleClearSequence } = require('./server/core/terminal-title.ts');
+import { createBackend } from './backend.ts';
+import { spawn } from './child-process-safe.ts';
+import { decideBindHost } from './core/remote-config.ts';
+import { buildTitleClearSequence, buildTitleSequence } from './core/terminal-title.ts';
+import { createLifecycle } from './server-lifecycle.ts';
 
 // Which address the listeners bind. Loopback unless GLISSA_HOST says otherwise, and a non-loopback
 // GLISSA_HOST is REFUSED unless GLISSA_INSECURE_BIND=1 states the intent: Glissa's control WebSocket
@@ -23,22 +24,41 @@ if (!bind.allowed) {
 
 const server = http.createServer();
 
-let backend;
-try {
-  backend = createBackend(server, { staticDir: 'auto' });
-} catch (err) {
-  // A boot-gate refusal (e.g. an invalid remote block) is an operator message, not a stack trace.
-  if (!err || !err.glissaBoot) throw err;
-  console.error(err.message);
-  process.exit(1);
+// A boot-gate refusal (e.g. an invalid remote block) is an operator message, not a stack trace.
+function isBootRefusal(error: unknown): error is Error {
+  if (!(error instanceof Error)) return false;
+  if (!('glissaBoot' in error)) return false;
+  return error.glissaBoot === true;
 }
+
+function createBackendOrExit(): ReturnType<typeof createBackend> {
+  try {
+    return createBackend(server, { staticDir: 'auto' });
+  } catch (err) {
+    if (!isBootRefusal(err)) throw err;
+    console.error(err.message);
+    process.exit(1);
+  }
+}
+
+const backend = createBackendOrExit();
 
 const { shutdown, port, app } = backend;
 server.on('request', app);
 
-function writeTerminalTitle(sequence) {
+function writeTerminalTitle(sequence: string): void {
   if (!process.stdout.isTTY) return;
   process.stdout.write(sequence);
+}
+
+function listeningPort(target: Server, fallback: number): number {
+  const address = target.address();
+  if (address === null || typeof address === 'string') return fallback;
+  return address.port;
+}
+
+function isPortInUse(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'EADDRINUSE';
 }
 
 // Single-instance guard. If another Glissa already holds the port, exit cleanly instead of crashing
@@ -47,7 +67,7 @@ function writeTerminalTitle(sequence) {
 // instances would ping-pong reloads and respawn each other's sessions). A clean exit (no respawn)
 // means a stray menu restart can never bootstrap a second, invisible, looping instance.
 server.on('error', (err) => {
-  if (err && err.code === 'EADDRINUSE') {
+  if (isPortInUse(err)) {
     console.error(`Another Glissa is already running on port ${port} - exiting.`);
     process.exit(1);
   }
@@ -55,7 +75,7 @@ server.on('error', (err) => {
 });
 
 server.listen(port, bind.host, () => {
-  const boundPort = server.address().port;
+  const boundPort = listeningPort(server, port);
   console.log(`Glissa server listening on http://${bind.host}:${boundPort}`);
   writeTerminalTitle(buildTitleSequence(`glissa :${boundPort}`));
   if (bind.reason === 'insecure-bind') {
@@ -66,18 +86,18 @@ server.listen(port, bind.host, () => {
 // Remote mode: a SECOND listener serving the same app, where every request needs a paired device
 // cookie. It binds loopback too - a reverse proxy (tailscale serve) is the thing that faces the
 // network, so the cookie gate is the only trust boundary crossed, not the bind address.
-const remoteServers = [];
+const remoteServers: Server[] = [];
 if (backend.remote.enabled) {
   const remoteServer = http.createServer();
   backend.remote.attach(remoteServer);
   remoteServer.on('error', (err) => {
-    if (err && err.code === 'EADDRINUSE') {
+    if (isPortInUse(err)) {
       console.error(`Remote listener port ${backend.remote.port} is already in use - exiting.`);
       process.exit(1);
     }
     throw err;
   });
-  remoteServer.listen(backend.remote.port, bind.host, () => {
+  remoteServer.listen(backend.remote.port ?? 0, bind.host, () => {
     console.log(`Glissa remote listener on http://${bind.host}:${backend.remote.port} (paired devices only)`);
     const publicHost = backend.remote.publicHost || '(remote.publicHost not set)';
     console.log(`  proxy target for ${publicHost}; pair a device with: glissa pair`);
@@ -92,13 +112,13 @@ if (!backend.remote.enabled) {
 }
 
 // Route every termination signal through the same lifecycle path as the dashboard-triggered shutdown
-// (server/backend.js wires an identical createLifecycle instance to the control WS "shutdown" message):
+// (server/backend.ts wires an identical createLifecycle instance to the control WS "shutdown" message):
 // requestShutdown awaits the in-flight PTY reaps shutdown() started, then closes the listener with a
 // bounded fallback exit timer. The fallback matters because an open dashboard tab holds a live WS
 // connection, so httpServer.close()'s callback alone would never fire and the process would hang
 // forever on SIGINT/SIGTERM/SIGBREAK/SIGHUP. createLifecycle owns the single re-entry guard, so no
 // local shuttingDown flag is needed here.
-function exitWithClearedTerminalTitle(code) {
+function exitWithClearedTerminalTitle(code?: number): never {
   writeTerminalTitle(buildTitleClearSequence());
   process.exit(code);
 }
@@ -107,12 +127,13 @@ const { requestShutdown } = createLifecycle({
   shutdown,
   httpServer: server,
   extraServers: remoteServers,
+  spawn,
   exit: exitWithClearedTerminalTitle,
 });
 
-function handleShutdownSignal(signal) {
+function handleShutdownSignal(signal: string): void {
   console.log(`\n${signal} received - shutting down...`);
-  requestShutdown();
+  void requestShutdown();
 }
 
 process.on('SIGINT', () => handleShutdownSignal('SIGINT'));

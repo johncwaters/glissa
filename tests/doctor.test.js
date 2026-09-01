@@ -12,7 +12,7 @@ const ROOT = path.join(__dirname, '..');
 test('doctor reports each pack carrier and the codex hook-trust caveat', () => {
   const npmPrefix = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-doctor-'));
   try {
-    const result = spawnSync(process.execPath, ['bin/glissa.js', 'doctor'], {
+    const result = spawnSync(process.execPath, ['bin/glissa.ts', 'doctor'], {
       cwd: ROOT,
       encoding: 'utf8',
       env: { ...process.env, npm_config_prefix: npmPrefix },

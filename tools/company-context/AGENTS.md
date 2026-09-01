@@ -10,7 +10,7 @@ A zero-dependency MCP server exposing one tool, `get_company_context({ query }) 
 
 | File | Description |
 |------|-------------|
-| `server.js` | The MCP server (stdio transport, no dependencies); re-reads `context/` on every call |
+| `server.ts` | The MCP server (stdio transport, no dependencies); re-reads `context/` on every call |
 | `README.md` | Setup and editing instructions |
 | `_protocol-test.jsonl` | Recorded MCP protocol exchange used as a manual smoke check |
 
@@ -24,7 +24,7 @@ The content itself lives in `context/` (`conventions.md`, the engineering conven
 - Context content must remain reference material, never imperative instructions to agents.
 
 ### Testing Requirements
-- Pipe `_protocol-test.jsonl` lines into `node server.js` and eyeball the responses.
+- Pipe `_protocol-test.jsonl` lines into `node server.ts` and eyeball the responses.
 
 ## Dependencies
 

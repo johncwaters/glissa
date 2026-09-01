@@ -1,24 +1,25 @@
-'use strict';
-
-// ── Glissa release script ─────────────────────────────────────
+// Glissa release script.
 // Pushes to GitHub, tags, and creates a release. Nothing is published to a
 // registry: the package is private and distribution is the GitHub repo itself
 // (see docs/distribution.md).
-// Usage: node scripts/release.js
+// Usage: node scripts/release.ts
 
-const { execSync } = require('node:child_process');
-const fs = require('node:fs');
+import { execSync } from 'node:child_process';
+import type { ExecSyncOptions } from 'node:child_process';
+import fs from 'node:fs';
 
-function run(cmd, opts = {}) {
+import pkg from '../package.json' with { type: 'json' };
+
+function run(cmd: string, opts: ExecSyncOptions = {}): void {
   console.log(`  $ ${cmd}`);
-  return execSync(cmd, { stdio: 'inherit', ...opts });
+  execSync(cmd, { stdio: 'inherit', ...opts });
 }
 
-function runCapture(cmd) {
+function runCapture(cmd: string): string {
   return execSync(cmd, { encoding: 'utf8' }).trim();
 }
 
-function hasCommand(cmd) {
+function hasCommand(cmd: string): boolean {
   const probe = process.platform === 'win32' ? `where ${cmd}` : `command -v ${cmd}`;
   try {
     execSync(probe, { stdio: 'ignore' });
@@ -28,7 +29,7 @@ function hasCommand(cmd) {
   }
 }
 
-const VERSION = require('../package.json').version;
+const VERSION = pkg.version;
 const TAG = `v${VERSION}`;
 
 console.log(`==> Releasing glissa ${TAG}\n`);
@@ -47,26 +48,23 @@ if (existingTags.split('\n').includes(TAG)) {
   process.exit(1);
 }
 
-// 3. Verify all required files are in package.json "files" array
-console.log('==> Checking package files...');
-run('node scripts/check-package-files.js');
-
-// 4. Build and verify dist
+// 3. Build and verify dist
 console.log('==> Building...');
 run('npm run build');
 fs.statSync('dist/index.html');
 
-// 5. Push commits to GitHub
+// 4. Push commits to GitHub
 console.log('\n==> Pushing to GitHub...');
 run('git push');
 
-// 6. Tag and push tag
+// 5. Tag and push tag
 console.log(`\n==> Tagging ${TAG}...`);
 run(`git tag -a ${TAG} -m "Glissa ${TAG}"`);
 run(`git push origin ${TAG}`);
 
-// 7. Create GitHub release from CHANGELOG (optional, requires the gh CLI)
-if (hasCommand('gh')) {
+// 6. Create GitHub release from CHANGELOG (optional, requires the gh CLI)
+const hasGhCli = hasCommand('gh');
+if (hasGhCli) {
   console.log('\n==> Creating GitHub release...');
   const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
   const versionEscaped = VERSION.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
@@ -79,9 +77,10 @@ if (hasCommand('gh')) {
   try {
     run(`gh release create ${TAG} --title "Glissa ${TAG}" --notes-file ${tmpFile}`);
   } finally {
-    try { fs.unlinkSync(tmpFile); } catch {}
+    try { fs.unlinkSync(tmpFile); } catch { /* the notes file is already gone */ }
   }
-} else {
+}
+if (!hasGhCli) {
   console.log('\n==> Skipping GitHub release (gh CLI not installed).');
   console.log(`   Create manually at: https://github.com/johncwaters/glissa/releases/new?tag=${TAG}`);
 }

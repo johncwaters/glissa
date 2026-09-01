@@ -8,12 +8,12 @@
  * Exports a single function `createBackend(httpServer, options)` that wires
  * Express middleware, control/data WebSocket servers, and session management
  * onto a provided HTTP server. Used by both:
- *   - server.js (production: standalone HTTP server)
- *   - vite.config.js (dev: attached to Vite's internal HTTP server)
+ *   - server/main.ts (production: standalone HTTP server)
+ *   - vite.config.ts (dev: attached to Vite's internal HTTP server)
  *
  * node-pty crash risk: Sessions spawn native PTY processes via node-pty.
  * If the Node process crashes without calling shutdown(), PTY child processes
- * may become orphaned. SIGINT handlers in server.js and the Vite plugin
+ * may become orphaned. SIGINT handlers in server/main.ts and the Vite plugin
  * mitigate this for graceful exits, but unexpected crashes (segfault, OOM)
  * cannot be caught. This is a known limitation of node-pty.
  */

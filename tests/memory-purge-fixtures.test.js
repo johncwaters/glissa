@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { fixtureReason, purgeFixtures } = require('../scripts/memory-purge-fixtures');
+const { fixtureReason, purgeFixtures } = require('../scripts/memory-purge-fixtures.ts');
 const { createMemoryStore } = require('../server/memory-store.ts');
 const { resolveMemoryConfig } = require('../server/core/memory-core.ts');
 

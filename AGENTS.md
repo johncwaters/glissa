@@ -10,7 +10,7 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 
 | Path | Role |
 |------|------|
-| `server.js`, `vite.config.js` | Production entry; frontend build and dev wiring |
+| `server/main.ts`, `vite.config.ts` | Production entry; frontend build and dev wiring |
 | `config.json`, `package.json`, `biome.json`, `socket.yml` | Runtime/dev config; package, lint and scan policy |
 | `DESIGN.md`, `DESIGN.json`, `PRODUCT.md` | Visual system and product definition |
 | `docs/`, `bin/` | Design records and npm CLI |

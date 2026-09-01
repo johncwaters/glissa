@@ -46,7 +46,7 @@ EOF
 
 SERVER_PID=""
 start_server() {
-  node server.js > "$WORK/server.log" 2>&1 &
+  node server/main.ts > "$WORK/server.log" 2>&1 &
   SERVER_PID=$!
   for _ in $(seq 1 60); do
     if curl -s -o /dev/null "$LOCAL/"; then return 0; fi
@@ -76,7 +76,7 @@ grep -q 'remote listener' "$WORK/server.log" || { echo "  FAIL no remote listene
 assert 1 200 "$(status "$LOCAL/")" "local listener serves the dashboard unauthenticated"
 assert 2 401 "$(status "$REMOTE/")" "remote listener refuses an unpaired device"
 
-PAIR_OUT="$(node bin/glissa.js pair --name test-device)"
+PAIR_OUT="$(node bin/glissa.ts pair --name test-device)"
 echo "$PAIR_OUT" | sed 's/^/    | /'
 TOKEN="$(printf '%s' "$PAIR_OUT" | grep -o '/pair/[A-Za-z0-9_-]\+' | head -1 | sed 's|/pair/||')"
 URL_PRINTED="$(printf '%s' "$PAIR_OUT" | grep -c 'https://glissa.test/pair/')"
@@ -115,13 +115,13 @@ assert 8 REJECTED "$WS_EVIL" "a foreign Origin is refused even with a valid cook
 WS_GOOD="$(node test/container/ws-check.js ws://127.0.0.1:3001/control --cookie "$COOKIE" --origin https://glissa.test | cut -d' ' -f1)"
 assert 8 OK "$WS_GOOD" "the configured Origin is accepted"
 
-LIST_OUT="$(node bin/glissa.js pair --list)"
+LIST_OUT="$(node bin/glissa.ts pair --list)"
 echo "$LIST_OUT" | sed 's/^/    | /'
 DEVICE_ID="$(printf '%s' "$LIST_OUT" | awk 'NR==2 {print $1}')"
 printf '%s' "$LIST_OUT" | grep -q 'test-device' \
   && echo "  PASS [9] pair --list shows the paired device" \
   || { echo "  FAIL [9] pair --list did not show test-device"; failures=$((failures + 1)); }
-REVOKE_OUT="$(node bin/glissa.js pair --revoke "$DEVICE_ID")"
+REVOKE_OUT="$(node bin/glissa.ts pair --revoke "$DEVICE_ID")"
 echo "$REVOKE_OUT" | sed 's/^/    | /'
 printf '%s' "$REVOKE_OUT" | grep -q '30 seconds' \
   && echo "  PASS [9b] revoke quotes the worst-case propagation, not an instant promise" \
@@ -129,7 +129,7 @@ printf '%s' "$REVOKE_OUT" | grep -q '30 seconds' \
 sleep 2  # fs.watch debounce: the running server reloads the device list without a restart
 assert 9 401 "$(status -b "$WORK/jar.txt" "$REMOTE/")" "revocation locks the device out with no restart"
 
-FRESH_OUT="$(node bin/glissa.js pair --name expiring-device)"
+FRESH_OUT="$(node bin/glissa.ts pair --name expiring-device)"
 FRESH_TOKEN="$(printf '%s' "$FRESH_OUT" | grep -o '/pair/[A-Za-z0-9_-]\+' | head -1 | sed 's|/pair/||')"
 node -e '
 const fs = require("node:fs");

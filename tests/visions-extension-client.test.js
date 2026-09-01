@@ -19,6 +19,7 @@ const STUB_PATH = require.resolve('./helpers/vscode-stub');
 // The framing module is COPIED beside the extension when the vsix is packed (server/visions-cli.js), so
 // in the repo it resolves only from the one place that owns it.
 const LSP_CORE_PATH = require.resolve('../server/core/visions-lsp-core.ts');
+const CONVERT_PATH = require.resolve('../tools/vscode-visions/lsp-convert.ts');
 const RELAY_PATH = path.join(__dirname, '..', 'session', 'visions-relay.ts');
 const WAIT_MS = 8000;
 const URI = 'file:///tmp/plan.md';
@@ -26,11 +27,12 @@ const URI = 'file:///tmp/plan.md';
 const originalResolve = Module._resolveFilename;
 Module._resolveFilename = function resolveWithVscodeStub(request, ...rest) {
   if (request === 'vscode') return STUB_PATH;
-  if (request === './visions-lsp-core') return LSP_CORE_PATH;
+  if (request === './visions-lsp-core.js') return LSP_CORE_PATH;
+  if (request === './lsp-convert.js') return CONVERT_PATH;
   return originalResolve.call(this, request, ...rest);
 };
 
-const extension = require('../tools/vscode-visions/extension');
+const extension = require('../tools/vscode-visions/extension.ts');
 
 function createDaemon() {
   const server = new WebSocketServer({ port: 0, path: '/visions' });
@@ -238,7 +240,7 @@ test('an absent relay reports itself instead of spawning anything', () => {
 // The extension is packed into a .vsix and cannot require anything inside this package, so its copy of
 // the wire constant is pinned here instead.
 test('the packed extension names the same activity method the daemon answers', () => {
-  const source = fs.readFileSync(path.join(__dirname, '..', 'tools', 'vscode-visions', 'extension.js'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '..', 'tools', 'vscode-visions', 'extension.ts'), 'utf8');
   assert.match(source, new RegExp(`const ACTIVITY_METHOD = '${ACTIVITY_METHOD}';`));
 });
 

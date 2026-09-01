@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 
-'use strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+import pkg from '../package.json' with { type: 'json' };
+import { execSync } from '../server/child-process-safe.ts';
+import { decideConfigPath, glissaHomeDir } from '../server/core/config-path-core.ts';
+import { formatPathNotice, npmGlobalBinDir, onPath, pnpmGlobalBinDir } from './path-doctor.ts';
 
 const args = process.argv.slice(2);
 
@@ -33,17 +40,16 @@ Options:
 }
 
 if (args.includes('--version')) {
-  const pkg = require('../package.json');
   console.log(pkg.version);
   process.exit(0);
 }
 
 if (args[0] === 'doctor' || args.includes('--doctor')) {
-  runDoctor();
+  await runDoctor();
   process.exit(0);
 }
 
-function getArgValue(flag) {
+function getArgValue(flag: string): string | null {
   const idx = args.indexOf(flag);
   if (idx !== -1 && idx + 1 < args.length) {
     return args[idx + 1];
@@ -61,25 +67,25 @@ if (portArg) {
   process.env.GLISSA_PORT = portArg;
 }
 
-// Dispatched BEFORE require('../server') so the CLI never boots a server, and AFTER --config is
+// Dispatched BEFORE importing ../server/main.ts so the CLI never boots a server, and AFTER --config is
 // bridged into the env so it resolves the same ~/.glissa root the server would.
 if (args[0] === 'pair') {
-  const { runPairCli } = require('../server/pair-cli.ts');
+  const { runPairCli } = await import('../server/pair-cli.ts');
   process.exit(runPairCli(args.slice(1)));
 }
 
 const isAgentCommand = args[0] === 'agent';
 if (isAgentCommand) {
-  const { runAgentSetupCli } = require('../server/agent-setup-cli.ts');
+  const { runAgentSetupCli } = await import('../server/agent-setup-cli.ts');
   process.exit(runAgentSetupCli(args.slice(1)));
 }
 
 // Async, so they cannot process.exit inline the way `pair` does; the server boot is skipped instead.
-function runAsyncCommand(run) {
+function runAsyncCommand(run: Promise<number | never>): void {
   run.then(
     (code) => process.exit(code),
-    (err) => {
-      console.error(err?.message || String(err));
+    (err: unknown) => {
+      console.error(messageOf(err));
       process.exit(1);
     }
   );
@@ -87,38 +93,43 @@ function runAsyncCommand(run) {
 
 const isVisionsCommand = args[0] === 'visions';
 if (isVisionsCommand) {
-  const { runVisionsCli } = require('../server/visions-cli.ts');
+  const { runVisionsCli } = await import('../server/visions-cli.ts');
   runAsyncCommand(runVisionsCli(args.slice(1)));
 }
 
 const isPackCommand = args[0] === 'pack';
 if (isPackCommand) {
-  const { runPackCli } = require('../server/pack-cli.ts');
+  const { runPackCli } = await import('../server/pack-cli.ts');
   runAsyncCommand(runPackCli(args.slice(1)));
 }
 
 const isMemoryCommand = args[0] === 'memory';
 if (isMemoryCommand) {
-  const { runMemoryCli } = require('../server/memory-cli.ts');
+  const { runMemoryCli } = await import('../server/memory-cli.ts');
   runAsyncCommand(runMemoryCli(args.slice(1)));
 }
 
 if (!isPackCommand && !isMemoryCommand && !isAgentCommand && !isVisionsCommand) {
-  require('../server');
+  await import('../server/main.ts');
 }
 
-// Read-only replica of config-store.js resolveConfigPath precedence. Reports the
+function messageOf(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  return String(error);
+}
+
+function firstLineOf(error: unknown): string {
+  return messageOf(error).split('\n')[0];
+}
+
+// Read-only replica of config-store.ts resolveConfigPath precedence. Reports the
 // path WITHOUT creating or seeding anything (the real resolver has side effects),
 // so `glissa doctor` stays safe to run.
-function resolveConfigPathReadOnly() {
-  const fs = require('node:fs');
-  const os = require('node:os');
-  const path = require('node:path');
-  const { decideConfigPath, glissaHomeDir } = require('../server/core/config-path-core.ts');
+function resolveConfigPathReadOnly(): string {
   const decided = decideConfigPath({
     env: process.env,
     homeDir: glissaHomeDir(os.homedir()),
-    packageRoot: path.join(__dirname, '..'),
+    packageRoot: path.join(import.meta.dirname, '..'),
   }, (candidate) => fs.existsSync(candidate));
   if (decided.path) return decided.path;
   if (decided.source === 'env') return `${decided.envPath} (set via GLISSA_CONFIG, but NOT found)`;
@@ -128,18 +139,11 @@ function resolveConfigPathReadOnly() {
 // `glissa doctor`: print a read-only diagnosis of why `glissa` may not be found
 // and whether the install is healthy. Must not start the server or throw, so the
 // node-pty probe is wrapped and nothing here has side effects.
-function runDoctor() {
-  const os = require('node:os');
-  const path = require('node:path');
-  const fs = require('node:fs');
-  const { execSync } = require('../server/child-process-safe.ts');
-  const pkg = require('../package.json');
-  const { npmGlobalBinDir, pnpmGlobalBinDir, onPath, formatPathNotice } = require('./path-doctor');
-
+async function runDoctor(): Promise<void> {
   const platform = process.platform;
   const homedir = os.homedir();
   const pathEnv = process.env.PATH || process.env.Path || '';
-  const line = (label, value) => console.log(`  ${String(label).padEnd(18)} ${value}`);
+  const line = (label: string, value: string) => console.log(`  ${label.padEnd(18)} ${value}`);
 
   console.log('glissa doctor\n');
 
@@ -150,7 +154,7 @@ function runDoctor() {
 
   console.log('\nThis CLI');
   line('running from', process.argv[1] || '(unknown)');
-  line('package dir', path.resolve(__dirname, '..'));
+  line('package dir', path.resolve(import.meta.dirname, '..'));
 
   console.log('\nPATH registration');
   // Resolved lazily, and only when the env alone cannot answer: `npm prefix -g` can stall ~2s cold.
@@ -169,39 +173,40 @@ function runDoctor() {
   // Per-agent binary resolution, so an operator sees which supervised CLIs the Add Session picker
   // will offer and where each one resolves (session/adapters).
   try {
-    const { listAgentIds, getAdapter, commandFor } = require('../session/adapters/index.ts');
+    const { listAgentIds, getAdapter, commandFor } = await import('../session/adapters/index.ts');
     for (const id of listAgentIds()) {
       const adapter = getAdapter(id);
+      if (!adapter) continue;
       const resolved = commandFor(adapter);
       const where = resolved?.path ? resolved.path : 'not found on PATH';
       line(`${id} (${adapter.label || id})`, where);
       line(`${id} pack carrier`, adapter.capabilities.packs ? adapter.packCarrier : 'unsupported');
-      if (adapter.packNoticeCaveat) line(`${id} pack notices`, adapter.packNoticeCaveat);
+      const packNoticeCaveat = 'packNoticeCaveat' in adapter ? adapter.packNoticeCaveat : '';
+      if (packNoticeCaveat) line(`${id} pack notices`, packNoticeCaveat);
     }
-    const { inspectGrokAgentSetup } = require('../server/agent-setup-cli.ts');
+    const { inspectGrokAgentSetup } = await import('../server/agent-setup-cli.ts');
     const grokSetup = inspectGrokAgentSetup();
     line('grok hook setup', `${grokSetup.classification}: ${grokSetup.filePath}`);
   } catch (err) {
-    line('agents', `probe failed: ${(err?.message ? err.message : String(err)).split('\n')[0]}`);
+    line('agents', `probe failed: ${firstLineOf(err)}`);
   }
 
   console.log('\nrtk');
   try {
-    const { getRtkPath } = require('../server/rtk-resolver.ts');
+    const { getRtkPath } = await import('../server/rtk-resolver.ts');
     const rtkPath = getRtkPath();
     line('rtk', rtkPath || 'not installed (Glissa installs it when the rtk setting is on)');
   } catch (err) {
-    line('rtk', `probe failed: ${(err?.message ? err.message : String(err)).split('\n')[0]}`);
+    line('rtk', `probe failed: ${firstLineOf(err)}`);
   }
 
   console.log('\nNative module');
   try {
-    require('node-pty');
+    await import('node-pty');
     line('node-pty', 'loads OK');
   } catch (err) {
-    const reason = (err?.message ? err.message : String(err)).split('\n')[0];
     line('node-pty', 'FAILED to load');
-    line('reason', reason);
+    line('reason', firstLineOf(err));
     line('hint', nodePtyRebuildHint(platform));
   }
 
@@ -213,7 +218,7 @@ function runDoctor() {
   }
 }
 
-function resolveNpmGlobalPrefix(exec) {
+function resolveNpmGlobalPrefix(exec: typeof execSync): string | null {
   try {
     const out = exec('npm prefix -g', {
       encoding: 'utf8',
@@ -229,7 +234,7 @@ function resolveNpmGlobalPrefix(exec) {
 }
 
 // npm 12 blocks rebuild scripts under its allowScripts policy (verified 12.0.2), hence the broad flag in the hint.
-function nodePtyRebuildHint(platform) {
+function nodePtyRebuildHint(platform: NodeJS.Platform): string {
   if (platform === 'linux') return 'install build tools: sudo apt install build-essential python3; then rebuild: npm rebuild node-pty --dangerously-allow-all-scripts (the flag is required on npm 12, unknown-but-harmless on older npm)';
   if (platform === 'win32') return 'install Visual Studio Build Tools, then rebuild: npm rebuild node-pty --dangerously-allow-all-scripts (the flag is required on npm 12, unknown-but-harmless on older npm)';
   return 'install the native build tools for this platform, then rebuild: npm rebuild node-pty --dangerously-allow-all-scripts';

@@ -1,17 +1,30 @@
-'use strict';
-
 // Live verification of Codex pack delivery, run by hand against a
-// REAL codex binary: node test/probe-codex-session.js
+// REAL codex binary: node test/probe-codex-session.ts
 //
 // It boots the real backend against a throwaway config, delivers one pack through the adapter's
 // developer_instructions carrier, asks for a sentinel, resumes the same session, and asks again.
 
-const fs = require('node:fs');
-const http = require('node:http');
-const os = require('node:os');
-const path = require('node:path');
+import fs from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
 
-const { createBackend } = require('../server/backend.ts');
+import { createBackend } from '../server/backend.ts';
+import type { HookPayload } from '../shared/contracts/index.ts';
+import type { Session } from '../session/sessions.ts';
+
+// _packsBuiltRoot and _hookToken are no longer Session fields; the probe still names them, so the
+// shape it writes and reads is declared here rather than pretended into the class.
+interface ProbeSession extends Session {
+  _packsBuiltRoot?: string;
+  _hookToken?: string;
+}
+
+interface SpawnCall {
+  file: string;
+  args: string[];
+  cwd: string | undefined;
+}
 
 const SESSION_ID = 'codex-probe-session';
 const PACK_NAME = 'live-probe-pack';
@@ -21,17 +34,17 @@ const STEP_TIMEOUT_MS = 90000;
 
 let passed = 0;
 let failed = 0;
-function check(label, condition) {
+function check(label: string, condition: boolean): void {
   if (condition) { console.log(`  PASS  ${label}`); passed += 1; return; }
   console.error(`  FAIL  ${label}`);
   failed += 1;
 }
 
-function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+function delay(ms: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 // Resolve when the session reaches one of `states`, or reject on the step timeout. Transitions are
 // read off the session's own 'state-change' event, so the probe asserts the shipped state machine.
-function waitForState(session, states, label) {
+function waitForState(session: Session, states: string[], label: string): Promise<string> {
   const wanted = new Set(states);
   if (wanted.has(session.state)) return Promise.resolve(session.state);
   return new Promise((resolve, reject) => {
@@ -39,7 +52,7 @@ function waitForState(session, states, label) {
       session.off('state-change', onChange);
       reject(new Error(`timed out waiting for ${label} (still ${session.state})`));
     }, STEP_TIMEOUT_MS);
-    function onChange({ to }) {
+    function onChange({ to }: { to: string }): void {
       if (!wanted.has(to)) return;
       clearTimeout(timer);
       session.off('state-change', onChange);
@@ -58,7 +71,7 @@ function waitForState(session, states, label) {
  * home, and answers that trust prompt once, by hand, exactly as a Claude Code session answers its
  * workspace-trust dialog.
  */
-function makeProbeCodexHome(tmpDir, projectDir) {
+function makeProbeCodexHome(tmpDir: string, projectDir: string): string {
   const codexHome = path.join(tmpDir, 'codex-home');
   fs.mkdirSync(codexHome);
   const realAuth = path.join(os.homedir(), '.codex', 'auth.json');
@@ -66,7 +79,7 @@ function makeProbeCodexHome(tmpDir, projectDir) {
     try {
       fs.symlinkSync(realAuth, path.join(codexHome, 'auth.json'));
     } catch (err) {
-      console.warn(`  NOTE  could not link ~/.codex/auth.json (${err.message}); codex may ask you to log in`);
+      console.warn(`  NOTE  could not link ~/.codex/auth.json (${messageOf(err)}); codex may ask you to log in`);
     }
   }
   fs.writeFileSync(
@@ -77,7 +90,12 @@ function makeProbeCodexHome(tmpDir, projectDir) {
   return codexHome;
 }
 
-function writeProbeConfig(configPath, projectDir) {
+function messageOf(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  return String(error);
+}
+
+function writeProbeConfig(configPath: string, projectDir: string): void {
   fs.writeFileSync(configPath, JSON.stringify({
     projects: [{
       id: SESSION_ID,
@@ -98,7 +116,7 @@ function writeProbeConfig(configPath, projectDir) {
   }, null, 2), 'utf8');
 }
 
-function makeProbePack(tmpDir) {
+function makeProbePack(tmpDir: string): string {
   const builtRoot = path.join(tmpDir, 'packs', 'built');
   const currentDir = path.join(builtRoot, PACK_NAME, 'current');
   const dataDir = path.join(currentDir, 'data');
@@ -117,12 +135,12 @@ function makeProbePack(tmpDir) {
   return builtRoot;
 }
 
-function answerFrom(payload) {
+function answerFrom(payload: HookPayload | undefined): string | null {
   const answer = payload?.last_assistant_message;
   return typeof answer === 'string' ? answer.trim() : null;
 }
 
-function copySanitizedRecording(tmpDir) {
+function copySanitizedRecording(tmpDir: string): string | null {
   const recordingDir = path.join(tmpDir, 'recordings');
   if (!fs.existsSync(recordingDir)) return null;
   const recorded = fs.readdirSync(recordingDir);
@@ -137,7 +155,7 @@ function copySanitizedRecording(tmpDir) {
   return keptRecording;
 }
 
-async function main() {
+async function main(): Promise<void> {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-codex-probe-'));
   const projectDir = path.join(tmpDir, 'project');
   fs.mkdirSync(projectDir);
@@ -150,13 +168,14 @@ async function main() {
   const server = http.createServer();
   const backend = createBackend(server, { staticDir: null });
   server.on('request', backend.app);
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', () => resolve()); });
 
-  const session = backend.getSession(SESSION_ID);
-  const hookEvents = [];
-  const answers = [];
-  const titleSignals = [];
-  const spawnCalls = [];
+  const session: ProbeSession | null = backend.getSession(SESSION_ID);
+  if (!session) throw new Error(`the probe config did not produce a session named ${SESSION_ID}`);
+  const hookEvents: string[] = [];
+  const answers: string[] = [];
+  const titleSignals: string[] = [];
+  const spawnCalls: SpawnCall[] = [];
   session._packsBuiltRoot = builtRoot;
   const spawnPty = session._ptySpawn;
   session._ptySpawn = (file, args, options) => {
@@ -172,7 +191,7 @@ async function main() {
     if (answer) answers.push(answer);
     return originalIngest(raw);
   };
-  session._titleSource.on('signal', (s) => titleSignals.push(s.signal));
+  session._titleSource.on('signal', (s: { signal: string }) => titleSignals.push(s.signal));
 
   try {
     console.log('\nSpawn:');
@@ -214,7 +233,7 @@ async function main() {
       console.log(`  [argv:${index + 1}] ${JSON.stringify([call.file, ...call.args])}`);
     }
     check('both spawns carried developer_instructions', spawnCalls.length === 2 && spawnCalls.every((call) => call.args.some((arg) => arg.startsWith('developer_instructions='))));
-    check('the second spawn used codex resume', spawnCalls[1]?.args.includes('resume') && spawnCalls[1]?.args.includes(capturedId));
+    check('the second spawn used codex resume', !!capturedId && !!spawnCalls[1]?.args.includes('resume') && spawnCalls[1].args.includes(capturedId));
 
     // Copied out before the cleanup below removes the temp tree; this is what a fixture is cut from.
     // A full capture is the session's whole PTY stream, so it goes into a private directory (mkdtemp
@@ -229,7 +248,7 @@ async function main() {
     await delay(1500);
     backend.shutdown();
     server.closeAllConnections();
-    await new Promise((resolve) => server.close(resolve));
+    await new Promise<void>((resolve) => { server.close(() => resolve()); });
     // The temp tree holds a link to the operator's auth.json and a full PTY recording; neither may
     // outlive the probe in a world-readable /tmp.
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -239,7 +258,7 @@ async function main() {
   process.exit(failed === 0 ? 0 : 1);
 }
 
-main().catch((err) => {
+main().catch((err: unknown) => {
   console.error(err);
   process.exit(1);
 });

@@ -1,5 +1,7 @@
 'use strict';
 
+// Stays plain .js: npm runs this inside node_modules on a git install, where Node refuses type stripping.
+
 const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');

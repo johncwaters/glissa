@@ -3,22 +3,21 @@
   "version": "0.24.1",
   "private": true,
   "description": "Spawn and manage Claude Code sessions on Windows and Linux with a browser dashboard and real-time xterm.js streaming",
-  "main": "server.js",
+  "main": "server/main.ts",
   "imports": {
     "#shared/*": "./shared/*"
   },
   "bin": {
-    "glissa": "bin/glissa.js"
+    "glissa": "bin/glissa.ts"
   },
   "files": [
-    "bin/glissa.js",
-    "bin/path-doctor.js",
+    "bin/glissa.ts",
+    "bin/path-doctor.ts",
     "scripts/prepare-build.js",
     "scripts/postinstall-path-check.js",
     "dist/",
     "!dist/AGENTS.md",
     "!dist/pictures/",
-    "server.js",
     "server/",
     "packs/",
     "!packs/AGENTS.md",
@@ -59,7 +58,7 @@
     "linux"
   ],
   "scripts": {
-    "start": "node server.js",
+    "start": "node server/main.ts",
     "lint": "biome check .",
     "test": "node --test \"tests/**/*.test.js\" \"tests/**/*.test.ts\"",
     "typecheck": "tsc --project tsconfig.json && tsc --project tsconfig.mill-metrics.json && tsc --project tsconfig.public.json && tsc --project tsconfig.strict.json",
@@ -68,7 +67,7 @@
     "build": "vite build",
     "postinstall": "node scripts/postinstall-path-check.js",
     "prepare": "node scripts/prepare-build.js",
-    "release": "node scripts/release.js"
+    "release": "node scripts/release.ts"
   },
   "dependencies": {
     "@parcel/watcher": "^2.6.0",

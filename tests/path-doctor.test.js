@@ -13,7 +13,7 @@ const {
   npmGlobalBinDir,
   pnpmGlobalBinDir,
   formatPathNotice,
-} = require('../bin/path-doctor');
+} = require('../bin/path-doctor.ts');
 
 test('onPath: win32 is case-insensitive and trailing-separator insensitive', () => {
   const pathEnv = 'C:\\Windows;C:\\Users\\me\\AppData\\Roaming\\npm';

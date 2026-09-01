@@ -10,14 +10,14 @@ Maintainer scripts for cutting a release and validating the install tarball. Gli
 
 | File | Description |
 |------|-------------|
-| `release.js` | Release pipeline: pushes to GitHub, tags, creates the GitHub release. No registry publish. Run as `node scripts/release.js` |
-| `check-package-files.js` | Traces string-literal `require()` calls from the package entry points (bin, main) and verifies every required file is in `package.json` `files`; dynamic requires are not detected. Also verifies every pack spec the tarball ships has its non-optional sources in the tarball, since `pack-core` fails a build on a zero-match source pattern and the pack service retries it forever |
-| `memory-purge-fixtures.js` | Removes test-fixture records from a memory database (`node scripts/memory-purge-fixtures.js <db-path> [--dry-run]`), backing it up first and expunging through the store's own three writes |
+| `release.ts` | Release pipeline: pushes to GitHub, tags, creates the GitHub release. No registry publish. Run as `node scripts/release.ts` |
+| `memory-purge-fixtures.ts` | Removes test-fixture records from a memory database (`node scripts/memory-purge-fixtures.ts <db-path> [--dry-run]`), backing it up first and expunging through the store's own three writes |
+| `prepare-build.js`, `postinstall-path-check.js` | Stay plain `.js`: npm runs them INSIDE `node_modules` on a git install, where Node refuses type stripping |
 
 ## For AI Agents
 
 ### Working In This Directory
-- After adding a server module that ships, run `node scripts/check-package-files.js`; a miss means a broken `npm i -g github:johncwaters/glissa` (npm packs the repo for a GitHub spec, so the `files` whitelist still bounds the tarball).
+- After adding a server module that ships, check `package.json` `files`; a miss means a broken `npm i -g github:johncwaters/glissa`, which the packaged-install job in `.github/workflows/test.yml` catches.
 - These are one-shot cold paths: sync `execSync`/fs is acceptable here (unlike server runtime paths).
 
 ### Testing Requirements

@@ -368,7 +368,7 @@ function createConfigStore({ settingsDefaults }: { settingsDefaults?: Partial<De
   // it must not be materialized into config.json by a save that merely echoed it back, or the dev
   // overlay would leak into production the first time the operator changes an unrelated setting.
   const launchDefaultKeys = new Set(Object.keys(settingsDefaults || {}));
-  // True only when the resolved config is the in-repo config.json (dev via `node server.js`/`vite`).
+  // True only when the resolved config is the in-repo config.json (dev via `node server/main.ts`/`vite`).
   // A real global install never resolves this (config.json is not in package.json `files`, so it self-
   // seeds at ~/.glissa/config.json). Used as a best-effort dev-skip for the startup update check.
   const isLocalConfig = configPath === path.join(import.meta.dirname, '..', 'config.json');
