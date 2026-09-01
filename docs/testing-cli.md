@@ -271,7 +271,7 @@ package.json
 node -e "const p=require('./package.json'); console.log(JSON.stringify({bin:p.bin,files:p.files,engines:p.engines},null,2))"
 ```
 
-**Expected:** `bin.glissa` points at `bin/glissa.ts`, `engines.node` is `>=22.18.0`, and `files` matches the array above (check `package.json` directly for the current list; it grows as new server-side modules ship).
+**Expected:** `bin.glissa` points at `dist/bin/glissa.js`, `engines.node` is `>=22.18.0`, and `files` matches the array above (check `package.json` directly for the current list; it grows as new server-side modules ship).
 
 ---
 

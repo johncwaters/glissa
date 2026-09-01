@@ -80,7 +80,7 @@ function sourceFilesUnder(dir: string): string[] {
 function rootSourceFiles(): string[] {
   return fs
     .readdirSync(repoRoot, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && /\.(ts|mts|cts)$/.test(entry.name))
+    .filter((entry) => entry.isFile() && /\.(js|mjs|cjs|ts|mts|cts)$/.test(entry.name))
     .map((entry) => path.join(repoRoot, entry.name));
 }
 
@@ -134,13 +134,11 @@ test('npm run typecheck runs every root tsconfig project', () => {
 test('no source tree holds a non-TypeScript module', () => {
   const allowedPlainJs = new Set(['scripts/prepare-build.js', 'scripts/postinstall.mjs', 'scripts/build.mjs', 'test/container/ws-check.js']);
   const offenders: string[] = [];
-  for (const tree of CHECKED_TREES) {
-    for (const file of sourceFilesUnder(path.join(repoRoot, tree))) {
-      if (/\.ts$|\.mts$|\.cts$/.test(file)) continue;
-      const rel = path.relative(repoRoot, file).replace(/\\/g, '/');
-      if (allowedPlainJs.has(rel)) continue;
-      offenders.push(rel);
-    }
+  for (const file of checkedSourceFiles()) {
+    if (/\.ts$|\.mts$|\.cts$/.test(file)) continue;
+    const rel = path.relative(repoRoot, file).replace(/\\/g, '/');
+    if (allowedPlainJs.has(rel)) continue;
+    offenders.push(rel);
   }
   assert.deepEqual(offenders, [], 'source is TypeScript; the allowlisted npm-lifecycle scripts are the only plain JS');
 });

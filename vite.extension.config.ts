@@ -7,7 +7,10 @@ import type { Plugin } from 'vite';
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
 const extensionSourceDir = path.join(repoRoot, 'tools', 'vscode-visions');
 
+const PACKED_SIBLING_ENTRIES = new Set(['./lsp-convert.js', './visions-lsp-core.js']);
+
 function isExternal(id: string): boolean {
+  if (PACKED_SIBLING_ENTRIES.has(id)) return true;
   if (id.startsWith('.')) return false;
   return !path.isAbsolute(id);
 }

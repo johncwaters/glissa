@@ -153,11 +153,11 @@ Every session also writes a JSONL forensic recording by default (hook payloads a
 
 ## Engineering notes
 
-- Pure-core seam architecture: IO-free decision logic lives in `session/core/` and `*-core.mjs` modules; thin shells around them do the actual I/O.
+- Pure-core seam architecture: IO-free decision logic lives in `session/core/` and `*-core.ts` modules; thin shells around them do the actual I/O.
 - `node:test` suite in `tests/`, zero test-framework dependency.
 - Table-driven state machines, e.g. `session/core/state-machine.ts`.
-- Fail-closed PR auto-review merge gate: `server/core/pr-review-core.js` only merges a clean, non-stale, green-checks PR; anything ambiguous (no checks, a `gh` error, a touched workflow file) blocks instead of guessing.
-- Server-side fix handoff in the Radar lane: the fix agent may only commit locally (`git push` and every `gh` call are denied it, because a prefix deny-list cannot constrain a push target), so `server/posthog-wiring.js` does the push and opens the pull request from arguments it built itself, refusing any diff that touches `.github/workflows/`.
+- Fail-closed PR auto-review merge gate: `server/core/pr-review-core.ts` only merges a clean, non-stale, green-checks PR; anything ambiguous (no checks, a `gh` error, a touched workflow file) blocks instead of guessing.
+- Server-side fix handoff in the Radar lane: the fix agent may only commit locally (`git push` and every `gh` call are denied it, because a prefix deny-list cannot constrain a push target), so `server/posthog-wiring.ts` does the push and opens the pull request from arguments it built itself, refusing any diff that touches `.github/workflows/`.
 - Bounded-retention session recorder: `session/session-recorder.ts`, capped by file size, file count, and age so it can run unattended indefinitely.
 
 ## Focus
@@ -196,7 +196,6 @@ This is a minimal starting example. The full key list (`integrationBranch`, `aut
 ```bash
 npm install
 npm run dev             # Vite dev server with HMR (port 5173)
-npm run dev:server-only # Express backend only (port 3000)
 npm run build           # Production build to dist/
 npm start               # Production server
 ```

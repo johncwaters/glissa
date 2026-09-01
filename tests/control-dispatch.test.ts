@@ -22,6 +22,12 @@ function harness(): ControlConnection<DispatchFrame> {
   return connection;
 }
 
+test('visions-set-intent is not a control message', () => {
+  const h = harness();
+  assert.doesNotThrow(() => h.send({ type: 'visions-set-intent', text: 'refactor of the spawn path' }));
+  assert.equal(h.sent.length, 0, 'no reply and no dispatch for the retired type');
+});
+
 test('inherited-key message types are ignored, not dispatched', () => {
   const h = harness();
   assert.doesNotThrow(() => h.send({ type: '__proto__' }));

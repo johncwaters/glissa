@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import path from 'node:path';
+
+const repoRoot = path.join(import.meta.dirname, '..');
 import test from 'node:test';
 
 import { computeRuntimePaths } from '../server/core/runtime-paths.ts';
@@ -63,4 +66,16 @@ test('a module with no package.json above it falls back to the parent of its own
 
   assert.equal(paths.packageRoot, path.join(path.sep, 'tmp', 'loose'));
   assert.equal(paths.bundled, false);
+});
+
+test('the emitted dist manifest never carries a name, which would hijack the package-root walk', () => {
+  const buildSource = fs.readFileSync(path.join(repoRoot, 'scripts', 'build.mjs'), 'utf8');
+  const manifestWrite = buildSource.match(/writeFileSync\([^;]*dist[^;]*package\.json[^;]*;/);
+  assert.ok(manifestWrite, 'scripts/build.mjs writes dist/package.json');
+  assert.ok(!manifestWrite[0].includes('name'), 'the dist manifest stays nameless so findPackageRoot cannot stop at dist/');
+  const distManifestPath = path.join(repoRoot, 'dist', 'package.json');
+  if (!fs.existsSync(distManifestPath)) return;
+  const distManifest = JSON.parse(fs.readFileSync(distManifestPath, 'utf8')) as { name?: string; type?: string };
+  assert.equal(distManifest.name, undefined);
+  assert.equal(distManifest.type, 'module');
 });

@@ -83,7 +83,10 @@ if (backend.remote.enabled) {
     }
     throw err;
   });
-  remoteServer.listen(backend.remote.port ?? 0, bind.host, () => {
+  if (backend.remote.port === null) {
+    throw Object.assign(new Error('remote.enabled requires remote.port; refusing to bind an ephemeral port'), { glissaBoot: true });
+  }
+  remoteServer.listen(backend.remote.port, bind.host, () => {
     console.log(`Glissa remote listener on http://${bind.host}:${backend.remote.port} (paired devices only)`);
     const publicHost = backend.remote.publicHost || '(remote.publicHost not set)';
     console.log(`  proxy target for ${publicHost}; pair a device with: glissa pair`);
