@@ -207,9 +207,10 @@ export function collectDirtyBlocks(map: readonly SettingsSection[], original: Se
     }
     let value: unknown = wireValue(setting, edited[setting.path]);
     if (setting.control === 'projects') {
+      const storedSelection = original[setting.path];
       value = unionProjectSelection({
         checked: Array.isArray(value) ? value : [],
-        stored: (Array.isArray(original[setting.path]) ? original[setting.path] : []) as string[],
+        stored: Array.isArray(storedSelection) ? storedSelection : [],
         rendered: renderedProjectIds,
       });
     }

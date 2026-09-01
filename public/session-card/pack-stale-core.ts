@@ -11,7 +11,9 @@ export interface DeliveredPack {
   version?: unknown;
 }
 
-export type LatestPackVersions = Map<string, string> | Record<string, string>;
+// A null value is what the server sends for a pack it has never built, so it rides the wire and the
+// unknown-name rule above has to cover it rather than a cast pretending it cannot arrive.
+export type LatestPackVersions = Map<string, string | null> | Record<string, string | null>;
 
 /** Delivered pack names whose current version differs, in delivery order. */
 export function stalePackNames(deliveredPacks: readonly DeliveredPack[] | unknown, latestVersionsByName: LatestPackVersions | null | undefined): string[] {

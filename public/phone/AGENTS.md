@@ -35,7 +35,7 @@ Review, Radar, PRs, Usage, Mill, Visions, Hooks and Settings have no phone-only 
 - `*-core.ts` files stay pure (no DOM, no window); they run under node:test too.
 
 ### Testing Requirements
-- `tests/frontend-phone-triage.test.js` (ordering + counts), `tests/frontend-phone-board-groups.test.js` (Board project groups), and `tests/frontend-form-factor.test.js` (the layout decision). DOM behavior is verified manually; real-device rendering is not covered by the suite.
+- `tests/frontend-phone-triage.test.ts` (ordering + counts), `tests/frontend-phone-board-groups.test.ts` (Board project groups), and `tests/frontend-form-factor.test.ts` (the layout decision). DOM behavior is verified manually; real-device rendering is not covered by the suite.
 
 ## Dependencies
 

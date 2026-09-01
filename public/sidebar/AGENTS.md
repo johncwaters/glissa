@@ -24,7 +24,7 @@ The review sidebar: the single home for the worktree review gate of the selected
 - The panel is built once and MOVED between layouts, never rebuilt. It has no close control in either one (the desktop dock is permanent; the phone screen is dismissed by the bottom nav), so do not reintroduce a dismiss button without a layout that needs it.
 
 ### Testing Requirements
-- `tests/frontend-diff-core.test.js` for the parser; merge flow verified end-to-end via `npm run dev` with a worktree session.
+- `tests/frontend-diff-core.test.ts` for the parser; merge flow verified end-to-end via `npm run dev` with a worktree session.
 
 ## Dependencies
 

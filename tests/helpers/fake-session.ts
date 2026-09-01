@@ -25,5 +25,12 @@ function recordingSessionFactory(): RecordingSessionFactory {
   return { makeSession, constructed, created };
 }
 
-export { recordingSessionFactory };
+// A real, unstarted Session for a suite that only needs one to exist in a map: the control dispatch
+// looks sessions up by id and calls one method on the hit. A suite pins that call by replacing the
+// method on this instance, which keeps the replacement typed against the real signature.
+function plainSession(id: string, name: string = id, projectPath = '/repo'): Session {
+  return new Session({ id, name, path: projectPath, ptySpawn: () => fakePty() });
+}
+
+export { plainSession, recordingSessionFactory };
 export type { RecordingSessionFactory };

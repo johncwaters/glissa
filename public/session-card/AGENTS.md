@@ -34,7 +34,7 @@ Session card modules, decomposed from the old monolithic session-card.js. Each s
 - State is applied via `applyState` + `[data-state]` CSS; do not hand-toggle state classes.
 
 ### Testing Requirements
-- Pure cores tested in `tests/frontend-naming.test.js`, `frontend-webgl-pool.test.js`, `frontend-aggregate-status.test.js`, `frontend-ime-core.test.js`; terminal/DOM behavior verified via `npm run dev`.
+- Pure cores tested in `tests/frontend-naming.test.ts`, `frontend-webgl-pool.test.ts`, `frontend-aggregate-status.test.ts`, `frontend-ime-core.test.ts`; terminal/DOM behavior verified via `npm run dev`.
 
 ## Dependencies
 

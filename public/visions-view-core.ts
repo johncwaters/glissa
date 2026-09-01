@@ -195,7 +195,7 @@ export function intentAgeText(ts: unknown, now: number = Date.now()) {
   return `${days} days ago`;
 }
 
-export function intentMetaText(intent: IntentThread | null | undefined, now = Date.now()) {
+export function intentMetaText(intent: Partial<IntentThread> | null | undefined, now = Date.now()) {
   const source = intentSourceText(intent);
   if (!source) return '';
   const thread = typeof intent?.id === 'string' && intent.id ? `thread ${intent.id}, ` : '';
@@ -259,7 +259,8 @@ export function commentCountText(count: unknown) {
 }
 
 // One head line for a section, omitting quiet kinds rather than padding with zeroes.
-export function sectionCountText(section: VisionsSection | null | undefined) {
+// Only the three counted fields are read, so a partly-built section can still be counted.
+export function sectionCountText(section: Partial<VisionsSection> | null | undefined) {
   const findings = boundedCount(section?.findings?.length);
   const comments = boundedCount(section?.comments?.length);
   const hand = typeof section?.hand === 'string' && section.hand ? 1 : 0;
@@ -656,7 +657,8 @@ export function activityCountText(count: unknown) {
 
 // An event with no root belongs to no project (shell history is the source that can never know one), and
 // the row says so rather than letting a reader assume this project produced it.
-export function activityScopeText(event: ActivityEvent | null | undefined) {
+// Only the root is read, so a caller holding a partly-built row (or a scope alone) can label it.
+export function activityScopeText(event: Pick<ActivityEvent, 'root'> | null | undefined) {
   if (!event?.root) return 'machine';
   const root = event.root.replace(/[\\/]+$/, '');
   const lastSeparator = Math.max(root.lastIndexOf('/'), root.lastIndexOf('\\'));

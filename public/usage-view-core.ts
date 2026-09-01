@@ -818,7 +818,8 @@ export function heatmapCells(
   return { cells, max, weeks };
 }
 
-export function heatmapCellTitle(cell: HeatmapCell | null | undefined) {
+// Every field is read defensively, so a caller holding a partly-built cell can still label it.
+export function heatmapCellTitle(cell: Partial<HeatmapCell> | null | undefined) {
   const label = dayLabel(cell?.day);
   if (cell?.noData) return `${label}: no data`;
   const tokens = finiteNumber(cell?.tokens) ?? 0;
@@ -929,8 +930,9 @@ export interface PlanWindow {
 
 export interface PlanLimits {
   ts?: unknown;
-  fiveHour?: PlanWindow;
-  sevenDay?: PlanWindow;
+  // The statusline lane reports a window it never saw as null, and that null rides the wire.
+  fiveHour?: PlanWindow | null;
+  sevenDay?: PlanWindow | null;
 }
 
 export const PLAN_WINDOWS: readonly { key: 'fiveHour' | 'sevenDay'; label: string }[] = Object.freeze([

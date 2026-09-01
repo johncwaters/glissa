@@ -46,14 +46,15 @@ export interface HookRecord {
 export interface HookEvent {
   name: string;
   description: string;
-  matcher?: string;
+  // null is what the catalog stores for an event that takes no matcher, and it rides the wire as null.
+  matcher?: string | null;
   http?: boolean;
 }
 
 export interface HookBuiltinRow {
   event: string;
   purpose: string;
-  matcher?: string;
+  matcher?: string | null;
 }
 
 export interface HookProject {

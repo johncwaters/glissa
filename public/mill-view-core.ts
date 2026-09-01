@@ -209,7 +209,7 @@ export function variantNote(pack: MillPack | null | undefined) {
   return `variant of "${group}", project ${project}`;
 }
 
-export function budgetPct(pack: MillPack | null | undefined) {
+export function budgetPct(pack: Pick<MillPack, 'built'> | null | undefined) {
   const pct = pack?.built?.budgetPct;
   if (typeof pct !== 'number' || !Number.isFinite(pct)) return null;
   return pct;
@@ -225,7 +225,7 @@ function measured(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-export function budgetLine(pack: MillPack | null | undefined) {
+export function budgetLine(pack: Pick<MillPack, 'built'> | null | undefined) {
   const built = pack?.built;
   if (!built) return '';
   if (!measured(built.tokenEstimate)) return 'tokens unknown';
@@ -311,7 +311,7 @@ export function distillText(row: MillDistillRow | null | undefined) {
   return `check failed: ${row?.reason || 'unknown reason'}`;
 }
 
-export function distillTone(row: MillDistillRow | null | undefined) {
+export function distillTone(row: Pick<MillDistillRow, 'stale'> | null | undefined) {
   if (row?.stale === false) return 'ok';
   return 'warn';
 }
@@ -443,7 +443,7 @@ export function deliveryTargets(report: MillAssignmentReport | null | undefined,
 
 // A DELTA, not a list: the server re-reads the project's current packs inside its own write, so two
 // dashboards toggling different packs cannot overwrite each other.
-export function packDeltaFor(target: MillDeliveryTarget | null | undefined, packName: string) {
+export function packDeltaFor(target: Pick<MillDeliveryTarget, 'id' | 'checked'> | null | undefined, packName: string) {
   return { projectId: target?.id, pack: packName, deliver: target?.checked !== true };
 }
 

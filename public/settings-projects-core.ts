@@ -1,4 +1,4 @@
-export function unionProjectSelection({ checked = [], stored = [], rendered = [] }: { checked?: string[]; stored?: string[]; rendered?: string[] } = {}) {
+export function unionProjectSelection({ checked = [], stored = [], rendered = [] }: { checked?: string[]; stored?: unknown[]; rendered?: string[] } = {}) {
   const renderedIds = new Set(rendered);
   const selection = [...checked];
   for (const id of stored) {
