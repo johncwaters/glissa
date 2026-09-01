@@ -15,8 +15,8 @@ const { createCanonicalProjectLookupPlanner, createMemoryStore } = require('../s
 const { createMemoryDb, recordToRow, rowToRecord } = require('../server/memory-db');
 const {
   resolveMemoryConfig, segmentFileName, verifyRecordSignature, withSignature,
-} = require('../server/core/memory-core');
-const { projectVariantSlug } = require('../server/core/pack-core');
+} = require('../server/core/memory-core.ts');
+const { projectVariantSlug } = require('../server/core/pack-core.ts');
 
 const QUIET = { log() {}, warn() {} };
 const START = Date.UTC(2026, 7, 22, 12, 0, 0);

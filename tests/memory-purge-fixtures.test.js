@@ -13,7 +13,7 @@ const path = require('node:path');
 
 const { fixtureReason, purgeFixtures } = require('../scripts/memory-purge-fixtures');
 const { createMemoryStore } = require('../server/memory-store');
-const { resolveMemoryConfig } = require('../server/core/memory-core');
+const { resolveMemoryConfig } = require('../server/core/memory-core.ts');
 
 const QUIET = { log() {}, warn() {} };
 const CANARY = 'the merge gate lives in session/core/merge-gate.js';

@@ -27,7 +27,7 @@ const path = require('node:path');
 
 const { createAgentLogIngest } = require('../server/ingest-agent-logs');
 const { createIngestLane } = require('../server/ingest-wiring');
-const { resolveIngestConfig } = require('../server/core/ingest-core');
+const { resolveIngestConfig } = require('../server/core/ingest-core.ts');
 const { encodeProjectDir } = require('../session/core/conversation-history.ts');
 
 // --- Harness --------------------------------------------------------------

@@ -11,7 +11,7 @@
  * zombie from the server's presence count.
  */
 
-const { planHeartbeatSweep, DEFAULT_INTERVAL_MS, DEFAULT_DEADLINE_MS } = require('./core/heartbeat-core');
+const { planHeartbeatSweep, DEFAULT_INTERVAL_MS, DEFAULT_DEADLINE_MS } = require('./core/heartbeat-core.ts');
 
 /**
  * @param {{ servers?: Array<{ clients: Iterable<{ glissaLastSeenAt?: number, on: (event: string, listener: () => void) => void, terminate: () => void, ping: () => void }> }>, onTerminate?: (socket: unknown) => void, intervalMs?: number, deadlineMs?: number, now?: () => number, setIntervalFn?: typeof setInterval, clearIntervalFn?: typeof clearInterval, warn?: (message: string) => void }} [deps]

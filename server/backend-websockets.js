@@ -3,8 +3,8 @@
 const { WebSocketServer } = require('ws');
 const { STATES } = require('../shared/states.ts');
 const { createReplayLog } = require('./control-replay-core');
-const { decideControlSend } = require('./core/control-send-core');
-const { decideHostAllowed } = require('./core/host-policy');
+const { decideControlSend } = require('./core/control-send-core.ts');
+const { decideHostAllowed } = require('./core/host-policy.ts');
 const { classifyRequestOrigin, decideUpgradeAccess } = require('./core/request-trust');
 const { classifyUpgradePath, dataSessionIdFromUrl, upgradeTokenFromUrl } = require('./core/upgrade-route');
 const { isApplicableViewerSize, pickSizeAfterDeparture } = require('./core/viewer-size-core');

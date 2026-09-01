@@ -13,8 +13,8 @@ const path = require('node:path');
 const { createVisionsWiring } = require('../server/visions-wiring');
 const { createMemoryStore } = require('../server/memory-store');
 const { buildVisionsPrompt } = require('../server/core/visions-dispatch-core');
-const { memoryInputFromEvent } = require('../server/core/memory-ingest-core');
-const { resolveMemoryConfig } = require('../server/core/memory-core');
+const { memoryInputFromEvent } = require('../server/core/memory-ingest-core.ts');
+const { resolveMemoryConfig } = require('../server/core/memory-core.ts');
 
 const PROJECT_ID = 'e1f4c0de-0000-4000-8000-000000000002';
 const PROJECT_PATH = '/tmp/glissa-memory-delivery';

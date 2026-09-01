@@ -14,10 +14,10 @@ const crypto = require('node:crypto');
 
 const {
   COOKIE_NAME, readDeviceCookie, serializeSetCookie, decideCookieFlags,
-} = require('./core/cookie');
+} = require('./core/cookie.ts');
 const {
   hashSecret, decideDeviceAuth, deviceNameFromUserAgent, DEFAULT_DEVICE_MAX_AGE_MS,
-} = require('./core/pairing-token');
+} = require('./core/pairing-token.ts');
 const { classifyRequestOrigin, decideRequestAccess, normalizePathname } = require('./core/request-trust');
 
 const DEVICE_COOKIE_MAX_AGE_SECONDS = Math.floor(DEFAULT_DEVICE_MAX_AGE_MS / 1000);

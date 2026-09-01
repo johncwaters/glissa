@@ -1,7 +1,7 @@
 'use strict';
 
-const { planBranchGc } = require('./core/branch-gc-core');
-const { configuredIntegrationBranch } = require('./core/integration-branch-core');
+const { planBranchGc } = require('./core/branch-gc-core.ts');
+const { configuredIntegrationBranch } = require('./core/integration-branch-core.js');
 const { createTickLoop } = require('./lane-runner');
 
 const DEFAULT_STALE_DAYS = 14;
@@ -33,7 +33,7 @@ function createBranchGcPoller(deps) {
     decisionTrace({ kind: 'branch-gc', ts: now(), ...entry });
   }
 
-  function noteGitError({ projectPath, name = null, operation, gitResult }) {
+  function noteGitError({ projectPath, name = /** @type {string | null} */ (null), operation, gitResult }) {
     const message = gitResult.err || gitResult.out || 'git command failed';
     log.warn(`[branch-gc] ${operation} failed in ${projectPath}: ${message}`);
     trace({ projectPath, name, decision: 'skipped', reason: `${operation}-error` });

@@ -1,7 +1,7 @@
 'use strict';
 
-const core = require('./core/posthog-core');
-const recurrence = require('./core/posthog-recurrence');
+const core = require('./core/posthog-core.ts');
+const recurrence = require('./core/posthog-recurrence.ts');
 const traffic = require('./core/traffic-spike-core');
 const { normalizeIssues, parseSpikeIssueIds } = require('./posthog-api');
 const { firstLine, raceWithAbort } = require('./ephemeral-session');
@@ -315,7 +315,7 @@ function createPosthogPoller(deps) {
   // planned investigations and the operator's manual re-investigation, so both take the same
   // concurrency slot, the same never-rejecting tracking promise, and the same state bookkeeping.
   // A fix job and an investigation are indistinguishable here on purpose: one slot pool, one drain.
-  function startInvestigation(change, decision = /** @type {{ matchKey?: string }|null} */ (null)) {
+  function startInvestigation(change, decision = /** @type {{ matchKey?: string|null }|null} */ (null)) {
     const mode = core.decideJobMode(change, { autoFix });
     state[change.key].inFlight = true;
     if (decision?.matchKey) state[change.key].recurrenceOf = decision.matchKey;
@@ -511,7 +511,7 @@ function createPosthogPoller(deps) {
       // Latch-and-ping only alongside the spawn it justifies; the latch re-check keeps two
       // same-cluster escalations planned from one pre-tick snapshot down to a single ping.
       const escalating = item.recurrence.action === 'escalate'
-        && recurrence.signatureRecords(state)[item.recurrence.matchKey]?.escalated !== true;
+        && recurrence.signatureRecords(state)[item.recurrence.matchKey ?? '']?.escalated !== true;
       if (escalating) applyEscalation(item);
       startInvestigation(item.change, item.recurrence);
     }

@@ -13,7 +13,7 @@ const nodeFs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { decideDbOpenRefusal, homeDbRefusedError, underTestRunner } = require('./core/db-path-guard');
+const { decideDbOpenRefusal, homeDbRefusedError, underTestRunner } = require('./core/db-path-guard.ts');
 
 // The shape every tenant's tables are created at. A future change is a read-old write-new pass in code.
 const SCHEMA_VERSION = 1;

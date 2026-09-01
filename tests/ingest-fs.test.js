@@ -22,8 +22,8 @@ const path = require('node:path');
 
 const { createFsIngest } = require('../server/ingest-fs');
 const { createIngestLane } = require('../server/ingest-wiring');
-const { MAX_FILES_PER_BATCH } = require('../server/core/ingest-fs-core');
-const { resolveIngestConfig } = require('../server/core/ingest-core');
+const { MAX_FILES_PER_BATCH } = require('../server/core/ingest-fs-core.ts');
+const { resolveIngestConfig } = require('../server/core/ingest-core.ts');
 
 const PROJECT = path.resolve('/work/project');
 

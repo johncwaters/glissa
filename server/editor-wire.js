@@ -13,7 +13,7 @@ const { execSync } = require('./child-process-safe');
 const {
   emacsMerge, emacsRemove, helixMerge, helixRemove, jsonSettingsMerge, jsonSettingsRemove, kateSettings,
   neovimDropIn, sublimeSettings,
-} = require('./core/editor-wire-core');
+} = require('./core/editor-wire-core.ts');
 const { resolvePathCommandMatches } = require('../session/core/spawn-command.ts');
 
 function configHome(homeDir, env) {

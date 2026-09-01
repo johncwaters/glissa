@@ -1,7 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const { hostOfOrigin } = require('./core/origin-policy');
+const { hostOfOrigin } = require('./core/origin-policy.ts');
 const { decideBindHost, normalizeRemoteConfig, validateRemoteConfig } = require('./core/remote-config');
 const { createPairingsStore, createSeenStore, defaultPairingsPath, defaultSeenPath } = require('./pairings-store');
 const { createRemoteAuth } = require('./remote-auth');

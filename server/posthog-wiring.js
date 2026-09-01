@@ -20,9 +20,9 @@ const { Session } = require('../session/sessions');
 const {
   awaitSessionExit, createJobResultFile, readResultFile, registerEphemeralSession,
 } = require('./ephemeral-session');
-const core = require('./core/posthog-core');
-const { normalizePackNames } = require('./core/pack-core');
-const { configuredIntegrationBranch } = require('./core/integration-branch-core');
+const core = require('./core/posthog-core.ts');
+const { normalizePackNames } = require('./core/pack-core.ts');
+const { configuredIntegrationBranch } = require('./core/integration-branch-core.js');
 const { createPosthogPoller } = require('./posthog-poller');
 const { createPosthogApi } = require('./posthog-api');
 const { sendPosthogPing } = require('./posthog-telegram');

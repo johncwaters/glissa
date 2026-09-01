@@ -14,8 +14,8 @@ const { EventEmitter } = require('node:events');
 const {
   BATCH_INTERVAL_MS, MAX_EVENTS_PER_FRAME, SNAPSHOT_EVENT_LIMIT, createIngestLane,
 } = require('../server/ingest-wiring');
-const { resolveIngestConfig } = require('../server/core/ingest-core');
-const { TRUNCATION_NOTE } = require('../server/core/ingest-terminal-core');
+const { resolveIngestConfig } = require('../server/core/ingest-core.ts');
+const { TRUNCATION_NOTE } = require('../server/core/ingest-terminal-core.ts');
 
 const NOW = 1700000000000;
 

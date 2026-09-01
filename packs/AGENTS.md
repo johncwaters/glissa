@@ -31,7 +31,7 @@ Version-controlled input to the context mill: pack specs and the shared source m
 }
 ```
 
-Every key is validated by `validatePackSpec` in `../server/core/pack-core.js`; unknown keys are a build error, not a silent no-op. A source sets exactly one of `path` (a file or a directory taken whole) or `glob` (`**`, `*`, `?`). Relative patterns resolve against this directory, so a spec reads the same from a repo checkout or a global install; absolute patterns are allowed. `optional: true` is allowed only on a source and means a missing match is skipped instead of failing the build, for derived files the distiller has not written yet. `budgetTokens` is a hard gate: over budget means no output at all.
+Every key is validated by `validatePackSpec` in `../server/core/pack-core.ts`; unknown keys are a build error, not a silent no-op. A source sets exactly one of `path` (a file or a directory taken whole) or `glob` (`**`, `*`, `?`). Relative patterns resolve against this directory, so a spec reads the same from a repo checkout or a global install; absolute patterns are allowed. `optional: true` is allowed only on a source and means a missing match is skipped instead of failing the build, for derived files the distiller has not written yet. `budgetTokens` is a hard gate: over budget means no output at all.
 
 ### Data sources and `{{glissaHome}}`
 
@@ -45,13 +45,13 @@ A source may set `data: true`. Its files are published under `data/<slug>/` as p
 
 ### Working In This Directory
 - Sources are LOCAL FILES ONLY. No remote fetching in a spec: pack bytes land in `--dangerously-skip-permissions` sessions, so the trust boundary is "files the operator already controls".
-- A pack may NOT be built out of a consumer project's own checkout. Delivery refuses it (`self-referential`, `server/core/pack-core.js`) and so does assignment: a session already loads those files, and the pack is a lossy copy that drifts silently. Two packs distilled from this repo were retired for exactly that.
+- A pack may NOT be built out of a consumer project's own checkout. Delivery refuses it (`self-referential`, `server/core/pack-core.ts`) and so does assignment: a session already loads those files, and the pack is a lossy copy that drifts silently. Two packs distilled from this repo were retired for exactly that.
 - Adding a source that matches no file fails the build on purpose; fix the pattern rather than dropping the source.
 - These files ship in the npm tarball (`package.json` `files`), so keep them reference material, not scratch notes.
 - A spec whose sources reach OUTSIDE `packs/` is repo-development context and must be excluded from the tarball, or a global install fails its build on every watch fire and every sweep. `scripts/check-package-files.js` enforces that: a shipped spec whose non-optional sources are not in the whitelist fails the release gate.
 
 ### Testing Requirements
-- `node --test tests/pack-core.test.js tests/pack-builder.test.js` covers the format and the builder; `glissa pack build` is the end-to-end check.
+- `node --test tests/pack-core.test.ts tests/pack-builder.test.js` covers the format and the builder; `glissa pack build` is the end-to-end check.
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->
 
@@ -70,6 +70,6 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - Per-project variants flatten into independent pack NAMES, so one version per pack still holds. A foreign project's slug in a delivered path fails the build.
 - Sources are local files only: pack bytes land in permissionless sessions, so the boundary stays at files the operator already controls.
 - Assignment is a DELTA message: the list is re-read inside the config write, so two dashboards cannot clobber each other.
-- Delivery is addressed per PROJECT (its resolved path), never per card record: two records may share one checkout, and a per-record control offered the same project twice. One delta fans over every record on that path, refusing whole when any is at the cap, and the Mill's rows count sessions per project (`server/core/pack-core.js` packConsumerGroups, `tests/control-project-packs.test.js`).
+- Delivery is addressed per PROJECT (its resolved path), never per card record: two records may share one checkout, and a per-record control offered the same project twice. One delta fans over every record on that path, refusing whole when any is at the cap, and the Mill's rows count sessions per project (`server/core/pack-core.ts` packConsumerGroups, `tests/control-project-packs.test.js`).
 - A reload restarts a recreated session only if it was LIVE: starting a dormant card would spawn a session, with that project's permission setting, nobody asked for.
 - A codex card gets packs as ONE `-c developer_instructions` token: a constant directive plus index paths, never `--add-dir` (a writable root), pack bytes, or memory bytes (`session/adapters/codex.js.renderPackArgs`, `tests/agent-codex.test.js`).

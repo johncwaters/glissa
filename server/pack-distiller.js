@@ -19,8 +19,8 @@ const {
   registerEphemeralSession,
 } = require('./ephemeral-session');
 const { createSerialQueue } = require('./spawn-gate');
-const { needsDistill } = require('./core/distill-core');
-const { buildLanePermissions } = require('./core/lane-permissions-core');
+const { needsDistill } = require('./core/distill-core.ts');
+const { buildLanePermissions } = require('./core/lane-permissions-core.ts');
 const {
   MAX_DISTILL_RESULT_BYTES,
   buildPackDistillPrompt,
@@ -28,8 +28,8 @@ const {
   decidePackDistillPromptSize,
   renderDistilledOutput,
   validateDistillResult,
-} = require('./core/pack-distiller-core');
-const { validatePackSpec } = require('./core/pack-core');
+} = require('./core/pack-distiller-core.ts');
+const { validatePackSpec } = require('./core/pack-core.ts');
 const {
   distillOutputPath, distillSourceHashes, listPackSpecs, loadPackSpec,
 } = require('./pack-builder');

@@ -2,7 +2,7 @@
 
 'use strict';
 
-const { applyEditorNotification, createEditorState } = require('./core/ingest-editor-core');
+const { applyEditorNotification, createEditorState } = require('./core/ingest-editor-core.ts');
 const { createLaneLog } = require('./lane-log');
 
 /**
@@ -41,10 +41,11 @@ function createEditorIngest({
       now: nowFn(),
     });
     state = applied.state;
-    if (!applied.event) return null;
+    const event = applied.event;
+    if (!event) return null;
     // Debug only: one line per open, save and close on every mirrored buffer.
-    debugNote(() => `${applied.event.kind} ${applied.event.summary}`);
-    return publishEvent(applied.event);
+    debugNote(() => `${event.kind} ${event.summary}`);
+    return publishEvent(event);
   }
 
   function stop() {

@@ -12,7 +12,7 @@ const {
   createPairingsStore, createSeenStore, defaultPairingsPath, defaultSeenPath, pairingsSignature,
   SNAPSHOT_RELOAD_MS, REVOCATION_PROPAGATION_SECONDS,
 } = require('../server/pairings-store');
-const { hashSecret } = require('../server/core/pairing-token');
+const { hashSecret } = require('../server/core/pairing-token.ts');
 
 function withTempStore(run, { clock } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pairings-'));

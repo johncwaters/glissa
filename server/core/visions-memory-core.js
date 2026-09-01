@@ -3,7 +3,7 @@
 // M13 of docs/plan-visions-3.md: every trust field is stamped from which funnel fired, never read from input.
 // M16 adds the read half: the lines one dispatch is handed, in the projection's own bullet shape.
 
-const { effectiveRank, projectionBulletFrom } = require('./memory-core');
+const { effectiveRank, projectionBulletFrom } = require('./memory-core.ts');
 const { sanitizeOneLine } = require('./text-core');
 const { THREAD_ID_PATTERN, THREAD_ID_RE } = require('./visions-intent-core');
 

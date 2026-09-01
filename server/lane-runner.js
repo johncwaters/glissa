@@ -2,7 +2,7 @@
 
 const {
   nextBackoffMs, shouldSkipTick, DEFAULT_BASE_MS, DEFAULT_MAX_MS,
-} = require('./core/lane-backoff');
+} = require('./core/lane-backoff.ts');
 
 /** @type {(options: { attempt?: number, baseMs?: number, maxMs?: number, retryAfterMs?: number|null, random?: () => number }) => number} */
 const calculateNextBackoffMs = /** @type {(options: { attempt?: number, baseMs?: number, maxMs?: number, retryAfterMs?: number|null, random?: () => number }) => number} */ (nextBackoffMs);
@@ -17,7 +17,7 @@ const calculateNextBackoffMs = /** @type {(options: { attempt?: number, baseMs?:
 
 /**
  * @param {{ tag: string, intervalMs: number,
- *   tick: () => Promise<{ failed?: boolean, retryAfterMs?: number } | void>,
+ *   tick: () => Promise<{ failed?: boolean, retryAfterMs?: number } | void | null>,
  *   writeState?: () => Promise<void> | void, setIntervalFn?: typeof setInterval,
  *   clearIntervalFn?: typeof clearInterval, backoffBaseMs?: number, backoffMaxMs?: number,
  *   now?: () => number, random?: () => number, log?: Pick<Console, 'warn'> }} deps `tick` is the lane's tick body; `writeState` persists whatever the lane calls

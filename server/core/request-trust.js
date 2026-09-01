@@ -9,7 +9,7 @@
 // client: it is whichever socket the kernel accepted the connection on.
 
 const { normalizeClientTrust } = require('../../shared/client-trust.ts');
-const { decideOriginAllowed } = require('./origin-policy');
+const { decideOriginAllowed } = require('./origin-policy.ts');
 
 const PAIR_PATH_PREFIX = '/pair/';
 

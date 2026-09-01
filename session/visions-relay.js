@@ -22,8 +22,8 @@ const {
   listDocs,
   uriOfParams,
 } = require('../server/core/visions-buffer-core');
-const { decideConfigPath, glissaHomeDir } = require('../server/core/config-path-core');
-const { ACTIVITY_METHOD } = require('../server/core/ingest-editor-core');
+const { decideConfigPath, glissaHomeDir } = require('../server/core/config-path-core.ts');
+const { ACTIVITY_METHOD } = require('../server/core/ingest-editor-core.ts');
 const {
   MAX_DAEMON_FRAME_BYTES,
   daemonMessage,

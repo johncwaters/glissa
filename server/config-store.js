@@ -6,7 +6,7 @@ const path = require('node:path');
 const os = require('node:os');
 
 const { canonicalizePath, equalsIgnoringCaseOnWindows } = require('../shared/paths.ts');
-const { decideConfigPath, glissaHomeDir: resolveGlissaHomeDir } = require('./core/config-path-core');
+const { decideConfigPath, glissaHomeDir: resolveGlissaHomeDir } = require('./core/config-path-core.ts');
 const { Config, RUNTIME_CONFIG_SCALAR_KEYS } = require('../shared/contracts/index.ts');
 const { isPlainObject } = require('./core/usage-number-core');
 const {

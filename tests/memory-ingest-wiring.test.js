@@ -22,7 +22,7 @@ const path = require('node:path');
 const { createAgentLogIngest } = require('../server/ingest-agent-logs');
 const { createMemoryIngest } = require('../server/memory-ingest-wiring');
 const { createMemoryStore } = require('../server/memory-store');
-const { hashMemoryLine, resolveMemoryConfig } = require('../server/core/memory-core');
+const { hashMemoryLine, resolveMemoryConfig } = require('../server/core/memory-core.ts');
 
 function makeHomes() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memingest-'));

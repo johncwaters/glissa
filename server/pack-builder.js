@@ -12,7 +12,7 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 
 const { glissaHomeDir, resolveConfigPath } = require('./config-store');
-const { GLISSA_HOME_PLACEHOLDER, PACK_NAME_RE, PROJECT_SLUG_PLACEHOLDER, isDataSource, isPackRelativePath, matchesGlob, packTmpOwnerPid, planPackBuild, planPackVariants, sha256, shouldReclaimPackArtifact, sourcePattern, validatePackSpec } = require('./core/pack-core');
+const { GLISSA_HOME_PLACEHOLDER, PACK_NAME_RE, PROJECT_SLUG_PLACEHOLDER, isDataSource, isPackRelativePath, matchesGlob, packTmpOwnerPid, planPackBuild, planPackVariants, sha256, shouldReclaimPackArtifact, sourcePattern, validatePackSpec } = require('./core/pack-core.ts');
 const {
   CURRENT_POINTER_DIRECTORY,
   CURRENT_POINTER_FILE,

@@ -9,7 +9,7 @@
 const path = require('node:path');
 
 const { loadConfigFile, resolveConfigPath } = require('./config-store');
-const { packVariantProjects } = require('./core/pack-core');
+const { packVariantProjects } = require('./core/pack-core.ts');
 const { buildPacks, defaultBuiltRoot, defaultSpecsDir, describePackSpec, listPackSpecs, readBuiltManifest } = require('./pack-builder');
 const { formatTimestamp, shortVersion } = require('./text-format');
 

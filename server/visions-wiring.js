@@ -74,7 +74,7 @@ const {
   readSweepResult,
 } = require('./core/visions-fix-core');
 const { createJsonStateWriter } = require('./json-file');
-const { ACTIVITY_METHOD } = require('./core/ingest-editor-core');
+const { ACTIVITY_METHOD } = require('./core/ingest-editor-core.ts');
 const { createLaneLog } = require('./lane-log');
 
 // Quiet window before a document is swept.

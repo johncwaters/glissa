@@ -12,7 +12,7 @@
 // behaves exactly as before.
 
 import { sendTelegramMessage } from '../../server/telegram-transport.js';
-import { decideOffDashboardDelivery } from '../../server/core/client-presence.js';
+import { decideOffDashboardDelivery } from '../../server/core/client-presence.ts';
 import type { NotificationContext } from '../notification-manager.ts';
 
 export interface TelegramDecision {

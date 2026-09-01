@@ -14,8 +14,8 @@
 const {
   DEFAULT_DIGEST_BUDGET_CHARS, buildContextDigest, createIngestStore, enabledSourceNames, latestSeq,
   publishEvent, resolveIngestConfig, ringStats, snapshotEvents,
-} = require('./core/ingest-core');
-const { deriveSessionRoots, isActiveSessionState } = require('./core/ingest-fs-core');
+} = require('./core/ingest-core.ts');
+const { deriveSessionRoots, isActiveSessionState } = require('./core/ingest-fs-core.ts');
 const { createAgentLogIngest } = require('./ingest-agent-logs');
 const { createEditorIngest } = require('./ingest-editor');
 const { createFsIngest } = require('./ingest-fs');

@@ -315,7 +315,7 @@ test('a spec no project and no lane names is reported as having no consumers', a
 
 // ---- Per-project variants: the shell enumerates a group's derived packs beside it ----
 
-const { projectVariantSlug } = require('../server/core/pack-core');
+const { projectVariantSlug } = require('../server/core/pack-core.ts');
 
 function writeVariantFixture() {
   const fixture = writeFixture();

@@ -33,9 +33,9 @@ const { INTERACTIVE_LANE, laneKey } = require('./core/usage-lane-core');
 const {
   MAX_CATCH_UP_BYTES, applyRead, canTrustCachedListing, createTailState, isActiveMtime, pickStaleByMtime,
   planRead,
-} = require('./core/ingest-tail-core');
-const { PROMPT_KIND, isDispatchWorkdir, mapAgentLine } = require('./core/ingest-agent-core');
-const { positiveInt } = require('./core/ingest-number-core');
+} = require('./core/ingest-tail-core.ts');
+const { PROMPT_KIND, isDispatchWorkdir, mapAgentLine } = require('./core/ingest-agent-core.ts');
+const { positiveInt } = require('./core/ingest-number-core.ts');
 const { createLaneLog } = require('./lane-log');
 
 const DEFAULT_POLL_MS = 2000;

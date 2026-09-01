@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 
 const { createBranchGcPoller } = require('../server/branch-gc-poller');
 const { createBranchGcWiring } = require('../server/branch-gc-wiring');
-const { DAY_MS } = require('../server/core/branch-gc-core');
+const { DAY_MS } = require('../server/core/branch-gc-core.ts');
 const { createGitWorkspace } = require('../server/git-workspace');
 
 const NOW_MS = Date.parse('2026-08-25T12:00:00Z');

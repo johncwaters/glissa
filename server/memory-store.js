@@ -18,12 +18,12 @@ const nodeFs = require('node:fs');
 const path = require('node:path');
 
 const { isBusyError } = require('./glissa-db');
-const { HOME_DB_REFUSED_CODE } = require('./core/db-path-guard');
+const { HOME_DB_REFUSED_CODE } = require('./core/db-path-guard.ts');
 const { createMemoryDb } = require('./memory-db');
 const { writeTextAtomic, writeTextAtomicSync } = require('./json-file');
 const { createLaneLog } = require('./lane-log');
-const core = require('./core/memory-core');
-const distillCore = require('./core/memory-distill-core');
+const core = require('./core/memory-core.ts');
+const distillCore = require('./core/memory-distill-core.ts');
 
 const MEMORY_DIR_NAME = 'memory';
 const HMAC_KEY_FILE = 'hmac-key';

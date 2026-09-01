@@ -4,8 +4,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const ranges = require('../shared/settings-ranges.ts');
-const memoryCore = require('../server/core/memory-core');
-const memoryDistillCore = require('../server/core/memory-distill-core');
+const memoryCore = require('../server/core/memory-core.ts');
+const memoryDistillCore = require('../server/core/memory-distill-core.ts');
 const {
   BRANCH_GC_NUMERIC_RANGES,
   POSTHOG_NUMERIC_RANGES,

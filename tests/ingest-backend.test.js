@@ -27,7 +27,7 @@ const WebSocket = require('ws');
 const { createBackend } = require('../server/backend');
 const { dashboardClient } = require('./helpers/dashboard-ws');
 const { createReplayLog } = require('../server/control-replay-core');
-const { ACTIVITY_METHOD } = require('../server/core/ingest-editor-core');
+const { ACTIVITY_METHOD } = require('../server/core/ingest-editor-core.ts');
 const { registerEphemeralSession } = require('../server/ephemeral-session');
 const { hasGit, git } = require('./helpers/git-fixture');
 

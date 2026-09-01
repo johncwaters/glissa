@@ -135,7 +135,7 @@ test('an accepted intent proposal is remembered as a model-stamped record tagged
 });
 
 test('the thread prefix passes the entropy screen, so a threaded intent enters the canon', () => {
-  const { screenMemoryText } = require('../server/core/memory-core');
+  const { screenMemoryText } = require('../server/core/memory-core.ts');
   const screened = screenMemoryText('thread t-716d49b4: shipping the memory writers');
   assert.equal(screened.ok, true, JSON.stringify(screened));
 });

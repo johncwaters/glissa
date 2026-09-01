@@ -11,7 +11,7 @@
  */
 
 const { applySchema, dataVersion, openDatabase } = require('./glissa-db');
-const core = require('./core/memory-core');
+const core = require('./core/memory-core.ts');
 
 const SCHEMA = Object.freeze([
   `CREATE TABLE IF NOT EXISTS memory_records (

@@ -26,12 +26,12 @@ const { createLaneLedger } = require('./usage-lane-ledger');
 const { createVisionsDispatcher, createVisionsSpawn } = require('./visions-dispatch');
 const { createVisionsSetup } = require('./visions-setup');
 const { createVisionsWiring } = require('./visions-wiring');
-const { resolveIngestConfig } = require('./core/ingest-core');
-const { resolveMemoryConfig } = require('./core/memory-core');
-const { resolveDistillConfig: resolveMemoryDistillConfig } = require('./core/memory-distill-core');
-const { consumedPackNames, packVariantProjects } = require('./core/pack-core');
+const { resolveIngestConfig } = require('./core/ingest-core.ts');
+const { resolveMemoryConfig } = require('./core/memory-core.ts');
+const { resolveDistillConfig: resolveMemoryDistillConfig } = require('./core/memory-distill-core.ts');
+const { consumedPackNames, packVariantProjects } = require('./core/pack-core.ts');
 const { resolveMillMetricsConfig } = /** @type {MillMetricsCore} */ (require('./core/mill-metrics-core.ts'));
-const { numberOrNull } = require('./core/usage-number-core');
+const { numberOrNull } = require('./core/usage-number-core.js');
 const { resolveVisionsConfig } = require('./core/visions-dispatch-core');
 const { normalizeShapePath } = require('./core/visions-scope-core');
 

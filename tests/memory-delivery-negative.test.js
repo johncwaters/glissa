@@ -18,7 +18,7 @@ const { createConfigStore } = require('../server/config-store');
 const { CONFIG_SCALAR_KEYS, ConfigUpdate } = require('../shared/contracts/index.ts');
 const { REPLAYABLE_EXACT, isReplayable } = require('../server/control-replay-core');
 const { createMemoryStore } = require('../server/memory-store');
-const { resolveMemoryConfig } = require('../server/core/memory-core');
+const { resolveMemoryConfig } = require('../server/core/memory-core.ts');
 const codex = require('../session/adapters/codex');
 
 const SERVER_DIR = path.join(__dirname, '..', 'server');

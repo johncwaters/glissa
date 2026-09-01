@@ -917,7 +917,7 @@ test('a source whose root IS the config directory resolves as inside it', async 
 
 // ---- Per-project variants: one derived top-level pack per consuming project ----
 
-const { projectVariantSlug } = require('../server/core/pack-core');
+const { projectVariantSlug } = require('../server/core/pack-core.ts');
 
 const SLUG_A = projectVariantSlug('/repos/a/glissa');
 const SLUG_B = projectVariantSlug('/repos/b/other');

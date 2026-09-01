@@ -14,9 +14,9 @@ const { createMemoryStore } = require('../server/memory-store');
 const {
   BOOTSTRAP_PROMPT, MEMORY_DISTILL_DENY_TOOLS, PROMPT_FILE, WORK_DIR_PREFIX, createMemoryDistiller,
 } = require('../server/memory-distill');
-const { resolveDistillConfig } = require('../server/core/memory-distill-core');
-const { resolveMemoryConfig } = require('../server/core/memory-core');
-const { isDispatchWorkdir } = require('../server/core/ingest-agent-core');
+const { resolveDistillConfig } = require('../server/core/memory-distill-core.ts');
+const { resolveMemoryConfig } = require('../server/core/memory-core.ts');
+const { isDispatchWorkdir } = require('../server/core/ingest-agent-core.ts');
 
 const QUIET = { log() {}, warn() {} };
 const START = Date.UTC(2026, 7, 23, 12, 0, 0);

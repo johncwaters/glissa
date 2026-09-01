@@ -19,7 +19,7 @@ function defaultMakeStore() {
   const { createMemoryStore } = require('./memory-store');
   const { configSiblingPath } = require('./pairings-store');
   const { dbPathForConfig } = require('./glissa-db');
-  const { resolveMemoryConfig } = require('./core/memory-core');
+  const { resolveMemoryConfig } = require('./core/memory-core.ts');
   const { createGitWorkspace, createGitWorkspaceSync } = require('./git-workspace');
   const configPath = resolveConfigPath();
   const loaded = loadConfigFile(configPath, { exitOnError: false });
@@ -124,7 +124,7 @@ async function runBackfill(makeStore, makeIngest) {
 function defaultMakeDistiller(store) {
   const { loadConfigFile, resolveConfigPath } = require('./config-store');
   const { createMemoryDistiller } = require('./memory-distill');
-  const { resolveDistillConfig } = require('./core/memory-distill-core');
+  const { resolveDistillConfig } = require('./core/memory-distill-core.ts');
   const loaded = loadConfigFile(resolveConfigPath(), { exitOnError: false });
   const raw = loaded?.config?.memory ? loaded.config.memory.distill : null;
   return createMemoryDistiller({

@@ -19,7 +19,7 @@ const { Session } = require('../session/sessions');
 const {
   awaitSessionExit, createJobResultFile, readResultFile, registerEphemeralSession,
 } = require('./ephemeral-session');
-const { normalizePackNames } = require('./core/pack-core');
+const { normalizePackNames } = require('./core/pack-core.ts');
 const { createPrPoller } = require('./pr-poller');
 const { createPrGh } = require('./pr-gh');
 const { sendPrPing } = require('./pr-telegram');

@@ -21,7 +21,7 @@ const path = require('node:path');
 
 const { createShellHistoryIngest } = require('../server/ingest-shell-history');
 const { createIngestLane } = require('../server/ingest-wiring');
-const { resolveIngestConfig } = require('../server/core/ingest-core');
+const { resolveIngestConfig } = require('../server/core/ingest-core.ts');
 
 // --- Harness --------------------------------------------------------------
 

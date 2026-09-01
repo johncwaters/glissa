@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileAsync, execFileSync } = require('../server/child-process-safe');
 const { createSerialQueue } = require('./spawn-gate');
-const { sessionIdFromBranch } = require('./core/branch-gc-core');
+const { sessionIdFromBranch } = require('./core/branch-gc-core.ts');
 const {
   GIT_FETCH_TIMEOUT_MS,
   parseLeftRightCount,
@@ -13,12 +13,12 @@ const {
   decideResyncAction,
   buildResyncCommand,
   firstGitErrorLine,
-} = require('./core/branch-sync-core');
-const { decideIntegrationSync, classifyRefusedIntegrationSync } = require('./core/integration-sync-core');
+} = require('./core/branch-sync-core.ts');
+const { decideIntegrationSync, classifyRefusedIntegrationSync } = require('./core/integration-sync-core.ts');
 
 const fsp = fs.promises;
 
-/** @typedef {import('./core/integration-sync-core').IntegrationSyncOutcome} IntegrationSyncOutcome */
+/** @typedef {import('./core/integration-sync-core.ts').IntegrationSyncOutcome} IntegrationSyncOutcome */
 /** @typedef {{ outcome: IntegrationSyncOutcome, from: string | null, to: string | null, error?: string }} IntegrationSyncResult */
 
 // Shared {ok,out}/{ok:false,out,err} result shaping for the sync and async `run()` git helpers below.

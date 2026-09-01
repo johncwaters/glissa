@@ -21,8 +21,8 @@ const {
   writeOutputNoFollow,
 } = require('../server/pack-distiller');
 const { distillOutputPath } = require('../server/pack-builder');
-const { buildStampLine, needsDistill } = require('../server/core/distill-core');
-const { LANE_ENVIRONMENT_ARGS, buildLanePermissions } = require('../server/core/lane-permissions-core');
+const { buildStampLine, needsDistill } = require('../server/core/distill-core.ts');
+const { LANE_ENVIRONMENT_ARGS, buildLanePermissions } = require('../server/core/lane-permissions-core.ts');
 const {
   MAX_DISTILL_PROMPT_BYTES,
   MAX_DISTILL_RESULT_BYTES,
@@ -31,7 +31,7 @@ const {
   decidePackDistillPromptSize,
   renderDistilledOutput,
   validateDistillResult,
-} = require('../server/core/pack-distiller-core');
+} = require('../server/core/pack-distiller-core.ts');
 const { withFakeSession } = require('./helpers/fake-session');
 
 const HASHES = [

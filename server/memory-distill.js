@@ -10,13 +10,13 @@ const path = require('node:path');
 const {
   awaitSessionExit, drainPending, firstLine, raceWithAbort, registerEphemeralSession,
 } = require('./ephemeral-session');
-const { buildLanePermissions } = require('./core/lane-permissions-core');
+const { buildLanePermissions } = require('./core/lane-permissions-core.ts');
 const { createLaneLog } = require('./lane-log');
 const { isBusyError } = require('./glissa-db');
-const { needsDistill } = require('./core/distill-core');
+const { needsDistill } = require('./core/distill-core.ts');
 const { createTickLoop } = require('./lane-runner');
-const core = require('./core/memory-core');
-const distillCore = require('./core/memory-distill-core');
+const core = require('./core/memory-core.ts');
+const distillCore = require('./core/memory-distill-core.ts');
 
 const LANE_NAME = 'memory-distill';
 const RESULT_FILE = 'memory-distill-result.json';

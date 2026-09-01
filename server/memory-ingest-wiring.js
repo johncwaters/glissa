@@ -22,11 +22,11 @@ const {
 } = require('./ingest-agent-logs');
 const { INTERACTIVE_LANE } = require('./core/usage-lane-core');
 const { isBusyError } = require('./glissa-db');
-const { isDispatchWorkdir, mapAgentLine } = require('./core/ingest-agent-core');
+const { isDispatchWorkdir, mapAgentLine } = require('./core/ingest-agent-core.ts');
 const { isUsageFile } = require('./core/usage-scan-core');
 const { createLaneLog } = require('./lane-log');
-const { readKnownProjects } = require('./core/memory-core');
-const core = require('./core/memory-ingest-core');
+const { readKnownProjects } = require('./core/memory-core.ts');
+const core = require('./core/memory-ingest-core.ts');
 
 // The usage scanner's budget shape: one pass reads at most this, and what it did not reach is resumable.
 const DEFAULT_BACKFILL_BYTE_BUDGET = 8 * 1024 * 1024;
@@ -392,7 +392,7 @@ function createMemoryIngest({
   }
 
   function ingestLines(entry, lines, scope, lanes) {
-    let context = { root: scope.root, sessionId: scope.sessionId, vendorState: null };
+    let context = { root: scope.root, sessionId: scope.sessionId, vendorState: /** @type {Record<string, string> | null} */ (null) };
     for (const rawLine of lines) {
       if (!rawLine) continue;
       const mapped = mapAgentLine({

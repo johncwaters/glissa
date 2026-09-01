@@ -27,12 +27,12 @@ const { canonicalizePath } = require('../shared/paths.ts');
 const {
   HEAD_SAMPLE_BYTES, MAX_CATCH_UP_BYTES, applyRead, createTailState, headChanged, headSample,
   pickStaleByMtime, planRead,
-} = require('./core/ingest-tail-core');
+} = require('./core/ingest-tail-core.ts');
 const {
   createParseState, decideCommandEvent, historyLocations, matchesLocation, normalizeShells,
   parseHistoryLines,
-} = require('./core/ingest-shell-core');
-const { positiveInt } = require('./core/ingest-number-core');
+} = require('./core/ingest-shell-core.ts');
+const { positiveInt } = require('./core/ingest-number-core.ts');
 const { createLaneLog } = require('./lane-log');
 
 const DEFAULT_POLL_MS = 2000;

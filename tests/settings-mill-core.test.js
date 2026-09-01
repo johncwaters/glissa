@@ -11,9 +11,9 @@ const {
   mergeMillBlock,
   validateMillBlock,
 } = require('../server/core/settings-mill-core');
-const { resolveMemoryConfig } = require('../server/core/memory-core');
-const { resolveDistillConfig } = require('../server/core/memory-distill-core');
-const { resolveIngestConfig } = require('../server/core/ingest-core');
+const { resolveMemoryConfig } = require('../server/core/memory-core.ts');
+const { resolveDistillConfig } = require('../server/core/memory-distill-core.ts');
+const { resolveIngestConfig } = require('../server/core/ingest-core.ts');
 const settingsRanges = require('../shared/settings-ranges.ts');
 
 test('an absent block is valid, so an untouched tab writes nothing', () => {

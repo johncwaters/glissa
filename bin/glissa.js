@@ -114,7 +114,7 @@ function resolveConfigPathReadOnly() {
   const fs = require('node:fs');
   const os = require('node:os');
   const path = require('node:path');
-  const { decideConfigPath, glissaHomeDir } = require('../server/core/config-path-core');
+  const { decideConfigPath, glissaHomeDir } = require('../server/core/config-path-core.ts');
   const decided = decideConfigPath({
     env: process.env,
     homeDir: glissaHomeDir(os.homedir()),

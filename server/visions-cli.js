@@ -5,9 +5,9 @@
 
 const fs = require('node:fs');
 
-const { buildSetupGuide, commandLine, recipeIds } = require('./core/editor-setup-core');
+const { buildSetupGuide, commandLine, recipeIds } = require('./core/editor-setup-core.ts');
 const { extensionIdOf } = require('./core/vsix-core');
-const { isExtensionInstalled } = require('./core/editor-extension-core');
+const { isExtensionInstalled } = require('./core/editor-extension-core.ts');
 const { editorTargets } = require('./editor-wire');
 const {
   RELAY_PATH, editorExtensions, packVsix, relayInvocationOptions, resolveRelayInvocation, resolvedEditorPaths,
@@ -35,7 +35,7 @@ async function runInstall(args) {
   if (report.extensions.results.length === 0) console.log(`  ${'VS Code family'.padEnd(18)} ${report.extensions.reason}`);
   reportFiles(report.files);
 
-  console.log(`\nrelay ${commandLine(report.invocation)}`);
+  console.log(`\nrelay ${commandLine(/** @type {import('./core/editor-setup-core.ts').Invocation} */ (report.invocation))}`);
   console.log('reload any open editor window, then open a markdown file inside a project the daemon knows.');
   return report.extensions.results.some((result) => !result.ok) ? 1 : 0;
 }

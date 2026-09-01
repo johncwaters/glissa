@@ -29,7 +29,7 @@ const { glissaHomeDir } = require('./config-store');
 const { writeJsonAtomic, writeJsonAtomicSync } = require('./json-file');
 const {
   hashSecret, mintPairingToken, decideRedemption, mintDeviceCredential,
-} = require('./core/pairing-token');
+} = require('./core/pairing-token.ts');
 
 const EMPTY_DOC = { version: 1, pending: [], devices: [] };
 

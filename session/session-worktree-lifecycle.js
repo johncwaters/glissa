@@ -21,7 +21,7 @@ const {
   decideResyncAction,
   buildResyncCommand,
   firstGitErrorLine,
-} = require("../server/core/branch-sync-core");
+} = require("../server/core/branch-sync-core.ts");
 
 const WORKTREE_CHECK_DEBOUNCE_MS = 400;
 
@@ -600,7 +600,7 @@ function createSessionWorktreeLifecycle({
     const checkedOut = (await gitOut(["rev-parse", "--abbrev-ref", "HEAD"], opts)).trim();
     const decision = decideResyncAction(before.state, checkedOut === branch);
     let action = "none";
-    let error = null;
+    let error = /** @type {string | null} */ (null);
     const command = buildResyncCommand(decision, { upstream, branch, remote, opts });
     if (command) {
       try {

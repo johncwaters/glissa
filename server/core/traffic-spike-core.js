@@ -2,7 +2,7 @@
 
 // Baseline uses the project's p90 so one past spike cannot hide the next one.
 
-const { toCount } = require('./posthog-core');
+const { toCount } = require('./posthog-core.ts');
 
 const DEFAULT_TRAFFIC_SPIKE_MULTIPLIER = 3;
 const DEFAULT_TRAFFIC_SPIKE_MIN_USERS = 10;

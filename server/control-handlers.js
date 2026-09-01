@@ -11,12 +11,12 @@ const {
 const { STATES } = require('../shared/states.ts');
 const { claudeProjectsDir, listRepoConversations } = require('../session/core/conversation-history.ts');
 const { normalizeClientTrust } = require('./core/request-trust');
-const { PACK_NAME_RE, applyPackDelta, isSelfReferentialPack, sameProjectRecords } = require('./core/pack-core');
+const { PACK_NAME_RE, applyPackDelta, isSelfReferentialPack, sameProjectRecords } = require('./core/pack-core.ts');
 const {
   INGEST_SPEC, MEMORY_SPEC, MILL_METRICS_SPEC, PACK_DISTILLER_SPEC, mergeMillBlock, validateMillBlock,
 } = require('./core/settings-mill-core');
 const { readPosthogReport } = require('./posthog-report');
-const posthogCore = require('./core/posthog-core');
+const posthogCore = require('./core/posthog-core.ts');
 const { buildSettingsPayload: buildSettingsPayloadFrom } = require('./settings-payload');
 const { RESUME_ID_RE } = require('../session/core/auto-resume.ts');
 const { execFile } = require('./child-process-safe');

@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const { PACK_NAME_RE } = require("../../server/core/pack-core");
+const { PACK_NAME_RE } = require("../../server/core/pack-core.ts");
 const { buildAgentEnv } = require("../core/spawn-env.ts");
 const { renderGrokHooksFile, classifyGrokHooksFile } = require("../core/grok-hooks-file-core.ts");
 const { PACK_DIRECTIVE, renderPackPointerText } = require("../core/pack-pointer-core.ts");

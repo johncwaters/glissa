@@ -13,8 +13,8 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 
 const { createHeartbeat } = require('../server/ws-heartbeat');
-const { planHeartbeatSweep, DEFAULT_DEADLINE_MS } = require('../server/core/heartbeat-core');
-const { createClientPresence, decideOffDashboardDelivery } = require('../server/core/client-presence');
+const { planHeartbeatSweep, DEFAULT_DEADLINE_MS } = require('../server/core/heartbeat-core.ts');
+const { createClientPresence, decideOffDashboardDelivery } = require('../server/core/client-presence.ts');
 
 // A socket that answers pings, or does not. terminate() emits 'close' the way ws does, which is what
 // the presence bookkeeping listens to.

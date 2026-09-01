@@ -1,7 +1,7 @@
 'use strict';
 
 const { STATES } = require('../../shared/states.ts');
-const { normalizePackNames } = require('./pack-core');
+const { normalizePackNames } = require('./pack-core.ts');
 
 /**
  * Agent id a project may name, derived from config schema so the two cannot drift.

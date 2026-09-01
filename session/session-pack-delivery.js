@@ -1,6 +1,6 @@
 "use strict";
 
-const { decidePackDelivery, normalizePackNames, variantPackName } = require("../server/core/pack-core");
+const { decidePackDelivery, normalizePackNames, variantPackName } = require("../server/core/pack-core.ts");
 const { DEFAULT_PACKS_DIR, defaultBuiltRoot, resolveBuiltPack } = require("../server/pack-builder");
 const { buildPackNotice, listStalePacks } = require("./core/pack-notice.ts");
 

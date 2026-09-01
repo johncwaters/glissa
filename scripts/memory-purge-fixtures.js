@@ -4,9 +4,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { isUnder } = require('../server/core/db-path-guard');
+const { isUnder } = require('../server/core/db-path-guard.ts');
 const { createMemoryStore } = require('../server/memory-store');
-const { resolveMemoryConfig } = require('../server/core/memory-core');
+const { resolveMemoryConfig } = require('../server/core/memory-core.ts');
 
 const FIXTURE_SESSION_ID = /^(?:sess|s)-\d+$/;
 const DB_SIDECAR_SUFFIXES = ['', '-wal', '-shm'];

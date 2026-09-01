@@ -1,6 +1,6 @@
 'use strict';
 
-const core = require('./core/pr-review-core');
+const core = require('./core/pr-review-core.ts');
 const { drainPending, firstLine, raceWithAbort } = require('./ephemeral-session');
 const { createTickLoop } = require('./lane-runner');
 

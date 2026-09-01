@@ -31,8 +31,8 @@ Backend runtime: the Express + WebSocket server factory and its control plane, p
 | `pr-poller.js` | PR auto-review poller (opt-in), IO-free |
 | `pr-gh.js` | `gh`/`git` wrappers for the PR poller |
 | `pr-telegram.js` | PR-only Telegram push helper (never throws; NOT a `NotificationManager` channel) |
-| `core/pr-review-core.js` | Pure PR-review decisions |
-| `core/branch-sync-core.js` | Pure ahead/behind decisions for the branch-sync indicator |
+| `core/pr-review-core.ts` | Pure PR-review decisions |
+| `core/branch-sync-core.ts` | Pure ahead/behind decisions for the branch-sync indicator |
 | `core/restart-strategy.js` | Pure restart strategy, keyed on systemd's `INVOCATION_ID` |
 | `core/upgrade-route.js` | Pure WS-upgrade target classification by PATHNAME |
 
@@ -62,13 +62,13 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 ### Remote Branch GC
 
-- Remote cleanup is default-on and opts out only through `branchGc.enabled: false`; it is confined to `glissa/session/`, protects every configured session id, and otherwise requires merge proof or orphan staleness, so unattended cleanup cannot become branch loss (`server/core/branch-gc-core.js`, `tests/branch-gc-core.test.js`).
+- Remote cleanup is default-on and opts out only through `branchGc.enabled: false`; it is confined to `glissa/session/`, protects every configured session id, and otherwise requires merge proof or orphan staleness, so unattended cleanup cannot become branch loss (`server/core/branch-gc-core.ts`, `tests/branch-gc-core.test.ts`).
 
 ### GitHub PR Auto-Review (opt-in)
 
 - Inert unless both `config.prReview.enabled` and `config.telegram` are set. A clean PR is reviewed IN PLACE (diff only) so it coexists with a live session in the repo; a conflicting one gets a worktree, discarded on every exit path.
 - Only the POLLER merges; the agent never does. The verdict travels via a result file, since `gh pr review` 422s on your own PR, and a missing one reads as ERROR, never a false clean.
-- Every merge gate fails CLOSED: reviewed head must equal current head, checks must be green (no checks is never green), and a `gh` error on the workflow-files query defers a tick (`server/core/pr-review-core.js`).
+- Every merge gate fails CLOSED: reviewed head must equal current head, checks must be green (no checks is never green), and a `gh` error on the workflow-files query defers a tick (`server/core/pr-review-core.ts`).
 - All `gh` and `git` go through `child-process-safe` and `git-workspace` (`tests/no-direct-child-process.test.js`, `tests/no-direct-git-worktree.test.js`).
 
 ### Radar / PostHog Auto-Fix (opt-in)
@@ -97,7 +97,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 ### Long-Term Memory (plan: `docs/plan-visions-3.md`)
 
-- Trust is stamped by the WRITE PATH, never read off the event; ranks fall but never rise along a lineage (`server/core/memory-core.js`).
+- Trust is stamped by the WRITE PATH, never read off the event; ranks fall but never rise along a lineage (`server/core/memory-core.ts`).
 - A user prompt becomes a `prompt` record, never projected and refused as knowledge, its kind absent from the ingest ring's table, so operator text reaches neither `dist/` nor the control WS.
 - Memory alone never widens what leaves the machine: with the ingest lane off it builds its own source, and no ring, frame or digest sees those events.
 - Expunging is THREE writes, all needed: `secure_delete` (a DELETE leaves plaintext greppable), an FTS5 rebuild (a delete only tombstones terms), and a WAL truncate checkpoint. Canary in `tests/memory-store.test.js`.
@@ -109,14 +109,14 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - A tool call is activity, not a fact: `agent-tool` left the ingest kind table at 53% of the canon, `Bash` lines a run paid to read.
 - One `contentMarker` PER untrusted corpus, so one fence cannot close another, and it is a sha256 digest rather than a cheap hash an attacker's text could fix-point.
 - Only memory TOGGLES cross the control WS: settings are an allow-list of booleans and clamped ints, so no `memory-*` type, path, record or lane log line rides one, a knob being tunable where a filename would be a leak (`tests/memory-delivery-negative.test.js`).
-- The ceiling on a delivered projection is BYTES per project, not claims: a count bounds nothing an operator feels, so a project over `maxProjectChars` is compacted by a model first and evicted down to fit if that declines, never dropping a locked claim and never emptying a project (`server/core/memory-distill-core.js`).
+- The ceiling on a delivered projection is BYTES per project, not claims: a count bounds nothing an operator feels, so a project over `maxProjectChars` is compacted by a model first and evicted down to fit if that declines, never dropping a locked claim and never emptying a project (`server/core/memory-distill-core.ts`).
 - `deadend` is a projected kind of its own because retiring a failed attempt forgets it and the next session proposes it again; it stands until a record shows the approach working.
 - The direct-read pointer line in a repo's own `AGENTS.md` stays operator-authored: it is the one instruction-tier link in the chain, which keeps the store agent-agnostic.
 - An intent record names its thread as a `thread <id>: ` text prefix, never a column: chains are keyed by project AND thread (`latestIntentHeads`), and the id shape has ONE definition, `VISIONS_THREAD_ID_PATTERN` in `shared/visions-intent-ids.ts`, which the server cores and the browser decoder both build their regex from, short enough that the entropy screen can never refuse it.
 
 ### Ephemeral Lane Write Boundaries
 
-- THE boundary is `defaultMode: acceptEdits` plus a throwaway cwd holding only the result file. Four plausible spellings fail SILENTLY, so every clause below comes from live probes recorded in `server/core/lane-permissions-core.js`.
+- THE boundary is `defaultMode: acceptEdits` plus a throwaway cwd holding only the result file. Four plausible spellings fail SILENTLY, so every clause below comes from live probes recorded in `server/core/lane-permissions-core.ts`.
 - No lane may grant a bare `Write` allow, which unbounds the writes, and nothing narrower grants the tool.
 - A PATH DENY is not a write boundary: probed with a bare `Write` allow present, both spellings let the write through, and a rule that looks like a boundary and is not is worse than none.
 - No lane may deny bare `Read`, `Write`, `Glob` or `Grep`: a bare `Read` deny refuses the Write tool, mutually exclusive with a result-file contract.
@@ -126,7 +126,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 ### Security: Trust Boundary
 
 - Glissa binds localhost only. Any local PROCESS is trusted; it is deliberately NOT "any local web page", and three layers keep a page on another local port out of the control WS.
-- Host allow-list first (`server/core/host-policy.js`). An ABSENT Host passes, since rebinding always carries a name and refusing it would only break HTTP/1.0 clients.
+- Host allow-list first (`server/core/host-policy.ts`). An ABSENT Host passes, since rebinding always carries a name and refusing it would only break HTTP/1.0 clients.
 - Port-exact Origin, the port read from the socket so nothing a client sends decides it; a mismatch falls THROUGH to the allow-list. Browser channels demand an Origin, non-browser ingresses do not.
 - A per-process page token guards local control and data upgrades, riding the query string since a browser cannot set a WS handshake header. `GET /control-token` refuses a disallowed Origin outright.
 - Trust is the LISTENER PORT, never a header or IP: a reverse proxy makes remote traffic look loopback, so an IP or `X-Forwarded-For` rule would hand every visitor local trust (`tests/request-trust.test.js`).

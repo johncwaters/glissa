@@ -13,7 +13,7 @@ const { once } = require('node:events');
 const { WebSocketServer } = require('ws');
 
 const vscode = require('./helpers/vscode-stub');
-const { ACTIVITY_METHOD } = require('../server/core/ingest-editor-core');
+const { ACTIVITY_METHOD } = require('../server/core/ingest-editor-core.ts');
 
 const STUB_PATH = require.resolve('./helpers/vscode-stub');
 // The framing module is COPIED beside the extension when the vsix is packed (server/visions-cli.js), so

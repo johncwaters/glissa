@@ -6,8 +6,8 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { pipeline } = require('node:stream');
 const express = require('express');
-const { decideHostAllowed } = require('./core/host-policy');
-const { decideOriginAllowed } = require('./core/origin-policy');
+const { decideHostAllowed } = require('./core/host-policy.ts');
+const { decideOriginAllowed } = require('./core/origin-policy.ts');
 const { configSiblingPath } = require('./pairings-store');
 const {
   buildUploadFilename,

@@ -8,7 +8,7 @@
 
 const crypto = require('node:crypto');
 
-const { positiveInt } = require('./ingest-number-core');
+const { positiveInt } = require('./ingest-number-core.ts');
 const {
   DEFAULT_THREAD_TTL_MS, MAX_INTENT_CHARS, THREAD_ID_RE, sanitizeIntentText,
 } = require('./visions-intent-core');

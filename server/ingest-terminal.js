@@ -13,7 +13,7 @@
 
 const {
   DEFAULT_FLUSH_MS, appendChunk, createTerminalAccumulator, flushAccumulator, rebaseline,
-} = require('./core/ingest-terminal-core');
+} = require('./core/ingest-terminal-core.ts');
 const { createLaneLog } = require('./lane-log');
 
 /**

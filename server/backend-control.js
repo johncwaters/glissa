@@ -1,7 +1,7 @@
 'use strict';
 
 const { registerControlHandlers } = require('./control-handlers');
-const { packVariantProjects } = require('./core/pack-core');
+const { packVariantProjects } = require('./core/pack-core.ts');
 
 /** @typedef {Record<string, unknown> & { projects: Array<Record<string, unknown>> }} BackendControlConfig */
 /** @typedef {{ toSnapshot: () => Record<string, unknown> }} BackendControlSession */
@@ -12,7 +12,7 @@ const { packVariantProjects } = require('./core/pack-core');
 /** @typedef {{ getStatus: () => Record<string, unknown>|null }} PrReviewControl */
 /** @typedef {{ getVersions: () => Record<string, string>, ensureBuilt: (names: string[], options?: { projects?: Record<string, unknown>[]|null }) => Promise<unknown> }} PackControl */
 /** @typedef {{ getSessionsMessage: () => Record<string, unknown>|null, getCachedReport: () => Record<string, unknown>|null, requestReport: (args: { days?: number, force?: boolean, requestId?: string|null }) => Promise<Record<string, unknown>>, getPlanLimitsMessage: () => Record<string, unknown>|null }} UsageControl */
-/** @typedef {{ requestReport: (message: Record<string, unknown>, send: (payload: Record<string, unknown>) => void) => Promise<void>, getCachedReport: () => Record<string, unknown>|null, listPackNames: () => Promise<string[]>, resolvePackSourceRoots: (name: string) => Promise<string[]> }} MillControl */
+/** @typedef {{ requestReport: (message: Record<string, unknown>, send: (payload: Record<string, unknown>) => void) => Promise<void>, getCachedReport: () => import('./core/mill-core.ts').MillReport|null, listPackNames: () => Promise<string[]>, resolvePackSourceRoots: (name: string) => Promise<string[]> }} MillControl */
 
 /**
  * @typedef {object} BackendControlDependencies

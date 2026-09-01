@@ -11,10 +11,10 @@ const { execFileAsync, execSync } = require('./child-process-safe');
 const { buildVsix, extensionIdOf } = require('./core/vsix-core');
 const {
   EDITOR_CANDIDATES, decideEditorTargets, isExtensionInstalled, visionsExtensionFiles,
-} = require('./core/editor-extension-core');
-const { relayInvocation } = require('./core/editor-setup-core');
+} = require('./core/editor-extension-core.ts');
+const { relayInvocation } = require('./core/editor-setup-core.ts');
 const { applyChanges, decideImpliedDefaults } = require('./core/visions-defaults-core');
-const { isUnder, underTestRunner } = require('./core/db-path-guard');
+const { isUnder, underTestRunner } = require('./core/db-path-guard.ts');
 const { createLaneLog } = require('./lane-log');
 const { unwireEditors, wireEditors } = require('./editor-wire');
 const { resolvePathCommandMatches } = require('../session/core/spawn-command.ts');

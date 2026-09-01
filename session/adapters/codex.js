@@ -10,7 +10,7 @@
 const path = require("node:path");
 
 const { execSync } = require("../../server/child-process-safe");
-const { PACK_NAME_RE } = require("../../server/core/pack-core");
+const { PACK_NAME_RE } = require("../../server/core/pack-core.ts");
 const { resolveAgentCommand, buildAgentSpawnCommand } = require("../core/spawn-command.ts");
 const { buildAgentEnv } = require("../core/spawn-env.ts");
 const { buildHookCommand } = require("../core/hook-command-core.ts");

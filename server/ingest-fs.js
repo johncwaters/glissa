@@ -24,8 +24,8 @@ const { canonicalizePath } = require('../shared/paths.ts');
 const {
   DEFAULT_BATCH_MS, buildIgnorePatterns, createBatch, daemonWriteRules, decideFsEvents, dedupeRoots,
   isIgnoredChange, normalizeRoots, recordChange, relativeWithin,
-} = require('./core/ingest-fs-core');
-const { positiveInt } = require('./core/ingest-number-core');
+} = require('./core/ingest-fs-core.ts');
+const { positiveInt } = require('./core/ingest-number-core.ts');
 const { createLaneLog } = require('./lane-log');
 
 const DEFAULT_MAX_ROOTS = 8;

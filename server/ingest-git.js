@@ -31,8 +31,8 @@ const {
   DEFAULT_DEBOUNCE_MS, DEFAULT_POLL_MS, LOG_ARGS, REV_PARSE_ARGS, STATUS_ARGS, createRepoState,
   decideGitEvents, deriveWatchDirs, isNoiseGitFile, parseCommitLine, parsePorcelainStatus, parseRevParse,
   shouldReadCommit,
-} = require('./core/ingest-git-core');
-const { positiveInt } = require('./core/ingest-number-core');
+} = require('./core/ingest-git-core.ts');
+const { positiveInt } = require('./core/ingest-number-core.ts');
 const { createLaneLog } = require('./lane-log');
 
 const DEFAULT_MAX_REPOS = 16;
