@@ -10,7 +10,7 @@
 // connection chip, "+ Session", the help button, the hamburger with Mute / Settings / Restart / Shut
 // Down), so the client-trust gating and every existing listener come along untouched.
 
-import { STATES } from '/shared/states.mjs';
+import { STATES } from '#shared/states.ts';
 import { el, MERGE_TAGS, observeHeaderHeight, queryTag, stateChip } from '../dom-helpers.js';
 import { attentionSummaryText, countSessionsNeedingAttention, orderRoster } from '../focus-view/attention-core.mjs';
 import { NO_PATH_KEY } from '../focus-view/roster-groups.mjs';

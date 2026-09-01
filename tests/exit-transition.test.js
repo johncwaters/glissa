@@ -6,7 +6,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { decideExitTransition } = require('../session/core/exit-transition');
-const { STATES } = require('../shared/states');
+const { STATES } = require('../shared/states.ts');
 
 test('STARTING with no first output -> process_exit with no_output_before_exit reason', () => {
   const { event, detail } = decideExitTransition(STATES.STARTING, 1, null, false);

@@ -7,8 +7,8 @@ const path = require('node:path');
 const { promisify } = require('node:util');
 const {
   ClientMessage, RUNTIME_CONFIG_SCALAR_KEYS, ConfigUpdate, configIssueMessage,
-} = require('../shared/contracts');
-const { STATES } = require('../shared/states');
+} = require('../shared/contracts/index.ts');
+const { STATES } = require('../shared/states.ts');
 const { claudeProjectsDir, listRepoConversations } = require('../session/core/conversation-history');
 const { normalizeClientTrust } = require('./core/request-trust');
 const { PACK_NAME_RE, applyPackDelta, isSelfReferentialPack, sameProjectRecords } = require('./core/pack-core');
@@ -49,8 +49,8 @@ const {
   VISIONS_MAX_PER_HOUR_RANGE,
   VISIONS_QUIET_MS_RANGE,
   USAGE_INTEGER_RANGES,
-} = require('../shared/settings-ranges');
-const { USAGE_VENDOR_KEYS, USAGE_BUDGET_KEYS } = require('../shared/usage-config');
+} = require('../shared/settings-ranges.ts');
+const { USAGE_VENDOR_KEYS, USAGE_BUDGET_KEYS } = require('../shared/usage-config.ts');
 
 function scanRepoRoots(roots) {
   const results = [];

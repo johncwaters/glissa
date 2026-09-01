@@ -1,6 +1,6 @@
 'use strict';
 
-const { STATES } = require("../../shared/states");
+const { STATES } = require("../../shared/states.ts");
 
 // Maps a real PTY exit (current state + exit code/signal + whether the STARTING PTY ever
 // produced output) to the lifecycle event/detail to fire. Side-effect free: the caller

@@ -1,6 +1,6 @@
 'use strict';
 
-const { STATES } = require('../shared/states');
+const { STATES } = require('../shared/states.ts');
 
 const HEALTH_SNAPSHOT_INTERVAL_MS = 10000;
 

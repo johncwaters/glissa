@@ -1,4 +1,4 @@
-import { VISIONS_THREAD_ID_PATTERN } from '/shared/visions-intent-ids.mjs';
+import { VISIONS_THREAD_ID_PATTERN } from '#shared/visions-intent-ids.ts';
 
 export const VISIONS_EMPTY_TEXT = 'No findings. Open a markdown file in a connected editor.';
 

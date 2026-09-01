@@ -6,7 +6,6 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { pipeline } = require('node:stream');
 const express = require('express');
-const { mountBrowserModuleRoutes } = require('./browser-modules');
 const { decideHostAllowed } = require('./core/host-policy');
 const { decideOriginAllowed } = require('./core/origin-policy');
 const { configSiblingPath } = require('./pairings-store');
@@ -114,26 +113,6 @@ function receiveUpload({ req, res, sess, dir, filename, savedPath }) {
   });
 }
 
-function mountDevRoutes(app) {
-  app.get('/xterm/xterm.css', (_req, res) => {
-    res.sendFile(path.join(__dirname, '..', 'node_modules/@xterm/xterm/css/xterm.css'));
-  });
-  app.get('/xterm/xterm.mjs', (_req, res) => {
-    res.type('application/javascript');
-    res.sendFile(path.join(__dirname, '..', 'node_modules/@xterm/xterm/lib/xterm.mjs'));
-  });
-  app.get('/xterm/addon-fit.mjs', (_req, res) => {
-    res.type('application/javascript');
-    res.sendFile(path.join(__dirname, '..', 'node_modules/@xterm/addon-fit/lib/addon-fit.mjs'));
-  });
-  app.get('/xterm/addon-webgl.mjs', (_req, res) => {
-    res.type('application/javascript');
-    res.sendFile(path.join(__dirname, '..', 'node_modules/@xterm/addon-webgl/lib/addon-webgl.mjs'));
-  });
-  app.use('/zod', express.static(path.join(__dirname, '..', 'node_modules/zod')));
-
-  mountBrowserModuleRoutes(app);
-}
 
 /** @param {BackendHttpDependencies} dependencies */
 function createBackendHttpApp(dependencies) {
@@ -259,11 +238,14 @@ function createBackendHttpApp(dependencies) {
   });
 
   if (staticDir === 'auto') {
-    const distPath = path.join(__dirname, '..', 'dist');
-    const useDistDir = fs.existsSync(distPath) && fs.statSync(distPath).isDirectory();
-    const resolvedDir = useDistDir ? 'dist' : 'public';
-    app.use(express.static(path.join(__dirname, '..', resolvedDir)));
-    if (!useDistDir) mountDevRoutes(app);
+    const clientDir = path.join(__dirname, '..', 'dist', 'client');
+    if (!fs.existsSync(path.join(clientDir, 'index.html'))) {
+      throw Object.assign(
+        new Error('Dashboard build not found (dist/client). Run `npm run build` first, or use `npm run dev`.'),
+        { glissaBoot: true },
+      );
+    }
+    app.use(express.static(clientDir));
   }
   if (staticDir !== 'auto' && typeof staticDir === 'string') {
     app.use(express.static(staticDir));
@@ -272,4 +254,4 @@ function createBackendHttpApp(dependencies) {
   return app;
 }
 
-module.exports = { createBackendHttpApp, mountDevRoutes };
+module.exports = { createBackendHttpApp };

@@ -56,7 +56,7 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 ### Common Patterns
 
 - Dual WebSocket: data WS (`/terminals/:sessionId`, raw PTY bytes) and control WS (`/control`, JSON).
-- Table-driven state machines (`session/core/state-machine.js`, `shared/notification-states.js`).
+- Table-driven state machines (`session/core/state-machine.js`, `shared/notification-states.ts`).
 - Lane shape: pure rules in a core, deps injected into an IO-free poller, a thin wiring shell owning the timers.
 
 ## Invariants

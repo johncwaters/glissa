@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const ranges = require('../shared/settings-ranges');
+const ranges = require('../shared/settings-ranges.ts');
 const memoryCore = require('../server/core/memory-core');
 const memoryDistillCore = require('../server/core/memory-distill-core');
 const {

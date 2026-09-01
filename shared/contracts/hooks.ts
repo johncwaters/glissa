@@ -1,10 +1,8 @@
-'use strict';
+import { z } from 'zod';
 
-const { z } = require('zod');
+export const HookPayload = z.record(z.string(), z.unknown());
 
-const HookPayload = z.record(z.string(), z.unknown());
-
-const HookEnvelope = z.object({
+export const HookEnvelope = z.object({
   glissaId: z.string().min(1),
   event: z.string().min(1),
   token: z.string().nullable().optional(),
@@ -15,7 +13,7 @@ const HookEnvelope = z.object({
 // one back (session/core/user-hooks-core.js owns the semantic checks). Deliberately NOT what
 // config.json is parsed against: a stored record is validated loosely there and judged by the core at
 // read time, so one hand edit missing a field cannot fail the whole config load.
-const UserHook = z.object({
+export const UserHook = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   event: z.string().min(1),
@@ -28,8 +26,6 @@ const UserHook = z.object({
   projects: z.array(z.string()).optional(),
 }).passthrough();
 
-/** @typedef {import('zod').infer<typeof HookPayload>} HookPayload */
-/** @typedef {import('zod').infer<typeof UserHook>} UserHook */
-/** @typedef {import('zod').infer<typeof HookEnvelope>} HookEnvelope */
-
-module.exports = { HookPayload, HookEnvelope, UserHook };
+export type HookPayload = z.infer<typeof HookPayload>;
+export type UserHook = z.infer<typeof UserHook>;
+export type HookEnvelope = z.infer<typeof HookEnvelope>;

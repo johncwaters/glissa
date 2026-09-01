@@ -15,7 +15,7 @@
 // == can read the PTY. See docs/postmortem-terminal-detection.md.
 
 const claudeCode = require('../session/adapters/claude-code');
-const { HookEnvelope } = require('../shared/contracts');
+const { HookEnvelope } = require('../shared/contracts/index.ts');
 
 const { mapHookToSignal, mapHookConfidence, mapHookPromptKind } = claudeCode;
 

@@ -5,9 +5,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 
-const { canonicalizePath, equalsIgnoringCaseOnWindows } = require('../shared/paths');
+const { canonicalizePath, equalsIgnoringCaseOnWindows } = require('../shared/paths.ts');
 const { decideConfigPath, glissaHomeDir: resolveGlissaHomeDir } = require('./core/config-path-core');
-const { Config, RUNTIME_CONFIG_SCALAR_KEYS } = require('../shared/contracts');
+const { Config, RUNTIME_CONFIG_SCALAR_KEYS } = require('../shared/contracts/index.ts');
 const { isPlainObject } = require('./core/usage-number-core');
 const {
   INGEST_SPEC, MEMORY_SPEC, MILL_METRICS_SPEC, PACK_DISTILLER_SPEC, pickMillBlock,

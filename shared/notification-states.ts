@@ -1,9 +1,7 @@
-'use strict';
-
 // Notification lifecycle states - single source of truth.
-// Mirrors the table-driven pattern used by shared/states.js for session states.
+// Mirrors the table-driven pattern used by shared/states.ts for session states.
 
-const NOTIFICATION_STATES = Object.freeze({
+export const NOTIFICATION_STATES = Object.freeze({
   IDLE:         'IDLE',         // No active notification for this session
   PENDING:      'PENDING',      // Transient: auto-transitions in ENTRY_HOOK, never observable externally.
                                 // Exists to centralize the suppress/debounce/deliver decision.
@@ -19,7 +17,9 @@ const NOTIFICATION_STATES = Object.freeze({
                                 // react to the browser notification is reached on their phone even
                                 // with a dashboard open somewhere.
   ACKNOWLEDGED: 'ACKNOWLEDGED', // User interacted (dismissed, responded, or session left trigger state)
-});
+} as const);
+
+export type NotificationState = (typeof NOTIFICATION_STATES)[keyof typeof NOTIFICATION_STATES];
 
 // Ping-pong pattern: ESCALATED + escalation_tick -> DELIVERED (not self-transition)
 // because the session state machine's transition() skips entry/exit hooks on
@@ -29,7 +29,7 @@ const NOTIFICATION_STATES = Object.freeze({
 // trigger REPLACES a live notification (fresh category/message, timers cleared on exit).
 // Without those edges a re-trigger on an un-acknowledged entry is silently lost - e.g.
 // a team's second run could never notify after the first run's entry stayed DELIVERED.
-const NOTIFICATION_TRANSITIONS = Object.freeze({
+export const NOTIFICATION_TRANSITIONS: Readonly<Record<NotificationState, Readonly<Partial<Record<string, NotificationState>>>>> = Object.freeze({
   [NOTIFICATION_STATES.IDLE]: {
     trigger:           NOTIFICATION_STATES.PENDING,
   },
@@ -75,4 +75,3 @@ const NOTIFICATION_TRANSITIONS = Object.freeze({
   },
 });
 
-module.exports = { NOTIFICATION_STATES, NOTIFICATION_TRANSITIONS };

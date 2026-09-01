@@ -6,8 +6,8 @@ const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { ClientMessage, ServerMessage } = require('../shared/contracts');
-const { STATES } = require('../shared/states');
+const { ClientMessage, ServerMessage } = require('../shared/contracts/index.ts');
+const { STATES } = require('../shared/states.ts');
 const { registerControlHandlers } = require('../server/control-handlers');
 
 function dispatchTypes(file, startMarker, endMarker) {

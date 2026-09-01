@@ -8,7 +8,7 @@
 
 const crypto = require('node:crypto');
 
-const { VISIONS_THREAD_ID_PATTERN } = require('../../shared/visions-intent-ids');
+const { VISIONS_THREAD_ID_PATTERN } = require('../../shared/visions-intent-ids.ts');
 const { sanitizeOneLine } = require('./text-core');
 
 const MAX_INTENT_CHARS = 300;

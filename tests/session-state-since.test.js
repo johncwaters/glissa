@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const { setTimeout: sleep } = require('node:timers/promises');
 
 const { Session } = require('../session/sessions');
-const { STATES } = require('../shared/states');
+const { STATES } = require('../shared/states.ts');
 
 function makeSession(state) {
   const s = new Session({ id: 'state-since-test', name: 'state-since', path: process.cwd() });

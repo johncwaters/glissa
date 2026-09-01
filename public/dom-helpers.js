@@ -1,7 +1,7 @@
 // ── DOM helpers ──────────────────────────────────────────────
 // Shared utility for creating DOM elements.
 
-import { BADGE_LABELS, STATE_GLYPHS } from '/shared/states.mjs';
+import { BADGE_LABELS, STATE_GLYPHS } from '#shared/states.ts';
 
 /**
  * @template {keyof HTMLElementTagNameMap} Tag

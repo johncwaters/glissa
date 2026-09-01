@@ -7,7 +7,6 @@ import tailwindcss from '@tailwindcss/vite';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const pkg = require('./package.json');
-const { browserModulesVitePlugin } = require('./server/browser-modules');
 
 function glissaBackendPlugin() {
   let backend = null;
@@ -44,7 +43,6 @@ function glissaBackendPlugin() {
 export default defineConfig({
   plugins: [
     tailwindcss(),
-    browserModulesVitePlugin(),
     glissaBackendPlugin(),
   ],
 
@@ -59,11 +57,16 @@ export default defineConfig({
   publicDir: '../assets',
 
   build: {
-    outDir: '../dist',
+    outDir: '../dist/client',
     emptyOutDir: true,
   },
 
   server: {
+    // The dashboard imports shared/ through the package imports map (#shared/*), which lives
+    // outside the Vite root (public/), so the repo root must be servable in dev.
+    fs: {
+      allow: [__dirname],
+    },
     // Bind IPv4 loopback explicitly. Vite's default `localhost` resolves to ::1
     // (IPv6) on Windows, but settings-injector writes hook URLs as http://127.0.0.1
     // (IPv4) and server.js binds 127.0.0.1 in production. Without this, Glissa's

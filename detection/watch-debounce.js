@@ -11,7 +11,7 @@
 
 const fs = require('node:fs');
 
-const { canonicalizePath } = require('../shared/paths');
+const { canonicalizePath } = require('../shared/paths.ts');
 
 function createWatchDebounce({ onChange, debounceMs }) {
   /** @type {fs.FSWatcher|null} */

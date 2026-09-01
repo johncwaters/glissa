@@ -6,7 +6,7 @@
 // no clock and no Session import here. The guard ORDER is pinned by tests/rebase-gate.test.js rather
 // than described here, so the tests stay the single statement of it.
 
-const { STATES } = require("../../shared/states");
+const { STATES } = require("../../shared/states.ts");
 
 // A worktree may only be rewritten while nothing is running inside it: IDLE and COMPLETE sit between
 // turns, DONE and FAILED have no PTY at all, DORMANT never started one. WAITING is deliberately absent

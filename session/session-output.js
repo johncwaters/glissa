@@ -1,7 +1,7 @@
 "use strict";
 
 const { createOutputRing } = require("./core/output-ring");
-const { STATES, RESTARTABLE_STATES } = require("../shared/states");
+const { STATES, RESTARTABLE_STATES } = require("../shared/states.ts");
 
 /** @type {Set<string>} */
 const PASTE_READY_STATES = new Set([

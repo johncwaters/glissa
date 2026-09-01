@@ -5,9 +5,8 @@ import { nextReconnectDelayMs } from './reconnect-backoff.mjs';
 import { decideLivenessAction } from './connection-liveness-core.mjs';
 import { buildWebSocketUrl } from './ws-url-core.mjs';
 import { clearPageToken, loadPageToken, pageToken, withPageToken } from './ws-token.js';
-import controlContracts from '/shared/control-messages.mjs';
+import { ServerMessage } from '#shared/contracts/control-messages.ts';
 
-const { ServerMessage } = controlContracts;
 
 /** @type {WebSocket|null} */
 let controlWs = null;

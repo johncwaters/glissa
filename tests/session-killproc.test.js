@@ -12,7 +12,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 
 const { Session } = require('../session/sessions');
-const { STATES } = require('../shared/states');
+const { STATES } = require('../shared/states.ts');
 
 const FAKE_PID = 2147483646;
 

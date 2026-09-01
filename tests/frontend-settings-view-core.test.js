@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { SETTINGS_RANGES } = require('../shared/settings-ranges');
+const { SETTINGS_RANGES } = require('../shared/settings-ranges.ts');
 
 async function load() {
   const [{ SETTINGS_MAP }, core] = await Promise.all([

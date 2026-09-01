@@ -26,15 +26,14 @@
     "tools/vscode-visions/",
     "notifications/",
     "detection/",
-    "shared/states.js",
-    "shared/client-trust.js",
-    "shared/client-trust.esm.mjs",
-    "shared/notification-states.js",
-    "shared/settings-ranges.js",
+    "shared/states.ts",
+    "shared/client-trust.ts",
+    "shared/notification-states.ts",
+    "shared/settings-ranges.ts",
     "shared/contracts/",
-    "shared/paths.js",
-    "shared/usage-config.js",
-    "shared/visions-intent-ids.js"
+    "shared/paths.ts",
+    "shared/usage-config.ts",
+    "shared/visions-intent-ids.ts"
   ],
   "engines": {
     "node": ">=22.18.0"
@@ -63,12 +62,10 @@
     "start": "node server.js",
     "lint": "biome check .",
     "test": "node --test \"tests/**/*.test.js\" \"tests/**/*.test.ts\"",
-    "typecheck": "tsc --project tsconfig.json && tsc --project tsconfig.mill-metrics.json && tsc --project tsconfig.public.json",
+    "typecheck": "tsc --project tsconfig.json && tsc --project tsconfig.mill-metrics.json && tsc --project tsconfig.public.json && tsc --project tsconfig.strict.json",
     "test:container": "docker build -f test/container/Dockerfile -t glissa-remote-test . && docker run --rm glissa-remote-test",
     "dev": "vite",
-    "dev:server-only": "node server.js",
     "build": "vite build",
-    "preview": "vite preview",
     "postinstall": "node scripts/postinstall-path-check.js",
     "prepare": "node scripts/prepare-build.js",
     "release": "node scripts/release.js"

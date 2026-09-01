@@ -10,7 +10,7 @@ const assert = require('node:assert/strict');
 const pty = require('node-pty');
 
 const { Session } = require('../session/sessions');
-const { STATES } = require('../shared/states');
+const { STATES } = require('../shared/states.ts');
 
 const isWindows = process.platform === 'win32';
 const shell = isWindows ? 'cmd.exe' : '/bin/sh';

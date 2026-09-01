@@ -9,7 +9,7 @@ const path = require('node:path');
 const { createConfigStore, DEFAULT_CONFIG } = require('../server/config-store');
 const {
   BrowserConfig, Config, CONFIG_BLOCK_KEYS, ConfigUpdate, HIDDEN_CONFIG_KEYS,
-} = require('../shared/contracts');
+} = require('../shared/contracts/index.ts');
 
 test('DEFAULT_CONFIG satisfies the persisted Config contract', () => {
   assert.equal(Config.safeParse(DEFAULT_CONFIG).success, true);

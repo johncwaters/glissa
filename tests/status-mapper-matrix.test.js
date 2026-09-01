@@ -29,7 +29,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { mapSignalToEvent } = require('../session/core/status-mapper');
-const { STATES } = require('../shared/states');
+const { STATES } = require('../shared/states.ts');
 
 const ALL_STATES = Object.values(STATES);
 const CONFIDENCES = ['high', 'low'];

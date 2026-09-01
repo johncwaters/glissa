@@ -10,7 +10,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { Session } = require('../session/sessions');
-const { STATES } = require('../shared/states');
+const { STATES } = require('../shared/states.ts');
 
 // A worktree that is clean, quiescent, and two commits behind a develop that just moved.
 function signature(extra = {}) {

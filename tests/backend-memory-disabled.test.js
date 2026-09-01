@@ -16,7 +16,7 @@ const path = require('node:path');
 
 const { createBackend } = require('../server/backend');
 const { isolateTranscriptHomes } = require('./helpers/transcript-homes');
-const { CONFIG_SCALAR_KEYS } = require('../shared/contracts');
+const { CONFIG_SCALAR_KEYS } = require('../shared/contracts/index.ts');
 
 async function bootWithConfig(memory) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memory-backend-'));

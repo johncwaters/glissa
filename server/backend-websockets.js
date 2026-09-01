@@ -1,7 +1,7 @@
 'use strict';
 
 const { WebSocketServer } = require('ws');
-const { STATES } = require('../shared/states');
+const { STATES } = require('../shared/states.ts');
 const { createReplayLog } = require('./control-replay-core');
 const { decideControlSend } = require('./core/control-send-core');
 const { decideHostAllowed } = require('./core/host-policy');

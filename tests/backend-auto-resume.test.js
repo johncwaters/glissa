@@ -24,7 +24,7 @@ const { createBackend, runAutoResume, persistSessionField, decideWasActiveFlip }
 const { createConfigStore } = require('../server/config-store');
 const { createSpawnGate } = require('../server/spawn-gate');
 const { Session } = require('../session/sessions');
-const { STATES } = require('../shared/states');
+const { STATES } = require('../shared/states.ts');
 
 function withStore(cfg, fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-autoresume-'));

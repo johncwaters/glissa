@@ -17,7 +17,7 @@ const path = require('node:path');
 
 const { registerControlHandlers } = require('../server/control-handlers');
 const { createConfigStore } = require('../server/config-store');
-const { ConfigUpdate, HIDDEN_CONFIG_KEYS } = require('../shared/contracts');
+const { ConfigUpdate, HIDDEN_CONFIG_KEYS } = require('../shared/contracts/index.ts');
 
 function harness(cfg, store) {
   const controlWss = new EventEmitter();

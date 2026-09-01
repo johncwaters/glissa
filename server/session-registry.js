@@ -1,8 +1,8 @@
 'use strict';
 
 const fs = require('node:fs');
-const { STATES } = require('../shared/states');
-const { isSameDirectoryPath } = require('../shared/paths');
+const { STATES } = require('../shared/states.ts');
+const { isSameDirectoryPath } = require('../shared/paths.ts');
 const { pickAutoResume } = require('../session/core/auto-resume');
 const { diffProjects, shouldStartAfterModify } = require('./core/session-registry-core');
 const { configuredIntegrationBranch } = require('./core/integration-branch-core');

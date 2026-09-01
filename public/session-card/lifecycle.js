@@ -2,7 +2,7 @@
 // Owns session card DOM lifecycle, terminal setup, and per-session state.
 
 // Virtual module generated from shared/states.js (Vite plugin in dev/build, backend route in no-build)
-import { KILLABLE_STATES, RESTARTABLE_STATES, STATES } from '/shared/states.mjs';
+import { KILLABLE_STATES, RESTARTABLE_STATES, STATES } from '#shared/states.ts';
 import { playAlertSound } from '../alert-sound.js';
 import { sendControlMsg } from '../control-ws.js';
 import { el } from '../dom-helpers.js';

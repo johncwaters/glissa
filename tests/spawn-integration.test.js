@@ -11,7 +11,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { Session } = require('../session/sessions');
-const { STATES } = require('../shared/states');
+const { STATES } = require('../shared/states.ts');
 
 // Stub PTY handle. A non-existent pid keeps Session.kill()'s taskkill a harmless no-op.
 function fakePty(pid = 2147483646) {

@@ -18,7 +18,7 @@
 // branch-sync-status message; a resync-branch reply additionally carries action/error, which is what
 // tells the two apart client-side. This never touches the worktree merge gate above it.
 
-import { MERGEABLE_LIVE_STATES, STATES } from '/shared/states.mjs';
+import { MERGEABLE_LIVE_STATES, STATES } from '#shared/states.ts';
 import { sendControlMsg } from '../control-ws.js';
 import { adoptElement, el, releaseElement } from '../dom-helpers.js';
 import { sessionUIs } from '../session-card/card-registry.js';

@@ -11,7 +11,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { carryWorktreeAcrossRecreate, shouldStartAfterModify } = require('../server/backend');
-const { STATES } = require('../shared/states');
+const { STATES } = require('../shared/states.ts');
 
 // `unmergedWork` names WHY the tree still holds work - 'dirty' (uncommitted changes) or 'committed'
 // (a clean tree whose branch is ahead of the integration branch, the shape that used to be discarded

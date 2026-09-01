@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { SessionSnapshot, PendingWakeup } = require('../shared/contracts/session');
+const { SessionSnapshot, PendingWakeup } = require('../shared/contracts/session.ts');
 const { Session } = require('../session/sessions');
 
 test('SessionSnapshot preserves nested extension fields', () => {

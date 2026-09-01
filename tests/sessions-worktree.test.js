@@ -14,7 +14,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { Session } = require('../session/sessions');
-const { STATES } = require('../shared/states');
+const { STATES } = require('../shared/states.ts');
 const { hasGit, git } = require('./helpers/git-fixture');
 
 // The finish settled branch and the once("exit") handler now fire an ASYNC reset (merge/discard ->

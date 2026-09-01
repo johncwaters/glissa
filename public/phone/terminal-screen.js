@@ -10,7 +10,7 @@
 // the top bar's name, since the card header does not render on this screen), and the hover-revealed
 // remove "x" is the kebab's Remove.
 
-import { STATES } from '/shared/states.mjs';
+import { STATES } from '#shared/states.ts';
 import { borrowCard, getBorrowedCardId, releaseCard } from '../card-host.js';
 import { adoptElement, el, queryTag, releaseElement, stateChip } from '../dom-helpers.js';
 import { isRenameInProgress } from '../session-card/card-dom.js';

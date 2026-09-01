@@ -18,7 +18,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { NotificationManager } = require('../notifications/notification-manager');
-const { NOTIFICATION_STATES: NS, NOTIFICATION_TRANSITIONS } = require('../shared/notification-states');
+const { NOTIFICATION_STATES: NS, NOTIFICATION_TRANSITIONS } = require('../shared/notification-states.ts');
 const { decideTelegramNotification } = require('../notifications/channels/telegram');
 
 const PHONE_MS = 50;

@@ -1,4 +1,4 @@
-const { STATES } = require("../../shared/states");
+const { STATES } = require("../../shared/states.ts");
 
 // Pure state-machine tables for the Session lifecycle, extracted from sessions.js
 // (relocated verbatim, behavior-preserving). The transition() engine in sessions.js

@@ -1,12 +1,10 @@
-'use strict';
-
-const { z } = require('zod');
-const { PendingWakeup, SessionSnapshot, SessionState } = require('./session');
+import { z } from 'zod';
+import { PendingWakeup, SessionSnapshot, SessionState } from './session.ts';
 
 const requestId = z.string().nullable().optional();
 const sessionId = z.string();
-const loose = (type, shape = {}) => z.object({ type: z.literal(type), ...shape }).passthrough();
-const openObject = (shape = {}) => z.object(shape).passthrough();
+const loose = (type: string, shape: z.ZodRawShape = {}) => z.object({ type: z.literal(type), ...shape }).passthrough();
+const openObject = (shape: z.ZodRawShape = {}) => z.object(shape).passthrough();
 const nullableString = z.string().nullable();
 const timestamp = z.number().finite();
 const optionalTimestamp = timestamp.optional();
@@ -14,7 +12,7 @@ const optionalError = nullableString.optional();
 const opaqueObject = openObject();
 const opaqueArray = z.array(z.unknown());
 
-const CLIENT_MESSAGE_TYPES = Object.freeze([
+export const CLIENT_MESSAGE_TYPES = Object.freeze([
   'add-session',
   'list-conversations',
   'resume-conversation',
@@ -92,11 +90,11 @@ const clientVariants = [
   loose('focus-change', { focused: z.boolean() }),
   loose('request-health-snapshot'),
   ...idOnlyClientTypes.map((type) => loose(type, { id: sessionId, force: z.unknown().optional() })),
-];
+] as const;
 
-const ClientMessage = z.discriminatedUnion('type', /** @type {any} */ (clientVariants));
+export const ClientMessage = z.discriminatedUnion('type', clientVariants);
 
-const SERVER_MESSAGE_TYPES = Object.freeze([
+export const SERVER_MESSAGE_TYPES = Object.freeze([
   'snapshot',
   'pack-updated',
   'mill-report',
@@ -462,11 +460,9 @@ const serverVariants = [
   loose('sessions-reordered', { order: z.array(sessionId) }),
   loose('shutting-down'),
   loose('restarting'),
-];
+] as const;
 
-const ServerMessage = z.discriminatedUnion('type', /** @type {any} */ (serverVariants));
+export const ServerMessage = z.discriminatedUnion('type', serverVariants);
 
-/** @typedef {import('zod').infer<typeof ClientMessage>} ClientMessage */
-/** @typedef {import('zod').infer<typeof ServerMessage>} ServerMessage */
-
-module.exports = { CLIENT_MESSAGE_TYPES, SERVER_MESSAGE_TYPES, ClientMessage, ServerMessage };
+export type ClientMessage = z.infer<typeof ClientMessage>;
+export type ServerMessage = z.infer<typeof ServerMessage>;

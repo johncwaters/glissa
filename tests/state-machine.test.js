@@ -13,7 +13,7 @@ const {
   ENTRY_HOOKS,
   EXIT_HOOKS,
 } = require('../session/core/state-machine');
-const { STATES, KILLABLE_STATES } = require('../shared/states');
+const { STATES, KILLABLE_STATES } = require('../shared/states.ts');
 
 test('TRANSITIONS matrix is frozen and matches the lifecycle shape', () => {
   assert.ok(Object.isFrozen(TRANSITIONS), 'TRANSITIONS must be frozen');

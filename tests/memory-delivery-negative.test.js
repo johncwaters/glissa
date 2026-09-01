@@ -15,7 +15,7 @@ const path = require('node:path');
 
 const { registerControlHandlers } = require('../server/control-handlers');
 const { createConfigStore } = require('../server/config-store');
-const { CONFIG_SCALAR_KEYS, ConfigUpdate } = require('../shared/contracts');
+const { CONFIG_SCALAR_KEYS, ConfigUpdate } = require('../shared/contracts/index.ts');
 const { REPLAYABLE_EXACT, isReplayable } = require('../server/control-replay-core');
 const { createMemoryStore } = require('../server/memory-store');
 const { resolveMemoryConfig } = require('../server/core/memory-core');

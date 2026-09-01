@@ -1,6 +1,6 @@
 'use strict';
 
-const { STATES } = require('../shared/states');
+const { STATES } = require('../shared/states.ts');
 const { createNotifyGate, explainNotification } = require('../session/core/notify-gate');
 const { INTERACTIVE_LANE } = require('./core/usage-lane-core');
 const { decideWasActiveFlip } = require('./core/session-registry-core');

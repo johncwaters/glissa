@@ -23,7 +23,7 @@ const fsNode = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { canonicalizePath } = require('../shared/paths');
+const { canonicalizePath } = require('../shared/paths.ts');
 const {
   HEAD_SAMPLE_BYTES, MAX_CATCH_UP_BYTES, applyRead, createTailState, headChanged, headSample,
   pickStaleByMtime, planRead,

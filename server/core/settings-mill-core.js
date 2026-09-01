@@ -15,7 +15,7 @@ const {
   QUIET_MS_RANGE,
   STALE_HORIZON_DAYS_RANGE,
   TIMEOUT_SECONDS_RANGE,
-} = require('../../shared/settings-ranges');
+} = require('../../shared/settings-ranges.ts');
 const { SOURCE_NAMES } = require('./ingest-core');
 
 const NO_BLOCKS = Object.freeze({});

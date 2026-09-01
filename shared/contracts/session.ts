@@ -1,16 +1,14 @@
-'use strict';
+import { z } from 'zod';
+import { STATES } from '../states.ts';
 
-const { z } = require('zod');
-const { STATES } = require('../states');
-
-const SessionState = z.enum(Object.values(STATES));
-const PendingWakeup = z.object({
+export const SessionState = z.enum(STATES);
+export const PendingWakeup = z.object({
   at: z.number().finite().nullable(),
   kind: z.string(),
   reason: z.string().nullable(),
 }).passthrough();
 
-const SessionSnapshot = z.object({
+export const SessionSnapshot = z.object({
   id: z.string(),
   name: z.string(),
   path: z.string(),
@@ -33,7 +31,6 @@ const SessionSnapshot = z.object({
   auditLog: z.array(z.unknown()),
 }).passthrough();
 
-/** @typedef {import('zod').infer<typeof SessionState>} SessionState */
-/** @typedef {import('zod').infer<typeof SessionSnapshot>} SessionSnapshot */
-
-module.exports = { PendingWakeup, SessionState, SessionSnapshot };
+export type SessionState = z.infer<typeof SessionState>;
+export type SessionSnapshot = z.infer<typeof SessionSnapshot>;
+export type PendingWakeup = z.infer<typeof PendingWakeup>;

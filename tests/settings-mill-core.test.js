@@ -14,7 +14,7 @@ const {
 const { resolveMemoryConfig } = require('../server/core/memory-core');
 const { resolveDistillConfig } = require('../server/core/memory-distill-core');
 const { resolveIngestConfig } = require('../server/core/ingest-core');
-const settingsRanges = require('../shared/settings-ranges');
+const settingsRanges = require('../shared/settings-ranges.ts');
 
 test('an absent block is valid, so an untouched tab writes nothing', () => {
   for (const spec of [MEMORY_SPEC, MILL_METRICS_SPEC, PACK_DISTILLER_SPEC, INGEST_SPEC]) {

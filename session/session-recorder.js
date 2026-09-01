@@ -47,7 +47,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 
-const { safePathSegment } = require('../shared/paths');
+const { safePathSegment } = require('../shared/paths.ts');
 
 // Recordings live beside config.json, never under the process cwd: recording is on by default now,
 // and a cwd-relative directory would scatter forensic logs through whichever repo the server

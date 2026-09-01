@@ -4,8 +4,8 @@
 import '@xterm/xterm/css/xterm.css';
 import './tailwind.css';
 
-import { shouldShowServerAction } from '/shared/client-trust.mjs';
-import { STATES } from '/shared/states.mjs';
+import { shouldShowServerAction } from '#shared/client-trust.ts';
+import { STATES } from '#shared/states.ts';
 import { checkControlLiveness, connectControl, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.js';
 import { createAddSessionDialog } from './dialogs.js';
 import { observeHeaderHeight, queryTag, writeClipboardText } from './dom-helpers.js';

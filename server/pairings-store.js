@@ -24,7 +24,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { canonicalizePath, equalsIgnoringCaseOnWindows } = require('../shared/paths');
+const { canonicalizePath, equalsIgnoringCaseOnWindows } = require('../shared/paths.ts');
 const { glissaHomeDir } = require('./config-store');
 const { writeJsonAtomic, writeJsonAtomicSync } = require('./json-file');
 const {

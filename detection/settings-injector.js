@@ -13,7 +13,7 @@ const crypto = require('node:crypto');
 
 const { buildRtkHookEntry } = require('../session/core/rtk-command');
 const { appendUserHooks } = require('../session/core/user-hooks-core');
-const { safePathSegment } = require('../shared/paths');
+const { safePathSegment } = require('../shared/paths.ts');
 
 const DEFAULT_BASE_DIR = path.join(os.tmpdir(), 'glissa-hooks');
 const DEFAULT_TIMEOUT_SEC = 5; // short: handler returns 200 immediately; never stall Claude

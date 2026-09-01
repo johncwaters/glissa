@@ -7,7 +7,7 @@ const {
   MAX_RECORDS_PER_KIND_RANGE,
   MAX_RECORD_CHARS_RANGE,
   MEMORY_RETAIN_DAY_RANGE,
-} = require('../../shared/settings-ranges');
+} = require('../../shared/settings-ranges.ts');
 
 const { buildStampLine } = require('./distill-core');
 const { scrubText } = require('./ingest-core');

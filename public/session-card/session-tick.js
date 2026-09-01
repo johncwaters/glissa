@@ -11,7 +11,7 @@
 // interval at module load; refreshElapsed is also called directly on state changes (lifecycle.applyState)
 // so the clock resets immediately instead of waiting up to a second for the next tick.
 
-import { STATES } from '/shared/states.mjs';
+import { STATES } from '#shared/states.ts';
 import { refreshSessionActivity } from './activity.js';
 import { sessionUIs } from './card-registry.js';
 

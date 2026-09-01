@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { canonicalizePath, isSameDirectoryPath } = require('../shared/paths');
+const { canonicalizePath, isSameDirectoryPath } = require('../shared/paths.ts');
 const { SHORT_NAMES_AVAILABLE, shortPathOf, withTempDir } = require('./helpers/short-path');
 
 const WIN = process.platform === 'win32';

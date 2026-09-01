@@ -1,4 +1,4 @@
-import { SETTINGS_RANGES } from '/shared/settings-ranges.mjs';
+import { SETTINGS_RANGES } from '#shared/settings-ranges.ts';
 import { playAlertSound, SOUND_OPTIONS } from './alert-sound.js';
 import { sendControlRequest } from './control-ws.js';
 import { el } from './dom-helpers.js';

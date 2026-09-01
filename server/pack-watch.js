@@ -12,7 +12,7 @@
 const fs = require('node:fs');
 
 const { createWatchDebounce } = require('../detection/watch-debounce');
-const { canonicalizePath } = require('../shared/paths');
+const { canonicalizePath } = require('../shared/paths.ts');
 
 function createPackWatcher({ onChange, debounceMs = 500 }) {
   const debounce = createWatchDebounce({ onChange, debounceMs });

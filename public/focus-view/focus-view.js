@@ -11,7 +11,7 @@
 // State lives here (view-local); it reads sessions from the shared card registry. The borrowed card is
 // returned to its exact home slot in the off-screen grid on leave/swap.
 
-import { STATES } from '/shared/states.mjs';
+import { STATES } from '#shared/states.ts';
 import { borrowCard, getBorrowedCardId, releaseCard } from '../card-host.js';
 import { sendControlMsg } from '../control-ws.js';
 import { el, MERGE_TAGS, query, stateChip } from '../dom-helpers.js';

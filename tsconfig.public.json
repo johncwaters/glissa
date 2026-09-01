@@ -23,26 +23,7 @@
     "noImplicitReturns": true,
     "target": "ES2023",
     "types": [],
-    "paths": {
-      "/shared/control-messages.mjs": [
-        "./shared/contracts/control-messages.js"
-      ],
-      "/shared/session.mjs": [
-        "./shared/contracts/session.js"
-      ],
-      "/shared/states.mjs": [
-        "./shared/states.js"
-      ],
-      "/shared/settings-ranges.mjs": [
-        "./shared/settings-ranges.js"
-      ],
-      "/shared/client-trust.mjs": [
-        "./shared/client-trust.esm.mjs"
-      ],
-      "/shared/visions-intent-ids.mjs": [
-        "./shared/visions-intent-ids.js"
-      ]
-    }
+    "allowImportingTsExtensions": true
   },
   "include": [
     "public/**/*.js",

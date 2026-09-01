@@ -27,7 +27,7 @@
 // a card. Leaf module: terminal.js calls noteSessionOutput per inbound PTY chunk; lifecycle.js
 // drives setRunningActivity on transitions; session-tick.js's tick calls refreshSessionActivity.
 
-import { STATES } from '/shared/states.mjs';
+import { STATES } from '#shared/states.ts';
 
 const BEAT_THROTTLE_MS = 320;  // cap beats at ~3/s so an output flood can't thrash the glyph
 const QUIET_AFTER_MS = 8000;   // silence past this reads as "gone quiet" (thinking / long tool)

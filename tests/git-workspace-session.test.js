@@ -14,7 +14,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
 const { createGitWorkspace } = require('../server/git-workspace');
-const { isSameDirectoryPath } = require('../shared/paths');
+const { isSameDirectoryPath } = require('../shared/paths.ts');
 const { hasGit, git } = require('./helpers/git-fixture');
 
 // Junction-setup helper for the teardown-safety tests below: the junction is what the live shareList

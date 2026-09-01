@@ -11,7 +11,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { NotificationManager } = require('../notifications/notification-manager');
-const { NOTIFICATION_STATES: NS } = require('../shared/notification-states');
+const { NOTIFICATION_STATES: NS } = require('../shared/notification-states.ts');
 
 function makeManager(opts = {}) {
   const manager = new NotificationManager({ escalationIntervalMs: 60000, debounceMs: 0, ...opts });

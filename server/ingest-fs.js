@@ -20,7 +20,7 @@
 
 'use strict';
 
-const { canonicalizePath } = require('../shared/paths');
+const { canonicalizePath } = require('../shared/paths.ts');
 const {
   DEFAULT_BATCH_MS, buildIgnorePatterns, createBatch, daemonWriteRules, decideFsEvents, dedupeRoots,
   isIgnoredChange, normalizeRoots, recordChange, relativeWithin,

@@ -8,7 +8,7 @@ const { DASHBOARD_SETTING_PATHS } = require('../server/control-handlers');
 const {
   INGEST_SPEC, MEMORY_SPEC, MILL_METRICS_SPEC, PACK_DISTILLER_SPEC,
 } = require('../server/core/settings-mill-core');
-const settingsRanges = require('../shared/settings-ranges');
+const settingsRanges = require('../shared/settings-ranges.ts');
 
 const loadMap = () => import('../public/settings-map.mjs');
 

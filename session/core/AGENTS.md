@@ -10,7 +10,7 @@ Pure cores seam-extracted from `sessions.js`: no fs, no git, no async, no Sessio
 
 | File | Description |
 |------|-------------|
-| `state-machine.js` | `TRANSITIONS`, `GUARDS`, `ENTRY_HOOKS`, `EXIT_HOOKS` lifecycle tables for the session state machine (states defined in `shared/states.js`) |
+| `state-machine.js` | `TRANSITIONS`, `GUARDS`, `ENTRY_HOOKS`, `EXIT_HOOKS` lifecycle tables for the session state machine (states defined in `shared/states.ts`) |
 | `status-mapper.js` | Pure `mapSignalToEvent(signal, state, confidence, activeAgents)` -> event or null; `activeAgents > 0` suppresses `ready` -> `task_complete` |
 | `exit-transition.js` | Pure `decideExitTransition(state, exitCode, signal, receivedFirstOutput)` -> `{ event, detail }`: the real-PTY-exit decision extracted from `Session._handlePtyExit` |
 | `spawn-command.js` | Agent-neutral resolve-then-branch spawn mechanics (direct `.exe` vs `cmd.exe /c` shim fallback) plus the Claude-bound shims `classifyClaudeKind`, `resolveClaudeCommand`, `buildSpawnCommand`; the command constant lives in the adapter registry cache |

@@ -15,7 +15,7 @@ const path = require('node:path');
 
 const { SessionRecorder, createRecorder } = require('../session/session-recorder');
 const { Session } = require('../session/sessions');
-const { STATES } = require('../shared/states');
+const { STATES } = require('../shared/states.ts');
 
 function makeBaseDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-recorder-'));

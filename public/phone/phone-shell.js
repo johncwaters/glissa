@@ -20,7 +20,7 @@
 // PRs, Usage, Mill, Visions, Hooks and Settings panels, and the header controls the Board top bar adopts. Rebuilding any
 // of them would mean a second state pipeline for the same facts.
 
-import { STATES } from '/shared/states.mjs';
+import { STATES } from '#shared/states.ts';
 import { sendControlMsg } from '../control-ws.js';
 import { adoptElement, el, releaseElement } from '../dom-helpers.js';
 import { pickStrongestAttention } from '../focus-view/attention-core.mjs';

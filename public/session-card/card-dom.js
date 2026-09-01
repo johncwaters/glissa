@@ -7,7 +7,7 @@
 // package. The confirm prompt every card action needs therefore lives in
 // session-card/modal.js, which both sides can reach without a cycle.
 
-import { STATES } from '/shared/states.mjs';
+import { STATES } from '#shared/states.ts';
 import { sendControlMsg } from '../control-ws.js';
 import { el, escapeHtml } from '../dom-helpers.js';
 import { sessionUIs } from './card-registry.js';

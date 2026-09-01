@@ -1,6 +1,6 @@
 'use strict';
 
-const { STATES } = require('../../shared/states');
+const { STATES } = require('../../shared/states.ts');
 const { normalizePackNames } = require('./pack-core');
 
 /**

@@ -19,7 +19,7 @@ const { writeSessionSettings } = require('../detection/settings-injector');
 const claudeCode = require('../session/adapters/claude-code');
 const adapters = require('../session/adapters');
 const { validateConfig } = require('../server/config-store');
-const { STATES } = require('../shared/states');
+const { STATES } = require('../shared/states.ts');
 
 const REPO_ROOT = path.join(__dirname, '..');
 const RESUME_ID = '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5';

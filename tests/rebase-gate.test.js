@@ -8,7 +8,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { decideAutoRebase, AUTO_REBASE_STATES, SPAWN_GAP_TRIGGER } = require('../session/core/rebase-gate');
-const { STATES } = require('../shared/states');
+const { STATES } = require('../shared/states.ts');
 
 // The shape of a worktree that SHOULD be rebased: enabled, quiescent, clean, behind, nothing pending.
 function eligible(extra = {}) {

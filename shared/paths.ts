@@ -1,7 +1,5 @@
-'use strict';
-
-const fs = require('node:fs');
-const path = require('node:path');
+import fs from 'node:fs';
+import path from 'node:path';
 
 // The one spelling of a path that every producer agrees on. Windows names a single directory several
 // ways (an 8.3 short form like C:\Users\RUNNER~1\..., a subst drive, a junction) and only the NATIVE
@@ -11,7 +9,7 @@ const path = require('node:path');
 // Every path handed to fs.watch MUST go through this first: libuv expands each reported event
 // filename to its long form and asserts it still starts with the watched dir, so watching an
 // unresolved short path aborts the whole process from native code, past every try/catch.
-function canonicalizePath(p) {
+export function canonicalizePath(p: string): string {
   try {
     return fs.realpathSync.native(p);
   } catch {
@@ -19,7 +17,7 @@ function canonicalizePath(p) {
   }
 }
 
-function equalsIgnoringCaseOnWindows(a, b) {
+export function equalsIgnoringCaseOnWindows(a: string, b: string): boolean {
   if (a === b) return true;
   return process.platform === 'win32' && a.toLowerCase() === b.toLowerCase();
 }
@@ -29,7 +27,7 @@ function equalsIgnoringCaseOnWindows(a, b) {
 // with forward slashes, a trailing separator, an 8.3 short path inherited from %TEMP%). Misclassifying
 // two spellings of one directory as different repos skips worktree adoption and reproduces the
 // branch-in-use in-place fallback.
-function isSameDirectoryPath(a, b) {
+export function isSameDirectoryPath(a: unknown, b: unknown): boolean {
   const resolvedA = path.resolve(String(a || ''));
   const resolvedB = path.resolve(String(b || ''));
   if (equalsIgnoringCaseOnWindows(resolvedA, resolvedB)) return true;
@@ -45,9 +43,7 @@ function isSameDirectoryPath(a, b) {
 // operator-supplied, both legal as map keys and in a hook URL but illegal on disk. Callers sanitize
 // ONLY the segment, so the real id still flows verbatim into the hook URL and HookRouter registration
 // and routing is unaffected.
-function safePathSegment(value) {
+export function safePathSegment(value: unknown): string {
   // eslint-disable-next-line no-control-regex
   return String(value).replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[. ]+$/, '') || '_';
 }
-
-module.exports = { canonicalizePath, equalsIgnoringCaseOnWindows, isSameDirectoryPath, safePathSegment };

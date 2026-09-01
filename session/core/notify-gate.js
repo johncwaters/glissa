@@ -1,6 +1,6 @@
 'use strict';
 
-const { STATES } = require('../../shared/states');
+const { STATES } = require('../../shared/states.ts');
 
 // Pure once-per-work-cycle notification gate (the seam pattern used by agent-tracker.js /
 // status-mapper.js). The backend's per-session state-change listener consults it before

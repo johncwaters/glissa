@@ -1,36 +1,33 @@
-'use strict';
+import path from 'node:path';
+import { z } from 'zod';
+import * as ranges from '../settings-ranges.ts';
+import type { SettingsRange } from '../settings-ranges.ts';
+import { USAGE_COST_MODES, USAGE_VENDOR_KEYS, USAGE_BUDGET_KEYS } from '../usage-config.ts';
 
-const path = require('node:path');
-const { z } = require('zod');
-const ranges = require('../settings-ranges');
-const { USAGE_COST_MODES, USAGE_VENDOR_KEYS, USAGE_BUDGET_KEYS } = require('../usage-config');
-
-/** @typedef {{ min: number, max?: number, exclusiveMin?: boolean, label?: string }} NumberRange */
-const optionalBoolean = (field) => z.boolean({ error: `${field} must be a boolean` }).optional();
-const optionalString = (field, trim = false) => {
+const optionalBoolean = (field: string) => z.boolean({ error: `${field} must be a boolean` }).optional();
+const optionalString = (field: string, trim = false) => {
   const schema = z.string({ error: `${field} must be a string` });
   return (trim ? schema.transform((value) => value.trim()) : schema).optional();
 };
-const numberRangeLabel = (range) => {
+const numberRangeLabel = (range: SettingsRange) => {
   if (range.label) return range.label;
   if (range.max != null) return `between ${range.min} and ${range.max}`;
   if (range.exclusiveMin) return `greater than ${range.min}`;
   return `at least ${range.min}`;
 };
-/** @param {NumberRange} range */
-const optionalNumber = (field, range = ranges.POSITIVE_NUMBER_RANGE) => z.number({ error: `${field} must be ${numberRangeLabel(range)}` })
+const optionalNumber = (field: string, range: SettingsRange = ranges.POSITIVE_NUMBER_RANGE) => z.number({ error: `${field} must be ${numberRangeLabel(range)}` })
   .finite()
   .refine((value) => !range.exclusiveMin || value > range.min, { message: `${field} must be ${numberRangeLabel(range)}` })
   .refine((value) => range.exclusiveMin || value >= range.min, { message: `${field} must be ${numberRangeLabel(range)}` })
   .refine((value) => range.max == null || value <= range.max, { message: `${field} must be ${numberRangeLabel(range)}` })
   .optional();
-const optionalInteger = (field, range) => z.number({ error: `${field} must be an integer between ${range.min} and ${range.max}` })
+const optionalInteger = (field: string, range: { min: number; max: number }) => z.number({ error: `${field} must be an integer between ${range.min} and ${range.max}` })
   .int({ error: `${field} must be an integer between ${range.min} and ${range.max}` })
   .min(range.min, { error: `${field} must be an integer between ${range.min} and ${range.max}` })
   .max(range.max, { error: `${field} must be an integer between ${range.min} and ${range.max}` })
   .optional();
-const optionalObject = (field, shape) => z.object(shape, { error: `${field} must be an object` }).nullable().optional();
-const optionalLooseObject = (field) => z.object({}, { error: `${field} must be an object` }).passthrough().nullable().optional();
+const optionalObject = (field: string, shape: z.ZodRawShape) => z.object(shape, { error: `${field} must be an object` }).nullable().optional();
+const optionalLooseObject = (field: string) => z.object({}, { error: `${field} must be an object` }).passthrough().nullable().optional();
 
 const PrReviewSettings = optionalObject('prReview', {
   enabled: optionalBoolean('prReview.enabled'),
@@ -175,8 +172,8 @@ const BROWSER_CONFIG_SHAPE = {
   ingest: MillSettings,
 };
 
-const BrowserConfig = z.object(BROWSER_CONFIG_SHAPE);
-const ConfigUpdate = z.object({
+export const BrowserConfig = z.object(BROWSER_CONFIG_SHAPE);
+export const ConfigUpdate = z.object({
   ...BROWSER_CONFIG_SHAPE,
   autoRecoverSeconds: z.number({ error: 'autoRecoverSeconds must be a positive number' }).finite().positive({ error: 'autoRecoverSeconds must be a positive number' }).optional(),
   inputGraceSeconds: z.number({ error: 'inputGraceSeconds must be a positive number' }).finite().positive({ error: 'inputGraceSeconds must be a positive number' }).optional(),
@@ -188,7 +185,7 @@ const ConfigUpdate = z.object({
   worktreeSyncOnStart: optionalBoolean('worktreeSyncOnStart'),
   worktreeRerere: optionalBoolean('worktreeRerere'),
 }).omit({ port: true, worktreeShare: true }).strict();
-const ProjectConfig = z.object({
+export const ProjectConfig = z.object({
   id: z.string().optional(),
   name: z.string().optional(),
   path: z.string(),
@@ -208,7 +205,7 @@ const FILE_CONFIG_SHAPE = {
   memory: optionalLooseObject('memory'),
   ingest: optionalLooseObject('ingest'),
 };
-const Config = z.object({
+export const Config = z.object({
   ...FILE_CONFIG_SHAPE,
   detectScheduledWakeups: optionalBoolean('detectScheduledWakeups'),
   worktreeAutoRebase: optionalBoolean('worktreeAutoRebase'),
@@ -229,21 +226,21 @@ const Config = z.object({
   projects: z.array(ProjectConfig),
 }).passthrough();
 
-const BROWSER_CONFIG_KEYS = Object.freeze(Object.keys(BROWSER_CONFIG_SHAPE));
-const CONFIG_BLOCK_KEYS = Object.freeze([
+export const BROWSER_CONFIG_KEYS = Object.freeze(Object.keys(BROWSER_CONFIG_SHAPE));
+export const CONFIG_BLOCK_KEYS = Object.freeze([
   'prReview', 'branchGc', 'visions', 'posthog', 'usage', 'telegram', 'packDistiller', 'millMetrics', 'memory', 'ingest',
 ]);
-const CONFIG_SCALAR_KEYS = Object.freeze(Object.keys(BROWSER_CONFIG_SHAPE).filter((key) => {
+export const CONFIG_SCALAR_KEYS = Object.freeze(Object.keys(BROWSER_CONFIG_SHAPE).filter((key) => {
   if (CONFIG_BLOCK_KEYS.includes(key)) return false;
   return key !== 'port' && key !== 'repoRoots' && key !== 'worktreeShare';
 }));
-const RUNTIME_CONFIG_SCALAR_KEYS = Object.freeze([
+export const RUNTIME_CONFIG_SCALAR_KEYS = Object.freeze([
   ...CONFIG_SCALAR_KEYS,
   'worktreeAutoRebase',
   'worktreeSyncOnStart',
   'worktreeRerere',
 ]);
-const HIDDEN_CONFIG_KEYS = Object.freeze([
+export const HIDDEN_CONFIG_KEYS = Object.freeze([
   'detectScheduledWakeups',
   'worktreeAutoRebase',
   'worktreeSyncOnStart',
@@ -254,23 +251,11 @@ const HIDDEN_CONFIG_KEYS = Object.freeze([
   'projects',
 ]);
 
-function configIssueMessage(error) {
+export function configIssueMessage(error: z.ZodError): string {
   return error.issues[0]?.message || 'settings are invalid';
 }
 
-/** @typedef {import('zod').infer<typeof Config>} Config */
-/** @typedef {import('zod').infer<typeof BrowserConfig>} BrowserConfig */
-/** @typedef {import('zod').infer<typeof ConfigUpdate>} ConfigUpdate */
-
-module.exports = {
-  BROWSER_CONFIG_KEYS,
-  CONFIG_BLOCK_KEYS,
-  CONFIG_SCALAR_KEYS,
-  RUNTIME_CONFIG_SCALAR_KEYS,
-  HIDDEN_CONFIG_KEYS,
-  BrowserConfig,
-  Config,
-  ConfigUpdate,
-  ProjectConfig,
-  configIssueMessage,
-};
+export type Config = z.infer<typeof Config>;
+export type BrowserConfig = z.infer<typeof BrowserConfig>;
+export type ConfigUpdate = z.infer<typeof ConfigUpdate>;
+export type ProjectConfig = z.infer<typeof ProjectConfig>;

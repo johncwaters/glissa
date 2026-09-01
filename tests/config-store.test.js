@@ -624,7 +624,7 @@ test('a duplicate event for content already applied is not re-applied', async ()
 // buried in the manager.
 test('phoneEscalationMs is a settable timeout key with the five-minute default', async () => {
   const { DEFAULT_CONFIG } = require('../server/config-store');
-  const { ConfigUpdate } = require('../shared/contracts');
+  const { ConfigUpdate } = require('../shared/contracts/index.ts');
   assert.equal('phoneEscalationMs' in ConfigUpdate.shape, true);
   assert.equal(DEFAULT_CONFIG.phoneEscalationMs, 300000);
 

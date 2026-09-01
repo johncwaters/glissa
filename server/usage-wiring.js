@@ -15,8 +15,8 @@
 'use strict';
 
 const path = require('node:path');
-const { USAGE_INTEGER_RANGES } = require('../shared/settings-ranges');
-const { USAGE_COST_MODES, USAGE_VENDOR_KEYS, USAGE_BUDGET_KEYS } = require('../shared/usage-config');
+const { USAGE_INTEGER_RANGES } = require('../shared/settings-ranges.ts');
+const { USAGE_COST_MODES, USAGE_VENDOR_KEYS, USAGE_BUDGET_KEYS } = require('../shared/usage-config.ts');
 const { createUsageScanner } = require('./usage-scanner');
 const { loadPricing } = require('./usage-pricing');
 const { execFileAsync: defaultExecFileAsync } = require('./child-process-safe');

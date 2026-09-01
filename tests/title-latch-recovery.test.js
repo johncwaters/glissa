@@ -11,7 +11,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { Session } = require('../session/sessions');
-const { STATES } = require('../shared/states');
+const { STATES } = require('../shared/states.ts');
 const { createOscTitleSource } = require('../detection/osc-title-source');
 
 const SPIN_A = '⠋'; // braille spinner frames

@@ -118,7 +118,7 @@ test('an already-parsed proposal reads back as itself, an explicit null thread m
 test('the thread id shape has one definition, which the intent core builds its regex from', () => {
   const fs = require('node:fs');
   const path = require('node:path');
-  const { VISIONS_THREAD_ID_PATTERN } = require('../shared/visions-intent-ids');
+  const { VISIONS_THREAD_ID_PATTERN } = require('../shared/visions-intent-ids.ts');
   const { THREAD_ID_PATTERN } = require('../server/core/visions-intent-core');
   assert.equal(THREAD_ID_PATTERN, VISIONS_THREAD_ID_PATTERN);
   assert.equal(THREAD_ID_RE.source, `^${VISIONS_THREAD_ID_PATTERN}$`);
@@ -128,7 +128,7 @@ test('the thread id shape has one definition, which the intent core builds its r
     assert.equal(restated.test(source), false, `${file} must build the id shape from the shared pattern, not restate it`);
   }
   const browserCore = fs.readFileSync(path.join(__dirname, '..', 'public/visions-view-core.mjs'), 'utf8');
-  assert.match(browserCore, /import \{ VISIONS_THREAD_ID_PATTERN \} from '\/shared\/visions-intent-ids\.mjs';/);
+  assert.match(browserCore, /import \{ VISIONS_THREAD_ID_PATTERN \} from '#shared\/visions-intent-ids\.ts';/);
 });
 
 test('selection prefers the thread bound to this uri, then recency, then hits', () => {
