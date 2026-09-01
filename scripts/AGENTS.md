@@ -4,7 +4,7 @@
 # scripts
 
 ## Purpose
-Maintainer scripts for cutting a release and validating the install tarball. Glissa is not published to a registry: distribution is the GitHub repo, provisioned by `claude-setup` on servers and by `npm i -g github:johncwaters/glissa` for a standalone CLI (see `../docs/distribution.md`).
+Maintainer scripts for cutting a release and validating the install tarball. Glissa is not published to a registry: distribution is the GitHub repo, provisioned by the dotfiles repo on servers and by `npm i -g github:johncwaters/glissa` for a standalone CLI (see `../docs/distribution.md`).
 
 ## Key Files
 
