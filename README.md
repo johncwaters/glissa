@@ -17,9 +17,9 @@ I run my daily agent fleet in it. This README was written inside a Glissa sessio
 
 Glissa ships from this repo, through two channels. It is not an npm package: nothing is published to any registry, and the `github:` spec below is the only supported install.
 
-### Server machines: claude-setup
+### Server machines: dotfiles
 
-My own always-on machines are provisioned by the [`claude-setup`](https://github.com/johncwaters/claude-setup) server profile: it clones this repo to `~/Projects/glissa`, runs `npm ci` and `npm run build`, installs a systemd user service, and fronts the remote listener with `tailscale serve`. Updating is re-running its apply script.
+My own always-on machines are provisioned by my dotfiles repo's server profile: it clones this repo to `~/Projects/glissa`, runs `npm ci` and `npm run build`, installs a systemd user service running `node dist/server/index.js`, and fronts the remote listener with `tailscale serve`. Updating is re-running its apply script.
 
 ### Standalone CLI
 
