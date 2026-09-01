@@ -97,7 +97,7 @@ const DISTILL_STATUS_LABEL = {
 // a dry run only reads and hashes, so it works on a machine without it.
 async function runDistill(name, { dryRun }, makeDistiller) {
   if (!dryRun) {
-    const { commandFor, DEFAULT_AGENT_ID } = require('../session/adapters');
+    const { commandFor, DEFAULT_AGENT_ID } = require('../session/adapters/index.ts');
     const resolved = commandFor(DEFAULT_AGENT_ID);
     if (!resolved || !resolved.path) {
       console.error("Cannot distill: 'claude' is not resolvable on PATH. Install Claude Code, or use --dry-run.");

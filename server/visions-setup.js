@@ -22,7 +22,7 @@ const { resolvePathCommandMatches } = require('../session/core/spawn-command.ts'
 
 const PACKAGE_ROOT = path.join(__dirname, '..');
 const EXTENSION_DIR = path.join(PACKAGE_ROOT, 'tools', 'vscode-visions');
-const RELAY_PATH = path.join(PACKAGE_ROOT, 'session', 'visions-relay.js');
+const RELAY_PATH = path.join(PACKAGE_ROOT, 'session', 'visions-relay.ts');
 const LSP_CORE_PATH = path.join(PACKAGE_ROOT, 'server', 'core', 'visions-lsp-core.ts');
 const CLI_PATH = path.join(PACKAGE_ROOT, 'bin', 'glissa.js');
 const EDITOR_TIMEOUT_MS = 60000;

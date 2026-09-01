@@ -11,7 +11,7 @@ import path from 'node:path';
 
 import { buildAgentEnv } from '../session/core/spawn-env.ts';
 import type { AgentEnvOptions, SpawnEnv } from '../session/core/spawn-env.ts';
-import claudeCodeAdapter from '../session/adapters/claude-code.js';
+import claudeCodeAdapter from '../session/adapters/claude-code.ts';
 
 function claudeSpawnEnv(baseEnv: SpawnEnv, extraEnv?: SpawnEnv | null, options?: AgentEnvOptions) {
   return buildAgentEnv(baseEnv, extraEnv, claudeCodeAdapter.envProfile, options);

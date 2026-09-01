@@ -19,7 +19,7 @@ const { CONFIG_SCALAR_KEYS, ConfigUpdate } = require('../shared/contracts/index.
 const { REPLAYABLE_EXACT, isReplayable } = require('../server/control-replay-core');
 const { createMemoryStore } = require('../server/memory-store');
 const { resolveMemoryConfig } = require('../server/core/memory-core.ts');
-const codex = require('../session/adapters/codex');
+const codex = require('../session/adapters/codex.ts').default;
 
 const SERVER_DIR = path.join(__dirname, '..', 'server');
 const REMEMBERED = 'the merge gate lives in session/core/merge-gate.js';

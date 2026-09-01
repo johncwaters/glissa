@@ -19,7 +19,7 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 | `server/git-workspace.js` | The ONLY module allowed to run `git worktree` |
 | `server/core/` | Pure decision modules for everything in `server/`, no IO |
 | `session/` | Session domain (`session/AGENTS.md`) |
-| `session/sessions.js` | Session lifecycle and PTY ownership |
+| `session/sessions.ts` | Session lifecycle and PTY ownership |
 | `session/adapters/`, `session/core/` | Agent adapters and pure session cores |
 | `detection/`, `notifications/` | Status signals and notification lifecycle |
 | `packs/`, `shared/` | Pack sources and shared constants |

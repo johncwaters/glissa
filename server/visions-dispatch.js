@@ -143,7 +143,7 @@ function createVisionsSpawn({
 } = {}) {
   return async function spawnVisionsSession({ id, name, cwd, model = null, signal = null, initialPrompt = VISIONS_BOOTSTRAP_PROMPT }) {
     // Required here, not at module load: an inert lane must not pay for resolving `claude` on PATH.
-    const { Session } = require('../session/sessions');
+    const { Session } = require('../session/sessions.ts');
     const posture = visionsPermissions();
     const extraClaudeArgs = ['-p', ...posture.args];
     if (model) extraClaudeArgs.push('--model', model);

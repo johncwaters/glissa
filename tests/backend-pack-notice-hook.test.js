@@ -18,7 +18,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { createBackend } = require('../server/backend');
-const grok = require('../session/adapters/grok');
+const grok = require('../session/adapters/grok.ts').default;
 
 const SESSION_ID = 'pack-notice-session';
 

@@ -1,8 +1,8 @@
 'use strict';
 
 const path = require('node:path');
-const { Session } = require('../session/sessions');
-const { createRecorder } = require('../session/session-recorder');
+const { Session } = require('../session/sessions.ts');
+const { createRecorder } = require('../session/session-recorder.ts');
 const { DEFAULT_CONFIG } = require('./config-store');
 const { configuredIntegrationBranch } = require('./core/integration-branch-core.js');
 const { projectVariantSlug } = require('./core/pack-core.ts');
@@ -15,7 +15,7 @@ const { resolveUsageConfig } = require('./usage-wiring');
  * @property {{ configPath: string }} configStore
  * @property {Pick<InstanceType<typeof import('../detection/hook-source.ts').HookRouter>, 'register' | 'unregister'>|null} hookRouter
  * @property {() => number|null} getHookPort
- * @property {() => import('../session/session-worktree-lifecycle').GitWorkspace|null} getGitWorkspace
+ * @property {() => import('../session/session-worktree-lifecycle.ts').GitWorkspace|null} getGitWorkspace
  * @property {() => MillMetricsPort|null} getMillMetricsPort
  * @property {(config: object) => string|null} rtkPathForConfig
  * @property {(projectId: string) => import('../session/core/user-hooks-core.ts').UserHook[]} getUserHooks

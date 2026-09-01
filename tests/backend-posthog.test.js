@@ -27,7 +27,8 @@ const {
 const ENABLED = { enabled: true, host: 'https://ph.test', apiKey: 'phx_secret' };
 const TELEGRAM = { botToken: 'x', chatId: '1' };
 
-const { withFakeSession } = require('./helpers/fake-session');
+const { createPosthogWiring } = require('../server/posthog-wiring');
+const { recordingSessionFactory } = require('./helpers/fake-session');
 
 // --- posthogShouldStart: inert-by-default + misconfiguration gating ---
 
@@ -67,34 +68,30 @@ function assertPosthogStatusShape(status, { configured, reason }) {
 }
 
 test('PostHog getStatus: disabled config synthesizes an off status', () => {
-  withFakeSession('../server/posthog-wiring', ({ createPosthogWiring }) => {
-    const wiring = createPosthogWiring({
-      config: { posthog: { enabled: false }, replayBufferKB: 256 },
-      investigationSessions: new Map(),
-      closeSessionDataClients() {},
-      hookRouter: null,
-      getHookPort: null,
-      spawnGate: null,
-    });
-    assertPosthogStatusShape(wiring.getStatus(), { configured: false, reason: null });
+  const wiring = createPosthogWiring({
+    config: { posthog: { enabled: false }, replayBufferKB: 256 },
+    investigationSessions: new Map(),
+    closeSessionDataClients() {},
+    hookRouter: null,
+    getHookPort: null,
+    spawnGate: null,
   });
+  assertPosthogStatusShape(wiring.getStatus(), { configured: false, reason: null });
 });
 
 test('PostHog getStatus: enabled without telegram synthesizes a misconfigured status', () => {
-  withFakeSession('../server/posthog-wiring', ({ createPosthogWiring }) => {
-    const wiring = createPosthogWiring({
-      config: { posthog: ENABLED, replayBufferKB: 256 },
-      investigationSessions: new Map(),
-      closeSessionDataClients() {},
-      hookRouter: null,
-      getHookPort: null,
-      spawnGate: null,
-    });
-    const status = wiring.getStatus();
-    assertPosthogStatusShape(status, {
-      configured: false,
-      reason: 'posthog.enabled but telegram botToken/chatId missing',
-    });
+  const wiring = createPosthogWiring({
+    config: { posthog: ENABLED, replayBufferKB: 256 },
+    investigationSessions: new Map(),
+    closeSessionDataClients() {},
+    hookRouter: null,
+    getHookPort: null,
+    spawnGate: null,
+  });
+  const status = wiring.getStatus();
+  assertPosthogStatusShape(status, {
+    configured: false,
+    reason: 'posthog.enabled but telegram botToken/chatId missing',
   });
 });
 
@@ -172,45 +169,45 @@ test('posthogCfgKey: a changed packs list counts as a lane config change', () =>
 });
 
 test('PostHog lane passes configured packs into Session options', () => {
-  withFakeSession('../server/posthog-wiring', ({ createPosthogWiring }, constructed) => {
-    const wiring = createPosthogWiring({
-      config: { posthog: { ...ENABLED, packs: ['crew-rules', '../bad', 'crew-rules', 'house-rules'] }, replayBufferKB: 256 },
-      investigationSessions: new Map(),
-      closeSessionDataClients() {},
-      hookRouter: null,
-      getHookPort: null,
-      spawnGate: null,
-    });
-    wiring._makeInvestigationSession({
-      id: 'posthog:1',
-      name: 'PostHog',
-      path: process.cwd(),
-      initialPrompt: 'prompt',
-      spawnEnv: { POSTHOG_API_KEY: 'x', POSTHOG_HOST: 'https://ph.test' },
-    });
-    assert.deepEqual(constructed[0].packs, ['crew-rules', 'house-rules']);
+  const { makeSession, constructed } = recordingSessionFactory();
+  const wiring = createPosthogWiring({
+    config: { posthog: { ...ENABLED, packs: ['crew-rules', '../bad', 'crew-rules', 'house-rules'] }, replayBufferKB: 256 },
+    investigationSessions: new Map(),
+    closeSessionDataClients() {},
+    hookRouter: null,
+    getHookPort: null,
+    spawnGate: null,
+    makeSession,
   });
+  wiring._makeInvestigationSession({
+    id: 'posthog:1',
+    name: 'PostHog',
+    path: process.cwd(),
+    initialPrompt: 'prompt',
+    spawnEnv: { POSTHOG_API_KEY: 'x', POSTHOG_HOST: 'https://ph.test' },
+  });
+  assert.deepEqual(constructed[0].packs, ['crew-rules', 'house-rules']);
 });
 
 test('PostHog lane omitting packs leaves Session options with an empty packs list', () => {
-  withFakeSession('../server/posthog-wiring', ({ createPosthogWiring }, constructed) => {
-    const wiring = createPosthogWiring({
-      config: { posthog: ENABLED, replayBufferKB: 256 },
-      investigationSessions: new Map(),
-      closeSessionDataClients() {},
-      hookRouter: null,
-      getHookPort: null,
-      spawnGate: null,
-    });
-    wiring._makeInvestigationSession({
-      id: 'posthog:2',
-      name: 'PostHog',
-      path: process.cwd(),
-      initialPrompt: 'prompt',
-      spawnEnv: { POSTHOG_API_KEY: 'x', POSTHOG_HOST: 'https://ph.test' },
-    });
-    assert.deepEqual(constructed[0].packs, []);
+  const { makeSession, constructed } = recordingSessionFactory();
+  const wiring = createPosthogWiring({
+    config: { posthog: ENABLED, replayBufferKB: 256 },
+    investigationSessions: new Map(),
+    closeSessionDataClients() {},
+    hookRouter: null,
+    getHookPort: null,
+    spawnGate: null,
+    makeSession,
   });
+  wiring._makeInvestigationSession({
+    id: 'posthog:2',
+    name: 'PostHog',
+    path: process.cwd(),
+    initialPrompt: 'prompt',
+    spawnEnv: { POSTHOG_API_KEY: 'x', POSTHOG_HOST: 'https://ph.test' },
+  });
+  assert.deepEqual(constructed[0].packs, []);
 });
 
 // --- Auto-fix dispatch: worktree isolation, the fix deny-list, and the downgrade rule ---
@@ -237,28 +234,28 @@ function fixWiringHarness({ createResult, config: over = {} } = {}) {
 }
 
 function runFixSpawn(harness, run) {
-  return withFakeSession('../server/posthog-wiring', ({ createPosthogWiring }, constructed) => {
-    const wiring = createPosthogWiring({
-      config: harness.config,
-      investigationSessions: new Map(),
-      closeSessionDataClients() {},
-      hookRouter: null,
-      getHookPort: null,
-      spawnGate: { run: async (fn) => fn() },
-      gitWorkspace: harness.gitWorkspace,
-      runCommand: harness.runCommand,
-    });
-    const controller = new AbortController();
-    controller.abort();
-    return run(wiring._investigationSpawn({
-      issue: { issueId: 'iss-1' },
-      projectId: 1,
-      projectName: 'web',
-      url: 'https://ph.test/project/1/error_tracking/iss-1',
-      mode: 'fix',
-      signal: controller.signal,
-    }), constructed);
+  const { makeSession, constructed } = recordingSessionFactory();
+  const wiring = createPosthogWiring({
+    config: harness.config,
+    investigationSessions: new Map(),
+    closeSessionDataClients() {},
+    hookRouter: null,
+    getHookPort: null,
+    spawnGate: { run: async (fn) => fn() },
+    gitWorkspace: harness.gitWorkspace,
+    runCommand: harness.runCommand,
+    makeSession,
   });
+  const controller = new AbortController();
+  controller.abort();
+  return run(wiring._investigationSpawn({
+    issue: { issueId: 'iss-1' },
+    projectId: 1,
+    projectName: 'web',
+    url: 'https://ph.test/project/1/error_tracking/iss-1',
+    mode: 'fix',
+    signal: controller.signal,
+  }), constructed);
 }
 
 test('a fix job runs in an isolated worktree on a sanitized radar-fix branch', async () => {

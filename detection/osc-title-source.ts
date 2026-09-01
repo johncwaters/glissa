@@ -18,7 +18,7 @@
 
 import { EventEmitter } from 'node:events';
 
-import claudeCode from '../session/adapters/claude-code.js';
+import claudeCode from '../session/adapters/claude-code.ts';
 
 const DEFAULT_STABILIZATION_MS = 1500;
 

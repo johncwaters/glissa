@@ -50,7 +50,7 @@ test('enabled: a command-type statusLine pointing at the relay with the session 
   assert.equal(settings.statusLine.type, 'command');
   const command = settings.statusLine.command;
   assert.match(command, /^node /);
-  assert.ok(command.includes('statusline-relay.js'), 'runs the relay');
+  assert.ok(command.includes('statusline-relay.ts'), 'runs the relay');
   assert.ok(command.includes('/hook/sess-1/statusline'), 'posts to the statusline hook route');
   assert.ok(command.includes('t=tok-abc'), 'carries the per-session bearer token');
   assert.ok(command.includes('http://127.0.0.1:4321/'), 'loopback only');
@@ -62,13 +62,13 @@ test('enabled: every path in the command is forward-slashed for git-bash', () =>
   const settings = buildHookSettings({
     ...BASE,
     planLimits: true,
-    relayPath: 'C:\\Users\\johnw\\glissa\\session\\statusline-relay.js',
+    relayPath: 'C:\\Users\\johnw\\glissa\\session\\statusline-relay.ts',
     userSettingsPath: path.join(tmpDir, 'nope.json'),
   });
   assert.ok(settings.statusLine);
   const command = settings.statusLine.command;
   assert.equal(command.includes('\\'), false, `no backslash survives: ${command}`);
-  assert.ok(command.includes('C:/Users/johnw/glissa/session/statusline-relay.js'));
+  assert.ok(command.includes('C:/Users/johnw/glissa/session/statusline-relay.ts'));
 });
 
 test('the real relay path resolves to a file that exists', () => {

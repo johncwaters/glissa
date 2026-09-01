@@ -39,8 +39,8 @@ Status detection and change watching. Session status is derived from machine-emi
 ## Dependencies
 
 ### Internal
-- `session/sessions.js` - consumes StatusSource, owns transitions
-- `session/session-recorder.js` - produces the JSONL that `replay.ts` consumes
+- `session/sessions.ts` - consumes StatusSource, owns transitions
+- `session/session-recorder.ts` - produces the JSONL that `replay.ts` consumes
 - `../session/core/status-mapper.ts` - the pure signal-to-event decision
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->
@@ -53,7 +53,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 - Machine signals only: hooks authoritative, OSC-0 title a fallback that never emits `awaiting-input`. Scraping the rendered TUI false-fires on redraw races (`session/core/status-mapper.ts`, `docs/postmortem-terminal-detection.md`).
 - A held `ready` is cancelled by `working`/`resume` in the conflict window, since resolving it fired a false COMPLETE after a fast re-prompt; `/clear` and `/compact` latch the title off likewise. `idle_prompt` is low confidence: it may only confirm quiescence from RUNNING.
-- A main `Stop` is held for live work; an orphan `SubagentStop` proves a lost Start, so an empty Stop waits one quiet window (2026-08-25 recordings; `tests/sessions-detection.test.js`).
+- A main `Stop` is held for live work; an orphan `SubagentStop` proves a lost Start, so an empty Stop waits one quiet window (2026-08-25 recordings; `tests/sessions-detection.test.ts`).
 - A held ready releases on live evidence, never the count, sequence-ordered, its quiet window starting at the first evaluation that OBSERVES the drain (false COMPLETEs, 2026-08-14).
 - Declared entries are TTL-bounded per kind: `shell`/`monitor` get no completion hook and an idle teammate is declared running forever, which pinned cards WORKING. Kill switch `detectBackgroundAgents`.
 

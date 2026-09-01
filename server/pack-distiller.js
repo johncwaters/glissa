@@ -108,7 +108,8 @@ function writeStandaloneLaneSettings(permissions) {
 /**
  * @param {{ sessions?: Map<string, unknown>, closeSessionDataClients?: (id: string) => void,
  *   hookRouter?: Pick<InstanceType<typeof import('../detection/hook-source.ts').HookRouter>, 'register' | 'unregister'>|null, getHookPort?: (() => number | null) | null, spawnGate?: unknown,
- *   replayBufferKB?: number, recordLane?: import('./ephemeral-session').RecordLane | null }} [options]
+ *   replayBufferKB?: number, recordLane?: import('./ephemeral-session').RecordLane | null,
+ *   makeSession?: ((options: ConstructorParameters<typeof import('../session/sessions.ts').Session>[0]) => InstanceType<typeof import('../session/sessions.ts').Session>) | null }} [options]
  * @returns {DistillSpawn}
  */
 function createDistillSpawn({
@@ -116,13 +117,15 @@ function createDistillSpawn({
   spawnGate = null, replayBufferKB = undefined,
   // Lane attribution: names this lane on the ledger when its headless session reports a Claude session id.
   recordLane = null,
+  // Session constructor seam: a test records the posture this lane builds without spawning anything.
+  makeSession = null,
 } = {}) {
   return async function spawnDistill({ id, name, cwd, signal = null }) {
     // Lazy loading keeps dry runs from resolving Claude on PATH.
-    const { Session } = require('../session/sessions');
+    const buildSession = makeSession || ((options) => new (require('../session/sessions.ts').Session)(options));
     const posture = packDistillerPermissions();
     const standalone = hookRouter ? null : writeStandaloneLaneSettings(posture.permissions);
-    const sess = new Session({
+    const sess = buildSession({
       id,
       name,
       path: cwd,

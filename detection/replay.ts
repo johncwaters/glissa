@@ -10,7 +10,7 @@ import { createOscTitleSource } from './osc-title-source.ts';
 import type { TitleContext } from './osc-title-source.ts';
 import { createStatusSource } from './status-source.ts';
 import type { MetaStatusSignal, ResolvedStatusSignal } from './status-source.ts';
-import { resolveAdapter } from '../session/adapters/index.js';
+import { resolveAdapter } from '../session/adapters/index.ts';
 import type { HookPayload } from '../shared/contracts/index.ts';
 
 export interface ReplayRecord {
@@ -84,7 +84,7 @@ async function replayDetection(records: ReplayRecord[], opts: ReplayOptions = {}
     if (r.type === 'data' && typeof r.data === 'string') {
       title.feed(r.data);
     }
-    if (r.type === 'hook') {
+    if (r.type === 'hook' && typeof r.event === 'string') {
       const sig = adapter.hooks.mapSignal(r.event, r.payload);
       if (sig) {
         status.ingest({ signal: sig, source: 'hook', ts: Date.now(), event: r.event, payload: r.payload });

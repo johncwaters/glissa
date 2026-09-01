@@ -6,7 +6,7 @@
 const http = require('node:http');
 const WebSocket = require('ws');
 const { createBackend } = require('../server/backend');
-const { CLAUDE_CMD } = require('../session/sessions');
+const { claudeCommand } = require('../session/sessions.ts');
 
 const PORT = 3098;
 process.env.GLISSA_PORT = String(PORT);
@@ -29,7 +29,8 @@ function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 // (no cmd.exe /c shim layer). Skips on hosts where claude is a .cmd/.ps1 shim.
 function assertSpawnStrategy(target) {
   console.log('\nSpawn strategy:');
-  const isDirectExeSpawn = process.platform === 'win32' && CLAUDE_CMD && CLAUDE_CMD.kind === 'exe';
+  const claudeCmd = claudeCommand();
+  const isDirectExeSpawn = process.platform === 'win32' && claudeCmd && claudeCmd.kind === 'exe';
   if (!isDirectExeSpawn) {
     origConsoleLog('  SKIP  direct-exe spawn assertion (claude is not a .exe on this host)');
     return;
@@ -39,7 +40,7 @@ function assertSpawnStrategy(target) {
   );
   assert('spawn log line captured for target session', !!spawnLine);
   assert('direct exe spawn (resolved .exe present, no cmd.exe /c)',
-    !!spawnLine && spawnLine.includes(CLAUDE_CMD.path) && !spawnLine.includes('cmd.exe /c'));
+    !!spawnLine && spawnLine.includes(claudeCmd.path) && !spawnLine.includes('cmd.exe /c'));
 }
 
 async function main() {

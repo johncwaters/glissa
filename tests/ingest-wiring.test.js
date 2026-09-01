@@ -20,7 +20,7 @@ const { TRUNCATION_NOTE } = require('../server/core/ingest-terminal-core.ts');
 const NOW = 1700000000000;
 
 // A Session as the tap sees it: an EventEmitter with an id and a cwd, nothing else. The tap must never
-// need more than the public surface, because session/sessions.js is not modified by this milestone.
+// need more than the public surface, because session/sessions.ts is not modified by this milestone.
 class FakeSession extends EventEmitter {
   constructor(id = 'session-1', cwd = '/repo') {
     super();

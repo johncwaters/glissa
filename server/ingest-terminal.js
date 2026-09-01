@@ -1,6 +1,6 @@
 /*
  * Terminal ingest source, IO shell (docs/plan-ingestion.md, M6). It taps a Session's existing public
- * EventEmitter surface and nothing else: no change to session/sessions.js, no reach into the PTY, no
+ * EventEmitter surface and nothing else: no change to session/sessions.ts, no reach into the PTY, no
  * detection involvement. Every decision about what survives a flush lives in ingest-terminal-core.js.
  *
  * Attaching a `data` listener turns on emit('data') for a session with no browser client attached

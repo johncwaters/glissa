@@ -29,7 +29,8 @@ interface RelayPostVerdict {
   reason: string;
 }
 
-function readHookUrl(env: Record<string, string | undefined> | null | undefined): string | null {
+// Deliberately indifferent to the value type: the guard below is what refuses a non-string.
+function readHookUrl(env: Record<string, unknown> | null | undefined): string | null {
   const raw = env ? env[HOOK_URL_ENV] : null;
   if (typeof raw !== "string") return null;
   const trimmed = raw.trim();

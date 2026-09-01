@@ -158,7 +158,7 @@ Every session also writes a JSONL forensic recording by default (hook payloads a
 - Table-driven state machines, e.g. `session/core/state-machine.ts`.
 - Fail-closed PR auto-review merge gate: `server/core/pr-review-core.js` only merges a clean, non-stale, green-checks PR; anything ambiguous (no checks, a `gh` error, a touched workflow file) blocks instead of guessing.
 - Server-side fix handoff in the Radar lane: the fix agent may only commit locally (`git push` and every `gh` call are denied it, because a prefix deny-list cannot constrain a push target), so `server/posthog-wiring.js` does the push and opens the pull request from arguments it built itself, refusing any diff that touches `.github/workflows/`.
-- Bounded-retention session recorder: `session/session-recorder.js`, capped by file size, file count, and age so it can run unattended indefinitely.
+- Bounded-retention session recorder: `session/session-recorder.ts`, capped by file size, file count, and age so it can run unattended indefinitely.
 
 ## Focus
 

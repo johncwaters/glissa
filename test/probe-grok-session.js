@@ -7,7 +7,7 @@ const path = require("node:path");
 
 const { createBackend } = require("../server/backend");
 const { runAgentSetupCli } = require("../server/agent-setup-cli");
-const grok = require("../session/adapters/grok");
+const grok = require("../session/adapters/grok.ts").default;
 
 const SESSION_ID = "grok-probe-session";
 const PROMPT = "Run the shell command: touch ./grok-probe-approval.txt";

@@ -169,7 +169,7 @@ function runDoctor() {
   // Per-agent binary resolution, so an operator sees which supervised CLIs the Add Session picker
   // will offer and where each one resolves (session/adapters).
   try {
-    const { listAgentIds, getAdapter, commandFor } = require('../session/adapters');
+    const { listAgentIds, getAdapter, commandFor } = require('../session/adapters/index.ts');
     for (const id of listAgentIds()) {
       const adapter = getAdapter(id);
       const resolved = commandFor(adapter);

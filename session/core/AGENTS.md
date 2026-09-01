@@ -22,7 +22,7 @@ Pure cores seam-extracted from `sessions.js`: no fs, no git, no async, no Sessio
 | `rebase-gate.ts` | Pure `decideAutoRebase(...)` -> `{ action: 'rebase' }` or a skip with its reason: may a worktree be rebased onto a moved integration branch right now, unattended. `AUTO_REBASE_STATES` excludes WAITING (a paused turn resumes into the files a rebase would rewrite); the guard order is stated only by its test |
 | `pack-notice.ts` | Pure `buildPackNotice(deliveredPacks, latestVersions)` -> the one Glissa-authored line a `UserPromptSubmit` hook response injects when a delivered context pack has been rebuilt; hard-capped, never pack content |
 | `anti-slop-prompt.ts` | Fixed deterministic anti-slop note for `--append-system-prompt`; single line, no double quotes (must survive the cmd.exe shim re-parse) |
-| `hook-relay-core.ts` | Pure rules for `../hook-relay.js`: the `GLISSA_HOOK_URL` read, event-token normalization into the URL's last segment, the http/loopback/`/hook/` target refusals, and the payload size cap that matches the ingress body cap |
+| `hook-relay-core.ts` | Pure rules for `../hook-relay.ts`: the `GLISSA_HOOK_URL` read, event-token normalization into the URL's last segment, the http/loopback/`/hook/` target refusals, and the payload size cap that matches the ingress body cap |
 | `post-turn-rules.ts` | Pure idempotent post-turn hygiene rules, `(content) -> { content, findings }`; applied by `server/post-turn-checker.js` |
 | `slop-code-patterns.ts` | Pure regex-based code-slop detection (`detectCodeSlop`), Noise/Lies/Soul taxonomy, offsets only |
 
@@ -40,6 +40,6 @@ Pure cores seam-extracted from `sessions.js`: no fs, no git, no async, no Sessio
 ## Dependencies
 
 ### Internal
-- Consumed by `session/sessions.js` and `server/post-turn-checker.js`; depends only on siblings (e.g. `post-turn-rules.ts` -> `slop-code-patterns.ts`).
+- Consumed by `session/sessions.ts` and `server/post-turn-checker.js`; depends only on siblings (e.g. `post-turn-rules.ts` -> `slop-code-patterns.ts`).
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

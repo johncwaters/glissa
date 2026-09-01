@@ -16,7 +16,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileAsync } = require('./child-process-safe');
-const { Session } = require('../session/sessions');
+const { Session } = require('../session/sessions.ts');
 const {
   awaitSessionExit, createJobResultFile, readResultFile, registerEphemeralSession,
 } = require('./ephemeral-session');
@@ -425,7 +425,8 @@ function posthogPackNames(cfg) {
  *   getHookPort: (() => number | null) | null, spawnGate: { run: (callback: () => unknown) => Promise<unknown> },
  *   gitWorkspace?: PosthogGitWorkspace | null, runCommand?: typeof runCli,
  *   broadcast?: (message: Record<string, unknown>) => void,
- *   recordLane?: import('./ephemeral-session').RecordLane | null }} options
+ *   recordLane?: import('./ephemeral-session').RecordLane | null,
+ *   makeSession?: (options: ConstructorParameters<typeof Session>[0]) => InstanceType<typeof Session> }} options
  */
 function createPosthogWiring({
   config, investigationSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate,
@@ -438,6 +439,9 @@ function createPosthogWiring({
   broadcast = /** @type {(message: Record<string, unknown>) => void} */ (() => {}),
   // Lane attribution: names this lane on the ledger when its headless session reports a Claude session id.
   recordLane = null,
+  // Session constructor seam, mirroring runCommand/broadcast: a test records the options this lane
+  // builds without spawning anything.
+  makeSession = (options) => new Session(options),
 }) {
   function activePosthogConfig() {
     const posthogConfig = config.posthog;
@@ -450,7 +454,7 @@ function createPosthogWiring({
   // Build one headless (claude -p) investigation session, registered in investigationSessions and
   // auto-removed on exit. Not surfaced as a card (a -p session has no watchable TUI).
   function makeInvestigationSession({ id, name, path: cwd, initialPrompt, spawnEnv, permissions = POSTHOG_DENY }) {
-    const sess = new Session({
+    const sess = makeSession({
       id,
       name,
       path: cwd,

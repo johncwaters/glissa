@@ -15,7 +15,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { Session } = require('../session/sessions');
+const { Session } = require('../session/sessions.ts');
 const {
   awaitSessionExit, createJobResultFile, readResultFile, registerEphemeralSession,
 } = require('./ephemeral-session');
@@ -137,7 +137,8 @@ function prReviewPackNames(cfg) {
  *   gitWorkspace: object, getProjectPathById: (projectId: string) => string | null,
  *   getProjectNameById?: (projectId: string) => string | null,
  *   broadcast?: (message: Record<string, unknown>) => void,
- *   recordLane?: import('./ephemeral-session').RecordLane | null }} options
+ *   recordLane?: import('./ephemeral-session').RecordLane | null,
+ *   makeSession?: (options: ConstructorParameters<typeof Session>[0]) => InstanceType<typeof Session> }} options
  */
 function createPrReviewWiring({
   config, reviewSessions, closeSessionDataClients, hookRouter, getHookPort, spawnGate, gitWorkspace,
@@ -145,11 +146,14 @@ function createPrReviewWiring({
   broadcast = /** @type {(message: Record<string, unknown>) => void} */ (() => {}),
   // Lane attribution: names this lane on the ledger when its headless session reports a Claude session id.
   recordLane = null,
+  // Session constructor seam, mirroring broadcast: a test records the options this lane builds
+  // without spawning anything.
+  makeSession = (options) => new Session(options),
 }) {
   // Build one headless (claude -p) PR-review session, registered in reviewSessions and auto-removed on
   // exit. Mirrors makeStageSession; not surfaced as a card (a -p session has no watchable TUI).
   function makeReviewSession({ id, name, path: cwd, initialPrompt }) {
-    const sess = new Session({
+    const sess = makeSession({
       id,
       name,
       path: cwd,

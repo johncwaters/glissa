@@ -21,7 +21,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const { resolveAdapter } = require('../session/adapters');
+const { resolveAdapter } = require('../session/adapters/index.ts');
 const { createConfigStore, generateProjectId, ensureProjectIds } = require('./config-store');
 const { createLifecycle } = require('./server-lifecycle');
 const { spawn } = require('./child-process-safe');
@@ -44,7 +44,7 @@ const { createBackendControl } = require('./backend-control');
 const { createBackendUpdateCheck } = require('./backend-update');
 const { createBackendSessionRuntime } = require('./backend-session-runtime');
 
-/** @typedef {{ id: string, name: string, path: string, state: string, stateSince: number, pendingRestart?: boolean, dangerouslySkipPermissions?: boolean, isWorktree?: boolean, resumeSessionId?: string|null, _killReap?: Promise<unknown>, start: () => unknown, destroy: () => void, toSnapshot: () => Record<string, unknown>, getWorktreeCarry?: () => Record<string, unknown>|null, adoptWorktree: (worktree: Record<string, unknown>) => void, discardWorktree?: () => unknown, discardWorktreeIfClean: () => unknown }} BackendRegistrySession */
+/** @typedef {{ id: string, name: string, path: string, state: string, stateSince: number, pendingRestart?: boolean, dangerouslySkipPermissions?: boolean, isWorktree?: boolean, resumeSessionId?: string|null, _killReap?: Promise<unknown>, start: () => unknown, destroy: () => void, toSnapshot: () => Record<string, unknown>, getWorktreeCarry?: () => Record<string, unknown>|null, adoptWorktree: (worktree: import('../session/session-worktree-lifecycle.ts').AdoptWorktreeOptions) => void, discardWorktree?: () => unknown, discardWorktreeIfClean: () => unknown }} BackendRegistrySession */
 /** @typedef {Record<string, unknown> & { id: string, name: string, path: string }} BackendRegistryProject */
 /** @typedef {Record<string, unknown> & { projects: BackendRegistryProject[], integrationBranch?: string|null }} BackendRegistryConfig */
 /** @typedef {{ snapshotMessage: () => Record<string, unknown> }} BackendSnapshotLane */

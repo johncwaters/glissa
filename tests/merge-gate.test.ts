@@ -1,4 +1,4 @@
-// Pure review-gate demotion matrix (session/core/merge-gate.js), extracted from
+// Pure review-gate demotion matrix (session/core/merge-gate.ts), extracted from
 // Session.checkWorktreeChange / Session.getDiff. The Session-level wiring (emit
 // ordering, dedup interplay) stays covered by sessions-worktree tests; this pins
 // the decision table itself.
@@ -7,13 +7,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { decideSignatureDemotion, decideBaseSyncDemotion, decideDiffSelfHeal } from '../session/core/merge-gate.ts';
+import type { MergeStatus } from '../session/core/worktree-state.ts';
 
 function sig(over = {}) {
   return { dirty: false, ahead: '0', behind: '0', rebaseInProgress: false, ...over };
 }
 
 test('signature demotion: reviewable gate over a clean, un-ahead worktree heals to none', () => {
-  for (const status of ['pending-review', 'parked']) {
+  for (const status of ['pending-review', 'parked'] as MergeStatus[]) {
     assert.equal(decideSignatureDemotion(status, sig()), 'none', status);
     assert.equal(decideSignatureDemotion(status, sig({ ahead: '' })), 'none', `${status}, empty ahead counts as zero`);
   }
@@ -33,7 +34,7 @@ test('signature demotion: parked becomes mergeable again only when clean, ahead,
 });
 
 test('signature demotion: non-reviewable statuses never demote', () => {
-  for (const status of ['none', 'merging', 'merged']) {
+  for (const status of ['none', 'merging', 'merged'] as MergeStatus[]) {
     assert.equal(decideSignatureDemotion(status, sig()), null, status);
     assert.equal(decideSignatureDemotion(status, sig({ ahead: '2' })), null, status);
   }
@@ -50,7 +51,7 @@ test('H1 base-diverged park demotes once origin is no longer diverged', () => {
 });
 
 test('diff self-heal: reviewable gate over an empty diff drops to none', () => {
-  for (const status of ['pending-review', 'parked']) {
+  for (const status of ['pending-review', 'parked'] as MergeStatus[]) {
     assert.equal(decideDiffSelfHeal(status, '', ''), 'none', status);
     assert.equal(decideDiffSelfHeal(status, ' \n', '\t'), 'none', `${status}, whitespace-only diffs are empty`);
   }
@@ -62,7 +63,7 @@ test('diff self-heal: any remaining diff keeps the gate', () => {
 });
 
 test('diff self-heal: non-reviewable statuses never heal', () => {
-  for (const status of ['none', 'merging', 'merged']) {
+  for (const status of ['none', 'merging', 'merged'] as MergeStatus[]) {
     assert.equal(decideDiffSelfHeal(status, '', ''), null, status);
   }
 });

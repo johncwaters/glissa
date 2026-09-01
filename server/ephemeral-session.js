@@ -28,7 +28,7 @@ const ABORT_REAP_CAP_MS = 3000;
  * so a synchronous throw reaches the same rejection path.
  */
 /**
- * @param {InstanceType<typeof import('../session/sessions')['Session']>} sess
+ * @param {InstanceType<typeof import('../session/sessions.ts')['Session']>} sess
  * @param {{ signal?: AbortSignal | null, spawnGate?: unknown, reapCapMs?: number }} [options]
  */
 async function awaitSessionExit(sess, { signal = null, spawnGate = null, reapCapMs = ABORT_REAP_CAP_MS } = {}) {
@@ -214,7 +214,7 @@ function readResultFile(resultPath, allowed, decorate = null, { maxBytes = null,
 
 /**
  * @param {{ map: Map<string, unknown>, id: string,
- *   sess: InstanceType<typeof import('../session/sessions')['Session']>, closeSessionDataClients: (id: string) => void,
+ *   sess: InstanceType<typeof import('../session/sessions.ts')['Session']>, closeSessionDataClients: (id: string) => void,
  *   logPrefix: string, name: string,
  *   recordLane?: RecordLane | null }} options
  */

@@ -72,7 +72,7 @@ function createMemoryDistillSpawn({
    *   model?: string|null, signal?: AbortSignal|null }} options
    */
   return async function spawnMemoryDistill({ id, name, prompt, cwd, model = null, signal = null }) {
-    const { Session } = require('../session/sessions');
+    const { Session } = require('../session/sessions.ts');
     const posture = buildLanePermissions({ denyTools: MEMORY_DISTILL_DENY_TOOLS });
     const standalone = hookRouter ? null : writeStandaloneDenySettings(posture.permissions);
     const extraClaudeArgs = ['-p', ...posture.args, ...(standalone ? standalone.args : [])];

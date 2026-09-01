@@ -18,7 +18,7 @@
         "glissaVisions.relayPath": {
           "type": "string",
           "default": "",
-          "description": "Absolute path to session/visions-relay.js. Empty uses the path stamped at install time."
+          "description": "Absolute path to session/visions-relay.ts. Empty uses the path stamped at install time."
         },
         "glissaVisions.port": {
           "type": "number",

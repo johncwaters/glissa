@@ -108,7 +108,7 @@ const WAKEUP_TOOL_MATCHER = 'ScheduleWakeup|CronCreate|CronDelete';
 const PACK_READ_TOOL_MATCHER = 'Read';
 
 // The managed statusLine relay, and the marker meaning "the operator had no statusLine of their own".
-const RELAY_PATH = path.resolve(import.meta.dirname, '..', 'session', 'statusline-relay.js');
+const RELAY_PATH = path.resolve(import.meta.dirname, '..', 'session', 'statusline-relay.ts');
 const NO_CHAIN = '-';
 
 function generateToken(): string {

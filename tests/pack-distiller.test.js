@@ -15,6 +15,7 @@ const {
   PACK_DISTILL_BOOTSTRAP_PROMPT,
   PACK_DISTILL_DENY_TOOLS,
   PACK_DISTILL_PROMPT_FILE,
+  createDistillSpawn,
   createPackDistiller,
   packDistillerPermissions,
   readDistillResult,
@@ -32,7 +33,7 @@ const {
   renderDistilledOutput,
   validateDistillResult,
 } = require('../server/core/pack-distiller-core.ts');
-const { withFakeSession } = require('./helpers/fake-session');
+const { recordingSessionFactory } = require('./helpers/fake-session');
 
 const HASHES = [
   { path: 'AGENTS.md', fullPath: 'C:/repo/AGENTS.md', sha256: 'a'.repeat(64) },
@@ -305,19 +306,18 @@ test('the distiller posture is the shared acceptEdits posture with no write-shap
 });
 
 test('the spawned Session receives the shared posture and never skips permissions', async () => {
-  await withFakeSession('../server/pack-distiller', async (distillerModule, constructed) => {
-    const controller = new AbortController();
-    controller.abort();
-    const spawn = distillerModule.createDistillSpawn({ hookRouter: {} });
-    await spawn({ id: 'distill:1', name: 'distill one', cwd: '/tmp/job', signal: controller.signal });
+  const { makeSession, constructed } = recordingSessionFactory();
+  const controller = new AbortController();
+  controller.abort();
+  const spawn = createDistillSpawn({ hookRouter: {}, makeSession });
+  await spawn({ id: 'distill:1', name: 'distill one', cwd: '/tmp/job', signal: controller.signal });
 
-    assert.equal(constructed.length, 1);
-    assert.equal(constructed[0].path, '/tmp/job');
-    assert.equal(constructed[0].dangerouslySkipPermissions, false);
-    assert.equal(constructed[0].initialPrompt, PACK_DISTILL_BOOTSTRAP_PROMPT);
-    assert.deepEqual(constructed[0].settingsPermissions, distillerModule.packDistillerPermissions().permissions);
-    assert.deepEqual(constructed[0].extraClaudeArgs, ['-p', ...LANE_ENVIRONMENT_ARGS]);
-  });
+  assert.equal(constructed.length, 1);
+  assert.equal(constructed[0].path, '/tmp/job');
+  assert.equal(constructed[0].dangerouslySkipPermissions, false);
+  assert.equal(constructed[0].initialPrompt, PACK_DISTILL_BOOTSTRAP_PROMPT);
+  assert.deepEqual(constructed[0].settingsPermissions, packDistillerPermissions().permissions);
+  assert.deepEqual(constructed[0].extraClaudeArgs, ['-p', ...LANE_ENVIRONMENT_ARGS]);
 });
 
 // ---------------------------------------------------------------------------

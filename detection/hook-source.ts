@@ -12,7 +12,7 @@
 // the live session's token. Trust level == "can read this session's settings file"
 // == can read the PTY. See docs/postmortem-terminal-detection.md.
 
-import claudeCode from '../session/adapters/claude-code.js';
+import claudeCode from '../session/adapters/claude-code.ts';
 import { HookEnvelope } from '../shared/contracts/index.ts';
 import type { HookPayload } from '../shared/contracts/index.ts';
 
@@ -21,21 +21,24 @@ const { mapHookToSignal, mapHookConfidence, mapHookPromptKind } = claudeCode;
 // Method shorthand on purpose: an adapter's hook profile is a plain JS object whose mappers are
 // inferred, and bivariant parameter checking is what lets every adapter satisfy one type.
 export interface HookProfile {
-  mapSignal(event: string, payload: HookPayload): string | null;
-  mapConfidence(event: string, payload: HookPayload): string | null;
-  mapPromptKind(event: string, payload: HookPayload): string | null;
+  mapSignal(event: string, payload?: HookPayload): string | null;
+  mapConfidence(event: string, payload?: HookPayload): string | null;
+  mapPromptKind(event: string, payload?: HookPayload): string | null;
   mapPayload?(event: string, payload: HookPayload): HookPayload;
 }
 
-export interface HookSignal {
+// A type alias rather than an interface: the StatusSource ingest boundary takes an indexable signal,
+// and only an alias carries the implicit index signature that makes one assignable to the other.
+export type HookSignal = {
   signal: string;
   source: 'hook';
   confidence?: string;
   promptKind?: string;
   ts: number;
-  event: string;
-  payload: HookPayload;
-}
+  // The router always carries both; every consumer guards their absence, so a synthesized signal may not.
+  event?: string;
+  payload?: HookPayload;
+};
 
 export interface HookRegistration {
   token: string;

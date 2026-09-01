@@ -41,7 +41,7 @@ test('the packed extension carries every file it requires and the stamped relay 
 
   assert.equal(JSON.parse(fs.readFileSync(path.join(extensionDir, 'package.json'), 'utf8')).version, manifest.version);
   const stamped = JSON.parse(fs.readFileSync(path.join(extensionDir, 'relay-path.json'), 'utf8')).relayPath;
-  assert.equal(stamped, path.join(__dirname, '..', 'session', 'visions-relay.js'));
+  assert.equal(stamped, path.join(__dirname, '..', 'session', 'visions-relay.ts'));
   assert.ok(fs.existsSync(stamped), 'the stamped relay path points at a file that exists');
 
   const server = new WebSocketServer({ port: 0, path: '/visions' });

@@ -18,7 +18,8 @@ const { buildReviewPrompt, readReviewResult, prPollerShouldStart } = require('..
 const { createBackend } = require('../server/backend');
 const { dashboardClient } = require('./helpers/dashboard-ws');
 
-const { withFakeSession } = require('./helpers/fake-session');
+const { createPrReviewWiring } = require('../server/pr-review-wiring');
+const { recordingSessionFactory } = require('./helpers/fake-session');
 
 // --- prPollerShouldStart: inert-by-default + misconfiguration gating ---
 
@@ -49,36 +50,32 @@ function assertPrStatusShape(status, { configured, reason }) {
 }
 
 test('PR review getStatus: disabled config synthesizes an off status', () => {
-  withFakeSession('../server/pr-review-wiring', ({ createPrReviewWiring }) => {
-    const wiring = createPrReviewWiring({
-      config: { prReview: { enabled: false }, replayBufferKB: 256 },
-      reviewSessions: new Map(),
-      closeSessionDataClients() {},
-      hookRouter: null,
-      getHookPort: null,
-      spawnGate: null,
-      gitWorkspace: null,
-      getProjectPathById: () => null,
-    });
-    assertPrStatusShape(wiring.getStatus(), { configured: false, reason: null });
+  const wiring = createPrReviewWiring({
+    config: { prReview: { enabled: false }, replayBufferKB: 256 },
+    reviewSessions: new Map(),
+    closeSessionDataClients() {},
+    hookRouter: null,
+    getHookPort: null,
+    spawnGate: null,
+    gitWorkspace: null,
+    getProjectPathById: () => null,
   });
+  assertPrStatusShape(wiring.getStatus(), { configured: false, reason: null });
 });
 
 test('PR review getStatus: enabled without telegram synthesizes a misconfigured status', () => {
-  withFakeSession('../server/pr-review-wiring', ({ createPrReviewWiring }) => {
-    const wiring = createPrReviewWiring({
-      config: { prReview: { enabled: true }, replayBufferKB: 256 },
-      reviewSessions: new Map(),
-      closeSessionDataClients() {},
-      hookRouter: null,
-      getHookPort: null,
-      spawnGate: null,
-      gitWorkspace: null,
-      getProjectPathById: () => null,
-    });
-    const status = wiring.getStatus();
-    assertPrStatusShape(status, { configured: false, reason: 'prReview.enabled but telegram botToken/chatId missing' });
+  const wiring = createPrReviewWiring({
+    config: { prReview: { enabled: true }, replayBufferKB: 256 },
+    reviewSessions: new Map(),
+    closeSessionDataClients() {},
+    hookRouter: null,
+    getHookPort: null,
+    spawnGate: null,
+    gitWorkspace: null,
+    getProjectPathById: () => null,
   });
+  const status = wiring.getStatus();
+  assertPrStatusShape(status, { configured: false, reason: 'prReview.enabled but telegram botToken/chatId missing' });
 });
 
 // --- buildReviewPrompt: clean vs conflict lane ---
@@ -170,37 +167,37 @@ test('prReviewCfgKey: a changed packs list counts as a lane config change', () =
 });
 
 test('PR review lane passes configured packs into Session options', () => {
-  withFakeSession('../server/pr-review-wiring', ({ createPrReviewWiring }, constructed) => {
-    const wiring = createPrReviewWiring({
-      config: { prReview: { packs: ['crew-rules', '../bad', 'crew-rules', 'house-rules'] }, replayBufferKB: 256 },
-      reviewSessions: new Map(),
-      closeSessionDataClients() {},
-      hookRouter: null,
-      getHookPort: null,
-      spawnGate: null,
-      gitWorkspace: null,
-      getProjectPathById: () => null,
-    });
-    wiring._makeReviewSession({ id: 'pr:1', name: 'PR', path: process.cwd(), initialPrompt: 'prompt' });
-    assert.deepEqual(constructed[0].packs, ['crew-rules', 'house-rules']);
+  const { makeSession, constructed } = recordingSessionFactory();
+  const wiring = createPrReviewWiring({
+    config: { prReview: { packs: ['crew-rules', '../bad', 'crew-rules', 'house-rules'] }, replayBufferKB: 256 },
+    reviewSessions: new Map(),
+    closeSessionDataClients() {},
+    hookRouter: null,
+    getHookPort: null,
+    spawnGate: null,
+    gitWorkspace: null,
+    getProjectPathById: () => null,
+    makeSession,
   });
+  wiring._makeReviewSession({ id: 'pr:1', name: 'PR', path: process.cwd(), initialPrompt: 'prompt' });
+  assert.deepEqual(constructed[0].packs, ['crew-rules', 'house-rules']);
 });
 
 test('PR review lane omitting packs leaves Session options with an empty packs list', () => {
-  withFakeSession('../server/pr-review-wiring', ({ createPrReviewWiring }, constructed) => {
-    const wiring = createPrReviewWiring({
-      config: { prReview: {}, replayBufferKB: 256 },
-      reviewSessions: new Map(),
-      closeSessionDataClients() {},
-      hookRouter: null,
-      getHookPort: null,
-      spawnGate: null,
-      gitWorkspace: null,
-      getProjectPathById: () => null,
-    });
-    wiring._makeReviewSession({ id: 'pr:2', name: 'PR', path: process.cwd(), initialPrompt: 'prompt' });
-    assert.deepEqual(constructed[0].packs, []);
+  const { makeSession, constructed } = recordingSessionFactory();
+  const wiring = createPrReviewWiring({
+    config: { prReview: {}, replayBufferKB: 256 },
+    reviewSessions: new Map(),
+    closeSessionDataClients() {},
+    hookRouter: null,
+    getHookPort: null,
+    spawnGate: null,
+    gitWorkspace: null,
+    getProjectPathById: () => null,
+    makeSession,
   });
+  wiring._makeReviewSession({ id: 'pr:2', name: 'PR', path: process.cwd(), initialPrompt: 'prompt' });
+  assert.deepEqual(constructed[0].packs, []);
 });
 
 // --- applySettingsReload hot-applies the poller, gated + serialized (pr-review-wiring.js startPoller

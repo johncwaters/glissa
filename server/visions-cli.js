@@ -70,7 +70,7 @@ async function runStatus() {
 
 // The relay owns stdout from here on: it is the LSP wire, so nothing else may write a byte to it.
 function runRelay() {
-  const { createRelay } = require('../session/visions-relay');
+  const { createRelay } = require('../session/visions-relay.ts');
   createRelay().start();
   return new Promise(() => {});
 }

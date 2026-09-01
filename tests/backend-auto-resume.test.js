@@ -23,7 +23,7 @@ const pty = require('node-pty');
 const { createBackend, runAutoResume, persistSessionField, decideWasActiveFlip } = require('../server/backend');
 const { createConfigStore } = require('../server/config-store');
 const { createSpawnGate } = require('../server/spawn-gate');
-const { Session } = require('../session/sessions');
+const { Session } = require('../session/sessions.ts');
 const { STATES } = require('../shared/states.ts');
 
 function withStore(cfg, fn) {

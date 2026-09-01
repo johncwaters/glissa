@@ -2,7 +2,9 @@
 // Session.getDiff. Both consumers apply the returned status via _setMergeStatus; the
 // decisions themselves have no side effects so the full matrix is unit-testable.
 
-const REVIEWABLE = ["pending-review", "parked"];
+import type { MergeStatus } from "./worktree-state.ts";
+
+const REVIEWABLE: MergeStatus[] = ["pending-review", "parked"];
 
 interface WorktreeSignature {
   dirty: boolean;
@@ -22,14 +24,18 @@ function isZero(count: string): boolean {
 //   - A parked merge whose worktree is clean, sits on top of the merge target (behind 0),
 //     and is not mid-rebase is mergeable again: hand Merge back by demoting to
 //     'pending-review' (NOT 'none': the committed work is still unmerged and reviewable).
-function decideSignatureDemotion(mergeStatus: string, sig: WorktreeSignature): string | null {
+function decideSignatureDemotion(mergeStatus: MergeStatus, sig: WorktreeSignature): MergeStatus | null {
   if (REVIEWABLE.includes(mergeStatus) && !sig.dirty && isZero(sig.ahead)) return "none";
   if (mergeStatus === "parked" && !sig.dirty && !isZero(sig.ahead)
       && isZero(sig.behind) && !sig.rebaseInProgress) return "pending-review";
   return null;
 }
 
-function decideBaseSyncDemotion(mergeStatus: string, mergeReason: string | null, baseSyncState: string): string | null {
+function decideBaseSyncDemotion(
+  mergeStatus: MergeStatus,
+  mergeReason: string | null,
+  baseSyncState: string,
+): MergeStatus | null {
   if (mergeStatus !== "parked" || mergeReason !== "base-diverged") return null;
   if (!["in-sync", "ahead", "behind"].includes(baseSyncState)) return null;
   return "pending-review";
@@ -38,10 +44,10 @@ function decideBaseSyncDemotion(mergeStatus: string, mergeReason: string | null,
 // Self-heal for a stranded review gate over an empty diff (operator committed-and-merged
 // or cleaned the worktree inside the still-live PTY). Returns 'none' or null.
 function decideDiffSelfHeal(
-  mergeStatus: string,
+  mergeStatus: MergeStatus,
   committedDiff: string,
   uncommittedDiff: string,
-): string | null {
+): MergeStatus | null {
   if (!REVIEWABLE.includes(mergeStatus)) return null;
   if (committedDiff.trim() !== "" || uncommittedDiff.trim() !== "") return null;
   return "none";
