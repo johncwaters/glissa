@@ -31,6 +31,7 @@ const CANONICALIZED_ARG = /^canonicalizePath\(/;
 // config-store's watchDir is path.dirname() of a path canonicalizePath resolved a few lines above.
 const ALLOWED = new Map([
   [path.join(ROOT, "server", "config-store.js"), "watchDir"],
+  [path.join(ROOT, "server", "config-store.ts"), "watchDir"],
 ]);
 
 function collectJsFiles(dir, acc) {
@@ -47,7 +48,7 @@ function collectJsFiles(dir, acc) {
       collectJsFiles(full, acc);
       continue;
     }
-    if (entry.isFile() && entry.name.endsWith(".js")) acc.push(full);
+    if (entry.isFile() && /\.(js|mjs|cjs|ts|mts|cts)$/.test(entry.name)) acc.push(full);
   }
   return acc;
 }

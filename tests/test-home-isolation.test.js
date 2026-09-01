@@ -18,7 +18,7 @@ function collectTestFiles(dir, acc) {
       collectTestFiles(full, acc);
       continue;
     }
-    if (entry.isFile() && entry.name.endsWith('.test.js')) acc.push(full);
+    if (entry.isFile() && /\.test\.(js|ts)$/.test(entry.name)) acc.push(full);
   }
   return acc;
 }

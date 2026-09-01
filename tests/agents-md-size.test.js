@@ -11,7 +11,7 @@ const REPO_ROOT = path.join(__dirname, '..');
 const MAX_ROOT_BYTES = 10000;
 const MAX_NESTED_BYTES = 18000;
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', '.glissa-worktrees']);
-const CITATION_EXTENSIONS = /\.(js|mjs|cjs|json|md|css|html|toml|yml|yaml|sh|ps1)$/;
+const CITATION_EXTENSIONS = /\.(js|mjs|cjs|ts|mts|cts|json|md|css|html|toml|yml|yaml|sh|ps1)$/;
 
 function agentsMdFiles(dir, found = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {

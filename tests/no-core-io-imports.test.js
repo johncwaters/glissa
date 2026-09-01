@@ -7,7 +7,7 @@ const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
 const CORE_DIRECTORIES = [path.join(ROOT, 'server', 'core'), path.join(ROOT, 'session', 'core')];
-const SOURCE_EXTENSIONS = new Set(['.js', '.cjs', '.mjs']);
+const SOURCE_EXTENSIONS = new Set(['.js', '.cjs', '.mjs', '.ts', '.cts', '.mts']);
 const FORBIDDEN_NODE_MODULES = new Set([
   'node:fs',
   'node:child_process',
@@ -34,6 +34,7 @@ function collectSourceFiles(directory, files = []) {
 }
 
 function importedSpecifiers(line) {
+  if (/\bimport\s+type\b/.test(line)) return [];
   const specifiers = [];
   for (const pattern of [CALL_IMPORT, STATIC_IMPORT]) {
     pattern.lastIndex = 0;
