@@ -25,7 +25,7 @@
 'use strict';
 
 const { execFileAsync } = require('./child-process-safe');
-const { createWatchDebounce } = require('../detection/watch-debounce');
+const { createWatchDebounce } = require('../detection/watch-debounce.ts');
 const { canonicalizePath } = require('../shared/paths.ts');
 const {
   DEFAULT_DEBOUNCE_MS, DEFAULT_POLL_MS, LOG_ARGS, REV_PARSE_ARGS, STATUS_ARGS, createRepoState,

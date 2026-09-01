@@ -1,11 +1,11 @@
 'use strict';
 
-const { NotificationManager } = require('../notifications/notification-manager');
-const { createTelegramChannel, decideTelegramNotification } = require('../notifications/channels/telegram');
-const { createToastChannel } = require('../notifications/channels/toast');
-const { createWebNotificationChannel } = require('../notifications/channels/web-notification');
-const { createTelegramCompletionDefer } = require('../notifications/telegram-completion-defer');
-const { createTelegramOutbox } = require('../notifications/telegram-outbox');
+const { NotificationManager } = require('../notifications/notification-manager.ts');
+const { createTelegramChannel, decideTelegramNotification } = require('../notifications/channels/telegram.ts');
+const { createToastChannel } = require('../notifications/channels/toast.ts');
+const { createWebNotificationChannel } = require('../notifications/channels/web-notification.ts');
+const { createTelegramCompletionDefer } = require('../notifications/telegram-completion-defer.ts');
+const { createTelegramOutbox } = require('../notifications/telegram-outbox.ts');
 const { createClientPresence } = require('./core/client-presence');
 const { configSiblingPath } = require('./pairings-store');
 const { sendTelegramMessage } = require('./telegram-transport');

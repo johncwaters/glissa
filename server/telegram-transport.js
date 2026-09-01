@@ -2,7 +2,7 @@
 
 // The one Telegram sendMessage path. Two callers with unrelated lifecycles share it: the PR
 // auto-review lane (server/pr-telegram.js) and the opt-in session-notification channel
-// (notifications/channels/telegram.js).
+// (notifications/channels/telegram.ts).
 //
 // Fire-and-forget by contract: it NEVER throws and never rejects. Both callers sit on paths where a
 // failed ping must not disturb the work that triggered it (a poller tick, a notification delivery

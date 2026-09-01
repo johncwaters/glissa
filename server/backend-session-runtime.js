@@ -1,7 +1,7 @@
 'use strict';
 
-const { HookRouter } = require('../detection/hook-source');
-const { sweepOrphans } = require('../detection/settings-injector');
+const { HookRouter } = require('../detection/hook-source.ts');
+const { sweepOrphans } = require('../detection/settings-injector.ts');
 const { createRtkInstallWiring } = require('./rtk-install-wiring');
 const { getRtkPath } = require('./rtk-resolver');
 const { createSessionFactory } = require('./session-factory');

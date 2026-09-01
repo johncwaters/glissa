@@ -107,7 +107,7 @@ function writeStandaloneLaneSettings(permissions) {
 
 /**
  * @param {{ sessions?: Map<string, unknown>, closeSessionDataClients?: (id: string) => void,
- *   hookRouter?: Pick<InstanceType<typeof import('../detection/hook-source').HookRouter>, 'register' | 'unregister'>|null, getHookPort?: (() => number | null) | null, spawnGate?: unknown,
+ *   hookRouter?: Pick<InstanceType<typeof import('../detection/hook-source.ts').HookRouter>, 'register' | 'unregister'>|null, getHookPort?: (() => number | null) | null, spawnGate?: unknown,
  *   replayBufferKB?: number, recordLane?: import('./ephemeral-session').RecordLane | null }} [options]
  * @returns {DistillSpawn}
  */

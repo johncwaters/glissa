@@ -12,7 +12,7 @@ const assert = require('node:assert/strict');
 
 const { Session } = require('../session/sessions');
 const { STATES } = require('../shared/states.ts');
-const { createOscTitleSource } = require('../detection/osc-title-source');
+const { createOscTitleSource } = require('../detection/osc-title-source.ts');
 
 const SPIN_A = '⠋'; // braille spinner frames
 const SPIN_B = '⠙';

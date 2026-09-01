@@ -12,8 +12,8 @@ const { setTimeout: sleep } = require('node:timers/promises');
 
 const { Session } = require('../session/sessions');
 const { STATES } = require('../shared/states.ts');
-const { mapHookToSignal } = require('../detection/hook-source');
-const { buildHookSettings, WAKEUP_TOOL_MATCHER, HOOK_EVENTS } = require('../detection/settings-injector');
+const { mapHookToSignal } = require('../detection/hook-source.ts');
+const { buildHookSettings, WAKEUP_TOOL_MATCHER, HOOK_EVENTS } = require('../detection/settings-injector.ts');
 const wakeupTracker = require('../session/core/wakeup-tracker');
 
 function makeSession(state, overrides = {}) {

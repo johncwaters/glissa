@@ -3,7 +3,7 @@
 // A recursive, debounced fs.watch over one context-pack source root.
 //
 // The debounce, the coalescing of a write burst into one trailing call, and the stop lifecycle are
-// detection/watch-debounce.js verbatim; only the fs.watch handle is ours. It has to be: that module
+// detection/watch-debounce.ts verbatim; only the fs.watch handle is ours. It has to be: that module
 // watches ONE directory non-recursively (exactly right for the small gitdir it was written for),
 // while a pack source glob like `sources/docs/**/*.md` spans nested directories that would otherwise
 // never fire. Same lossy-watch posture as the detection watchers - the pack service's interval sweep
@@ -11,7 +11,7 @@
 
 const fs = require('node:fs');
 
-const { createWatchDebounce } = require('../detection/watch-debounce');
+const { createWatchDebounce } = require('../detection/watch-debounce.ts');
 const { canonicalizePath } = require('../shared/paths.ts');
 
 function createPackWatcher({ onChange, debounceMs = 500 }) {

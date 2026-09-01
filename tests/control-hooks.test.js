@@ -10,7 +10,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 
 const { registerControlHandlers } = require('../server/control-handlers');
-const { HOOK_EVENTS } = require('../detection/settings-injector');
+const { HOOK_EVENTS } = require('../detection/settings-injector.ts');
 const { MAX_TIMEOUT_SEC } = require('../session/core/user-hooks-core');
 
 function harness(cfg, { saveFails = false, rtkPath = '/usr/bin/rtk' } = {}) {

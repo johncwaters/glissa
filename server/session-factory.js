@@ -13,7 +13,7 @@ const { resolveUsageConfig } = require('./usage-wiring');
 /**
  * @typedef {object} SessionFactoryDependencies
  * @property {{ configPath: string }} configStore
- * @property {Pick<InstanceType<typeof import('../detection/hook-source').HookRouter>, 'register' | 'unregister'>|null} hookRouter
+ * @property {Pick<InstanceType<typeof import('../detection/hook-source.ts').HookRouter>, 'register' | 'unregister'>|null} hookRouter
  * @property {() => number|null} getHookPort
  * @property {() => import('../session/session-worktree-lifecycle').GitWorkspace|null} getGitWorkspace
  * @property {() => MillMetricsPort|null} getMillMetricsPort

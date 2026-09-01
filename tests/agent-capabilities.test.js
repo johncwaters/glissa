@@ -18,7 +18,7 @@ const path = require('node:path');
 
 const { Session } = require('../session/sessions');
 const { SessionRecorder } = require('../session/session-recorder');
-const { HookRouter } = require('../detection/hook-source');
+const { HookRouter } = require('../detection/hook-source.ts');
 const claudeCode = require('../session/adapters/claude-code');
 
 const CLAUDE_MD_ENV = 'CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD';

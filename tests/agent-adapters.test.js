@@ -14,8 +14,8 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { Session } = require('../session/sessions');
-const { HookRouter } = require('../detection/hook-source');
-const { writeSessionSettings } = require('../detection/settings-injector');
+const { HookRouter } = require('../detection/hook-source.ts');
+const { writeSessionSettings } = require('../detection/settings-injector.ts');
 const claudeCode = require('../session/adapters/claude-code');
 const adapters = require('../session/adapters');
 const { validateConfig } = require('../server/config-store');

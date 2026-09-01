@@ -132,7 +132,7 @@ function prReviewPackNames(cfg) {
 
 /**
  * @param {{ config: PrReviewWiringConfig, reviewSessions: Map<string, unknown>,
- *   closeSessionDataClients: (id: string) => void, hookRouter: Pick<InstanceType<typeof import('../detection/hook-source').HookRouter>, 'register' | 'unregister'>|null,
+ *   closeSessionDataClients: (id: string) => void, hookRouter: Pick<InstanceType<typeof import('../detection/hook-source.ts').HookRouter>, 'register' | 'unregister'>|null,
  *   getHookPort: (() => number | null) | null, spawnGate: { run: (callback: () => unknown) => Promise<unknown> },
  *   gitWorkspace: object, getProjectPathById: (projectId: string) => string | null,
  *   getProjectNameById?: (projectId: string) => string | null,

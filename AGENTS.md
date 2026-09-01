@@ -50,7 +50,7 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 ### Testing Requirements
 
 - Run `npm test` (the `node:test` suite in `tests/`) before claiming completion.
-- New pure logic gets a unit test; detection changes must also pass the replay fixtures (`tests/replay-harness.test.js`).
+- New pure logic gets a unit test; detection changes must also pass the replay fixtures (`tests/replay-harness.test.ts`).
 - Tests pin behavior better than prose: when a rule matters, add the test rather than a paragraph here.
 
 ### Common Patterns

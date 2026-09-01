@@ -10,27 +10,27 @@ Status detection and change watching. Session status is derived from machine-emi
 
 | File | Description |
 |------|-------------|
-| `status-source.js` | Merges hook + title signals: precedence hook > title, `ready` conflict window so a racing `awaiting-input` wins, dedup |
-| `hook-source.js` | `HookRouter`: validates the per-session bearer token, maps Claude Code hook POSTs (`Stop`, `Notification`, `UserPromptSubmit`, `SessionStart/End`, `SubagentStart/Stop`, post-tool wakeups) to signals |
-| `settings-injector.js` | Writes the per-session `--settings` file injecting HTTP hooks that POST to `POST /hook/:glissaId/:event` (token in URL) |
-| `osc-title-source.js` | OSC-0 title fallback: braille or circle-halves spinner = `working`, idle glyph = `ready`, unknown glyph = `unknown` (never a guess, never `awaiting-input`) |
-| `replay.js` | Version-aware replay harness: drives `session-recorder.js` JSONL recordings (v1/v2) through the detection stack |
-| `worktree-watch.js` | fs.watch on the per-worktree gitdir; nudges `sessions.js` to recompute the diff when git state moves. Watch-only, no parsing |
-| `integration-ref-watch.js` | Reflog-based listener for integration-branch movement (e.g. another session merged into develop) that no local worktree event would surface |
-| `watch-debounce.js` | Shared debounce-into-trailing-call + stop lifecycle used by `worktree-watch.js` and `integration-ref-watch.js` (both single-directory fs.watch listeners) |
+| `status-source.ts` | Merges hook + title signals: precedence hook > title, `ready` conflict window so a racing `awaiting-input` wins, dedup |
+| `hook-source.ts` | `HookRouter`: validates the per-session bearer token, maps Claude Code hook POSTs (`Stop`, `Notification`, `UserPromptSubmit`, `SessionStart/End`, `SubagentStart/Stop`, post-tool wakeups) to signals |
+| `settings-injector.ts` | Writes the per-session `--settings` file injecting HTTP hooks that POST to `POST /hook/:glissaId/:event` (token in URL) |
+| `osc-title-source.ts` | OSC-0 title fallback: braille or circle-halves spinner = `working`, idle glyph = `ready`, unknown glyph = `unknown` (never a guess, never `awaiting-input`) |
+| `replay.ts` | Version-aware replay harness: drives `session-recorder.js` JSONL recordings (v1/v2) through the detection stack |
+| `worktree-watch.ts` | fs.watch on the per-worktree gitdir; nudges `sessions.js` to recompute the diff when git state moves. Watch-only, no parsing |
+| `integration-ref-watch.ts` | Reflog-based listener for integration-branch movement (e.g. another session merged into develop) that no local worktree event would surface |
+| `watch-debounce.ts` | Shared debounce-into-trailing-call + stop lifecycle used by `worktree-watch.ts` and `integration-ref-watch.ts` (both single-directory fs.watch listeners) |
 
 ## For AI Agents
 
 ### Working In This Directory
 - The PTY data path does NO content parsing beyond scanning for OSC-0 titles. Do not reintroduce body/line scraping.
 - Hook signals are authoritative; the title source is fallback only and must never emit `awaiting-input`.
-- Keep the bearer-token check in `hook-source.js`; it is the trust boundary of the only HTTP write ingress.
+- Keep the bearer-token check in `hook-source.ts`; it is the trust boundary of the only HTTP write ingress.
 - Watchers are listeners, not pollers: they say "look again", `sessions.js` recomputes the truth. Keep recompute work async (shared event loop).
 - The signal x state transition matrix lives in `session/core/status-mapper.js` and is documented in `docs/postmortem-terminal-detection.md`.
 
 ### Testing Requirements
-- Unit tests: `tests/status-source.test.js`, `hook-source.test.js`, `osc-title-source.test.js`, `worktree-watch.test.js`, `integration-ref-watch.test.js`.
-- Detection behavior changes must keep `tests/replay-harness.test.js` green against the `tests/fixtures/*.jsonl` recordings; add a fixture for a new signal scenario.
+- Unit tests: `tests/status-source.test.ts`, `hook-source.test.ts`, `osc-title-source.test.ts`, `worktree-watch.test.ts`, `integration-ref-watch.test.ts`.
+- Detection behavior changes must keep `tests/replay-harness.test.ts` green against the `tests/fixtures/*.jsonl` recordings; add a fixture for a new signal scenario.
 
 ### Common Patterns
 - Sources emit normalized signals; `sessions.js._onStatus` + `session/core/status-mapper.js` decide transitions.
@@ -40,7 +40,7 @@ Status detection and change watching. Session status is derived from machine-emi
 
 ### Internal
 - `session/sessions.js` - consumes StatusSource, owns transitions
-- `session/session-recorder.js` - produces the JSONL that `replay.js` consumes
+- `session/session-recorder.js` - produces the JSONL that `replay.ts` consumes
 - `../session/core/status-mapper.js` - the pure signal-to-event decision
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->
@@ -59,7 +59,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 ### Operator Hooks
 
-- The Hooks tab's records (`config.hooks`) are appended to the per-session settings file AFTER Glissa's own entries for the same event, never merged into `~/.claude/settings.json`: a session with none configured writes a byte-identical file, and no operator hook can displace a status callback (`tests/settings-injector-user-hooks.test.js`).
+- The Hooks tab's records (`config.hooks`) are appended to the per-session settings file AFTER Glissa's own entries for the same event, never merged into `~/.claude/settings.json`: a session with none configured writes a byte-identical file, and no operator hook can displace a status callback (`tests/settings-injector-user-hooks.test.ts`).
 - The core (`session/core/user-hooks-core.js`) is the one validator; the control handler, the spawn path and a hand edit of config.json all pass through it, and an unreadable record is dropped there rather than failing the spawn.
 
 ### Session Recording

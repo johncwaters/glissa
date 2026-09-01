@@ -13,8 +13,8 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { Session } = require('../session/sessions');
-const { HookRouter } = require('../detection/hook-source');
-const { createOscTitleSource } = require('../detection/osc-title-source');
+const { HookRouter } = require('../detection/hook-source.ts');
+const { createOscTitleSource } = require('../detection/osc-title-source.ts');
 const { explainNotification, createNotifyGate } = require('../session/core/notify-gate');
 const { STATES } = require('../shared/states.ts');
 const codex = require('../session/adapters/codex');

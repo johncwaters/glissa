@@ -10,7 +10,7 @@ const { Readable } = require("node:stream");
 const { spawnSync } = require("node:child_process");
 
 const { Session } = require("../session/sessions");
-const { HookRouter } = require("../detection/hook-source");
+const { HookRouter } = require("../detection/hook-source.ts");
 const hookRelay = require("../session/hook-relay");
 const adapters = require("../session/adapters");
 const grok = require("../session/adapters/grok");

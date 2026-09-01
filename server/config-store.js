@@ -21,7 +21,7 @@ const DEFAULT_CONFIG = {
   promptDetectionMs: 1500,
   notifyDebounceMs: 3000,
   // How long an unacknowledged notification waits before the escalation ladder's last rung reaches
-  // the off-dashboard channel (see notifications/notification-manager.js). 0 switches the rung off.
+  // the off-dashboard channel (see notifications/notification-manager.ts). 0 switches the rung off.
   phoneEscalationMs: 300000,
   cursorBlink: false,
   debugMode: false,
@@ -72,7 +72,7 @@ const DEFAULT_CONFIG = {
   // Push session notifications (complete / waiting / failed) to Telegram when NO dashboard tab is
   // open anywhere, using the same config.telegram credentials the PR-review lane defines. Separate
   // from prReview.enabled on purpose: PR pings and session pings are independently switchable. Off
-  // by default; see notifications/channels/telegram.js for the per-delivery gate.
+  // by default; see notifications/channels/telegram.ts for the per-delivery gate.
   telegramNotifications: false,
   // A null integration branch selects each repository's default branch for session worktrees.
   integrationBranch: null,

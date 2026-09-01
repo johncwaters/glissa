@@ -10,7 +10,7 @@ const assert = require('node:assert/strict');
 
 const { createNotifyGate, decideNotification, explainNotification } = require('../session/core/notify-gate');
 const { STATES } = require('../shared/states.ts');
-const { NotificationManager } = require('../notifications/notification-manager');
+const { NotificationManager } = require('../notifications/notification-manager.ts');
 
 // ---------------------------------------------------------------------------
 // Gate unit behavior

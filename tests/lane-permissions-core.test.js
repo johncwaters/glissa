@@ -15,7 +15,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { ACCEPT_EDITS_MODE, buildLanePermissions } = require('../server/core/lane-permissions-core');
-const { buildHookSettings } = require('../detection/settings-injector');
+const { buildHookSettings } = require('../detection/settings-injector.ts');
 const { MEMORY_DISTILL_DENY_TOOLS, makeMemoryDistillWorkDir } = require('../server/memory-distill');
 const { makePackDistillResultFile } = require('../server/pack-distiller');
 const { VISIONS_DENY_TOOLS, makeVisionsWorkDir } = require('../server/visions-dispatch');

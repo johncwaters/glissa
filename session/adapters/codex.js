@@ -76,9 +76,13 @@ function isPathLikeTitle(title) {
  * idle and awaiting-input shapes both have to carry the session's own cwd basename, and a title that
  * matches nothing is reported as `unknown`: telemetry, never a transition.
  */
+/**
+ * @param {string} title
+ * @param {{ cwdBasename?: string | null }} [context]
+ */
 function classifyTitle(title, { cwdBasename = null } = {}) {
   if (isPathLikeTitle(title)) return "ignore";
-  if (isSpinnerChar(String.fromCodePoint(title.codePointAt(0)))) return "working";
+  if (isSpinnerChar(String.fromCodePoint(title.codePointAt(0) ?? 0))) return "working";
   // Without a basename to compare against there is no way to tell codex's idle title from any other
   // program's, so neither shape resolves and the hook tier carries the session alone.
   if (!cwdBasename) return "ignore";

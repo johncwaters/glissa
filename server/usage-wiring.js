@@ -23,7 +23,7 @@ const { execFileAsync: defaultExecFileAsync } = require('./child-process-safe');
 const { createJsonStateWriter } = require('./json-file');
 const { evaluateBudget, normalizeBudgetConfig } = require('./core/usage-budget-core');
 const { computeCacheSavings, normalizeRtkGain } = require('./core/usage-savings-core');
-const { decideTelegramNotification } = require('../notifications/channels/telegram');
+const { decideTelegramNotification } = require('../notifications/channels/telegram.ts');
 const { sendTelegramMessage } = require('./telegram-transport');
 const {
   buildPlanLimitsMessage,

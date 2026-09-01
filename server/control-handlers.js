@@ -22,7 +22,7 @@ const { RESUME_ID_RE } = require('../session/core/auto-resume');
 const { execFile } = require('./child-process-safe');
 const { DEFAULT_AGENT_ID, isKnownAgentId, listAgentIds, getAdapter, commandFor } = require('../session/adapters');
 const { HOOK_EVENT_CATALOG, ID_RE: HOOK_ID_RE, MAX_TIMEOUT_SEC: HOOK_MAX_TIMEOUT_SEC, normalizeHook, rawStoredHooks, readStoredHooks, removeHook, upsertHook } = require('../session/core/user-hooks-core');
-const { describeBuiltinHooks } = require('../detection/settings-injector');
+const { describeBuiltinHooks } = require('../detection/settings-injector.ts');
 const { getRtkPath } = require('./rtk-resolver');
 const {
   BRANCH_GC_INTERVAL_MS_RANGE,
@@ -915,7 +915,7 @@ function registerControlHandlers(controlWss, deps) {
 
   /*
    * The Hooks tab. Operator hooks live in config.json under `hooks` and are injected into every Claude
-   * Code session's per-session settings file at spawn (detection/settings-injector.js), so a save here
+   * Code session's per-session settings file at spawn (detection/settings-injector.ts), so a save here
    * reaches sessions on their next start or restart, never a live one. Like set-project-packs, the
    * write goes through configStore.save and a reload, so a hand edit and a tab edit take one path.
    */

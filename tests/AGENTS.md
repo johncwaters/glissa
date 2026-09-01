@@ -23,7 +23,7 @@ Tests are named `<module>.test.js` after the module under test. Notable clusters
 
 | Directory | Purpose |
 |-----------|---------|
-| `fixtures/` | JSONL session recordings (v1 legacy and v2 structural-signal format) consumed by `replay-harness.test.js` |
+| `fixtures/` | JSONL session recordings (v1 legacy and v2 structural-signal format) consumed by `replay-harness.test.ts` |
 | `helpers/` | Shared test fixtures that are not themselves tests (the `*.test.js` glob skips them). `short-path.js` mints 8.3 aliases so the CI runner's short `%TEMP%` is reproducible locally; `transcript-homes.js` redirects the three vendor transcript homes, which every boot with `memory.enabled` needs since that switch implies the agent-log source |
 
 ## For AI Agents

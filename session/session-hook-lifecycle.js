@@ -2,7 +2,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { writeSessionSettings, generateToken } = require("../detection/settings-injector");
+const { writeSessionSettings, generateToken } = require("../detection/settings-injector.ts");
 const { HOOK_URL_ENV } = require("./core/hook-relay-core");
 const { RTK_PATH_ENV } = require("./core/rtk-hook-core");
 

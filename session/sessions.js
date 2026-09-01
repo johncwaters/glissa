@@ -4,8 +4,8 @@ const pty = require("node-pty");
 const { EventEmitter } = require("node:events");
 const { execFile } = require("../server/child-process-safe");
 const { STATES, KILLABLE_STATES, RESTARTABLE_STATES } = require("../shared/states.ts");
-const { createOscTitleSource } = require("../detection/osc-title-source");
-const { createStatusSource } = require("../detection/status-source");
+const { createOscTitleSource } = require("../detection/osc-title-source.ts");
+const { createStatusSource } = require("../detection/status-source.ts");
 const { classifyClaudeKind, buildSpawnCommand } = require("./core/spawn-command");
 const { DEFAULT_AGENT_ID, resolveAdapter, commandFor } = require("./adapters");
 
@@ -60,7 +60,7 @@ const DISMISSIBLE_STATES = new Set([STATES.WAITING, STATES.COMPLETE]);
  * @property {string} path
  * @property {boolean} [dangerouslySkipPermissions]
  * @property {number} [replayBufferKB]
- * @property {Pick<InstanceType<typeof import('../detection/hook-source').HookRouter>, 'register' | 'unregister'> | null} [hookRouter]
+ * @property {Pick<InstanceType<typeof import('../detection/hook-source.ts').HookRouter>, 'register' | 'unregister'> | null} [hookRouter]
  * @property {(() => number | null) | null} [getHookPort]
  * @property {string} [hooksBaseDir]
  * @property {number} [titleStabilizationMs]
