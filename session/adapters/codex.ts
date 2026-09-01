@@ -5,9 +5,8 @@
 // plan doc's 0.146.0 evidence and pinned by unit fixtures instead, since ConPTY cannot be reproduced
 // off Windows.
 
-import path from "node:path";
-
 import { execSync } from "../../server/child-process-safe.ts";
+import { relayPath } from "../../server/runtime-paths.ts";
 import { PACK_NAME_RE } from "../../server/core/pack-core.ts";
 import { resolveAgentCommand, buildAgentSpawnCommand } from "../core/spawn-command.ts";
 import type { PathLookupExec, ResolvedCommand } from "../core/spawn-command.ts";
@@ -29,9 +28,9 @@ const ID = "codex";
 const COMMAND_NAME = "codex";
 
 // The relay ships beside this file and is run by codex as a command-type hook (session/hook-relay.ts).
-const RELAY_PATH = path.resolve(import.meta.dirname, "..", "hook-relay.ts");
+const RELAY_PATH = relayPath("hook-relay");
 // Its rtk sibling, subscribed separately and only when rtk is on (session/rtk-relay.ts).
-const RTK_RELAY_PATH = path.resolve(import.meta.dirname, "..", "rtk-relay.ts");
+const RTK_RELAY_PATH = relayPath("rtk-relay");
 const RTK_HOOK_EVENT = "PreToolUse";
 const RTK_TOOL_MATCHER = "Bash";
 

@@ -11,6 +11,7 @@ import {
   INGEST_SPEC, MEMORY_SPEC, MILL_METRICS_SPEC, PACK_DISTILLER_SPEC, pickMillBlock,
 } from './core/settings-mill-core.ts';
 import { writeJsonAtomicSync, writeTextAtomicSync } from './json-file.ts';
+import { packageRoot } from './runtime-paths.ts';
 
 // Every project in the LIVE config carries an id (createConfigStore backfills one on load) and a name
 // (the add-session handler refuses a blank one), which the contract cannot state because the same schema
@@ -172,7 +173,7 @@ function resolveConfigPath(): string {
   const decided = decideConfigPath({
     env: process.env,
     homeDir: glissaHomeDir(),
-    packageRoot: path.join(import.meta.dirname, '..'),
+    packageRoot,
   }, (candidate: string) => fs.existsSync(candidate));
   if (decided.path) return decided.path;
   if (decided.source === 'env') {
@@ -371,7 +372,7 @@ function createConfigStore({ settingsDefaults }: { settingsDefaults?: Partial<De
   // True only when the resolved config is the in-repo config.json (dev via `node server/main.ts`/`vite`).
   // A real global install never resolves this (config.json is not in package.json `files`, so it self-
   // seeds at ~/.glissa/config.json). Used as a best-effort dev-skip for the startup update check.
-  const isLocalConfig = configPath === path.join(import.meta.dirname, '..', 'config.json');
+  const isLocalConfig = configPath === path.join(packageRoot, 'config.json');
   const loadedConfig = loadConfigFile(configPath);
   const config = loadedConfig.config;
   writeBackupContent(`${configPath}.boot.bak`, loadedConfig.loadedContent);

@@ -22,12 +22,16 @@ import type { VsixManifest } from './core/vsix-core.ts';
 import { unwireEditors, wireEditors } from './editor-wire.ts';
 import type { EditorOutcome } from './editor-wire.ts';
 import { createLaneLog } from './lane-log.ts';
+import { bundled, cliPath, extensionDir, packageRoot, relayPath } from './runtime-paths.ts';
 
-const PACKAGE_ROOT = path.join(import.meta.dirname, '..');
-const EXTENSION_DIR = path.join(PACKAGE_ROOT, 'tools', 'vscode-visions');
-const RELAY_PATH = path.join(PACKAGE_ROOT, 'session', 'visions-relay.ts');
-const LSP_CORE_PATH = path.join(PACKAGE_ROOT, 'server', 'core', 'visions-lsp-core.ts');
-const CLI_PATH = path.join(PACKAGE_ROOT, 'bin', 'glissa.ts');
+const EXTENSION_DIR = extensionDir;
+const RELAY_PATH = relayPath('visions-relay');
+// Bundled, the extension's three files are already built CJS beside its manifest; from a checkout they
+// are the .ts sources this module strips at pack time.
+const LSP_CORE_PATH = bundled
+  ? path.join(EXTENSION_DIR, 'visions-lsp-core.js')
+  : path.join(packageRoot, 'server', 'core', 'visions-lsp-core.ts');
+const CLI_PATH = cliPath;
 const EDITOR_TIMEOUT_MS = 60000;
 
 interface InstallOutcome extends ExtensionEditorTarget {
@@ -83,14 +87,27 @@ function packedLspCore(filePath: string): string {
   return packedSource(filePath).replace(/^export \{([^}]*)\};/m, 'module.exports = {$1};');
 }
 
+function packedExtensionSources(): { extensionJs: string; convertJs: string; lspCoreJs: string } {
+  if (bundled) {
+    return {
+      extensionJs: fs.readFileSync(path.join(EXTENSION_DIR, 'extension.js'), 'utf8'),
+      convertJs: fs.readFileSync(path.join(EXTENSION_DIR, 'lsp-convert.js'), 'utf8'),
+      lspCoreJs: fs.readFileSync(LSP_CORE_PATH, 'utf8'),
+    };
+  }
+  return {
+    extensionJs: packedSource(path.join(EXTENSION_DIR, 'extension.ts')),
+    convertJs: packedSource(path.join(EXTENSION_DIR, 'lsp-convert.ts')),
+    lspCoreJs: packedLspCore(LSP_CORE_PATH),
+  };
+}
+
 function packVsix(): { manifest: VsixManifest; vsix: Buffer } {
   const manifestJson = fs.readFileSync(path.join(EXTENSION_DIR, 'package.json'), 'utf8');
   const manifest = JSON.parse(manifestJson) as VsixManifest;
   const extensionFiles = visionsExtensionFiles({
     manifestJson,
-    extensionJs: packedSource(path.join(EXTENSION_DIR, 'extension.ts')),
-    convertJs: packedSource(path.join(EXTENSION_DIR, 'lsp-convert.ts')),
-    lspCoreJs: packedLspCore(LSP_CORE_PATH),
+    ...packedExtensionSources(),
     relayPath: RELAY_PATH,
   });
   const vsix = buildVsix({

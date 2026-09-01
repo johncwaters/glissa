@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { PACK_NAME_RE } from "../../server/core/pack-core.ts";
+import { relayPath } from "../../server/runtime-paths.ts";
 import { buildAgentEnv } from "../core/spawn-env.ts";
 import type { AgentEnvOptions, AgentEnvProfile, SpawnEnv } from "../core/spawn-env.ts";
 import { renderGrokHooksFile, classifyGrokHooksFile } from "../core/grok-hooks-file-core.ts";
@@ -20,7 +21,7 @@ import type { HookPayload } from "../../shared/contracts/index.ts";
 
 const ID = "grok";
 const COMMAND_NAME = "grok";
-const RELAY_PATH = path.resolve(import.meta.dirname, "..", "hook-relay.ts");
+const RELAY_PATH = relayPath("hook-relay");
 const HOOK_EVENTS = [
   "UserPromptSubmit",
   "Stop",

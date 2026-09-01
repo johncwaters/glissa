@@ -12,7 +12,8 @@ Maintainer scripts for cutting a release and validating the install tarball. Gli
 |------|-------------|
 | `release.ts` | Release pipeline: pushes to GitHub, tags, creates the GitHub release. No registry publish. Run as `node scripts/release.ts` |
 | `memory-purge-fixtures.ts` | Removes test-fixture records from a memory database (`node scripts/memory-purge-fixtures.ts <db-path> [--dry-run]`), backing it up first and expunging through the store's own three writes |
-| `prepare-build.js`, `postinstall-path-check.js` | Stay plain `.js`: npm runs them INSIDE `node_modules` on a git install, where Node refuses type stripping |
+| `build.mjs`, `prepare-build.js`, `postinstall.mjs` | Stay plain `.js`: npm runs them INSIDE `node_modules` on a git install, where Node refuses type stripping |
+| `postinstall-path-check.ts` | The PATH notice itself, bundled to `dist/` and reached through `postinstall.mjs` |
 
 ## For AI Agents
 

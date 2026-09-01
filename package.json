@@ -3,36 +3,19 @@
   "version": "0.24.1",
   "private": true,
   "description": "Spawn and manage Claude Code sessions on Windows and Linux with a browser dashboard and real-time xterm.js streaming",
-  "main": "server/main.ts",
+  "main": "dist/server/index.js",
   "imports": {
     "#shared/*": "./shared/*"
   },
   "bin": {
-    "glissa": "bin/glissa.ts"
+    "glissa": "dist/bin/glissa.js"
   },
   "files": [
-    "bin/glissa.ts",
-    "bin/path-doctor.ts",
-    "scripts/prepare-build.js",
-    "scripts/postinstall-path-check.js",
     "dist/",
-    "!dist/AGENTS.md",
-    "!dist/pictures/",
-    "server/",
-    "packs/",
-    "!packs/AGENTS.md",
-    "session/",
-    "tools/vscode-visions/",
-    "notifications/",
-    "detection/",
-    "shared/states.ts",
-    "shared/client-trust.ts",
-    "shared/notification-states.ts",
-    "shared/settings-ranges.ts",
-    "shared/contracts/",
-    "shared/paths.ts",
-    "shared/usage-config.ts",
-    "shared/visions-intent-ids.ts"
+    "!dist/client/pictures/",
+    "!dist/client/AGENTS.md",
+    "scripts/postinstall.mjs",
+    "scripts/prepare-build.js"
   ],
   "engines": {
     "node": ">=22.18.0"
@@ -58,14 +41,14 @@
     "linux"
   ],
   "scripts": {
-    "start": "node server/main.ts",
+    "start": "node dist/server/index.js",
     "lint": "biome check .",
     "test": "node --test \"tests/**/*.test.js\" \"tests/**/*.test.ts\"",
     "typecheck": "tsc --project tsconfig.json && tsc --project tsconfig.mill-metrics.json && tsc --project tsconfig.public.json && tsc --project tsconfig.strict.json",
     "test:container": "docker build -f test/container/Dockerfile -t glissa-remote-test . && docker run --rm glissa-remote-test",
     "dev": "vite",
-    "build": "vite build",
-    "postinstall": "node scripts/postinstall-path-check.js",
+    "build": "node scripts/build.mjs",
+    "postinstall": "node scripts/postinstall.mjs",
     "prepare": "node scripts/prepare-build.js",
     "release": "node scripts/release.ts"
   },

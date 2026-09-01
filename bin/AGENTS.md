@@ -16,11 +16,11 @@ The globally-installed CLI entry point for Glissa (`npm i -g github:johncwaters/
 ## For AI Agents
 
 ### Working In This Directory
-- Keep this a thin argv parser; real logic belongs in `backend.js` or `config-store.js`.
-- It is listed in `package.json` `bin`, so every local file it imports must be in the `files` whitelist that bounds the GitHub-spec install tarball (the packaged-install job in `.github/workflows/test.yml` is the gate).
+- Keep this a thin argv parser; real logic belongs in `server/backend.ts` or `server/config-store.ts`.
+- `package.json` `bin` points at the BUILT CLI under `dist/`, so a new local import rides the bundle and needs no `files` entry; the packaged-install job in `.github/workflows/test.yml` is still the gate.
 
 ### Testing Requirements
-- `npm test` for behavior; the packaged-install CI job catches a whitelist miss.
+- `npm test` for behavior; the packaged-install CI job proves the installed CLI runs from `dist/`.
 
 ## Dependencies
 

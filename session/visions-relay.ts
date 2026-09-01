@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import os from "node:os";
-import path from "node:path";
 
 import WebSocket from "ws";
 
@@ -24,6 +23,7 @@ import {
 import type { Range } from "../server/core/visions-buffer-core.ts";
 import { decideConfigPath, glissaHomeDir } from "../server/core/config-path-core.ts";
 import { ACTIVITY_METHOD } from "../server/core/ingest-editor-core.ts";
+import { packageRoot } from "../server/runtime-paths.ts";
 import {
   MAX_DAEMON_FRAME_BYTES,
   daemonMessage,
@@ -124,7 +124,7 @@ function readConfiguredPort(env: Record<string, string | undefined> = process.en
   const decided = decideConfigPath({
     env,
     homeDir: glissaHomeDir(os.homedir()),
-    packageRoot: path.join(import.meta.dirname, ".."),
+    packageRoot,
   }, (candidate) => {
     try {
       return fsApi.existsSync(candidate);

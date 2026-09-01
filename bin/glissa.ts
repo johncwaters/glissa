@@ -2,11 +2,11 @@
 
 import fs from 'node:fs';
 import os from 'node:os';
-import path from 'node:path';
 
 import pkg from '../package.json' with { type: 'json' };
 import { execSync } from '../server/child-process-safe.ts';
 import { decideConfigPath, glissaHomeDir } from '../server/core/config-path-core.ts';
+import { packageRoot } from '../server/runtime-paths.ts';
 import { formatPathNotice, npmGlobalBinDir, onPath, pnpmGlobalBinDir } from './path-doctor.ts';
 
 const args = process.argv.slice(2);
@@ -129,7 +129,7 @@ function resolveConfigPathReadOnly(): string {
   const decided = decideConfigPath({
     env: process.env,
     homeDir: glissaHomeDir(os.homedir()),
-    packageRoot: path.join(import.meta.dirname, '..'),
+    packageRoot,
   }, (candidate) => fs.existsSync(candidate));
   if (decided.path) return decided.path;
   if (decided.source === 'env') return `${decided.envPath} (set via GLISSA_CONFIG, but NOT found)`;
@@ -154,7 +154,7 @@ async function runDoctor(): Promise<void> {
 
   console.log('\nThis CLI');
   line('running from', process.argv[1] || '(unknown)');
-  line('package dir', path.resolve(import.meta.dirname, '..'));
+  line('package dir', packageRoot);
 
   console.log('\nPATH registration');
   // Resolved lazily, and only when the env alone cannot answer: `npm prefix -g` can stall ~2s cold.

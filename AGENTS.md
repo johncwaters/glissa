@@ -11,6 +11,8 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 | Path | Role |
 |------|------|
 | `server/main.ts`, `vite.config.ts` | Production entry; frontend build and dev wiring |
+| `vite.server.config.ts`, `vite.extension.config.ts`, `scripts/build.mjs` | The node and VS Code bundles, and the orchestrator that owns `dist/` |
+| `server/core/runtime-paths.ts` | The ONLY derivation of where a shipped asset lives; nothing else may guess from `import.meta` |
 | `config.json`, `package.json`, `biome.json`, `socket.yml` | Runtime/dev config; package, lint and scan policy |
 | `DESIGN.md`, `DESIGN.json`, `PRODUCT.md` | Visual system and product definition |
 | `docs/`, `bin/` | Design records and npm CLI |
@@ -43,6 +45,7 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 - Avoid `else`: prefer early returns and guard clauses.
 - Prefer the seam pattern: pure logic in `session/core/` or a `*-core` module, thin IO shells around it. A pure core imports no Session and reads no clock.
 - Inter-module communication via Node `EventEmitter`, not globals or direct coupling.
+- The published package ships `dist/` only and runs built `.js`, because Node refuses type stripping inside `node_modules`. Resolve a shipped asset (relay, pack spec, CLI, dashboard) through `server/runtime-paths.ts`, never from `import.meta.dirname`: the same module runs from a source checkout and from `dist/`.
 - Sessions are keyed by stable UUID `id`; `name` is display-only.
 - Wire and persisted shapes are Zod schemas in `shared/contracts/`; boundaries parse and fail closed (`tests/contracts-*.test.js`).
 - `npm run typecheck` gates `server/`, `session/`, `detection/`, `notifications/`, `shared/` and `public/` at zero errors under `strictNullChecks` and the rest of the strict family `tests/typecheck-gate.test.js` pins. The checked set only grows, no file may opt out with `@ts-nocheck`/`@ts-ignore`, and no file may launder an assertion through `unknown` (`tests/typecheck-gate.test.js`).
@@ -84,7 +87,7 @@ Each subsystem states its own rules beside its code, so a rule is loaded when th
 
 - `npm run dev` - Vite dev server with HMR on 5173, backend attached via plugin (one process)
 - `npm run dev:server-only` - Express backend only on 3000
-- `npm run build` / `npm start` - production bundle to `dist/`; production server
+- `npm run build` / `npm start` - whole package to `dist/` (dashboard, node bundles, extension); the built server entry
 - `npm test` - the `node:test` suite; `npm run test:container` adds the Docker remote-mode run
 
 ## Platform and Runtime

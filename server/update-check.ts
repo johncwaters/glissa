@@ -22,6 +22,7 @@ import {
 } from './core/update-core.ts';
 import type { InstallFlavor } from './core/update-core.ts';
 import { writeJsonAtomicSync } from './json-file.ts';
+import { packageRoot as resolvedPackageRoot } from './runtime-paths.ts';
 
 const GIT_REMOTE_URL = 'https://github.com/johncwaters/glissa.git';
 const GITHUB_LATEST_RELEASE_URL = 'https://api.github.com/repos/johncwaters/glissa/releases/latest';
@@ -203,7 +204,7 @@ async function checkForUpdate({
   fetchFn = fetch,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   abortController = new AbortController(),
-  packageRoot = path.join(import.meta.dirname, '..'),
+  packageRoot = resolvedPackageRoot,
   runCommand = execFileAsync,
   statePath = defaultStatePath(),
   ttlMs = STATE_TTL_MS,

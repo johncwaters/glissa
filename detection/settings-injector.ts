@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
+import { relayPath } from '../server/runtime-paths.ts';
 import { buildRtkHookEntry } from '../session/core/rtk-command.ts';
 import { appendUserHooks } from '../session/core/user-hooks-core.ts';
 import type { UserHook } from '../session/core/user-hooks-core.ts';
@@ -108,7 +109,7 @@ const WAKEUP_TOOL_MATCHER = 'ScheduleWakeup|CronCreate|CronDelete';
 const PACK_READ_TOOL_MATCHER = 'Read';
 
 // The managed statusLine relay, and the marker meaning "the operator had no statusLine of their own".
-const RELAY_PATH = path.resolve(import.meta.dirname, '..', 'session', 'statusline-relay.ts');
+const RELAY_PATH = relayPath('statusline-relay');
 const NO_CHAIN = '-';
 
 function generateToken(): string {

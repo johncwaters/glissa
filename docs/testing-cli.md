@@ -255,24 +255,13 @@ npm pack --dry-run
 **Expected files included** (per the `files` array in `package.json`):
 
 ```
-bin/glissa.ts
-bin/path-doctor.ts
+dist/            (the whole built package: client, server, bin, session relays, packs, extension)
+scripts/postinstall.mjs
 scripts/prepare-build.js
-scripts/postinstall-path-check.js
-dist/            (built frontend, excludes dist/AGENTS.md and dist/pictures/)
-server/
-session/
-notifications/
-detection/
-shared/states.js
-shared/client-trust.js
-shared/client-trust.esm.mjs
-shared/notification-states.js
-shared/paths.js
 package.json
 ```
 
-**Verify no unwanted files**: `config.json`, `spike/`, `.omc/`, `.claude/`, `docs/`, `node_modules/` should NOT appear.
+**Verify no unwanted files**: no raw `.ts` source anywhere, and no `config.json`, `spike/`, `.omc/`, `.claude/`, `docs/`, `node_modules/`.
 
 ---
 

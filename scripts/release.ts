@@ -51,18 +51,40 @@ if (existingTags.split('\n').includes(TAG)) {
 // 3. Build and verify dist
 console.log('==> Building...');
 run('npm run build');
-fs.statSync('dist/index.html');
+fs.statSync('dist/client/index.html');
 
-// 4. Push commits to GitHub
+// 4. Verify the tarball is the built package and nothing else: an installed copy lives inside
+// node_modules, where Node refuses to strip types, so any raw source that rides along is dead weight
+// at best and an import that cannot load at worst.
+console.log('\n==> Checking the tarball contents...');
+const NOTICE_LINE = /^npm notice\s+[\d.]+\s*[kMG]?B\s+(.+)$/;
+const packedFiles = runCapture('npm pack --dry-run 2>&1')
+  .split('\n')
+  .map((line) => line.trim().match(NOTICE_LINE))
+  .filter((match): match is RegExpMatchArray => match !== null)
+  .map((match) => match[1].trim());
+
+if (!packedFiles.includes('dist/bin/glissa.js')) {
+  console.error('ERROR: the tarball has no dist/bin/glissa.js, so the installed CLI would have nothing to run.');
+  process.exit(1);
+}
+const rawSources = packedFiles.filter((file) => /\.[cm]?ts$/.test(file));
+if (rawSources.length > 0) {
+  console.error(`ERROR: the tarball ships raw TypeScript sources: ${rawSources.join(', ')}`);
+  process.exit(1);
+}
+console.log(`   ${packedFiles.length} files, all built.`);
+
+// 5. Push commits to GitHub
 console.log('\n==> Pushing to GitHub...');
 run('git push');
 
-// 5. Tag and push tag
+// 6. Tag and push tag
 console.log(`\n==> Tagging ${TAG}...`);
 run(`git tag -a ${TAG} -m "Glissa ${TAG}"`);
 run(`git push origin ${TAG}`);
 
-// 6. Create GitHub release from CHANGELOG (optional, requires the gh CLI)
+// 7. Create GitHub release from CHANGELOG (optional, requires the gh CLI)
 const hasGhCli = hasCommand('gh');
 if (hasGhCli) {
   console.log('\n==> Creating GitHub release...');

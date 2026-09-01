@@ -43,3 +43,6 @@ if (!fs.existsSync(viteBin)) {
   runNpm(['ci', '--include=dev', '--ignore-scripts', '--no-audit', '--no-fund']);
 }
 runNpm(['run', 'build']);
+
+// npm ran postinstall before this, when dist/ did not exist yet, so the PATH notice is printed here.
+spawnSync(process.execPath, [path.join(__dirname, 'postinstall.mjs')], { stdio: 'inherit' });

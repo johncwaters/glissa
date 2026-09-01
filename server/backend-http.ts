@@ -9,6 +9,7 @@ import type { Session } from '../session/sessions.ts';
 import { decideHostAllowed } from './core/host-policy.ts';
 import { decideOriginAllowed } from './core/origin-policy.ts';
 import { configSiblingPath } from './pairings-store.ts';
+import { clientDir } from './runtime-paths.ts';
 import {
   buildUploadFilename,
   decideUploadType,
@@ -246,7 +247,6 @@ function createBackendHttpApp(dependencies: BackendHttpDependencies): Express {
   });
 
   if (staticDir === 'auto') {
-    const clientDir = path.join(import.meta.dirname, '..', 'dist', 'client');
     if (!fs.existsSync(path.join(clientDir, 'index.html'))) {
       throw Object.assign(
         new Error('Dashboard build not found (dist/client). Run `npm run build` first, or use `npm run dev`.'),

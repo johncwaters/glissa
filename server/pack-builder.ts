@@ -10,6 +10,7 @@ import fsp from 'node:fs/promises';
 import type { Dirent, Stats } from 'node:fs';
 import path from 'node:path';
 
+import { packsDir } from './runtime-paths.ts';
 import {
   CURRENT_POINTER_DIRECTORY,
   CURRENT_POINTER_FILE,
@@ -40,7 +41,7 @@ import type { PackInputFile, PackManifest, PackSkill, PackSource, PackSpec, Pack
 const SPEC_SUFFIX = '.pack.json';
 // Source patterns resolve against packs/, so a shared spec reads the same whether it runs from a repo
 // checkout or a global install.
-const DEFAULT_PACKS_DIR = path.join(import.meta.dirname, '..', 'packs');
+const DEFAULT_PACKS_DIR = packsDir;
 const SKIP_DIRS = new Set(['.git', 'node_modules']);
 const TMP_PREFIX = 'tmp-';
 const PUBLISH_LOCK_FILE = 'publish.lock';
