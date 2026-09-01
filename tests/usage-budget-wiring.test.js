@@ -13,7 +13,7 @@ const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createUsageWiring, resolveUsageConfig, budgetAlertText, DEFAULT_USAGE_CONFIG } = require('../server/usage-wiring');
+const { createUsageWiring, resolveUsageConfig, budgetAlertText, DEFAULT_USAGE_CONFIG } = require('../server/usage-wiring.ts');
 
 const TODAY = '2026-08-19';
 const MONTH = '2026-08';

@@ -23,13 +23,13 @@ Pure cores seam-extracted from `sessions.js`: no fs, no git, no async, no Sessio
 | `pack-notice.ts` | Pure `buildPackNotice(deliveredPacks, latestVersions)` -> the one Glissa-authored line a `UserPromptSubmit` hook response injects when a delivered context pack has been rebuilt; hard-capped, never pack content |
 | `anti-slop-prompt.ts` | Fixed deterministic anti-slop note for `--append-system-prompt`; single line, no double quotes (must survive the cmd.exe shim re-parse) |
 | `hook-relay-core.ts` | Pure rules for `../hook-relay.ts`: the `GLISSA_HOOK_URL` read, event-token normalization into the URL's last segment, the http/loopback/`/hook/` target refusals, and the payload size cap that matches the ingress body cap |
-| `post-turn-rules.ts` | Pure idempotent post-turn hygiene rules, `(content) -> { content, findings }`; applied by `server/post-turn-checker.js` |
+| `post-turn-rules.ts` | Pure idempotent post-turn hygiene rules, `(content) -> { content, findings }`; applied by `server/post-turn-checker.ts` |
 | `slop-code-patterns.ts` | Pure regex-based code-slop detection (`detectCodeSlop`), Noise/Lies/Soul taxonomy, offsets only |
 
 ## For AI Agents
 
 ### Working In This Directory
-- Purity is the contract: no IO, no timers, no EventEmitter, no requires from `sessions.js`. If a change needs IO, it belongs in the root-level shell (`sessions.js`, `post-turn-checker.js`).
+- Purity is the contract: no IO, no timers, no EventEmitter, no requires from `sessions.js`. If a change needs IO, it belongs in the root-level shell (`sessions.ts`, `post-turn-checker.ts`).
 - `post-turn-rules.ts`, `slop-code-patterns.ts`, `anti-slop-prompt.ts` and their tests must contain no literal em dash, en dash, or ellipsis character; build them via `String.fromCharCode`.
 - Tracker modules (`agent-tracker.ts`, `wakeup-tracker.ts`) mutate the passed Map and return whether the set changed; follow that shape for any new tracker.
 - Strings destined for the cmd.exe shim spawn path must avoid embedded double quotes (see `anti-slop-prompt.ts` header).
@@ -40,6 +40,6 @@ Pure cores seam-extracted from `sessions.js`: no fs, no git, no async, no Sessio
 ## Dependencies
 
 ### Internal
-- Consumed by `session/sessions.ts` and `server/post-turn-checker.js`; depends only on siblings (e.g. `post-turn-rules.ts` -> `slop-code-patterns.ts`).
+- Consumed by `session/sessions.ts` and `server/post-turn-checker.ts`; depends only on siblings (e.g. `post-turn-rules.ts` -> `slop-code-patterns.ts`).
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

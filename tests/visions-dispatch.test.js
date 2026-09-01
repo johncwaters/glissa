@@ -18,7 +18,7 @@ const {
   createVisionsDispatcher,
   readCommentsResult,
   visionsPermissions,
-} = require('../server/visions-dispatch');
+} = require('../server/visions-dispatch.ts');
 const { MAX_PROMPT_BYTES, buildVisionsPrompt } = require('../server/core/visions-dispatch-core.ts');
 
 const URI = 'file:///tmp/plan-visions.md';

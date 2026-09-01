@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { classifyChecks, normalizePr } = require('../server/pr-gh');
+const { classifyChecks, normalizePr } = require('../server/pr-gh.ts');
 
 // CheckRun shape (status/conclusion)
 test('classifyChecks: empty rollup is none (never green)', () => {

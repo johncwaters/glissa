@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createSpawnGate } = require('../server/spawn-gate');
+const { createSpawnGate } = require('../server/spawn-gate.ts');
 
 test('run executes queued work one-at-a-time, in submission order', async () => {
   const gate = createSpawnGate();

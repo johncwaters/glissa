@@ -1,7 +1,7 @@
 import type { ControlBroadcast } from './backend-websockets.ts';
 import type { decideUpdateStatus } from './core/update-core.ts';
 import { shortSha } from './core/update-core.ts';
-import { checkForUpdate as defaultCheckForUpdate } from './update-check.js';
+import { checkForUpdate as defaultCheckForUpdate } from './update-check.ts';
 
 const UPDATE_RECHECK_MS = 24 * 60 * 60 * 1000;
 

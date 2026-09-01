@@ -11,26 +11,26 @@ Backend runtime: the Express + WebSocket server factory and its control plane, p
 |------|-------------|
 | `backend.js` | Express + WebSocket server factory |
 | `backend-*.js` | Wiring extracted from the factory, one concern per file |
-| `session-{factory,registry,event-wiring}.js` | Session construction, config reconciliation, and one-time event wiring |
+| `session-{factory,registry,event-wiring}.ts` | Session construction, config reconciliation, and one-time event wiring |
 | `control-handlers.js` | Control-WebSocket message handlers (kill, restart, rename, settings) |
 | `control-replay-core.js` | Pure control-broadcast replay log |
-| `server-lifecycle.js` | Boot/shutdown helpers; restart strategy in `core/restart-strategy.ts` |
-| `ws-sender.js` | Data-WebSocket sender: batching and backpressure |
-| `post-turn-checker.js` | Post-turn hygiene IO runner (rules in `session/core/post-turn-rules.ts`) |
-| `usage-wiring.js` | Usage lane IO shell |
-| `usage-scanner.js` | Claude Code transcript scanner |
-| `usage-pricing.js` | Claude model pricing loader |
+| `server-lifecycle.ts` | Boot/shutdown helpers; restart strategy in `core/restart-strategy.ts` |
+| `ws-sender.ts` | Data-WebSocket sender: batching and backpressure |
+| `post-turn-checker.ts` | Post-turn hygiene IO runner (rules in `session/core/post-turn-rules.ts`) |
+| `usage-wiring.ts` | Usage lane IO shell |
+| `usage-scanner.ts` | Claude Code transcript scanner |
+| `usage-pricing.ts` | Claude model pricing loader |
 | `data/claude-pricing.json` | Bundled LiteLLM pricing snapshot |
-| `spawn-gate.js` | Process-wide async serialization of `pty.spawn` initiation (ConPTY wedge avoidance) |
+| `spawn-gate.ts` | Process-wide async serialization of `pty.spawn` initiation (ConPTY wedge avoidance) |
 | `git-workspace.js` | THE ONLY module allowed to run `git worktree` (`tests/no-direct-git-worktree.test.js`) |
 | `config-store.js` | Runtime config load/save/defaults |
 | `child-process-safe.js` | THE ONLY importer of `node:child_process` (`tests/no-direct-child-process.test.js`) |
-| `update-check.js` | Startup release-tag check, advisory only |
-| `pr-review-wiring.js` | PR auto-review IO shell |
+| `update-check.ts` | Startup release-tag check, advisory only |
+| `pr-review-wiring.ts` | PR auto-review IO shell |
 | `ephemeral-session.js` | Shared ephemeral-Session registration and cleanup |
-| `pr-poller.js` | PR auto-review poller (opt-in), IO-free |
-| `pr-gh.js` | `gh`/`git` wrappers for the PR poller |
-| `pr-telegram.js` | PR-only Telegram push helper (never throws; NOT a `NotificationManager` channel) |
+| `pr-poller.ts` | PR auto-review poller (opt-in), IO-free |
+| `pr-gh.ts` | `gh`/`git` wrappers for the PR poller |
+| `pr-telegram.ts` | PR-only Telegram push helper (never throws; NOT a `NotificationManager` channel) |
 | `core/pr-review-core.ts` | Pure PR-review decisions |
 | `core/branch-sync-core.ts` | Pure ahead/behind decisions for the branch-sync indicator |
 | `core/restart-strategy.ts` | Pure restart strategy, keyed on systemd's `INVOCATION_ID` |
@@ -121,7 +121,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - A PATH DENY is not a write boundary: probed with a bare `Write` allow present, both spellings let the write through, and a rule that looks like a boundary and is not is worse than none.
 - No lane may deny bare `Read`, `Write`, `Glob` or `Grep`: a bare `Read` deny refuses the Write tool, mutually exclusive with a result-file contract.
 - The mode is set in the lane's managed settings file, overriding the operator's own, or `defaultMode: auto` leaves a classifier deciding these writes instead of a rule.
-- A lane prompt is written in its throwaway cwd and invoked by a constant bootstrap argument, since a Windows `.cmd` shim re-parses argv through `cmd.exe` (`server/visions-dispatch.js`, `server/pack-distiller.js`).
+- A lane prompt is written in its throwaway cwd and invoked by a constant bootstrap argument, since a Windows `.cmd` shim re-parses argv through `cmd.exe` (`server/visions-dispatch.ts`, `server/pack-distiller.ts`).
 
 ### Security: Trust Boundary
 

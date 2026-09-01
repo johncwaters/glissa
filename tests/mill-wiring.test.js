@@ -12,7 +12,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { createMillWiring } = require('../server/mill-wiring');
+const { createMillWiring } = require('../server/mill-wiring.ts');
 
 const VERSION = 'e'.repeat(64);
 

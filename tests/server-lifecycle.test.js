@@ -10,7 +10,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { awaitReaps, createLifecycle } = require('../server/server-lifecycle');
+const { awaitReaps, createLifecycle } = require('../server/server-lifecycle.ts');
 const { decideRestartStrategy, SUPERVISED_RESTART_EXIT_CODE } = require('../server/core/restart-strategy.ts');
 
 // Every test injects env explicitly: the restart hand-off branches on it, and the suite itself may run

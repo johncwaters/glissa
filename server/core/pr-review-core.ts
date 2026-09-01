@@ -10,7 +10,7 @@ const VERDICT_TO_PHASE: Record<string, string> = {
 export interface PullRequestCandidate {
   isDraft?: boolean;
   isCrossRepository?: boolean;
-  headOwner?: string;
+  headOwner?: string | null;
   key?: string;
   headRefOid?: string;
   author: { isBot?: boolean; login: string };

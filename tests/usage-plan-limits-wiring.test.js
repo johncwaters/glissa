@@ -10,7 +10,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createUsageWiring, resolveUsageConfig, DEFAULT_USAGE_CONFIG } = require('../server/usage-wiring');
+const { createUsageWiring, resolveUsageConfig, DEFAULT_USAGE_CONFIG } = require('../server/usage-wiring.ts');
 
 const GLISSA_ID = 'a0000000-0000-4000-8000-000000000001';
 const CLAUDE_ID = 'c1c1c1c1-2222-4333-8444-555555555555';

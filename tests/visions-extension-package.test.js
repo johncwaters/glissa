@@ -15,7 +15,7 @@ const { once } = require('node:events');
 const { WebSocketServer } = require('ws');
 
 const vscode = require('./helpers/vscode-stub');
-const { packVsix } = require('../server/visions-setup');
+const { packVsix } = require('../server/visions-setup.ts');
 
 const STUB_PATH = require.resolve('./helpers/vscode-stub');
 const WAIT_MS = 8000;

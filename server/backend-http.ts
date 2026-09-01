@@ -8,7 +8,7 @@ import type { Express, Request, RequestHandler, Response } from 'express';
 import type { Session } from '../session/sessions.ts';
 import { decideHostAllowed } from './core/host-policy.ts';
 import { decideOriginAllowed } from './core/origin-policy.ts';
-import { configSiblingPath } from './pairings-store.js';
+import { configSiblingPath } from './pairings-store.ts';
 import {
   buildUploadFilename,
   decideUploadType,

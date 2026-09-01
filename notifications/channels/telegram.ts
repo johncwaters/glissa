@@ -11,7 +11,7 @@
 // key absent the gate short-circuits on the first line, which is why an unconfigured install
 // behaves exactly as before.
 
-import { sendTelegramMessage } from '../../server/telegram-transport.js';
+import { sendTelegramMessage } from '../../server/telegram-transport.ts';
 import { decideOffDashboardDelivery } from '../../server/core/client-presence.ts';
 import type { NotificationContext } from '../notification-manager.ts';
 

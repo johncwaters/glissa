@@ -20,8 +20,8 @@ const {
   packDistillerPermissions,
   readDistillResult,
   writeOutputNoFollow,
-} = require('../server/pack-distiller');
-const { distillOutputPath } = require('../server/pack-builder');
+} = require('../server/pack-distiller.ts');
+const { distillOutputPath } = require('../server/pack-builder.ts');
 const { buildStampLine, needsDistill } = require('../server/core/distill-core.ts');
 const { LANE_ENVIRONMENT_ARGS, buildLanePermissions } = require('../server/core/lane-permissions-core.ts');
 const {

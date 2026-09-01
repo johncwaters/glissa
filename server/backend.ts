@@ -25,20 +25,20 @@ import { resolveAdapter } from '../session/adapters/index.ts';
 import type { Session } from '../session/sessions.ts';
 import { createConfigStore, generateProjectId, ensureProjectIds } from './config-store.ts';
 import type { GlissaConfig } from './config-store.ts';
-import { createLifecycle } from './server-lifecycle.js';
+import { createLifecycle } from './server-lifecycle.ts';
 import { spawn } from './child-process-safe.ts';
 import { createBackendHttpApp } from './backend-http.ts';
 import { createBackendWebSockets } from './backend-websockets.ts';
 import type { ControlBroadcast } from './backend-websockets.ts';
 import { createBackendShutdown } from './backend-shutdown.ts';
 import { createBackendTrust } from './backend-trust.ts';
-import { createSessionEventWiring, persistSessionField } from './session-event-wiring.js';
+import { createSessionEventWiring, persistSessionField } from './session-event-wiring.ts';
 import {
   carryWorktreeAcrossRecreate,
   createSessionRegistry,
   reconcileSessionWorktrees,
   runAutoResume,
-} from './session-registry.js';
+} from './session-registry.ts';
 import { createBackendLanes } from './backend-lanes.ts';
 import type { BackendLaneOptions } from './backend-lanes.ts';
 import { decideWasActiveFlip, shouldStartAfterModify } from './core/session-registry-core.ts';
@@ -236,7 +236,7 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     broadcastControl,
     telegramChannel,
     notificationManager,
-    getIngestLane: () => laneAssembly.current('ingest'),
+    getIngestLane: getCurrentIngestLane,
     tapIngestForSession,
     closeSessionDataClients,
     logger: console,

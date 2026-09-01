@@ -22,7 +22,7 @@ const {
   normalizeLedger,
   pruneLedger,
 } = require('../server/core/usage-lane-core.ts');
-const { createLaneLedger } = require('../server/usage-lane-ledger');
+const { createLaneLedger } = require('../server/usage-lane-ledger.ts');
 const { registerEphemeralSession } = require('../server/ephemeral-session.ts');
 
 const NOW = Date.parse('2026-08-19T12:00:00.000Z');

@@ -12,7 +12,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 
-const { createHeartbeat } = require('../server/ws-heartbeat');
+const { createHeartbeat } = require('../server/ws-heartbeat.ts');
 const { planHeartbeatSweep, DEFAULT_DEADLINE_MS } = require('../server/core/heartbeat-core.ts');
 const { createClientPresence, decideOffDashboardDelivery } = require('../server/core/client-presence.ts');
 

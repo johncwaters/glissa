@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { sendPrPing } = require('../server/pr-telegram');
+const { sendPrPing } = require('../server/pr-telegram.ts');
 
 test('posts to the botToken URL with chat_id/text body via injected transport', async () => {
   let cap;

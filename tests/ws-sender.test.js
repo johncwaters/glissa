@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createWsSender, DEFAULTS } = require('../server/ws-sender');
+const { createWsSender, DEFAULTS } = require('../server/ws-sender.ts');
 
 // Minimal ws double: records sends/close, exposes a settable bufferedAmount.
 function fakeWs({ bufferedAmount = 0, readyState = 1 } = {}) {

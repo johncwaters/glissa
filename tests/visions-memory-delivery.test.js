@@ -10,8 +10,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { createVisionsWiring } = require('../server/visions-wiring');
-const { createMemoryStore } = require('../server/memory-store');
+const { createVisionsWiring } = require('../server/visions-wiring.ts');
+const { createMemoryStore } = require('../server/memory-store.ts');
 const { buildVisionsPrompt } = require('../server/core/visions-dispatch-core.ts');
 const { memoryInputFromEvent } = require('../server/core/memory-ingest-core.ts');
 const { resolveMemoryConfig } = require('../server/core/memory-core.ts');

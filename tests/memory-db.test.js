@@ -11,7 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 
-const { createMemoryDb, ftsMatchExpression, recordToRow } = require('../server/memory-db');
+const { createMemoryDb, ftsMatchExpression, recordToRow } = require('../server/memory-db.ts');
 const { SCHEMA_VERSION, isBusyError, isSqliteAvailable, openDatabase } = require('../server/glissa-db.ts');
 
 const START = Date.UTC(2026, 7, 22, 12, 0, 0);

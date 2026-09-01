@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { checkForUpdate } = require('../server/update-check');
+const { checkForUpdate } = require('../server/update-check.ts');
 
 const SHA_LOCAL = '0123456789abcdef0123456789abcdef01234567';
 const SHA_RELEASE_TAG = '1111111111111111111111111111111111111111';

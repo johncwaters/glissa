@@ -21,7 +21,7 @@ const { createBackend } = require('../server/backend.ts');
 const { createConfigStore } = require('../server/config-store.ts');
 const { CONFIG_SCALAR_KEYS, ConfigUpdate } = require('../shared/contracts/index.ts');
 const { MAX_PROMPT_BYTES } = require('../server/core/visions-dispatch-core.ts');
-const { DIGEST_BUDGET_CHARS, createVisionsWiring, VISIONS_DEBOUNCE_MS } = require('../server/visions-wiring');
+const { DIGEST_BUDGET_CHARS, createVisionsWiring, VISIONS_DEBOUNCE_MS } = require('../server/visions-wiring.ts');
 
 const MARKDOWN_URI = 'file:///tmp/plan-visions.md';
 const PROJECT_ID = 'e1f4c0de-0000-4000-8000-000000000001';

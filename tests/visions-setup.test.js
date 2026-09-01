@@ -9,7 +9,7 @@ const assert = require('node:assert/strict');
 const os = require('node:os');
 const path = require('node:path');
 
-const { createVisionsSetup } = require('../server/visions-setup');
+const { createVisionsSetup } = require('../server/visions-setup.ts');
 const { IMPLIED_INGEST, decideImpliedDefaults } = require('../server/core/visions-defaults-core.ts');
 
 function harness(initialConfig) {

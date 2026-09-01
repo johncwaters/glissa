@@ -14,11 +14,11 @@ const os = require('node:os');
 const path = require('node:path');
 const WebSocket = require('ws');
 
-const { buildReviewPrompt, readReviewResult, prPollerShouldStart } = require('../server/pr-review-wiring');
+const { buildReviewPrompt, readReviewResult, prPollerShouldStart } = require('../server/pr-review-wiring.ts');
 const { createBackend } = require('../server/backend.ts');
 const { dashboardClient } = require('./helpers/dashboard-ws');
 
-const { createPrReviewWiring } = require('../server/pr-review-wiring');
+const { createPrReviewWiring } = require('../server/pr-review-wiring.ts');
 const { recordingSessionFactory } = require('./helpers/fake-session');
 
 // --- prPollerShouldStart: inert-by-default + misconfiguration gating ---
@@ -147,20 +147,20 @@ test('readReviewResult: a missing file is ERROR (never a false clean pass)', () 
 // --- prReviewCfgKey: identity used to gate a restart to actual prReview/telegram changes ---
 
 test('prReviewCfgKey: identical prReview/telegram produce the same key regardless of key order', () => {
-  const { prReviewCfgKey } = require('../server/pr-review-wiring');
+  const { prReviewCfgKey } = require('../server/pr-review-wiring.ts');
   const a = prReviewCfgKey({ prReview: { enabled: true, projects: ['p1'] }, telegram: { botToken: 'x', chatId: 'y' } });
   const b = prReviewCfgKey({ telegram: { botToken: 'x', chatId: 'y' }, prReview: { enabled: true, projects: ['p1'] } });
   assert.equal(a, b);
 });
 
 test('prReviewCfgKey: absent prReview/telegram normalizes to null, distinct from a disabled/empty object', () => {
-  const { prReviewCfgKey } = require('../server/pr-review-wiring');
+  const { prReviewCfgKey } = require('../server/pr-review-wiring.ts');
   assert.equal(prReviewCfgKey({}), prReviewCfgKey({ prReview: undefined, telegram: undefined }));
   assert.notEqual(prReviewCfgKey({}), prReviewCfgKey({ prReview: { enabled: false } }));
 });
 
 test('prReviewCfgKey: a changed packs list counts as a lane config change', () => {
-  const { prReviewCfgKey } = require('../server/pr-review-wiring');
+  const { prReviewCfgKey } = require('../server/pr-review-wiring.ts');
   const base = { prReview: { enabled: true, projects: ['p1'], packs: ['crew-rules'] }, telegram: { botToken: 'x', chatId: 'y' } };
   const changed = { prReview: { enabled: true, projects: ['p1'], packs: ['house-rules'] }, telegram: { botToken: 'x', chatId: 'y' } };
   assert.notEqual(prReviewCfgKey(base), prReviewCfgKey(changed));

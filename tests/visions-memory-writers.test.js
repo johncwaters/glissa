@@ -7,7 +7,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createVisionsWiring } = require('../server/visions-wiring');
+const { createVisionsWiring } = require('../server/visions-wiring.ts');
 
 const PROJECT_ID = 'e1f4c0de-0000-4000-8000-000000000001';
 const PROJECT_PATH = '/tmp/glissa-memory-writers';

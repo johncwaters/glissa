@@ -4,31 +4,31 @@ import type { Session } from '../session/sessions.ts';
 import type { ControlBroadcast } from './backend-websockets.ts';
 import { createBranchGcWiring } from './branch-gc-wiring.ts';
 import type { ConfigStore, GlissaConfig } from './config-store.ts';
-import { configSiblingPath } from './pairings-store.js';
+import { configSiblingPath } from './pairings-store.ts';
 import { createGitWorkspace, createGitWorkspaceSync } from './git-workspace.ts';
 import { createIngestLane } from './ingest-wiring.ts';
 import { dbPathForConfig } from './glissa-db.ts';
-import { createMemoryDistillSpawn, createMemoryDistiller } from './memory-distill.js';
-import { createMemoryIngest, earliestLaneEntryMs } from './memory-ingest-wiring.js';
-import { createMemoryStore } from './memory-store.js';
+import { createMemoryDistillSpawn, createMemoryDistiller } from './memory-distill.ts';
+import { createMemoryIngest, earliestLaneEntryMs } from './memory-ingest-wiring.ts';
+import { createMemoryStore } from './memory-store.ts';
 import { createMillMetricsStore } from './mill-metrics-store.ts';
 import { createMillMetricsLane } from './mill-metrics-wiring.ts';
-import { createMillWiring } from './mill-wiring.js';
-import { createPackService } from './pack-service.js';
+import { createMillWiring } from './mill-wiring.ts';
+import { createPackService } from './pack-service.ts';
 import {
   DEFAULT_INTERVAL_HOURS,
   DEFAULT_TIMEOUT_SECONDS,
   createDistillSpawn,
   createPackDistiller,
-} from './pack-distiller.js';
-import { createPosthogWiring } from './posthog-wiring.js';
-import { createPrReviewWiring } from './pr-review-wiring.js';
-import { createSpawnGate } from './spawn-gate.js';
-import { createUsageWiring, resolveUsageConfig } from './usage-wiring.js';
-import { createLaneLedger } from './usage-lane-ledger.js';
-import { createVisionsDispatcher, createVisionsSpawn } from './visions-dispatch.js';
-import { createVisionsSetup } from './visions-setup.js';
-import { createVisionsWiring } from './visions-wiring.js';
+} from './pack-distiller.ts';
+import { createPosthogWiring } from './posthog-wiring.ts';
+import { createPrReviewWiring } from './pr-review-wiring.ts';
+import { createSpawnGate } from './spawn-gate.ts';
+import { createUsageWiring, resolveUsageConfig } from './usage-wiring.ts';
+import { createLaneLedger } from './usage-lane-ledger.ts';
+import { createVisionsDispatcher, createVisionsSpawn } from './visions-dispatch.ts';
+import { createVisionsSetup } from './visions-setup.ts';
+import { createVisionsWiring } from './visions-wiring.ts';
 import { resolveIngestConfig } from './core/ingest-core.ts';
 import { resolveMemoryConfig } from './core/memory-core.ts';
 import { resolveDistillConfig as resolveMemoryDistillConfig } from './core/memory-distill-core.ts';

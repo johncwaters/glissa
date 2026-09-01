@@ -17,7 +17,7 @@ const path = require('node:path');
 const WebSocket = require('ws');
 
 const { createBackend } = require('../server/backend.ts');
-const { createPairingsStore } = require('../server/pairings-store');
+const { createPairingsStore } = require('../server/pairings-store.ts');
 
 let tmpDir = null;
 let prevEnv = null;

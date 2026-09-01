@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createPrPoller } = require('../server/pr-poller');
+const { createPrPoller } = require('../server/pr-poller.ts');
 
 const flush = async (n = 20) => {
   for (let i = 0; i < n; i += 1) await new Promise((r) => setImmediate(r));

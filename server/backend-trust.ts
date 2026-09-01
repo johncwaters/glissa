@@ -2,8 +2,8 @@ import crypto from 'node:crypto';
 import { hostOfOrigin } from './core/origin-policy.ts';
 import { decideBindHost, normalizeRemoteConfig, validateRemoteConfig } from './core/remote-config.ts';
 import type { RemoteConfig } from './core/remote-config.ts';
-import { createPairingsStore, createSeenStore, defaultPairingsPath, defaultSeenPath } from './pairings-store.js';
-import { createRemoteAuth } from './remote-auth.js';
+import { createPairingsStore, createSeenStore, defaultPairingsPath, defaultSeenPath } from './pairings-store.ts';
+import { createRemoteAuth } from './remote-auth.ts';
 
 interface BackendTrustDependencies {
   localPort: number;

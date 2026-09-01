@@ -14,7 +14,7 @@ const {
   VISIONS_INTENT_NUMERIC_RANGES,
 } = require('../server/control-handlers.ts');
 const { MEMORY_SPEC, MILL_METRICS_SPEC, PACK_DISTILLER_SPEC } = require('../server/core/settings-mill-core.ts');
-const { USAGE_INTEGER_RANGES } = require('../server/usage-wiring');
+const { USAGE_INTEGER_RANGES } = require('../server/usage-wiring.ts');
 
 test('server resolvers and wire specs reuse the shared range objects', () => {
   assert.strictEqual(memoryCore.MEMORY_RETAIN_DAY_RANGE, ranges.MEMORY_RETAIN_DAY_RANGE);

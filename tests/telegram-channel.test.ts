@@ -8,8 +8,8 @@ import {
   createTelegramChannel, decideTelegramNotification, formatTelegramText,
 } from '../notifications/channels/telegram.ts';
 import { createTelegramCompletionDefer } from '../notifications/telegram-completion-defer.ts';
-import { sendTelegramMessage } from '../server/telegram-transport.js';
-import { sendPrPing } from '../server/pr-telegram.js';
+import { sendTelegramMessage } from '../server/telegram-transport.ts';
+import { sendPrPing } from '../server/pr-telegram.ts';
 import type { TelegramChannelDeps } from '../notifications/channels/telegram.ts';
 
 const CONFIGURED = { enabled: true, botToken: 'TOK', chatId: '123', connectionCount: 0 };

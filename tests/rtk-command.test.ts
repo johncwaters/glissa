@@ -7,7 +7,7 @@ import {
   resolveRtkPath,
 } from '../session/core/rtk-command.ts';
 import type { StatApi } from '../session/core/rtk-command.ts';
-import { getRtkPath, resetRtkPathCache } from '../server/rtk-resolver.js';
+import { getRtkPath, resetRtkPathCache } from '../server/rtk-resolver.ts';
 import { MAX_RTK_STDOUT_BYTES, normalizeRtkHookResponse } from '../session/core/rtk-hook-core.ts';
 
 function fsWithFiles(files: string[]): StatApi {

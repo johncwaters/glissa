@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileAsync, execFileSync } from '../server/child-process-safe.ts';
-import { createSerialQueue } from './spawn-gate.js';
+import { createSerialQueue } from './spawn-gate.ts';
 import { sessionIdFromBranch } from './core/branch-gc-core.ts';
 import {
   GIT_FETCH_TIMEOUT_MS,

@@ -1,5 +1,5 @@
 import { decidePackDelivery, normalizePackNames, variantPackName } from "../server/core/pack-core.ts";
-import { DEFAULT_PACKS_DIR, defaultBuiltRoot, resolveBuiltPack } from "../server/pack-builder.js";
+import { DEFAULT_PACKS_DIR, defaultBuiltRoot, resolveBuiltPack } from "../server/pack-builder.ts";
 import { buildPackNotice, listStalePacks } from "./core/pack-notice.ts";
 import type { DecisionEntry } from "./core/decision-log.ts";
 

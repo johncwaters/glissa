@@ -11,7 +11,7 @@ const {
   clampBaselineDays,
   DEFAULT_BASELINE_DAYS,
   MAX_BASELINE_DAYS,
-} = require('../server/posthog-api');
+} = require('../server/posthog-api.ts');
 
 // --- normalizeIssue: the shapes the query endpoint is known to return, plus defensive fallbacks ---
 

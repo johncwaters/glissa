@@ -11,7 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createUsageScanner } = require('../server/usage-scanner');
+const { createUsageScanner } = require('../server/usage-scanner.ts');
 const { normalizePricingTable } = require('../server/core/usage-pricing-core.ts');
 
 const NOW = Date.parse('2026-07-09T00:00:00.000Z');

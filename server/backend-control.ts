@@ -27,7 +27,7 @@ interface PrReviewControl {
 }
 
 interface PackControl {
-  getVersions: () => Record<string, string>;
+  getVersions: () => Record<string, string | null>;
   ensureBuilt: (names: string[], options?: { projects?: Record<string, unknown>[] | null }) => Promise<unknown>;
 }
 

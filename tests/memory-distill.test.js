@@ -10,10 +10,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { createMemoryStore } = require('../server/memory-store');
+const { createMemoryStore } = require('../server/memory-store.ts');
 const {
   BOOTSTRAP_PROMPT, MEMORY_DISTILL_DENY_TOOLS, PROMPT_FILE, WORK_DIR_PREFIX, createMemoryDistiller,
-} = require('../server/memory-distill');
+} = require('../server/memory-distill.ts');
 const { resolveDistillConfig } = require('../server/core/memory-distill-core.ts');
 const { resolveMemoryConfig } = require('../server/core/memory-core.ts');
 const { isDispatchWorkdir } = require('../server/core/ingest-agent-core.ts');

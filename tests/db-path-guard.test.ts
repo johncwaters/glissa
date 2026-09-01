@@ -11,7 +11,7 @@ import {
   underTestRunner,
 } from '../server/core/db-path-guard.ts';
 import { dbPathForConfig, openDatabase } from '../server/glissa-db.ts';
-import { createMemoryStore } from '../server/memory-store.js';
+import { createMemoryStore } from '../server/memory-store.ts';
 import { resolveMemoryConfig } from '../server/core/memory-core.ts';
 
 const HOME = os.homedir();

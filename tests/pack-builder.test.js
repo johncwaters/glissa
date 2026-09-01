@@ -11,7 +11,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 
-const { buildPack, buildPacks, distillOutputPath, listPackSpecs, packSourceRoots, packWatchRoots, publishBuild, readBuiltManifest, resolveBuiltPack } = require('../server/pack-builder');
+const { buildPack, buildPacks, distillOutputPath, listPackSpecs, packSourceRoots, packWatchRoots, publishBuild, readBuiltManifest, resolveBuiltPack } = require('../server/pack-builder.ts');
 
 function writeFile(root, relPath, content) {
   const full = path.join(root, relPath);

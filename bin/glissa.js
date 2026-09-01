@@ -64,7 +64,7 @@ if (portArg) {
 // Dispatched BEFORE require('../server') so the CLI never boots a server, and AFTER --config is
 // bridged into the env so it resolves the same ~/.glissa root the server would.
 if (args[0] === 'pair') {
-  const { runPairCli } = require('../server/pair-cli');
+  const { runPairCli } = require('../server/pair-cli.ts');
   process.exit(runPairCli(args.slice(1)));
 }
 
@@ -87,19 +87,19 @@ function runAsyncCommand(run) {
 
 const isVisionsCommand = args[0] === 'visions';
 if (isVisionsCommand) {
-  const { runVisionsCli } = require('../server/visions-cli');
+  const { runVisionsCli } = require('../server/visions-cli.ts');
   runAsyncCommand(runVisionsCli(args.slice(1)));
 }
 
 const isPackCommand = args[0] === 'pack';
 if (isPackCommand) {
-  const { runPackCli } = require('../server/pack-cli');
+  const { runPackCli } = require('../server/pack-cli.ts');
   runAsyncCommand(runPackCli(args.slice(1)));
 }
 
 const isMemoryCommand = args[0] === 'memory';
 if (isMemoryCommand) {
-  const { runMemoryCli } = require('../server/memory-cli');
+  const { runMemoryCli } = require('../server/memory-cli.ts');
   runAsyncCommand(runMemoryCli(args.slice(1)));
 }
 
@@ -187,7 +187,7 @@ function runDoctor() {
 
   console.log('\nrtk');
   try {
-    const { getRtkPath } = require('../server/rtk-resolver');
+    const { getRtkPath } = require('../server/rtk-resolver.ts');
     const rtkPath = getRtkPath();
     line('rtk', rtkPath || 'not installed (Glissa installs it when the rtk setting is on)');
   } catch (err) {

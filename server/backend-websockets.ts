@@ -12,7 +12,7 @@ import { classifyRequestOrigin, decideUpgradeAccess } from './core/request-trust
 import type { RequestTrust } from './core/request-trust.ts';
 import { classifyUpgradePath, dataSessionIdFromUrl, upgradeTokenFromUrl } from './core/upgrade-route.ts';
 import { isApplicableViewerSize, pickSizeAfterDeparture } from './core/viewer-size-core.ts';
-import { createWsSender } from './ws-sender.js';
+import { createWsSender } from './ws-sender.ts';
 
 /**
  * A control-plane broadcast. Messages are JSON frames keyed by `type`, so the parameter is the

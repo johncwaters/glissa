@@ -27,9 +27,9 @@ const WebSocket = require('ws');
 
 const { createBackend } = require('../server/backend.ts');
 const { dashboardClient } = require('./helpers/dashboard-ws');
-const { createUsageWiring } = require('../server/usage-wiring');
-const { createUsageScanner } = require('../server/usage-scanner');
-const { loadPricing } = require('../server/usage-pricing');
+const { createUsageWiring } = require('../server/usage-wiring.ts');
+const { createUsageScanner } = require('../server/usage-scanner.ts');
+const { loadPricing } = require('../server/usage-pricing.ts');
 
 const SESSION_ID = 'b0000000-0000-4000-8000-000000000001';
 const CLAUDE_SESSION_ID = 'c1c1c1c1-2222-4333-8444-555555555555';

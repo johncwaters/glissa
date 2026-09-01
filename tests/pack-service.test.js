@@ -7,7 +7,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createPackService } = require('../server/pack-service');
+const { createPackService } = require('../server/pack-service.ts');
 
 // Drain the microtask queue: the loop chains several awaits before a build starts, and a build
 // queued by a watch fire runs off the shared promise chain rather than inline.

@@ -20,8 +20,8 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { createAgentLogIngest } = require('../server/ingest-agent-logs.ts');
-const { createMemoryIngest } = require('../server/memory-ingest-wiring');
-const { createMemoryStore } = require('../server/memory-store');
+const { createMemoryIngest } = require('../server/memory-ingest-wiring.ts');
+const { createMemoryStore } = require('../server/memory-store.ts');
 const { hashMemoryLine, resolveMemoryConfig } = require('../server/core/memory-core.ts');
 
 function makeHomes() {

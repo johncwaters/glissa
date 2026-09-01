@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createUsageScanner } = require('../server/usage-scanner');
+const { createUsageScanner } = require('../server/usage-scanner.ts');
 const { normalizePricingTable } = require('../server/core/usage-pricing-core.ts');
 
 const pricingTable = normalizePricingTable({

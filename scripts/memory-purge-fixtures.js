@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { isUnder } = require('../server/core/db-path-guard.ts');
-const { createMemoryStore } = require('../server/memory-store');
+const { createMemoryStore } = require('../server/memory-store.ts');
 const { resolveMemoryConfig } = require('../server/core/memory-core.ts');
 
 const FIXTURE_SESSION_ID = /^(?:sess|s)-\d+$/;

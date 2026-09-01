@@ -18,15 +18,15 @@ import { PACK_NAME_RE, applyPackDelta, isSelfReferentialPack, sameProjectRecords
 import {
   INGEST_SPEC, MEMORY_SPEC, MILL_METRICS_SPEC, PACK_DISTILLER_SPEC, mergeMillBlock, validateMillBlock,
 } from './core/settings-mill-core.ts';
-import { readPosthogReport } from './posthog-report.js';
+import { readPosthogReport } from './posthog-report.ts';
 import * as posthogCore from './core/posthog-core.ts';
-import { buildSettingsPayload as buildSettingsPayloadFrom } from './settings-payload.js';
+import { buildSettingsPayload as buildSettingsPayloadFrom } from './settings-payload.ts';
 import { RESUME_ID_RE } from '../session/core/auto-resume.ts';
 import { execFile } from './child-process-safe.ts';
 import { DEFAULT_AGENT_ID, isKnownAgentId, listAgentIds, getAdapter, commandFor } from '../session/adapters/index.ts';
 import { HOOK_EVENT_CATALOG, ID_RE as HOOK_ID_RE, MAX_TIMEOUT_SEC as HOOK_MAX_TIMEOUT_SEC, normalizeHook, rawStoredHooks, readStoredHooks, removeHook, upsertHook } from '../session/core/user-hooks-core.ts';
 import { describeBuiltinHooks } from '../detection/settings-injector.ts';
-import { getRtkPath } from './rtk-resolver.js';
+import { getRtkPath } from './rtk-resolver.ts';
 import {
   BRANCH_GC_INTERVAL_MS_RANGE,
   BRANCH_GC_STALE_DAYS_RANGE,
@@ -119,7 +119,7 @@ interface ControlHandlerDeps {
   posthogSetIssueStatus?: ((args: { projectId: string; issueId: string; action: string }) => Promise<Record<string, unknown>>) | null;
   posthogArchiveInvestigation?: ((args: { id: string }) => Promise<Record<string, unknown>>) | null;
   getPrStatus?: (() => unknown) | null;
-  getPackVersions?: () => Record<string, string>;
+  getPackVersions?: () => Record<string, string | null>;
   serverBuild?: () => string | null;
   getUsageSessions?: (() => unknown) | null;
   getUsageReport?: (() => unknown) | null;

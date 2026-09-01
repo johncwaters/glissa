@@ -7,7 +7,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { runMemoryCli } = require('../server/memory-cli');
+const { runMemoryCli } = require('../server/memory-cli.ts');
 
 function fakeStore(result) {
   return {

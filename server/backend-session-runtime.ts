@@ -5,10 +5,10 @@ import { hooksForProject } from '../session/core/user-hooks-core.ts';
 import type { GitWorkspace } from '../session/session-worktree-lifecycle.ts';
 import type { ControlBroadcast } from './backend-websockets.ts';
 import type { ConfigStore, GlissaConfig } from './config-store.ts';
-import { createRtkInstallWiring } from './rtk-install-wiring.js';
-import { getRtkPath } from './rtk-resolver.js';
-import { createSessionFactory } from './session-factory.js';
-import { buildSettingsPayload } from './settings-payload.js';
+import { createRtkInstallWiring } from './rtk-install-wiring.ts';
+import { getRtkPath } from './rtk-resolver.ts';
+import { createSessionFactory } from './session-factory.ts';
+import { buildSettingsPayload } from './settings-payload.ts';
 
 interface BackendSessionRuntimeDependencies {
   httpServer: Server;

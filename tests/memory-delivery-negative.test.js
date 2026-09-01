@@ -17,7 +17,7 @@ const { registerControlHandlers } = require('../server/control-handlers.ts');
 const { createConfigStore } = require('../server/config-store.ts');
 const { CONFIG_SCALAR_KEYS, ConfigUpdate } = require('../shared/contracts/index.ts');
 const { REPLAYABLE_EXACT, isReplayable } = require('../server/control-replay-core.ts');
-const { createMemoryStore } = require('../server/memory-store');
+const { createMemoryStore } = require('../server/memory-store.ts');
 const { resolveMemoryConfig } = require('../server/core/memory-core.ts');
 const codex = require('../session/adapters/codex.ts').default;
 

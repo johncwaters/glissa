@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createPosthogPoller } = require('../server/posthog-poller');
+const { createPosthogPoller } = require('../server/posthog-poller.ts');
 
 const HOST = 'https://ph.test';
 const KEY = 'ph.test/1#iss-1';

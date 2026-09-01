@@ -11,7 +11,7 @@ const path = require('node:path');
 const {
   createPairingsStore, createSeenStore, defaultPairingsPath, defaultSeenPath, pairingsSignature,
   SNAPSHOT_RELOAD_MS, REVOCATION_PROPAGATION_SECONDS,
-} = require('../server/pairings-store');
+} = require('../server/pairings-store.ts');
 const { hashSecret } = require('../server/core/pairing-token.ts');
 
 function withTempStore(run, { clock } = {}) {

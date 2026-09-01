@@ -22,12 +22,12 @@ const {
   makeResolveProjects,
   POSTHOG_DENY,
   FIX_DENY,
-} = require('../server/posthog-wiring');
+} = require('../server/posthog-wiring.ts');
 
 const ENABLED = { enabled: true, host: 'https://ph.test', apiKey: 'phx_secret' };
 const TELEGRAM = { botToken: 'x', chatId: '1' };
 
-const { createPosthogWiring } = require('../server/posthog-wiring');
+const { createPosthogWiring } = require('../server/posthog-wiring.ts');
 const { recordingSessionFactory } = require('./helpers/fake-session');
 
 // --- posthogShouldStart: inert-by-default + misconfiguration gating ---

@@ -11,8 +11,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 
-const { createCanonicalProjectLookupPlanner, createMemoryStore } = require('../server/memory-store');
-const { createMemoryDb, recordToRow, rowToRecord } = require('../server/memory-db');
+const { createCanonicalProjectLookupPlanner, createMemoryStore } = require('../server/memory-store.ts');
+const { createMemoryDb, recordToRow, rowToRecord } = require('../server/memory-db.ts');
 const {
   resolveMemoryConfig, segmentFileName, verifyRecordSignature, withSignature,
 } = require('../server/core/memory-core.ts');

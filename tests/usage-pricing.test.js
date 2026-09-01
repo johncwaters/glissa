@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { loadPricing } = require('../server/usage-pricing');
+const { loadPricing } = require('../server/usage-pricing.ts');
 
 // The trim covers every provider the bundled snapshot covers: anthropic for Claude Code, openai for the
 // Codex CLI lane. Keeping it anthropic-only silently dropped every gpt entry from a fetch, which left

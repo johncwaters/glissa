@@ -18,6 +18,7 @@ declare module "express" {
     json(body?: unknown): Response;
     type(contentType: string): Response;
     send(body?: unknown): Response;
+    redirect(status: number, url: string): void;
   }
 
   type NextFunction = (error?: unknown) => void;
