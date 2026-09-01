@@ -10,7 +10,6 @@ interface Stoppable {
   stop: () => unknown;
 }
 
-// Only the teardown fan-out reaches shutdown; the rest of the measurement port is the lane's business.
 interface ShutdownMillMetricsPort {
   onSessionTeardown: (sessionId: string) => void;
 }
@@ -53,9 +52,6 @@ interface ShutdownOutcome {
   stoppers: StopperEntry[];
 }
 
-// A destroyed session never transitions, so its accumulator would be dropped mid-run and the delivery
-// it was measuring would come back as live on the next boot. Closing here is what puts the record in
-// the write queue the mill-metrics stopper then drains.
 function closeMeasuredSessions(
   millMetricsPort: ShutdownMillMetricsPort | null | undefined,
   sessions: Map<string, ShutdownSession>,
@@ -108,8 +104,7 @@ function createBackendShutdown(dependencies: BackendShutdownDependencies): () =>
     if (memoryDistiller) stoppers.add('memory-distill', () => memoryDistiller.stop());
     const memoryStore = dependencies.memoryStore;
     if (memoryStore) stoppers.add('memory-store', () => memoryStore.stop());
-    // The lane's own idle, never a snapshot of its store: a store swap in flight has no store to
-    // snapshot, and that window is exactly when writes are queued.
+
     const millMetricsIdle = dependencies.millMetricsIdle;
     if (millMetricsIdle) stoppers.add('mill-metrics', () => millMetricsIdle());
     stoppers.add('telegram-outbox', () => dependencies.telegramOutbox.idle());

@@ -1,23 +1,22 @@
-'use strict';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-
-const { createGitWorkspace } = require('../server/git-workspace');
-const { git, hasGit } = require('./helpers/git-fixture');
+import { createGitWorkspace } from '../server/git-workspace.ts';
+import type { GitWorkspaceInstance, WorkspaceHandle } from '../server/git-workspace.ts';
+import { git, hasGit } from './helpers/git-fixture.ts';
 
 const GIT = hasGit();
 
-function configureRepository(repositoryPath) {
+function configureRepository(repositoryPath: string): void {
   git(['config', 'user.email', 'test@example.com'], repositoryPath);
   git(['config', 'user.name', 'Glissa Test'], repositoryPath);
   git(['config', 'commit.gpgsign', 'false'], repositoryPath);
 }
 
-function commitFile(repositoryPath, fileName, content, message) {
+function commitFile(repositoryPath: string, fileName: string, content: string, message: string): void {
   fs.writeFileSync(path.join(repositoryPath, fileName), content, 'utf8');
   git(['add', '--', fileName], repositoryPath);
   git(['commit', '-m', message], repositoryPath);
@@ -47,12 +46,12 @@ function createRemoteFixture() {
   };
 }
 
-function pushCommit(writerPath, fileName, content, message) {
+function pushCommit(writerPath: string, fileName: string, content: string, message: string): void {
   commitFile(writerPath, fileName, content, message);
   git(['push', 'origin', 'main'], writerPath);
 }
 
-async function createSessionWorkspace(gitWorkspace, repositoryPath, label) {
+async function createSessionWorkspace(gitWorkspace: GitWorkspaceInstance, repositoryPath: string, label: string): Promise<WorkspaceHandle> {
   return gitWorkspace.create({
     projectPath: repositoryPath,
     teamId: 'session',
@@ -61,7 +60,7 @@ async function createSessionWorkspace(gitWorkspace, repositoryPath, label) {
   });
 }
 
-function detectionWorkspace(outputs) {
+function detectionWorkspace(outputs: Record<string, string | Error>) {
   return createGitWorkspace({
     git: (args) => {
       const command = args.join(' ');
@@ -147,7 +146,7 @@ test('merge continues with a warning when the base fetch fails', { skip: !GIT },
     });
     assert.equal(merged.merged, true);
     assert.equal(merged.pushed, false);
-    assert.match(merged.warning, /^could not fetch origin\/main; merged with local base: fatal:/);
+    assert.match(merged.warning ?? '', /^could not fetch origin\/main; merged with local base: fatal:/);
     await gitWorkspace.discard({ projectPath: fixture.repositoryPath, workspace: created });
   } finally {
     fixture.cleanup();
@@ -158,7 +157,7 @@ test('M2 no-origin fork and merge skip sync without an operator warning', { skip
   const fixture = createRemoteFixture();
   try {
     git(['remote', 'remove', 'origin'], fixture.repositoryPath);
-    const serverWarnings = [];
+    const serverWarnings: string[] = [];
     const gitWorkspace = createGitWorkspace({ log: { warn: (message) => serverWarnings.push(message) } });
     const created = await gitWorkspace.create({
       projectPath: fixture.repositoryPath,
@@ -295,10 +294,10 @@ test('merge does not recreate a remotely deleted base from a stale tracking ref'
 test('plain post-merge push is rejected when origin moves', { skip: !GIT }, async () => {
   const fixture = createRemoteFixture();
   try {
-    let capturedPushArguments = null;
-    const workspaceGit = (args, cwd) => {
-      if (args[0] === 'push' && !capturedPushArguments) {
-        capturedPushArguments = [...args];
+    const capturedPushArguments: string[][] = [];
+    const workspaceGit = (args: string[], cwd: string) => {
+      if (args[0] === 'push' && capturedPushArguments.length === 0) {
+        capturedPushArguments.push([...args]);
         pushCommit(fixture.writerPath, 'remote-after-advertisement.txt', 'remote advance\n', 'remote advance');
       }
       return git(args, cwd);
@@ -314,9 +313,9 @@ test('plain post-merge push is rejected when origin moves', { skip: !GIT }, asyn
 
     assert.equal(merged.merged, true);
     assert.equal(merged.pushed, false);
-    assert.deepEqual(capturedPushArguments, ['push', 'origin', 'main']);
-    assert.equal(capturedPushArguments.includes('--force'), false);
-    assert.equal(capturedPushArguments.some((argument) => argument.startsWith('--force-with-lease')), false);
+    assert.deepEqual(capturedPushArguments[0], ['push', 'origin', 'main']);
+    assert.equal(capturedPushArguments[0]?.includes('--force'), false);
+    assert.equal(capturedPushArguments[0]?.some((argument) => argument.startsWith('--force-with-lease')), false);
     assert.equal(
       git(['ls-remote', 'origin', 'refs/heads/main'], fixture.repositoryPath).trim().split(/\s/)[0],
       git(['rev-parse', 'main'], fixture.writerPath).trim(),
@@ -371,7 +370,7 @@ test('L5 forkFromHead isolates a detached checkout at its exact SHA', { skip: !G
   }
 });
 
-for (const method of ['mergeBack', 'mergeKeep']) {
+for (const method of ['mergeBack', 'mergeKeep'] as const) {
   test(`${method} fast-forwards a behind base, lands the session, and pushes`, { skip: !GIT }, async () => {
     const fixture = createRemoteFixture();
     try {

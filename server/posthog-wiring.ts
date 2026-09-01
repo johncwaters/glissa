@@ -25,7 +25,7 @@ import { createPosthogPoller } from './posthog-poller.ts';
 import type { PosthogState, SpawnInvestigationArgs } from './posthog-poller.ts';
 import { DEFAULT_POSTHOG_REPORT_DIR } from './posthog-report.ts';
 import { sendPosthogPing } from './posthog-telegram.ts';
-import { configuredIntegrationBranch } from './core/integration-branch-core.js';
+import { configuredIntegrationBranch } from './core/integration-branch-core.ts';
 
 const POSTHOG_DENY = {
   deny: [

@@ -33,7 +33,7 @@ function unreachableGitWorkspace(): BranchGcGitWorkspace {
 }
 
 test('fetches before listing, deletes separately, continues after failure, and protects live sessions', async () => {
-  const calls: string[][] = [];
+  const calls: (string | null)[][] = [];
   const traces: Record<string, unknown>[] = [];
   const mergedShas = new Set(['merged-sha', 'failed-delete-sha', 'live-sha']);
   const gitWorkspace: BranchGcGitWorkspace = {

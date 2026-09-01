@@ -109,7 +109,7 @@ const ranRebaseOnto = (cmds: string[], target: string): boolean => cmds.some((co
 const ranNoRebase = (cmds: string[]): boolean => !cmds.some((command) => command.includes('rebase'));
 
 test('base fetch is bounded and non-interactive', async () => {
-  let fetchCall = null;
+  let fetchCall: { args: string[]; cwd: string; extra?: unknown } | null = null;
   const gitWorkspace = createGitWorkspace({
     git: (args, cwd, extra) => {
       fetchCall = { args, cwd, extra };

@@ -5,6 +5,8 @@ import type { SessionState } from '../shared/states.ts';
 import type { ControlMessageRecord } from './control-replay-core.ts';
 import { decideWasActiveFlip } from './core/session-registry-core.ts';
 import { INTERACTIVE_LANE } from './core/usage-lane-core.ts';
+import type { MillMetricEndIntent } from './core/mill-metrics-core.ts';
+import type { MillMetricsPort } from './mill-metrics-wiring.ts';
 import { resolveCheckConfig, runPostTurnChecks } from './post-turn-checker.ts';
 
 interface WiringProject extends Record<string, unknown> {

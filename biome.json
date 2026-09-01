@@ -1,0 +1,112 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.3.5/schema.json",
+  "files": {
+    "includes": [
+      "**",
+      "!!**/.claude",
+      "!!**/dist",
+      "!!**/node_modules",
+      "!**/*.d.ts"
+    ]
+  },
+  "formatter": {
+    "enabled": false
+  },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "off"
+      }
+    }
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  },
+  "javascript": {
+    "globals": ["__APP_VERSION__"]
+  },
+  "linter": {
+    "rules": {
+      "recommended": true,
+      "suspicious": {
+        "noRedundantUseStrict": "off",
+        "noControlCharactersInRegex": "off"
+      },
+      "style": {
+        "noDescendingSpecificity": "off"
+      },
+      "correctness": {
+        "noUndeclaredVariables": "error",
+        "noUnusedImports": "error",
+        "noUnusedVariables": {
+          "level": "warn",
+          "options": {
+            "ignoreRestSiblings": true
+          }
+        }
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["**/*.ts", "**/*.mts", "**/*.cts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noExplicitAny": "error",
+            "noEvolvingTypes": "error",
+            "noConfusingVoidType": "error",
+            "noRedundantUseStrict": "error"
+          },
+          "style": {
+            "noEnum": "error",
+            "noNamespace": "error",
+            "noParameterProperties": "error",
+            "noNonNullAssertion": "error",
+            "noInferrableTypes": "error",
+            "useImportType": "error",
+            "useExportType": "error",
+            "useShorthandFunctionType": "error",
+            "useConsistentArrayType": {
+              "level": "error",
+              "options": {
+                "syntax": "shorthand"
+              }
+            },
+            "noUselessElse": "error"
+          },
+          "complexity": {
+            "noStaticOnlyClass": "error"
+          },
+          "correctness": {
+            "useImportExtensions": "error"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["server/core/**", "session/core/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "node:fs": "Pure cores receive filesystem operations from IO callers.",
+                  "node:child_process": "Pure cores receive process operations from IO callers.",
+                  "node:os": "Pure cores receive operating system values from IO callers.",
+                  "node:http": "Pure cores receive network operations from IO callers.",
+                  "node:https": "Pure cores receive network operations from IO callers.",
+                  "node:net": "Pure cores receive network operations from IO callers."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

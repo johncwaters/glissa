@@ -58,7 +58,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 ### Worktree Base Branch
 
-- The base is the configured integration branch, or each repo's default branch when unset. Origin is the source of truth: initial creation and fresh restart sync it fast-forward-only without blocking spawn, merge-back syncs it before landing and pushes it after, and a diverged base is never touched automatically (`tests/git-workspace-integration-sync.test.js`, `tests/git-workspace-session.test.js`, `tests/sessions-worktree.test.js`).
+- The base is the configured integration branch, or each repo's default branch when unset. Origin is the source of truth: initial creation and fresh restart sync it fast-forward-only without blocking spawn, merge-back syncs it before landing and pushes it after, and a diverged base is never touched automatically (`tests/git-workspace-integration-sync.test.ts`, `tests/git-workspace-session.test.ts`, `tests/sessions-worktree.test.ts`).
 
 ### Remote Branch GC
 

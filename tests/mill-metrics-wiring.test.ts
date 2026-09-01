@@ -1,28 +1,75 @@
-'use strict';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const fsp = require('node:fs/promises');
-const os = require('node:os');
-const path = require('node:path');
+import { tokensFromUsage } from '../server/backend-lanes.ts';
+import { createMillMetricsStore } from '../server/mill-metrics-store.ts';
+import { createMillMetricsLane, createMillMetricsWiring } from '../server/mill-metrics-wiring.ts';
+import type { MillMetricsStoreInstance } from '../server/mill-metrics-store.ts';
+import { MAX_PACK_FILES_PER_SESSION } from '../shared/contracts/mill-metrics.ts';
+import type { MillMetricSession } from '../shared/contracts/mill-metrics.ts';
 
-const { tokensFromUsage } = require('../server/backend-lanes');
-const { createMillMetricsStore } = require('../server/mill-metrics-store.ts');
-const { createMillMetricsLane, createMillMetricsWiring } = require('../server/mill-metrics-wiring.ts');
-const { MAX_PACK_FILES_PER_SESSION } = require('../shared/contracts/mill-metrics.ts');
+interface StoredEvent {
+  kind: string;
+  sessionId: string;
+  pack?: string;
+  relPath?: string;
+  promptClass?: string;
+  disposition?: string | null;
+  finalState?: string;
+  transition?: string;
+  version?: string;
+  tokenEstimate?: number | null;
+  agent?: string;
+  readDetection?: string;
+  ts?: number;
+}
+
+interface FakeStore extends MillMetricsStoreInstance {
+  events: StoredEvent[];
+  closed: MillMetricSession[];
+  retainDays?: number;
+}
+
+interface VendorTotals {
+  tokens: number | null;
+  costUSD: number | null;
+  identity?: string | null;
+}
+
+interface DeliveredPayload {
+  packs: { name: string; version: string; dir: string; tokenEstimate?: number | null }[];
+  agent: string;
+  readDetection: 'available' | 'unavailable';
+  ts: number;
+}
 
 const NOW = Date.parse('2026-08-30T12:00:00Z');
 const PACK_DIR = path.resolve(path.parse(process.cwd()).root, 'mill-metrics-wiring', 'alpha');
 
-function fakeStore(overrides = {}) {
-  const events = [];
-  const closed = [];
+function storedEventAt(store: FakeStore, index: number): StoredEvent {
+  const event = store.events.at(index);
+  assert.ok(event);
+  return event;
+}
+
+function closedAt(store: FakeStore, index: number): MillMetricSession {
+  const record = store.closed[index];
+  assert.ok(record);
+  return record;
+}
+
+function fakeStore(overrides: Partial<FakeStore> = {}): FakeStore {
+  const events: StoredEvent[] = [];
+  const closed: MillMetricSession[] = [];
   return {
     events,
     closed,
-    appendEvent: (event) => events.push(event),
-    closeSession: (record) => closed.push(record),
+    appendEvent: (event: unknown) => { events.push(event as StoredEvent); },
+    closeSession: (record: unknown) => { closed.push(record as MillMetricSession); },
     records: () => closed,
     load: async () => {},
     takeQueuedRecords: () => [],
@@ -32,7 +79,7 @@ function fakeStore(overrides = {}) {
   };
 }
 
-function delivered(overrides = {}) {
+function delivered(overrides: Partial<DeliveredPayload> = {}): DeliveredPayload {
   return {
     packs: [{ name: 'alpha', version: 'v1', dir: PACK_DIR }],
     agent: 'claude-code',
@@ -102,11 +149,11 @@ test('session end persists disposition and the tokens this run added', () => {
   vendorTotals = { tokens: 1434, costUSD: 3 };
   wiring.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'operator-abort', finalState: 'DONE' });
   assert.equal(store.closed.length, 1);
-  assert.equal(store.closed[0].tokens, 1234);
-  assert.equal(store.closed[0].costUSD, 2.5);
-  assert.equal(store.closed[0].disposition, 'user-kill');
-  assert.equal(store.events.at(-1).kind, 'session-end');
-  assert.equal(store.events.at(-1).disposition, 'user-kill');
+  assert.equal(closedAt(store, 0).tokens, 1234);
+  assert.equal(closedAt(store, 0).costUSD, 2.5);
+  assert.equal(closedAt(store, 0).disposition, 'user-kill');
+  assert.equal(storedEventAt(store, -1).kind, 'session-end');
+  assert.equal(storedEventAt(store, -1).disposition, 'user-kill');
 });
 
 test('a close-out and a sleep-kill reach the same transition without scoring as aborts', () => {
@@ -125,8 +172,8 @@ test('a session torn down while live closes with no disposition instead of stayi
   wiring.port.onPacksDelivered('s1', delivered());
   wiring.port.onSessionTeardown('s1');
   assert.equal(store.closed.length, 1);
-  assert.equal(store.closed[0].disposition, null);
-  assert.equal(store.closed[0].endedAt, NOW);
+  assert.equal(closedAt(store, 0).disposition, null);
+  assert.equal(closedAt(store, 0).endedAt, NOW);
   assert.equal(wiring.scorecards().alpha.liveSessions, 0);
 });
 
@@ -144,8 +191,8 @@ test('recorded pack files are capped per session and the overflow is counted', (
   });
   wiring.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'operator-abort', finalState: 'DONE' });
   assert.equal(store.events.filter((event) => event.kind === 'pack-read').length, MAX_PACK_FILES_PER_SESSION);
-  assert.equal(store.closed[0].packs[0].filesRead, MAX_PACK_FILES_PER_SESSION);
-  assert.equal(store.closed[0].packs[0].filesDropped, 6);
+  assert.equal(closedAt(store, 0).packs[0].filesRead, MAX_PACK_FILES_PER_SESSION);
+  assert.equal(closedAt(store, 0).packs[0].filesDropped, 6);
 });
 
 test('live scorecards report the tokens the run has added so far', () => {
@@ -166,7 +213,7 @@ test('live scorecards report the tokens the run has added so far', () => {
 
 test('a run whose usage is unscanned when it starts waits for a real baseline instead of guessing zero', () => {
   const store = fakeStore();
-  let vendorTotals = null;
+  let vendorTotals: VendorTotals | null = null;
   const wiring = createMillMetricsWiring({
     store,
     nowFn: () => NOW,
@@ -178,13 +225,13 @@ test('a run whose usage is unscanned when it starts waits for a real baseline in
   assert.equal(wiring.scorecards().alpha.unopened.meanTokens, 0);
   vendorTotals = { tokens: 9200, costUSD: 20.5 };
   wiring.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'natural', finalState: 'DONE' });
-  assert.equal(store.closed[0].tokens, 200);
-  assert.equal(store.closed[0].costUSD, 0.5);
+  assert.equal(closedAt(store, 0).tokens, 200);
+  assert.equal(closedAt(store, 0).costUSD, 0.5);
 });
 
 test('a conversation created mid-run is billed to this run in full, on top of what was banked', () => {
   const store = fakeStore();
-  let vendorTotals = { tokens: 100, costUSD: 1, identity: 'conv-a' };
+  let vendorTotals: VendorTotals | null = { tokens: 100, costUSD: 1, identity: 'conv-a' };
   const wiring = createMillMetricsWiring({
     store,
     nowFn: () => NOW,
@@ -197,14 +244,14 @@ test('a conversation created mid-run is billed to this run in full, on top of wh
   assert.equal(wiring.scorecards().alpha.unopened.meanTokens, 350);
   vendorTotals = { tokens: 120, costUSD: 0.9, identity: 'conv-b' };
   wiring.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'natural', finalState: 'DONE' });
-  assert.equal(store.closed[0].tokens, 420);
-  assert.equal(Math.round(store.closed[0].costUSD * 100) / 100, 1.9);
-  assert.equal(store.closed[0].resumeSessionId, 'conv-b');
+  assert.equal(closedAt(store, 0).tokens, 420);
+  assert.equal(Math.round((closedAt(store, 0).costUSD ?? 0) * 100) / 100, 1.9);
+  assert.equal(closedAt(store, 0).resumeSessionId, 'conv-b');
 });
 
 test('a total that moves backward banks the delta already earned instead of erasing it', () => {
   const store = fakeStore();
-  let vendorTotals = { tokens: 100, costUSD: 1, identity: 'conv-a' };
+  let vendorTotals: VendorTotals | null = { tokens: 100, costUSD: 1, identity: 'conv-a' };
   const wiring = createMillMetricsWiring({
     store,
     nowFn: () => NOW,
@@ -217,13 +264,13 @@ test('a total that moves backward banks the delta already earned instead of eras
   assert.equal(wiring.scorecards().alpha.unopened.meanTokens, 800);
   vendorTotals = { tokens: 90, costUSD: 0.9, identity: 'conv-a' };
   wiring.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'natural', finalState: 'DONE' });
-  assert.equal(store.closed[0].tokens, 850);
-  assert.equal(Math.round(store.closed[0].costUSD * 100) / 100, 2.5);
+  assert.equal(closedAt(store, 0).tokens, 850);
+  assert.equal(Math.round((closedAt(store, 0).costUSD ?? 0) * 100) / 100, 2.5);
 });
 
 test('an identity that only arrives after the baseline is not treated as a new conversation', () => {
   const store = fakeStore();
-  let vendorTotals = { tokens: 9000, costUSD: 20, identity: null };
+  let vendorTotals: VendorTotals | null = { tokens: 9000, costUSD: 20, identity: null };
   const wiring = createMillMetricsWiring({
     store,
     nowFn: () => NOW,
@@ -232,13 +279,13 @@ test('an identity that only arrives after the baseline is not treated as a new c
   wiring.port.onPacksDelivered('s1', delivered());
   vendorTotals = { tokens: 9200, costUSD: 20.5, identity: 'conv-a' };
   wiring.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'natural', finalState: 'DONE' });
-  assert.equal(store.closed[0].tokens, 200);
-  assert.equal(store.closed[0].resumeSessionId, 'conv-a');
+  assert.equal(closedAt(store, 0).tokens, 200);
+  assert.equal(closedAt(store, 0).resumeSessionId, 'conv-a');
 });
 
 test('measurement starts live and a retention change swaps the store behind it', async () => {
-  const order = [];
-  const stores = [];
+  const order: string[] = [];
+  const stores: FakeStore[] = [];
   let millMetricsConfig = { retainDays: 90 };
   const lane = createMillMetricsLane({
     resolveConfig: () => millMetricsConfig,
@@ -259,13 +306,19 @@ test('measurement starts live and a retention change swaps the store behind it',
   assert.equal(lane.currentStore(), stores[1]);
 
   lane.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'natural', finalState: 'DONE' });
-  assert.equal(stores[0].closed.length, 0);
-  assert.equal(stores[1].closed.length, 1);
+  assert.equal(stores[0]?.closed.length, 0);
+  assert.equal(stores[1]?.closed.length, 1);
 
   assert.equal(stores.length, 2);
 });
 
-function gatedLane(order, stores, gate, initialConfig, logger = null) {
+function gatedLane(
+  order: string[],
+  stores: FakeStore[],
+  gate: { promise: Promise<void>; open: () => void },
+  initialConfig: { retainDays: number },
+  logger: Pick<Console, 'warn'> | null = null,
+) {
   let millMetricsConfig = initialConfig;
   const lane = createMillMetricsLane({
     resolveConfig: () => millMetricsConfig,
@@ -285,20 +338,20 @@ function gatedLane(order, stores, gate, initialConfig, logger = null) {
     },
     nowFn: () => NOW,
   });
-  return { lane, setConfig: (next) => { millMetricsConfig = next; } };
+  return { lane, setConfig: (next: { retainDays: number }) => { millMetricsConfig = next; } };
 }
 
-function openGate() {
+function openGate(): { promise: Promise<void>; open: () => void } {
   let open = () => {};
-  const promise = new Promise((settle) => { open = settle; });
+  const promise = new Promise<void>((settle) => { open = () => settle(); });
   return { promise, open };
 }
 
-const tick = () => new Promise((settle) => { setImmediate(settle); });
+const tick = () => new Promise<void>((settle) => { setImmediate(() => settle()); });
 
 test('a session closing while the store is swapping is replayed into the replacement', async () => {
-  const order = [];
-  const stores = [];
+  const order: string[] = [];
+  const stores: FakeStore[] = [];
   const gate = openGate();
   const { lane, setConfig } = gatedLane(order, stores, gate, { retainDays: 90 });
   lane.port.onPacksDelivered('s1', delivered());
@@ -310,14 +363,14 @@ test('a session closing while the store is swapping is replayed into the replace
   gate.open();
   await swap;
   assert.equal(stores.length, 2);
-  assert.equal(stores[0].closed.length, 0);
-  assert.equal(stores[1].closed.length, 1);
+  assert.equal(stores[0]?.closed.length, 0);
+  assert.equal(stores[1]?.closed.length, 1);
   assert.equal(stores[1].events.filter((event) => event.kind === 'session-end').length, 1);
 });
 
 test('two settings changes during one drain end on a single open store', async () => {
-  const order = [];
-  const stores = [];
+  const order: string[] = [];
+  const stores: FakeStore[] = [];
   const gate = openGate();
   const { lane, setConfig } = gatedLane(order, stores, gate, { retainDays: 90 });
   lane.port.onPacksDelivered('s1', delivered());
@@ -332,12 +385,12 @@ test('two settings changes during one drain end on a single open store', async (
   assert.deepEqual(order, ['open:90', 'drain:90', 'open:60']);
   assert.equal(stores.length, 2);
   assert.equal(lane.currentStore(), stores[1]);
-  assert.equal(stores[1].closed.length, 1);
+  assert.equal(stores[1]?.closed.length, 1);
 });
 
 test('shutdown during a store swap drains the replacement as well', async () => {
-  const order = [];
-  const stores = [];
+  const order: string[] = [];
+  const stores: FakeStore[] = [];
   const gate = openGate();
   const { lane, setConfig } = gatedLane(order, stores, gate, { retainDays: 90 });
   lane.port.onPacksDelivered('s1', delivered());
@@ -349,16 +402,16 @@ test('shutdown during a store swap drains the replacement as well', async () => 
   gate.open();
   await idle;
   assert.deepEqual(order, ['open:90', 'drain:90', 'open:30', 'drain:30']);
-  assert.equal(stores[1].closed.length, 1);
+  assert.equal(stores[1]?.closed.length, 1);
 });
 
 test('a swap buffer filled with events gives ground to a close instead of dropping it', async () => {
-  const order = [];
-  const stores = [];
+  const order: string[] = [];
+  const stores: FakeStore[] = [];
   const gate = openGate();
-  const warnings = [];
+  const warnings: string[] = [];
   const { lane, setConfig } = gatedLane(order, stores, gate, { retainDays: 90 }, {
-    warn: (message) => warnings.push(message),
+    warn: (message: string) => { warnings.push(message); },
   });
   lane.port.onPacksDelivered('s1', delivered());
   setConfig({ retainDays: 30 });
@@ -370,14 +423,14 @@ test('a swap buffer filled with events gives ground to a close instead of droppi
   lane.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'natural', finalState: 'DONE' });
   gate.open();
   await swap;
-  assert.equal(stores[1].closed.length, 1);
+  assert.equal(stores[1]?.closed.length, 1);
   assert.equal(stores[1].events.length, 499);
   assert.ok(warnings.some((message) => /dropping an event to keep a close/.test(message)));
 });
 
 test('a conversation first identified after the packs land is billed to this run in full', () => {
   const store = fakeStore();
-  let vendorTotals = null;
+  let vendorTotals: VendorTotals | null = null;
   const wiring = createMillMetricsWiring({
     store,
     nowFn: () => NOW,
@@ -386,13 +439,13 @@ test('a conversation first identified after the packs land is billed to this run
   wiring.port.onPacksDelivered('s1', delivered());
   vendorTotals = { tokens: 300, costUSD: 0.75, identity: 'conv-a' };
   wiring.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'natural', finalState: 'DONE' });
-  assert.equal(store.closed[0].tokens, 300);
-  assert.equal(store.closed[0].costUSD, 0.75);
+  assert.equal(closedAt(store, 0).tokens, 300);
+  assert.equal(closedAt(store, 0).costUSD, 0.75);
 });
 
 test('a conversation known at delivery but scanned later still bills only what this run added', () => {
   const store = fakeStore();
-  let vendorTotals = { tokens: null, costUSD: null, identity: 'conv-a' };
+  let vendorTotals: VendorTotals | null = { tokens: null, costUSD: null, identity: 'conv-a' };
   const wiring = createMillMetricsWiring({
     store,
     nowFn: () => NOW,
@@ -403,12 +456,12 @@ test('a conversation known at delivery but scanned later still bills only what t
   assert.equal(wiring.scorecards().alpha.unopened.meanTokens, 0);
   vendorTotals = { tokens: 9200, costUSD: 20.5, identity: 'conv-a' };
   wiring.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'natural', finalState: 'DONE' });
-  assert.equal(store.closed[0].tokens, 200);
+  assert.equal(closedAt(store, 0).tokens, 200);
 });
 
 test('a tokens rewind keeps the cost that the same sample added', () => {
   const store = fakeStore();
-  let vendorTotals = { tokens: 100, costUSD: 1, identity: 'conv-a' };
+  let vendorTotals: VendorTotals | null = { tokens: 100, costUSD: 1, identity: 'conv-a' };
   const wiring = createMillMetricsWiring({
     store,
     nowFn: () => NOW,
@@ -419,13 +472,13 @@ test('a tokens rewind keeps the cost that the same sample added', () => {
   assert.equal(wiring.scorecards().alpha.unopened.meanTokens, 800);
   vendorTotals = { tokens: 40, costUSD: 3.5, identity: 'conv-a' };
   wiring.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'natural', finalState: 'DONE' });
-  assert.equal(store.closed[0].tokens, 800);
-  assert.equal(Math.round(store.closed[0].costUSD * 100) / 100, 2.5);
+  assert.equal(closedAt(store, 0).tokens, 800);
+  assert.equal(Math.round((closedAt(store, 0).costUSD ?? 0) * 100) / 100, 2.5);
 });
 
 test('a resumed card reports its own run, not the whole conversation', () => {
   const store = fakeStore();
-  let vendorTotals = { tokens: 900, costUSD: 2, identity: 'conv-a' };
+  let vendorTotals: VendorTotals | null = { tokens: 900, costUSD: 2, identity: 'conv-a' };
   const wiring = createMillMetricsWiring({
     store,
     nowFn: () => NOW,
@@ -436,7 +489,11 @@ test('a resumed card reports its own run, not the whole conversation', () => {
   assert.equal(wiring.scorecards().alpha.unopened.meanTokens, 200);
 });
 
-function laneFedByUsage(store, sessions, readTotals) {
+function laneFedByUsage(
+  store: FakeStore,
+  sessions: Map<string, { resumeSessionId: string | null }>,
+  readTotals: () => VendorTotals | null,
+) {
   return createMillMetricsWiring({
     store,
     nowFn: () => NOW,
@@ -447,7 +504,7 @@ function laneFedByUsage(store, sessions, readTotals) {
 test('a resumed card whose usage is unscanned at delivery is never billed the prior conversation', () => {
   const store = fakeStore();
   const sessions = new Map([['s1', { resumeSessionId: 'conv-a' }]]);
-  let vendorTotals = null;
+  let vendorTotals: VendorTotals | null = null;
   const wiring = laneFedByUsage(store, sessions, () => vendorTotals);
   wiring.port.onPacksDelivered('s1', delivered());
   assert.equal(wiring.scorecards().alpha.unopened.meanTokens, null);
@@ -455,21 +512,21 @@ test('a resumed card whose usage is unscanned at delivery is never billed the pr
   assert.equal(wiring.scorecards().alpha.unopened.meanTokens, 0);
   vendorTotals = { tokens: 500300, costUSD: 12.6 };
   wiring.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'natural', finalState: 'DONE' });
-  assert.equal(store.closed[0].tokens, 300);
-  assert.equal(store.closed[0].resumeSessionId, 'conv-a');
+  assert.equal(closedAt(store, 0).tokens, 300);
+  assert.equal(closedAt(store, 0).resumeSessionId, 'conv-a');
 });
 
 test('a fresh session whose vendor identity arrives mid-run is billed the whole conversation', () => {
   const store = fakeStore();
-  const sessions = new Map([['s1', { resumeSessionId: null }]]);
-  let vendorTotals = null;
+  const sessions = new Map<string, { resumeSessionId: string | null }>([['s1', { resumeSessionId: null }]]);
+  let vendorTotals: VendorTotals | null = null;
   const wiring = laneFedByUsage(store, sessions, () => vendorTotals);
   wiring.port.onPacksDelivered('s1', delivered());
   sessions.set('s1', { resumeSessionId: 'conv-new' });
   vendorTotals = { tokens: 300, costUSD: 0.75 };
   wiring.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'natural', finalState: 'DONE' });
-  assert.equal(store.closed[0].tokens, 300);
-  assert.equal(store.closed[0].costUSD, 0.75);
+  assert.equal(closedAt(store, 0).tokens, 300);
+  assert.equal(closedAt(store, 0).costUSD, 0.75);
 });
 
 test('a store replaced while holding unpersisted closes hands them to its replacement', async (t) => {
@@ -489,11 +546,9 @@ test('a store replaced while holding unpersisted closes hands them to its replac
       nowFn: () => NOW,
       fsPromises: {
         ...fsp,
-        readFile: async (target, encoding) => {
+        readFile: async (target: string, encoding: 'utf8') => {
           if (target === recordsPath && !readable) {
-            const error = new Error('permission denied');
-            error.code = 'EACCES';
-            throw error;
+            throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
           }
           return fsp.readFile(target, encoding);
         },
@@ -509,6 +564,6 @@ test('a store replaced while holding unpersisted closes hands them to its replac
   millMetricsConfig = { retainDays: 30 };
   await lane.restartIfConfigChanged();
   await lane.whenIdle();
-  const persisted = JSON.parse(await fsp.readFile(recordsPath, 'utf8'));
+  const persisted = JSON.parse(await fsp.readFile(recordsPath, 'utf8')) as { sessions: { sessionId: string }[] };
   assert.deepEqual(persisted.sessions.map((entry) => entry.sessionId), ['s1']);
 });

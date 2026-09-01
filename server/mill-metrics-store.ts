@@ -1,29 +1,26 @@
-const path: typeof import('node:path') = require('node:path');
-
-const {
+import path from 'node:path';
+import fsPromisesDefault from 'node:fs/promises';
+import {
   MillMetricEvent,
   MillMetricSessionRecord,
   MillMetricStore,
-}: MillMetricsContracts = require('../shared/contracts/mill-metrics.ts');
-const {
+} from '../shared/contracts/mill-metrics.ts';
+import type { MillMetricPack, MillMetricSession } from '../shared/contracts/mill-metrics.ts';
+import {
   DEFAULT_MILL_METRICS_RETAIN_DAYS,
   mergeRecords,
   pruneRecords,
   utcDay,
-}: MillMetricsCore = require('./core/mill-metrics-core.ts');
-const { cutoffDayKey }: { cutoffDayKey: UsageCutoffDayKey } = require('./core/usage-warehouse-core');
-const {
-  appendJsonLine,
-  appendJsonLineIdle,
-  createJsonStateWriter,
-}: {
-  appendJsonLine: (filePath: string, entry: unknown, options: { mkdir?: boolean, fsPromises?: typeof import('node:fs/promises') }) => Promise<void>;
-  appendJsonLineIdle: (filePath: string) => Promise<void>;
-  createJsonStateWriter: (options: { filePath: string, fsPromises: typeof import('node:fs/promises'), warn: (error: unknown) => void }) => {
-    write: (state: unknown, serialize: () => string) => Promise<void>;
-    idle: () => Promise<void>;
-  };
-} = require('./json-file');
+} from './core/mill-metrics-core.ts';
+import { cutoffDayKey } from './core/usage-warehouse-core.ts';
+import { appendJsonLine, appendJsonLineIdle, createJsonStateWriter } from './json-file.ts';
+
+type StoreFileSystem = Pick<
+  typeof fsPromisesDefault,
+  'appendFile' | 'mkdir' | 'readdir' | 'rename' | 'rm' | 'writeFile'
+> & {
+  readFile: (target: string, encoding: 'utf8') => Promise<string>;
+};
 
 const EVENT_FILE_PATTERN = /^events-(\d{4}-\d{2}-\d{2})\.jsonl$/;
 
@@ -33,7 +30,7 @@ type MillMetricsStoreOptions = {
   recordsPath: string;
   eventsDir: string;
   retainDays?: number;
-  fsPromises?: typeof import('node:fs/promises');
+  fsPromises?: StoreFileSystem;
   nowFn?: () => number;
   logger?: Logger | null;
 };
@@ -42,7 +39,7 @@ function createMillMetricsStore({
   recordsPath,
   eventsDir,
   retainDays = DEFAULT_MILL_METRICS_RETAIN_DAYS,
-  fsPromises = require('node:fs/promises'),
+  fsPromises = fsPromisesDefault,
   nowFn = Date.now,
   logger = null,
 }: MillMetricsStoreOptions) {
@@ -92,9 +89,6 @@ function createMillMetricsStore({
     }
   }
 
-  // A file that cannot be READ (a lock, a permission, an fd exhaustion) says nothing about what it
-  // holds, so the load stays failed and retryable: treating it as empty and persisting over it is how
-  // one transient error erases the whole retained history.
   function load(): Promise<void> {
     if (loadPromise) return loadPromise;
     loadPromise = (async () => {
@@ -162,8 +156,6 @@ function createMillMetricsStore({
     });
   }
 
-  // A record the persisted shape refuses is dropped here rather than written, because load() parses the
-  // file as a whole: one oversized record reaching disk would take every other record down with it.
   function keepPersistableRecords(): void {
     const kept: MillMetricSession[] = [];
     for (const record of sessionRecords) {
@@ -219,7 +211,6 @@ function createMillMetricsStore({
     scheduleMerge([parsed.data]);
   }
 
-  // A store being replaced surrenders the closes its load never reached, for a replacement to retry.
   function takeQueuedRecords(): MillMetricSession[] {
     const stranded = queuedRecords;
     queuedRecords = [];
@@ -241,8 +232,6 @@ function createMillMetricsStore({
     }));
   }
 
-  // Nothing but a LATER close flushes the queue, so a store going idle to be replaced or shut down
-  // retries the load itself rather than taking the runs it is holding with it.
   async function flushQueuedRecords(): Promise<void> {
     if (recordsLoaded || queuedRecords.length === 0) return;
     await load();
@@ -271,12 +260,6 @@ function createMillMetricsStore({
   return { adoptQueuedRecords, appendEvent, closeSession, load, records, takeQueuedRecords, whenIdle };
 }
 
-declare global {
-  type MillMetricsStoreInstance = ReturnType<typeof createMillMetricsStore>;
+export type MillMetricsStoreInstance = ReturnType<typeof createMillMetricsStore>;
 
-  type MillMetricsStoreModule = {
-    createMillMetricsStore: typeof createMillMetricsStore;
-  };
-}
-
-module.exports = { createMillMetricsStore } satisfies MillMetricsStoreModule;
+export { createMillMetricsStore };

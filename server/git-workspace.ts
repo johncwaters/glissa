@@ -36,6 +36,7 @@ type WorkspaceHandle = {
   reason?: string;
   conflictPath?: string;
   error?: string;
+  warning?: string | null;
 };
 type WorktreeArgs = {
   projectPath: string;
@@ -946,9 +947,12 @@ async function populateWorktree(projectPath: string, wtDir: string, shareList: s
   }
 }
 
+type GitWorkspaceInstance = ReturnType<typeof createGitWorkspace>;
+
 export { createGitWorkspace, createGitWorkspaceSync };
 export type {
   GitResult,
+  GitWorkspaceInstance,
   IntegrationSyncResult,
   MergeOutcome,
   RebaseOutcome,

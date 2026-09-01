@@ -1,9 +1,7 @@
-'use strict';
+import assert from 'node:assert/strict';
+import test from 'node:test';
 
-const assert = require('node:assert/strict');
-const test = require('node:test');
-
-const {
+import {
   armOutcome,
   classifyObservedPrompts,
   emptyPromptCounts,
@@ -13,7 +11,7 @@ const {
   promptCount,
   summariseAblation,
   turnBudget,
-} = require('../test/ablation/ablation-core');
+} from '../test/ablation/ablation-core.ts';
 
 test('armOutcome treats an execution error as invalid ahead of the check result', () => {
   assert.equal(armOutcome('spawn did not use model haiku', true), 'invalid');

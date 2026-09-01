@@ -1,9 +1,5 @@
-const zod: typeof import('zod') = require('zod');
+import { z } from 'zod';
 
-const { z } = zod;
-
-// A pack read is keyed by its path relative to the delivered pack dir, and one session's reads are
-// unbounded input from the agent, so both the key and the set are capped at ingest and in the shape.
 const MAX_PACK_REL_PATH_CHARS = 512;
 const MAX_PACK_FILES_PER_SESSION = 300;
 
@@ -54,8 +50,6 @@ const MillMetricPackRecord = z.object({
   files: z.array(z.string().min(1).max(MAX_PACK_REL_PATH_CHARS)).max(MAX_PACK_FILES_PER_SESSION).default([]),
   filesDropped: z.number().int().nonnegative().default(0),
   opened: z.boolean(),
-  // Absent on records written before per-pack measurability existed, where the session-wide
-  // readDetection is the only answer available.
   measurable: z.boolean().optional(),
 });
 
@@ -86,31 +80,18 @@ const MillMetricStore = z.object({
   sessions: z.array(MillMetricSessionRecord),
 });
 
-// A CommonJS .ts module declares no exports to TypeScript, so the shapes and the module surface are
-// published as global types: that is what makes a cross-file require() checked rather than `any`.
-declare global {
-  type MillMetricPromptClass = 'interruption' | 'answer' | 'followup' | 'ambiguous';
-  type MillMetricReadDetection = 'available' | 'unavailable';
-  type MillMetricDisposition = 'user-kill' | 'natural';
-  type MillMetricPromptCounts = Record<MillMetricPromptClass, number>;
-  type MillMetricPack = ReturnType<typeof MillMetricPackRecord.parse>;
-  type MillMetricSession = ReturnType<typeof MillMetricSessionRecord.parse>;
+export type MillMetricPromptClass = 'interruption' | 'answer' | 'followup' | 'ambiguous';
+export type MillMetricReadDetection = 'available' | 'unavailable';
+export type MillMetricDisposition = 'user-kill' | 'natural';
+export type MillMetricPromptCounts = Record<MillMetricPromptClass, number>;
+export type MillMetricPack = z.infer<typeof MillMetricPackRecord>;
+export type MillMetricSession = z.infer<typeof MillMetricSessionRecord>;
 
-  type MillMetricsContracts = {
-    MAX_PACK_FILES_PER_SESSION: typeof MAX_PACK_FILES_PER_SESSION;
-    MAX_PACK_REL_PATH_CHARS: typeof MAX_PACK_REL_PATH_CHARS;
-    MillMetricEvent: typeof MillMetricEvent;
-    MillMetricPackRecord: typeof MillMetricPackRecord;
-    MillMetricSessionRecord: typeof MillMetricSessionRecord;
-    MillMetricStore: typeof MillMetricStore;
-  };
-}
-
-module.exports = {
+export {
   MAX_PACK_FILES_PER_SESSION,
   MAX_PACK_REL_PATH_CHARS,
   MillMetricEvent,
   MillMetricPackRecord,
   MillMetricSessionRecord,
   MillMetricStore,
-} satisfies MillMetricsContracts;
+};

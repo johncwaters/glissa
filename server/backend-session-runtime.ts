@@ -4,6 +4,7 @@ import { sweepOrphans } from '../detection/settings-injector.ts';
 import { hooksForProject } from '../session/core/user-hooks-core.ts';
 import type { GitWorkspace } from '../session/session-worktree-lifecycle.ts';
 import type { ControlBroadcast } from './backend-websockets.ts';
+import type { MillMetricsPort } from './mill-metrics-wiring.ts';
 import type { ConfigStore, GlissaConfig } from './config-store.ts';
 import { createRtkInstallWiring } from './rtk-install-wiring.ts';
 import { getRtkPath } from './rtk-resolver.ts';

@@ -123,7 +123,7 @@ test('HookRouter ignores unmapped events with 200', () => {
 
 test('HookRouter observes mapped and ignored events after authentication', () => {
   const router = new HookRouter();
-  const events = [];
+  const events: { event: string; payload: Record<string, unknown> }[] = [];
   router.register('s1', {
     token: 'good',
     onSignal: () => {},
@@ -142,9 +142,9 @@ test('HookRouter observes mapped and ignored events after authentication', () =>
 
 test('a throwing observer cannot cost the mapped status signal', () => {
   const router = new HookRouter();
-  const signals = [];
+  const signals: unknown[] = [];
   const realWarn = console.warn;
-  const warnings = [];
+  const warnings: string[] = [];
   console.warn = (message) => warnings.push(String(message));
   try {
     router.register('s1', {
@@ -164,7 +164,7 @@ test('a throwing observer cannot cost the mapped status signal', () => {
 
 test('HookRouter never observes an unknown session or a bad token', () => {
   const router = new HookRouter();
-  const events = [];
+  const events: unknown[][] = [];
   router.register('s1', { token: 'good', onSignal: () => {}, onEvent: (...args) => events.push(args) });
   router.handle({ glissaId: 'missing', event: 'Stop', token: 'good', payload: {} });
   router.handle({ glissaId: 's1', event: 'Stop', token: 'bad', payload: {} });

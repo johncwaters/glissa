@@ -1,16 +1,22 @@
-const path: typeof import('node:path') = require('node:path');
+import path from 'node:path';
+import { MAX_PACK_FILES_PER_SESSION } from '../../shared/contracts/mill-metrics.ts';
+import type {
+  MillMetricDisposition,
+  MillMetricPack,
+  MillMetricPromptClass,
+  MillMetricPromptCounts,
+  MillMetricReadDetection,
+  MillMetricSession,
+} from '../../shared/contracts/mill-metrics.ts';
+import { MILL_METRICS_RETAIN_DAY_RANGE } from '../../shared/settings-ranges.ts';
+import { numberOrNull } from './usage-number-core.ts';
+import { cutoffDayKey } from './usage-warehouse-core.ts';
 
-const { numberOrNull }: { numberOrNull: UsageNumberOrNull } = require('./usage-number-core');
-const { cutoffDayKey }: { cutoffDayKey: UsageCutoffDayKey } = require('./usage-warehouse-core');
-const { MILL_METRICS_RETAIN_DAY_RANGE }: { MILL_METRICS_RETAIN_DAY_RANGE: IntegerRange } = require('../../shared/settings-ranges');
-const { MAX_PACK_FILES_PER_SESSION }: MillMetricsContracts = require('../../shared/contracts/mill-metrics.ts');
+type IntegerRange = { min: number; max: number };
 
 const TITLE_RACE_MS = 1500;
 const DEFAULT_MILL_METRICS_RETAIN_DAYS = 90;
 
-// What ended the run, as known by the caller that ended it. Only an operator abandoning live work is an
-// abort; a close-out ("Merge & finish"), a sleep-kill and a restart all reach the same user_kill
-// transition, so the transition name alone cannot tell them apart.
 type EndIntent = 'operator-abort' | 'close-out' | 'natural';
 
 type DeliveredPackDirectory = {
@@ -159,7 +165,7 @@ function classifyPrompt({
 }): MillMetricPromptClass {
   if (state === 'WAITING') return 'answer';
   if (state !== 'RUNNING') return 'followup';
-  // The OSC-0 title spinner can enter RUNNING just before the prompt hook arrives (session/sessions.js).
+
   if (ts - stateSince < TITLE_RACE_MS) return 'ambiguous';
   return 'interruption';
 }
@@ -239,10 +245,6 @@ function packWasMeasurable(record: MillMetricSession, pack: MillMetricPack): boo
   return record.readDetection === 'available';
 }
 
-// A run whose reads could not be observed knows nothing about what was opened, so it contributes its
-// delivery and its drop count and no file: otherwise folding it with a measurable run would let the
-// fold claim reads for a stretch that was never measurable. Measurability rides on the PACK, because a
-// pack delivered only during a blind run is not measurable just because another run of that session was.
 function measurablePacks(record: MillMetricSession): MillMetricPack[] {
   const packs = Array.isArray(record.packs) ? record.packs : [];
   return packs.map((pack) => {
@@ -265,8 +267,7 @@ function mergePacks(earlier: MillMetricPack[], later: MillMetricPack[]): MillMet
       ...(Array.isArray(current.files) ? current.files : []),
       ...(Array.isArray(pack.files) ? pack.files : []),
     ])).sort();
-    // The union of two capped runs can exceed the cap the persisted shape allows, and a record the
-    // shape rejects would take the whole store file down with it on the next load.
+
     const files = union.slice(0, MAX_PACK_FILES_PER_SESSION);
     const filesRead = Math.max(files.length, nonnegativeInteger(current.filesRead), nonnegativeInteger(pack.filesRead));
     packsByName.set(pack.name, {
@@ -285,21 +286,12 @@ function mergePacks(earlier: MillMetricPack[], later: MillMetricPack[]): MillMet
   return Array.from(packsByName.values());
 }
 
-/*
- * Two runs of ONE session (a sleep-kill plus its wake auto-restart, a restart, a crash and resume) each
- * produce a record under the same stable session id, and the id is what a pack scorecard counts as one
- * delivery. Keeping the newest record therefore ERASED the earlier run's file union and prompt counts,
- * so a session that read the pack before a restart scored as never having opened it. The runs are folded
- * instead: the union of what was read, the sum of what was counted, the span of when it ran.
- */
 function mergeSessionRecords(first: MillMetricSession, second: MillMetricSession): MillMetricSession {
   const earlier = first.startedAt <= second.startedAt ? first : second;
   const later = earlier === first ? second : first;
   return {
     sessionId: later.sessionId,
-    // `day` is the LATEST run's day so retention and the last-seen day key on activity: keying the fold
-    // on the first run expired a session the moment its restart merged with an aged original. The span
-    // start stays readable from startedAt, which is what the scorecard reports as its first day.
+
     day: later.day,
     startedAt: earlier.startedAt,
     endedAt: later.endedAt,
@@ -414,8 +406,7 @@ function buildScorecards(
   liveRecords: MillMetricSession[] = [],
 ): Record<string, PackScorecard> {
   const totalsByPack = new Map<string, ScorecardTotals>();
-  // A session live NOW can also have a persisted record from an earlier run of the same id, so the two
-  // sides are folded through the same merge before counting: otherwise it is two deliveries, not one.
+
   for (const record of mergeRecords(records, liveRecords)) {
     if (!Array.isArray(record.packs)) continue;
     const packsByName = new Map(record.packs.map((pack) => [pack.name, pack]));
@@ -464,35 +455,14 @@ function buildScorecards(
   return scorecards;
 }
 
-declare global {
-  type MillMetricEndIntent = EndIntent;
-  type MillMetricPackAccumulator = AccumulatorPack;
-  type MillMetricAccumulatorShape = MillMetricAccumulator;
-  type MillMetricsConfig = { retainDays: number };
-  type MillMetricsRawConfig = { retainDays?: unknown } | null | undefined;
+export type MillMetricEndIntent = EndIntent;
+export type MillMetricPackAccumulator = AccumulatorPack;
+export type MillMetricAccumulatorShape = MillMetricAccumulator;
+export type MillMetricsConfig = { retainDays: number };
+export type MillMetricsRawConfig = { retainDays?: unknown } | null | undefined;
+export type MillPackScorecard = PackScorecard;
 
-  // One declared signature per JS helper these modules require, annotated at every binding, so two
-  // hand-written copies of the same shape cannot drift apart in silence.
-  type UsageNumberOrNull = (value: unknown) => number | null;
-  type UsageCutoffDayKey = (todayKey: unknown, retainDays: unknown) => string | null;
-  type IntegerRange = { min: number; max: number };
-
-  type MillMetricsCore = {
-    DEFAULT_MILL_METRICS_RETAIN_DAYS: typeof DEFAULT_MILL_METRICS_RETAIN_DAYS;
-    TITLE_RACE_MS: typeof TITLE_RACE_MS;
-    buildScorecards: typeof buildScorecards;
-    classifyPrompt: typeof classifyPrompt;
-    classifyReadPath: typeof classifyReadPath;
-    dispositionFor: typeof dispositionFor;
-    mergeRecords: typeof mergeRecords;
-    pruneRecords: typeof pruneRecords;
-    recordFromAccumulator: typeof recordFromAccumulator;
-    resolveMillMetricsConfig: typeof resolveMillMetricsConfig;
-    utcDay: typeof utcDay;
-  };
-}
-
-module.exports = {
+export {
   DEFAULT_MILL_METRICS_RETAIN_DAYS,
   TITLE_RACE_MS,
   buildScorecards,
@@ -504,4 +474,4 @@ module.exports = {
   recordFromAccumulator,
   resolveMillMetricsConfig,
   utcDay,
-} satisfies MillMetricsCore;
+};

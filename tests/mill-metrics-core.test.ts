@@ -1,10 +1,8 @@
-'use strict';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import path from 'node:path';
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const path = require('node:path');
-
-const {
+import {
   DEFAULT_MILL_METRICS_RETAIN_DAYS,
   TITLE_RACE_MS,
   buildScorecards,
@@ -15,17 +13,26 @@ const {
   pruneRecords,
   recordFromAccumulator,
   resolveMillMetricsConfig,
-} = require('../server/core/mill-metrics-core.ts');
-const { MAX_PACK_FILES_PER_SESSION } = require('../shared/contracts/mill-metrics.ts');
+} from '../server/core/mill-metrics-core.ts';
+import type {
+  MillMetricAccumulatorShape,
+  MillMetricPackAccumulator,
+} from '../server/core/mill-metrics-core.ts';
+import { MAX_PACK_FILES_PER_SESSION } from '../shared/contracts/mill-metrics.ts';
+import type {
+  MillMetricPack,
+  MillMetricPromptCounts,
+  MillMetricSession,
+} from '../shared/contracts/mill-metrics.ts';
 
 const ROOT = path.resolve(path.parse(process.cwd()).root, 'mill-metrics-fixture');
 const PACK_DIR = path.join(ROOT, 'packs', 'alpha');
 
-function prompts(overrides = {}) {
+function prompts(overrides: Partial<MillMetricPromptCounts> = {}): MillMetricPromptCounts {
   return { interruption: 0, answer: 0, followup: 0, ambiguous: 0, ...overrides };
 }
 
-function pack(overrides = {}) {
+function pack(overrides: Partial<MillMetricPack> = {}): MillMetricPack {
   return {
     name: 'alpha',
     version: 'v1',
@@ -38,7 +45,7 @@ function pack(overrides = {}) {
   };
 }
 
-function record(overrides = {}) {
+function record(overrides: Partial<MillMetricSession> = {}): MillMetricSession {
   return {
     sessionId: 's1',
     day: '2026-08-30',
@@ -57,15 +64,15 @@ function record(overrides = {}) {
   };
 }
 
-function accumulator(overrides = {}) {
+function accumulator(overrides: Partial<MillMetricAccumulatorShape> = {}): MillMetricAccumulatorShape {
   return {
     sessionId: 'live',
     startedAt: Date.parse('2026-08-30T12:00:00Z'),
     agent: 'claude-code',
     readDetection: 'available',
     prompts: prompts(),
-    packs: new Map([['alpha', {
-      version: 'v1', tokenEstimate: 100, dir: PACK_DIR, files: new Set(), filesDropped: 0,
+    packs: new Map<string, MillMetricPackAccumulator>([['alpha', {
+      version: 'v1', tokenEstimate: 100, dir: PACK_DIR, files: new Set<string>(), filesDropped: 0,
     }]]),
     ...overrides,
   };
@@ -124,7 +131,7 @@ test('recordFromAccumulator keeps the file union needed after restart', () => {
   const files = new Set(['rules/b.md', 'rules/a.md']);
   const found = recordFromAccumulator(accumulator({
     prompts: prompts({ interruption: 2 }),
-    packs: new Map([['alpha', { version: 'v2', tokenEstimate: 200, dir: PACK_DIR, files, filesDropped: 3 }]]),
+    packs: new Map<string, MillMetricPackAccumulator>([['alpha', { version: 'v2', tokenEstimate: 200, dir: PACK_DIR, files, filesDropped: 3 }]]),
   }), {
     endedAt: Date.parse('2026-08-30T13:00:00Z'),
     disposition: 'user-kill',
@@ -132,6 +139,7 @@ test('recordFromAccumulator keeps the file union needed after restart', () => {
     tokens: 123,
     costUSD: 0.5,
   });
+  assert.ok(found);
   assert.equal(found.day, '2026-08-30');
   assert.deepEqual(found.packs[0].files, ['rules/a.md', 'rules/b.md']);
   assert.equal(found.packs[0].filesRead, 2);
@@ -161,6 +169,7 @@ test('two runs of one session id fold into a single record rather than replacing
   const other = record({ sessionId: 's2', endedAt: 150 });
   const merged = mergeRecords([firstRun, other], [secondRun]);
   const folded = merged.find((entry) => entry.sessionId === 's1');
+  assert.ok(folded);
   assert.equal(merged.length, 2);
   assert.equal(folded.startedAt, 100);
   assert.equal(folded.endedAt, 400);
@@ -261,18 +270,21 @@ test('zero denominators stay null and live accumulators add no abort denominator
 
   const live = accumulator({
     prompts: prompts({ interruption: 3, ambiguous: 1 }),
-    packs: new Map([['alpha', {
+    packs: new Map<string, MillMetricPackAccumulator>([['alpha', {
       version: 'v1', tokenEstimate: 100, dir: PACK_DIR, files: new Set(['a.md', 'b.md']), filesDropped: 0,
     }]]),
   });
-  const liveScorecard = buildScorecards([], [recordFromAccumulator(live)]).alpha;
+  const liveRecord = recordFromAccumulator(live);
+  assert.ok(liveRecord);
+  const liveScorecard = buildScorecards([], [liveRecord]).alpha;
+  assert.ok(liveScorecard);
   assert.equal(liveScorecard.liveSessions, 1);
   assert.equal(liveScorecard.opened.abortRate, null);
   assert.equal(liveScorecard.opened.meanInterruptions, 3);
 });
 
 test('a fold of two capped runs stays inside the persisted cap and counts the overflow', () => {
-  const filesFor = (prefix) => Array.from(
+  const filesFor = (prefix: string) => Array.from(
     { length: MAX_PACK_FILES_PER_SESSION },
     (_, index) => `${prefix}-${String(index).padStart(4, '0')}.md`,
   );
@@ -326,7 +338,7 @@ test('a fold is measurable when any run was, and only measurable runs contribute
 });
 
 test('a pack delivered only while reads were blind stays unmeasurable after the fold', () => {
-  const packEntry = (files) => ({
+  const packEntry = (files: string[]) => ({
     version: 'v1', tokenEstimate: 100, dir: PACK_DIR, files: new Set(files), filesDropped: 0,
   });
   const measurableRun = recordFromAccumulator(accumulator({
@@ -338,14 +350,16 @@ test('a pack delivered only while reads were blind stays unmeasurable after the 
     readDetection: 'unavailable',
     packs: new Map([['alpha', packEntry([])], ['beta', packEntry([])]]),
   }), { endedAt: 400 });
+  assert.ok(measurableRun);
+  assert.ok(blindRun);
   const scorecards = buildScorecards(mergeRecords([measurableRun], [blindRun]));
-  assert.equal(scorecards.alpha.measurableDeliveries, 1);
-  assert.equal(scorecards.alpha.openRate, 1);
-  assert.equal(scorecards.beta.deliveries, 1);
-  assert.equal(scorecards.beta.measurableDeliveries, 0);
-  assert.equal(scorecards.beta.unmeasurableDeliveries, 1);
-  assert.equal(scorecards.beta.openRate, null);
-  assert.equal(scorecards.beta.unopened.sessions, 0);
+  assert.equal(scorecards.alpha?.measurableDeliveries, 1);
+  assert.equal(scorecards.alpha?.openRate, 1);
+  assert.equal(scorecards.beta?.deliveries, 1);
+  assert.equal(scorecards.beta?.measurableDeliveries, 0);
+  assert.equal(scorecards.beta?.unmeasurableDeliveries, 1);
+  assert.equal(scorecards.beta?.openRate, null);
+  assert.equal(scorecards.beta?.unopened.sessions, 0);
 });
 
 test('a retention the wire would refuse falls back rather than reaching the lane', () => {

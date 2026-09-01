@@ -1,5 +1,5 @@
 import { planBranchGc } from './core/branch-gc-core.ts';
-import { configuredIntegrationBranch } from './core/integration-branch-core.js';
+import { configuredIntegrationBranch } from './core/integration-branch-core.ts';
 import type { IntegrationTip, KeptBranch } from './core/branch-gc-core.ts';
 import { createTickLoop } from './lane-runner.ts';
 import type { TickOutcome } from './lane-runner.ts';

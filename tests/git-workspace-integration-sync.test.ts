@@ -85,7 +85,7 @@ test('syncIntegrationBranch skips a repository without origin', { skip: !GIT }, 
 });
 
 test('syncIntegrationBranch fetch is bounded and non-interactive', async () => {
-  let fetchCall = null;
+  let fetchCall: { args: string[]; cwd: string; extra?: unknown } | null = null;
   const gitWorkspace = createGitWorkspace({
     git: (args, cwd, extra) => {
       if (args.join(' ') === 'remote get-url origin') return 'remote.git';

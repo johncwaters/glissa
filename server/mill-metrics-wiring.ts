@@ -1,15 +1,29 @@
-const {
+import {
   buildScorecards,
   classifyPrompt,
   classifyReadPath,
   dispositionFor,
   recordFromAccumulator,
-}: MillMetricsCore = require('./core/mill-metrics-core.ts');
-const {
+} from './core/mill-metrics-core.ts';
+import type {
+  MillMetricAccumulatorShape,
+  MillPackScorecard,
+  MillMetricEndIntent,
+  MillMetricPackAccumulator,
+  MillMetricsConfig,
+} from './core/mill-metrics-core.ts';
+import {
   MAX_PACK_FILES_PER_SESSION,
   MAX_PACK_REL_PATH_CHARS,
-}: MillMetricsContracts = require('../shared/contracts/mill-metrics.ts');
-const { numberOrNull }: { numberOrNull: UsageNumberOrNull } = require('./core/usage-number-core');
+} from '../shared/contracts/mill-metrics.ts';
+import type {
+  MillMetricDisposition,
+  MillMetricPromptClass,
+  MillMetricReadDetection,
+  MillMetricSession,
+} from '../shared/contracts/mill-metrics.ts';
+import { numberOrNull } from './core/usage-number-core.ts';
+import type { MillMetricsStoreInstance } from './mill-metrics-store.ts';
 
 type DeliveredPack = {
   name: string;
@@ -32,8 +46,6 @@ type TokenTotals = { tokens: number | null; costUSD: number | null };
 
 type UsageSample = TokenTotals & { identity: string | null };
 
-// What this run has spent, against a vendor conversation that may not have been scanned yet and may
-// be replaced mid-run. `baseline` null means nothing has been observed, so nothing may be subtracted.
 type TokenLedger = {
   identity: string | null;
   conversationExistedAtDelivery: boolean | null;
@@ -94,9 +106,6 @@ function createMillMetricsWiring({
     return left + right;
   }
 
-  // A resumed card carries the vendor's cumulative totals for the whole conversation, so this run is
-  // what has been added since the baseline. Every way a total can move backward is handled by banking
-  // and re-baselining before it gets here, so a negative figure would be a bug, not a new conversation.
   function sinceBaseline(current: number | null, baseline: number | null): number | null {
     if (current === null) return null;
     if (baseline === null) return current;
@@ -115,7 +124,6 @@ function createMillMetricsWiring({
     return current !== null && previous !== null && current < previous;
   }
 
-  // A field still climbing keeps its baseline, or the growth in the rewinding sample goes with it.
   function bankRewoundFields(ledger: TokenLedger, current: TokenTotals): void {
     const { baseline, latest } = ledger;
     if (!baseline || !latest) return;
@@ -133,11 +141,6 @@ function createMillMetricsWiring({
     };
   }
 
-  // The usage scanner may not have run when the packs land, so the baseline stays PENDING until a real
-  // total arrives: subtracting a guessed zero would bill a resumed card's whole prior conversation to
-  // this run. A conversation FIRST SEEN mid-run was created by this run, so its whole total is this
-  // run's and it baselines at zero, and a total that moves backward (a scanner rebuild, a retention
-  // prune) banks what was already earned instead of letting the smaller total stand in for it.
   function observeTokens(accumulator: Accumulator): TokenTotals {
     const ledger = accumulator.tokens;
     const sample = usageForSession(accumulator.sessionId);
@@ -158,8 +161,7 @@ function createMillMetricsWiring({
       ledger.latest = current;
       return ledgerTotals(ledger);
     }
-    // Only a swap between two KNOWN ids is a rotation: an id merely arriving late, or going missing for
-    // a scan, belongs to the conversation already baselined.
+
     if (ledger.identity !== null && sample.identity !== null && sample.identity !== ledger.identity) {
       ledger.banked = ledgerTotals(ledger);
       ledger.identity = sample.identity;
@@ -261,8 +263,7 @@ function createMillMetricsWiring({
     if (!read) return;
     const pack = accumulator.packs.get(read.pack);
     if (!pack || pack.files.has(read.relPath)) return;
-    // The agent chooses how many files it reads and how deep they sit, so the recorded set is bounded
-    // on both axes and the overflow is counted rather than silently forgotten.
+
     if (read.relPath.length > MAX_PACK_REL_PATH_CHARS || pack.files.size >= MAX_PACK_FILES_PER_SESSION) {
       pack.filesDropped += 1;
       return;
@@ -328,14 +329,11 @@ function createMillMetricsWiring({
     });
   }
 
-  // The session was removed from the config while it was still live, so the run is over but nothing
-  // says whether the operator was abandoning the work: it closes with no disposition rather than
-  // stranding an accumulator that would report as live forever.
   function onSessionTeardown(sessionId: string): void {
     closeAccumulator(sessionId, { disposition: null, finalState: '', transition: 'teardown' });
   }
 
-  function scorecards(): Record<string, unknown> {
+  function scorecards(): Record<string, MillPackScorecard> {
     const liveRecords: MillMetricSession[] = [];
     for (const accumulator of accumulators.values()) {
       const totals = observeTokens(accumulator);
@@ -372,17 +370,6 @@ type BufferedWrite = {
   apply: (target: MillMetricsStoreInstance) => void;
 };
 
-/*
- * The lane owns the store the wiring writes through, so a settings change can replace it without
- * rebuilding the wiring: the accumulators of the sessions running right now live in the wiring, and
- * rebuilding it would strand every one of them. The store is reached through a sink for the same reason.
- *
- * A replacement is not opened until the outgoing store's queued writes have drained, because both write
- * the same records file and a fresh load() racing an in-flight write would persist over it. Every reopen
- * runs on ONE restart chain so two settings changes can never leave two stores writing that file, and
- * the writes a live session produces while the swap is in flight are buffered into the replacement:
- * measurement stays on across the window, because a discarded close is a delivery lost forever.
- */
 function createMillMetricsLane({ resolveConfig, createStore, ...wiringOptions }: MillMetricsLaneOptions) {
   let config = resolveConfig();
   let store: MillMetricsStoreInstance | null = null;
@@ -405,15 +392,12 @@ function createMillMetricsLane({ resolveConfig, createStore, ...wiringOptions }:
     return opened;
   }
 
-  // A swap queued behind another finds the config already served by the store the earlier one opened,
-  // so a burst of settings changes ends on one store instead of opening every intermediate.
   function storeMatchesConfig(): boolean {
     return store !== null && openedRetainDays === config.retainDays;
   }
 
   openStore();
 
-  // A close is a whole delivery and an event one line of detail, so the oldest event yields to a close.
   function bufferWrite(isClose: boolean, apply: (target: MillMetricsStoreInstance) => void): void {
     if (pendingRestarts === 0) return;
     if (bufferedWrites.length >= MAX_BUFFERED_SWAP_WRITES) {
@@ -465,7 +449,6 @@ function createMillMetricsLane({ resolveConfig, createStore, ...wiringOptions }:
     }
   }
 
-  // The outgoing store is the only reference to closes its load never got past, so they move, not away.
   function handOverQueuedRecords(outgoing: MillMetricsStoreInstance, incoming: MillMetricsStoreInstance): void {
     const stranded = outgoing.takeQueuedRecords();
     if (stranded.length === 0) return;
@@ -512,28 +495,22 @@ function createMillMetricsLane({ resolveConfig, createStore, ...wiringOptions }:
   return { port, scorecards, restartIfConfigChanged, whenIdle, currentStore: () => store };
 }
 
-declare global {
-  type MillMetricsPort = {
-    onHookEvent: (sessionId: string, event: unknown, payload: unknown) => void;
-    onPacksDelivered: (sessionId: string, payload: {
-      packs?: Array<{ name: string, version: string, dir: string, tokenEstimate?: number | null }>,
-      agent?: string,
-      readDetection?: MillMetricReadDetection,
-      ts?: number,
-    }) => void;
-    onPromptSubmitted: (sessionId: string, payload: { state?: string, stateSince?: number, ts?: number }) => void;
-    onSessionEnd: (sessionId: string, payload: {
-      transitionEvent?: string,
-      intent?: MillMetricEndIntent,
-      finalState?: string,
-    }) => void;
-    onSessionTeardown: (sessionId: string) => void;
-  };
+export type MillMetricsPort = {
+  onHookEvent: (sessionId: string, event: unknown, payload: unknown) => void;
+  onPacksDelivered: (sessionId: string, payload: {
+    packs?: { name: string; version: string; dir: string; tokenEstimate?: number | null }[];
+    agent?: string;
+    readDetection?: MillMetricReadDetection;
+    ts?: number;
+  }) => void;
+  onPromptSubmitted: (sessionId: string, payload: { state?: string; stateSince?: number; ts?: number }) => void;
+  onSessionEnd: (sessionId: string, payload: {
+    transitionEvent?: string;
+    intent?: MillMetricEndIntent;
+    finalState?: string;
+  }) => void;
+  onSessionTeardown: (sessionId: string) => void;
+};
 
-  type MillMetricsWiringModule = {
-    createMillMetricsLane: typeof createMillMetricsLane;
-    createMillMetricsWiring: typeof createMillMetricsWiring;
-  };
-}
-
-module.exports = { createMillMetricsLane, createMillMetricsWiring } satisfies MillMetricsWiringModule;
+export { createMillMetricsLane, createMillMetricsWiring };
+export type { MillMetricsRecordSink };

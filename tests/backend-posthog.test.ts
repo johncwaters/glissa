@@ -202,6 +202,7 @@ interface CreateCall {
   projectPath: string;
   teamId: string;
   label: string;
+  baseBranch?: string | null;
   worktreeBase: string;
 }
 

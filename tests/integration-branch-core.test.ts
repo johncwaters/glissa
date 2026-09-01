@@ -1,8 +1,6 @@
-'use strict';
-
-const { test } = require('node:test');
-const assert = require('node:assert/strict');
-const { configuredIntegrationBranch } = require('../server/core/integration-branch-core');
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { configuredIntegrationBranch } from '../server/core/integration-branch-core.ts';
 
 test('configuredIntegrationBranch returns a configured branch name', () => {
   assert.equal(configuredIntegrationBranch({ integrationBranch: 'release' }), 'release');

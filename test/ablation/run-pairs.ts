@@ -1,12 +1,10 @@
-'use strict';
+import fs from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
 
-const fs = require('node:fs');
-const http = require('node:http');
-const os = require('node:os');
-const path = require('node:path');
-
-const { execSync } = require('../../server/child-process-safe');
-const {
+import { execSync } from '../../server/child-process-safe.ts';
+import {
   awaitBackendShutdown,
   closeServer,
   connectControl,
@@ -15,19 +13,79 @@ const {
   makeClaudeConfig,
   removeHarnessTempDirectory,
   safeTextTail,
-} = require('../support/backend-harness');
-const {
+} from '../support/backend-harness.ts';
+import {
   armOutcome,
   classifyObservedPrompts,
   pairArmOrder,
   promptCount,
   summariseAblation,
   turnBudget,
-} = require('./ablation-core');
+} from './ablation-core.ts';
+import { createBackend } from '../../server/backend.ts';
+import type { Session } from '../../session/sessions.ts';
+import type { HookSignal } from '../../detection/hook-source.ts';
+import type { MillMetricPack, MillMetricPromptCounts, MillMetricSession } from '../../shared/contracts/mill-metrics.ts';
 
-const REPOSITORY_ROOT = path.resolve(__dirname, '..', '..');
+type ArmName = 'on' | 'off';
+
+interface AblationTask {
+  id: string;
+  prompt: string;
+  checkCommand: string;
+  maxTurns: number;
+  taskIndex: number;
+}
+
+interface AblationArm {
+  armName: ArmName;
+  sessionId: string;
+  projectDirectory: string;
+}
+
+interface AblationPair {
+  task: AblationTask;
+  seed: number;
+  order: ArmName[];
+  arms: Record<ArmName, AblationArm>;
+}
+
+interface CheckResult {
+  passed: boolean;
+  exitCode?: number | null;
+  output: string;
+  error?: string;
+}
+
+interface ExitOutcome {
+  timedOut: boolean;
+  exit: { exitCode?: number } | null;
+  error: string | null;
+}
+
+interface ArmResult {
+  outcome: string;
+  wallMs: number;
+  funnel: { opened: boolean; filesRead: number; prompts: MillMetricPromptCounts };
+  execution: {
+    timedOut: boolean;
+    exitCode: number | null;
+    hookDriven: boolean;
+    error: string | null;
+    outputTail: string;
+  };
+  check: CheckResult;
+}
+
+interface SpawnCall {
+  file: string;
+  args: string[];
+  cwd?: string;
+}
+
+const REPOSITORY_ROOT = path.resolve(import.meta.dirname, '..', '..');
 const REPOSITORY_NODE_MODULES = path.join(REPOSITORY_ROOT, 'node_modules');
-const DEFAULT_TASKS_PATH = path.join(__dirname, 'tasks.json');
+const DEFAULT_TASKS_PATH = path.join(import.meta.dirname, 'tasks.json');
 const PACK_NAME = 'glissa-ablation-house-rules';
 const PACK_VERSION = 'glissa-ablation-v1';
 const SESSION_TIMEOUT_MS = 180000;
@@ -46,7 +104,7 @@ function usage() {
   ].join('\n');
 }
 
-function requiredFlagValue(argumentsList, index, flag) {
+function requiredFlagValue(argumentsList: string[], index: number, flag: string): string {
   const value = argumentsList[index + 1];
   if (!value || value.startsWith('--')) throw new Error(`${flag} requires a value`);
   return value;
@@ -54,11 +112,18 @@ function requiredFlagValue(argumentsList, index, flag) {
 
 function defaultOutputPath() {
   const timestamp = new Date().toISOString().replace(/[:]/g, '-');
-  return path.join(__dirname, 'results', `${timestamp}.jsonl`);
+  return path.join(import.meta.dirname, 'results', `${timestamp}.jsonl`);
 }
 
-function parseArguments(argumentsList) {
-  const options = {
+function parseArguments(argumentsList: string[]) {
+  const options: {
+    tasksPath: string;
+    only: string | null;
+    seeds: number;
+    model: string;
+    outputPath: string;
+    help: boolean;
+  } = {
     tasksPath: DEFAULT_TASKS_PATH,
     only: null,
     seeds: 1,
@@ -105,8 +170,8 @@ function parseArguments(argumentsList) {
   return options;
 }
 
-function readTasks(tasksPath, onlyTaskId) {
-  const parsedTasks = JSON.parse(fs.readFileSync(tasksPath, 'utf8'));
+function readTasks(tasksPath: string, onlyTaskId: string | null): AblationTask[] {
+  const parsedTasks = JSON.parse(fs.readFileSync(tasksPath, 'utf8')) as AblationTask[];
   if (!Array.isArray(parsedTasks)) throw new Error('tasks file must contain an array');
   const taskIds = new Set();
   const indexedTasks = parsedTasks.map((task, taskIndex) => {
@@ -125,11 +190,11 @@ function readTasks(tasksPath, onlyTaskId) {
   return selectedTasks;
 }
 
-function delay(delayMs) {
-  return new Promise((resolve) => setTimeout(resolve, delayMs));
+function delay(delayMs: number): Promise<void> {
+  return new Promise<void>((resolve) => { setTimeout(() => resolve(), delayMs); });
 }
 
-function extractSection(markdown, heading) {
+function extractSection(markdown: string, heading: string): string {
   const marker = `## ${heading}`;
   const sectionStart = markdown.indexOf(marker);
   if (sectionStart < 0) throw new Error(`AGENTS.md is missing ${marker}`);
@@ -138,7 +203,7 @@ function extractSection(markdown, heading) {
   return markdown.slice(sectionStart, nextSection).trim();
 }
 
-function makeAblationPack(tempDirectory) {
+function makeAblationPack(tempDirectory: string) {
   const agentsMarkdown = fs.readFileSync(path.join(REPOSITORY_ROOT, 'AGENTS.md'), 'utf8');
   const selectedRules = [
     extractSection(agentsMarkdown, 'For AI Agents'),
@@ -163,7 +228,7 @@ function makeAblationPack(tempDirectory) {
   return { builtRoot, packDirectory: currentDirectory };
 }
 
-function seedProject(projectDirectory) {
+function seedProject(projectDirectory: string): void {
   fs.mkdirSync(projectDirectory, { recursive: true });
   const packageDocument = {
     name: 'glissa-ablation-task',
@@ -181,14 +246,14 @@ function seedProject(projectDirectory) {
   );
 }
 
-function buildPairs(tasks, seeds, tempDirectory) {
-  const pairs = [];
+function buildPairs(tasks: AblationTask[], seeds: number, tempDirectory: string): AblationPair[] {
+  const pairs: AblationPair[] = [];
   for (const task of tasks) {
     for (let seed = 1; seed <= seeds; seed += 1) {
       const pairSlug = `${task.id}-seed-${seed}`;
       const order = pairArmOrder(task.taskIndex, seed);
-      const arms = {};
-      for (const armName of ['on', 'off']) {
+      const arms = {} as Record<ArmName, AblationArm>;
+      for (const armName of ['on', 'off'] as const) {
         const sessionId = `ablation-${pairSlug}-${armName}`;
         const projectDirectory = path.join(tempDirectory, 'projects', sessionId);
         seedProject(projectDirectory);
@@ -200,10 +265,10 @@ function buildPairs(tasks, seeds, tempDirectory) {
   return pairs;
 }
 
-function writeAblationConfig(configPath, pairs, port) {
-  const projects = [];
+function writeAblationConfig(configPath: string, pairs: AblationPair[], port: number): void {
+  const projects: Record<string, unknown>[] = [];
   for (const pair of pairs) {
-    for (const armName of ['on', 'off']) {
+    for (const armName of ['on', 'off'] as const) {
       const arm = pair.arms[armName];
       projects.push({
         id: arm.sessionId,
@@ -234,7 +299,7 @@ function writeAblationConfig(configPath, pairs, port) {
   fs.writeFileSync(configPath, `${JSON.stringify(configDocument, null, 2)}\n`, 'utf8');
 }
 
-function runCheckCommand(checkCommand, projectDirectory) {
+function runCheckCommand(checkCommand: string, projectDirectory: string): CheckResult {
   try {
     const output = execSync(checkCommand, {
       cwd: projectDirectory,
@@ -247,27 +312,28 @@ function runCheckCommand(checkCommand, projectDirectory) {
       },
     });
     return { passed: true, output: safeTextTail(output) };
-  } catch (error) {
+  } catch (thrown) {
+    const failure = thrown as { status?: unknown; stdout?: unknown; stderr?: unknown; message?: unknown };
     return {
       passed: false,
-      exitCode: Number.isInteger(error?.status) ? error.status : null,
-      output: safeTextTail(error?.stdout),
-      error: safeTextTail(error?.stderr || error?.message),
+      exitCode: typeof failure.status === 'number' && Number.isInteger(failure.status) ? failure.status : null,
+      output: safeTextTail(failure.stdout),
+      error: safeTextTail(failure.stderr || failure.message),
     };
   }
 }
 
-function readMetricRecords(recordsPath) {
+function readMetricRecords(recordsPath: string): MillMetricSession[] {
   if (!fs.existsSync(recordsPath)) return [];
   try {
-    const parsed = JSON.parse(fs.readFileSync(recordsPath, 'utf8'));
+    const parsed = JSON.parse(fs.readFileSync(recordsPath, 'utf8')) as { sessions?: MillMetricSession[] };
     return Array.isArray(parsed.sessions) ? parsed.sessions : [];
   } catch {
     return [];
   }
 }
 
-async function waitForMetricRecord(recordsPath, sessionId) {
+async function waitForMetricRecord(recordsPath: string, sessionId: string): Promise<MillMetricSession | null> {
   const deadline = Date.now() + METRICS_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const record = readMetricRecords(recordsPath).find((candidate) => candidate.sessionId === sessionId);
@@ -277,10 +343,10 @@ async function waitForMetricRecord(recordsPath, sessionId) {
   return null;
 }
 
-function waitForSessionExit(session, controlSocket) {
-  return new Promise((resolve) => {
+function waitForSessionExit(session: Session, controlSocket: { send: (data: string) => void }): Promise<ExitOutcome> {
+  return new Promise<ExitOutcome>((resolve) => {
     let isSettled = false;
-    const settle = (outcome) => {
+    const settle = (outcome: ExitOutcome) => {
       if (isSettled) return;
       isSettled = true;
       clearTimeout(timeoutHandle);
@@ -288,8 +354,8 @@ function waitForSessionExit(session, controlSocket) {
       session.off('error', onError);
       resolve(outcome);
     };
-    const onExit = (payload) => settle({ timedOut: false, exit: payload, error: null });
-    const onError = (error) => {
+    const onExit = (payload: { exitCode?: number }) => settle({ timedOut: false, exit: payload, error: null });
+    const onError = (error: Error) => {
       try { session.kill(); } catch {}
       settle({ timedOut: false, exit: null, error: error.message });
     };
@@ -303,27 +369,27 @@ function waitForSessionExit(session, controlSocket) {
   });
 }
 
-async function waitForKillReap(session) {
+async function waitForKillReap(session: Session): Promise<void> {
   if (!session?._killReap) return;
-  let timeoutHandle = null;
-  const timeout = new Promise((resolve) => {
-    timeoutHandle = setTimeout(resolve, 5000);
+  let timeoutHandle: NodeJS.Timeout | null = null;
+  const timeout = new Promise<void>((resolve) => {
+    timeoutHandle = setTimeout(() => resolve(), 5000);
   });
   await Promise.race([session._killReap, timeout]);
   if (timeoutHandle) clearTimeout(timeoutHandle);
 }
 
-function sawPromptHook(hookSignals) {
+function sawPromptHook(hookSignals: HookSignal[]): boolean {
   return hookSignals.some((signal) => String(signal?.event || '').toLowerCase() === 'userpromptsubmit');
 }
 
-function packCarrierWasPresent(spawnCalls, packDirectory) {
+function packCarrierWasPresent(spawnCalls: SpawnCall[], packDirectory: string): boolean {
   const args = spawnCalls[0]?.args || [];
   const addDirectoryIndex = args.indexOf('--add-dir');
   return addDirectoryIndex >= 0 && args[addDirectoryIndex + 1] === packDirectory;
 }
 
-function modelWasPresent(spawnCalls, model) {
+function modelWasPresent(spawnCalls: SpawnCall[], model: string): boolean {
   const args = spawnCalls[0]?.args || [];
   const modelIndex = args.indexOf('--model');
   return modelIndex >= 0 && args[modelIndex + 1] === model;
@@ -339,15 +405,25 @@ async function runArm({
   controlSocket,
   backend,
   recordsPath,
-}) {
+}: {
+  arm: AblationArm;
+  task: AblationTask;
+  model: string;
+  builtRoot: string;
+  packDirectory: string;
+  claudeConfigDirectory: string;
+  controlSocket: { send: (data: string) => void };
+  backend: ReturnType<typeof createBackend>;
+  recordsPath: string;
+}): Promise<ArmResult> {
   const startedAt = Date.now();
   const session = backend.getSession(arm.sessionId);
-  const hookSignals = [];
-  const promptPayloads = [];
-  const spawnCalls = [];
+  const hookSignals: HookSignal[] = [];
+  const promptPayloads: { ts?: unknown; state?: unknown; stateSince?: unknown }[] = [];
+  const spawnCalls: SpawnCall[] = [];
   let outputTail = '';
-  let executionError = null;
-  let executionOutcome = null;
+  let executionError: string | null = null;
+  let executionOutcome: ExitOutcome | null = null;
   if (!session) {
     executionError = `configured session ${arm.sessionId} was not created`;
   }
@@ -361,23 +437,23 @@ async function runArm({
       NODE_PATH: REPOSITORY_NODE_MODULES,
     };
     const spawnPty = session._ptySpawn;
-    session._ptySpawn = (file, args, spawnOptions) => {
+    session._ptySpawn = (file: string, args: string[], spawnOptions: { cwd?: string }) => {
       spawnCalls.push({ file, args: [...args], cwd: spawnOptions.cwd });
       return spawnPty(file, args, spawnOptions);
     };
     const ingestHookSignal = session.ingestHookSignal.bind(session);
-    session.ingestHookSignal = (rawSignal) => {
+    session.ingestHookSignal = (rawSignal: HookSignal) => {
       hookSignals.push(rawSignal);
       return ingestHookSignal(rawSignal);
     };
-    session.on('user-prompt', (payload) => promptPayloads.push(payload));
-    session.on('data', (chunk) => {
+    session.on('user-prompt', (payload: { ts?: unknown; state?: unknown; stateSince?: unknown }) => { promptPayloads.push(payload); });
+    session.on('data', (chunk: unknown) => {
       outputTail = `${outputTail}${String(chunk)}`.slice(-8192);
     });
     try {
       executionOutcome = await waitForSessionExit(session, controlSocket);
     } catch (error) {
-      executionError = error.message;
+      executionError = error instanceof Error ? error.message : String(error);
     } finally {
       try { session.kill(); } catch {}
       await waitForKillReap(session);
@@ -398,19 +474,19 @@ async function runArm({
   if (!executionError && arm.armName === 'on' && !metricRecord) {
     executionError = 'ON funnel record was not persisted';
   }
-  const packRecord = metricRecord?.packs?.find((pack) => pack.name === PACK_NAME) || null;
+  const packRecord: MillMetricPack | null = metricRecord?.packs?.find((pack) => pack.name === PACK_NAME) ?? null;
   const check = runCheckCommand(task.checkCommand, arm.projectDirectory);
   return {
     outcome: armOutcome(executionError, check.passed),
     wallMs: Date.now() - startedAt,
     funnel: {
       opened: packRecord?.opened === true,
-      filesRead: Number.isInteger(packRecord?.filesRead) ? packRecord.filesRead : 0,
+      filesRead: Number.isInteger(packRecord?.filesRead) ? (packRecord?.filesRead ?? 0) : 0,
       prompts: classifyObservedPrompts(promptPayloads),
     },
     execution: {
       timedOut: executionOutcome?.timedOut === true,
-      exitCode: Number.isInteger(executionOutcome?.exit?.exitCode) ? executionOutcome.exit.exitCode : null,
+      exitCode: Number.isInteger(executionOutcome?.exit?.exitCode) ? (executionOutcome?.exit?.exitCode ?? null) : null,
       hookDriven: sawPromptHook(hookSignals),
       error: executionError,
       outputTail: executionError ? safeTextTail(outputTail) : '',
@@ -419,7 +495,7 @@ async function runArm({
   };
 }
 
-function restoreEnvironmentVariable(name, previousValue) {
+function restoreEnvironmentVariable(name: string, previousValue: string | undefined): void {
   if (previousValue === undefined) {
     delete process.env[name];
     return;
@@ -427,7 +503,7 @@ function restoreEnvironmentVariable(name, previousValue) {
   process.env[name] = previousValue;
 }
 
-function printArm(taskId, seed, armName, armResult) {
+function printArm(taskId: string, seed: number, armName: string, armResult: ArmResult): void {
   const label = armName.toUpperCase();
   console.log(
     `  ${taskId} seed=${seed} ${label} ${armResult.outcome.toUpperCase()}`
@@ -456,20 +532,20 @@ async function main() {
   const recordsPath = path.join(tempDirectory, 'mill-metrics.json');
   const previousConfigPath = process.env.GLISSA_CONFIG;
   const previousPort = process.env.GLISSA_PORT;
-  let backend = null;
-  let controlSocket = null;
-  let server = null;
+  let backend: ReturnType<typeof createBackend> | null = null;
+  let controlSocket: Awaited<ReturnType<typeof connectControl>> | null = null;
+  let server: http.Server | null = null;
   let invalidPairs = 0;
-  let cleanupRun = null;
+  let cleanupRun: Promise<void> | null = null;
   const cleanUp = () => {
     if (cleanupRun) return cleanupRun;
     cleanupRun = (async () => {
       try { controlSocket?.terminate(); } catch {}
       try { await awaitBackendShutdown(backend); } catch (error) {
-        console.error(`backend cleanup failed: ${error.message}`);
+        console.error(`backend cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
       }
       try { await closeServer(server); } catch (error) {
-        console.error(`server cleanup failed: ${error.message}`);
+        console.error(`server cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
       }
       removeHarnessTempDirectory(tempDirectory);
       restoreEnvironmentVariable('GLISSA_CONFIG', previousConfigPath);
@@ -477,10 +553,10 @@ async function main() {
     })();
     return cleanupRun;
   };
-  const cleanUpAndExit = async (signalName) => {
+  const cleanUpAndExit = async (signalName: string) => {
     console.error(`\nreceived ${signalName}, killing sessions and removing ${tempDirectory}`);
     try { await cleanUp(); } catch (error) {
-      console.error(`signal cleanup failed: ${error.message}`);
+      console.error(`signal cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
     }
     process.exit(130);
   };
@@ -500,7 +576,6 @@ async function main() {
     const claudeConfigDirectory = makeClaudeConfig(tempDirectory, projectDirectories);
     process.env.GLISSA_CONFIG = configPath;
     process.env.GLISSA_PORT = String(port);
-    const { createBackend } = require('../../server/backend');
     server = http.createServer();
     backend = createBackend(server, { staticDir: null, checkForUpdate: null });
     server.on('request', backend.app);
@@ -509,11 +584,11 @@ async function main() {
 
     console.log(`Model: ${options.model}`);
     console.log(`Output: ${outputPath}`);
-    const completedPairs = [];
+    const completedPairs: { on: string; off: string }[] = [];
     for (const pair of pairs) {
       const orderLabel = pair.order.map((armName) => armName.toUpperCase()).join('/');
       console.log(`\nPair ${pair.task.id} seed=${pair.seed} order=${orderLabel}`);
-      const armResults = {};
+      const armResults = {} as Record<ArmName, ArmResult>;
       for (const armName of pair.order) {
         armResults[armName] = await runArm({
           arm: pair.arms[armName],
@@ -554,7 +629,7 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error.stack || error.message);
+main().catch((error: unknown) => {
+  console.error(error instanceof Error ? (error.stack ?? error.message) : String(error));
   process.exitCode = 1;
 });

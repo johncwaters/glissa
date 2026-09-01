@@ -1,39 +1,42 @@
-'use strict';
+import { classifyPrompt } from '../../server/core/mill-metrics-core.ts';
+import type { MillMetricPromptCounts } from '../../shared/contracts/mill-metrics.ts';
 
-const { classifyPrompt } = require('../../server/core/mill-metrics-core.ts');
+type ArmName = 'on' | 'off';
+type ArmOutcome = 'invalid' | 'pass' | 'fail';
+type PromptPayload = { ts?: unknown; state?: unknown; stateSince?: unknown } | null | undefined;
+type TaskPair = { on?: unknown; off?: unknown };
 
-const OUTCOMES = new Set(['pass', 'fail']);
+const OUTCOMES = new Set<unknown>(['pass', 'fail']);
 const SIGNIFICANCE_THRESHOLD = 0.05;
 
-function armOutcome(executionError, checkPassed) {
+function armOutcome(executionError: unknown, checkPassed: unknown): ArmOutcome {
   if (executionError) return 'invalid';
   if (checkPassed) return 'pass';
   return 'fail';
 }
 
-// The ON pack mandates a Read turn before the task, so the treatment gets that turn back.
-function turnBudget(armName, maxTurns) {
+function turnBudget(armName: ArmName, maxTurns: number): number {
   if (armName === 'on') return maxTurns + 1;
   return maxTurns;
 }
 
-function pairArmOrder(taskIndex, seed) {
+function pairArmOrder(taskIndex: number, seed: number): ArmName[] {
   const isOnFirst = (taskIndex + seed - 1) % 2 === 0;
   if (isOnFirst) return ['on', 'off'];
   return ['off', 'on'];
 }
 
-function emptyPromptCounts() {
+function emptyPromptCounts(): MillMetricPromptCounts {
   return { interruption: 0, answer: 0, followup: 0, ambiguous: 0 };
 }
 
-function classifyObservedPrompts(promptPayloads) {
+function classifyObservedPrompts(promptPayloads: PromptPayload[]): MillMetricPromptCounts {
   const prompts = emptyPromptCounts();
   for (const payload of promptPayloads) {
-    const timestamp = Number.isFinite(payload?.ts) ? payload.ts : Date.now();
+    const timestamp = typeof payload?.ts === 'number' && Number.isFinite(payload.ts) ? payload.ts : Date.now();
     const promptClass = classifyPrompt({
       state: typeof payload?.state === 'string' ? payload.state : '',
-      stateSince: Number.isFinite(payload?.stateSince) ? payload.stateSince : timestamp,
+      stateSince: typeof payload?.stateSince === 'number' && Number.isFinite(payload.stateSince) ? payload.stateSince : timestamp,
       ts: timestamp,
     });
     prompts[promptClass] += 1;
@@ -41,11 +44,11 @@ function classifyObservedPrompts(promptPayloads) {
   return prompts;
 }
 
-function promptCount(prompts) {
+function promptCount(prompts: MillMetricPromptCounts): number {
   return Object.values(prompts).reduce((total, count) => total + count, 0);
 }
 
-function pairOutcomes(taskPairs) {
+function pairOutcomes(taskPairs: TaskPair[] | null | undefined) {
   if (!Array.isArray(taskPairs)) throw new TypeError('taskPairs must be an array');
   let bothPass = 0;
   let bothFail = 0;
@@ -80,7 +83,7 @@ function pairOutcomes(taskPairs) {
   };
 }
 
-function mcnemarExact(onOnly, offOnly) {
+function mcnemarExact(onOnly: number, offOnly: number): number {
   if (!Number.isInteger(onOnly) || onOnly < 0) {
     throw new TypeError('onOnly must be a nonnegative integer');
   }
@@ -99,7 +102,7 @@ function mcnemarExact(onOnly, offOnly) {
   return Math.min(1, lowerTailProbability * 2);
 }
 
-function summariseAblation(taskPairs) {
+function summariseAblation(taskPairs: TaskPair[] | null | undefined) {
   const tallies = pairOutcomes(taskPairs);
   const pValue = mcnemarExact(tallies.onOnly, tallies.offOnly);
   let verdict = 'no-signal';
@@ -117,7 +120,7 @@ function summariseAblation(taskPairs) {
   };
 }
 
-module.exports = {
+export {
   armOutcome,
   classifyObservedPrompts,
   emptyPromptCounts,

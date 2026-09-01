@@ -638,7 +638,6 @@ test('cacheSavingsTile: unpriced models turn the figure into a floor', async () 
   assert.equal(many?.sub, '1.5M cache read tokens, a floor (2 unpriced models)');
 });
 
-// The four parts are measured against their own sum, not the report total, so they always add to 100.
 test('compositionParts: the four parts in bar order, each as a share of their own sum', async () => {
   const { compositionParts } = await importCore();
   const parts = compositionParts({ input: 250, output: 250, cacheCreate: 250, cacheRead: 250, tokens: 9_000_000 });
@@ -656,7 +655,7 @@ test('compositionParts: the four parts in bar order, each as a share of their ow
   );
   assert.equal(parts[2].value, '250');
   assert.equal(parts[2].title, 'cache write 250, 25%');
-  // The usual shape: cache reads dwarf everything else, and a zero part keeps its slot in the legend.
+
   const skewed = compositionParts({ input: 1000, output: 0, cacheCreate: 0, cacheRead: 999_000 });
   assert.equal(skewed.length, 4);
   assert.equal(skewed[0].pct, 0.1);
@@ -673,7 +672,7 @@ test('compositionParts: nothing finite and positive means no row at all', async 
   assert.deepEqual(compositionParts(null), []);
   assert.deepEqual(compositionParts(undefined), []);
   assert.deepEqual(compositionParts({ input: Number.NaN, output: Infinity, cacheCreate: -5, cacheRead: null }), []);
-  // A single negative part cannot drag the others below the guard.
+
   assert.equal(compositionParts({ input: -50, output: 100, cacheCreate: 0, cacheRead: 0 })[1].pct, 100);
 });
 

@@ -1,7 +1,5 @@
-'use strict';
-
-const test = require('node:test');
-const assert = require('node:assert/strict');
+import test from 'node:test';
+import assert from 'node:assert/strict';
 
 test('review copy names the effective base and its push action', async () => {
   const { baseLabel, mergeActionTitle, mergeTargetText, parkedStatusText } = await import('../public/sidebar/review-copy-core.ts');
@@ -39,7 +37,7 @@ test('base-diverged rendered Merge explains why it is disabled', async () => {
     hasCommits: true,
     live: true,
     state: 'COMPLETE',
-  }), /Resync the base branch by hand/);
+  }) ?? '', /Resync the base branch by hand/);
 });
 
 test('loading, no changes, and inactive session outrank base-diverged copy', async () => {

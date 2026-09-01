@@ -7,7 +7,7 @@ import { isSameDirectoryPath } from '../shared/paths.ts';
 import { STATES } from '../shared/states.ts';
 import type { AgentId, RegistryProject } from './core/session-registry-core.ts';
 import { diffProjects, shouldStartAfterModify } from './core/session-registry-core.ts';
-import { configuredIntegrationBranch } from './core/integration-branch-core.js';
+import { configuredIntegrationBranch } from './core/integration-branch-core.ts';
 import type { SessionWorktree, WorktreeArgs } from './git-workspace.ts';
 
 interface RegistryConfig extends Record<string, unknown> {
@@ -234,8 +234,7 @@ function createSessionRegistry(dependencies: SessionRegistryDependencies): Sessi
     dependencies.closeSessionDataClients(id);
 
     dependencies.notificationManager.acknowledge(id);
-    // Same reason: a removed session never transitions to DONE, so the measurement lane is told here or
-    // its accumulator is stranded and the pack scorecard keeps counting a delivery that is long gone.
+
     if (dependencies.millMetricsPort) dependencies.millMetricsPort.onSessionTeardown(id);
     const ingestLane = dependencies.getIngestLane();
     if (ingestLane) ingestLane.detachSessionTap(session);
@@ -280,8 +279,7 @@ function createSessionRegistry(dependencies: SessionRegistryDependencies): Sessi
       const wasDormant = !shouldStartAfterModify(oldSession.state);
       dependencies.closeSessionDataClients(project.id);
       dependencies.notificationManager.acknowledge(project.id);
-      // Same reason as teardownSession: the replaced session never transitions, so its accumulator is
-      // closed here or the measurement lane keeps counting a delivery that no longer exists.
+
       if (dependencies.millMetricsPort) dependencies.millMetricsPort.onSessionTeardown(project.id);
       oldSession.destroy();
       const newSession = dependencies.makeSession(project, { ...config, ...newConfig });

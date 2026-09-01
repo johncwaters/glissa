@@ -1,12 +1,33 @@
-'use strict';
+import fs from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
 
-const fs = require('node:fs');
-const http = require('node:http');
-const os = require('node:os');
-const path = require('node:path');
+import type { IncomingMessage, Server } from 'node:http';
 
-const { buildScorecards } = require('../server/core/mill-metrics-core.ts');
-const {
+import { createBackend } from '../server/backend.ts';
+import { buildScorecards } from '../server/core/mill-metrics-core.ts';
+import type { MillMetricSession } from '../shared/contracts/mill-metrics.ts';
+import type { Session } from '../session/sessions.ts';
+import type { HookSignal } from '../detection/hook-source.ts';
+
+interface MetricEvent {
+  kind: string;
+  sessionId?: string;
+  pack?: string;
+  relPath?: string;
+  promptClass?: string;
+}
+
+interface RecordsDocument {
+  sessions: MillMetricSession[];
+}
+
+interface ReadHookPayload {
+  tool_name?: string;
+  tool_input?: { file_path?: string };
+}
+import {
   awaitBackendShutdown,
   closeServer,
   connectControl,
@@ -15,10 +36,7 @@ const {
   makeClaudeConfig,
   removeHarnessTempDirectory,
   safeTextTail,
-} = require('./support/backend-harness');
-
-// Live verification of mill metrics, run by hand against a REAL billed claude binary and the
-// operator's own credentials: node test/probe-mill-metrics-smoke.js
+} from './support/backend-harness.ts';
 
 const SESSION_ID = 'mill-metrics-smoke-session';
 const PACK_NAME = 'mill-metrics-smoke-pack';
@@ -31,7 +49,7 @@ const HARD_TIMEOUT_MS = 180000;
 let passed = 0;
 let failed = 0;
 
-function check(label, condition) {
+function check(label: string, condition: unknown): void {
   if (condition) {
     console.log(`  PASS  ${label}`);
     passed += 1;
@@ -41,11 +59,11 @@ function check(label, condition) {
   failed += 1;
 }
 
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function delay(ms: number): Promise<void> {
+  return new Promise<void>((resolve) => { setTimeout(() => resolve(), ms); });
 }
 
-function writeProbeConfig(configPath, projectDirectory, port) {
+function writeProbeConfig(configPath: string, projectDirectory: string, port: number): void {
   fs.writeFileSync(configPath, `${JSON.stringify({
     port,
     projects: [{
@@ -67,7 +85,7 @@ function writeProbeConfig(configPath, projectDirectory, port) {
   }, null, 2)}\n`, 'utf8');
 }
 
-function makeProbePack(tempDirectory) {
+function makeProbePack(tempDirectory: string) {
   const builtRoot = path.join(tempDirectory, 'packs', 'built');
   const currentDirectory = path.join(builtRoot, PACK_NAME, 'current');
   const dataDirectory = path.join(currentDirectory, 'data');
@@ -86,9 +104,9 @@ function makeProbePack(tempDirectory) {
   return { builtRoot, packFile: path.join(currentDirectory, PACK_REL_PATH) };
 }
 
-function readMetricEvents(eventsDirectory) {
+function readMetricEvents(eventsDirectory: string): MetricEvent[] {
   if (!fs.existsSync(eventsDirectory)) return [];
-  const events = [];
+  const events: MetricEvent[] = [];
   const eventFiles = fs.readdirSync(eventsDirectory)
     .filter((name) => /^events-\d{4}-\d{2}-\d{2}\.jsonl$/.test(name))
     .sort();
@@ -96,13 +114,13 @@ function readMetricEvents(eventsDirectory) {
     const lines = fs.readFileSync(path.join(eventsDirectory, eventFile), 'utf8').split('\n');
     for (const line of lines) {
       if (!line.trim()) continue;
-      events.push(JSON.parse(line));
+      events.push(JSON.parse(line) as MetricEvent);
     }
   }
   return events;
 }
 
-async function waitForValue(readValue, label, timeoutMs = STEP_TIMEOUT_MS) {
+async function waitForValue<T>(readValue: () => T, label: string, timeoutMs = STEP_TIMEOUT_MS): Promise<NonNullable<T>> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const value = readValue();
@@ -112,18 +130,18 @@ async function waitForValue(readValue, label, timeoutMs = STEP_TIMEOUT_MS) {
   throw new Error(`timed out waiting for ${label}`);
 }
 
-function observeReadHookRequests(request, readHookPayloads) {
-  const requestPath = String(request.url || '').split('?')[0].toLowerCase();
+function observeReadHookRequests(request: IncomingMessage, readHookPayloads: ReadHookPayload[]): void {
+  const requestPath = String(request.url || '').split('?')[0]?.toLowerCase() ?? '';
   const expectedPath = `/hook/${SESSION_ID}/posttooluse`.toLowerCase();
   if (request.method !== 'POST' || requestPath !== expectedPath) return;
   let body = '';
-  request.on('data', (chunk) => {
-    body += chunk;
+  request.on('data', (chunk: Buffer) => {
+    body += String(chunk);
   });
   request.on('end', () => {
-    let payload = null;
+    let payload: ReadHookPayload | null = null;
     try {
-      payload = body ? JSON.parse(body) : {};
+      payload = (body ? JSON.parse(body) : {}) as ReadHookPayload;
     } catch {
       return;
     }
@@ -132,13 +150,13 @@ function observeReadHookRequests(request, readHookPayloads) {
   });
 }
 
-async function submitPrompt(session, prompt) {
+async function submitPrompt(session: Session, prompt: string): Promise<void> {
   session.write(prompt);
   await delay(300);
   session.write('\r');
 }
 
-function promptEventCount(events) {
+function promptEventCount(events: MetricEvent[]): number {
   return events.filter((event) => event.kind === 'prompt' && event.sessionId === SESSION_ID).length;
 }
 
@@ -156,12 +174,10 @@ async function main() {
   writeProbeConfig(configPath, projectDirectory, port);
   const { builtRoot, packFile } = makeProbePack(tempDirectory);
   const claudeConfigDirectory = makeClaudeConfig(tempDirectory, [projectDirectory]);
-  const { createBackend } = require('../server/backend');
-
-  let backend = null;
-  let controlSocket = null;
-  let server = null;
-  let session = null;
+  let backend: ReturnType<typeof createBackend> | null = null;
+  let controlSocket: Awaited<ReturnType<typeof connectControl>> | null = null;
+  let server: Server | null = null;
+  let session: Session | null = null;
   const hardTimeout = setTimeout(() => {
     console.error(`\nFAIL hard timeout after ${HARD_TIMEOUT_MS}ms`);
     try { session?.kill(); } catch {}
@@ -173,7 +189,7 @@ async function main() {
     process.exit(2);
   }, HARD_TIMEOUT_MS);
 
-  let cleanupRun = null;
+  let cleanupRun: Promise<void> | null = null;
   const cleanUp = () => {
     if (cleanupRun) return cleanupRun;
     cleanupRun = (async () => {
@@ -181,19 +197,19 @@ async function main() {
       try { session?.kill(); } catch {}
       try { controlSocket?.terminate(); } catch {}
       try { await awaitBackendShutdown(backend); } catch (error) {
-        console.error(`  NOTE  backend cleanup failed: ${error.message}`);
+        console.error(`  NOTE  backend cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
       }
       try { await closeServer(server); } catch (error) {
-        console.error(`  NOTE  server cleanup failed: ${error.message}`);
+        console.error(`  NOTE  server cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
       }
       removeHarnessTempDirectory(tempDirectory);
     })();
     return cleanupRun;
   };
-  const cleanUpAndExit = async (signalName) => {
+  const cleanUpAndExit = async (signalName: string) => {
     console.error(`\nreceived ${signalName}, killing the session and removing ${tempDirectory}`);
     try { await cleanUp(); } catch (error) {
-      console.error(`signal cleanup failed: ${error.message}`);
+      console.error(`signal cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
     }
     process.exit(130);
   };
@@ -202,10 +218,10 @@ async function main() {
   process.on('SIGINT', onSigint);
   process.on('SIGTERM', onSigterm);
 
-  const readHookPayloads = [];
-  const hookSignals = [];
-  const stateChanges = [];
-  const spawnCalls = [];
+  const readHookPayloads: ReadHookPayload[] = [];
+  const hookSignals: HookSignal[] = [];
+  const stateChanges: { from: string; to: string; event: string; detail: unknown }[] = [];
+  const spawnCalls: { file: string; args: string[]; cwd?: string }[] = [];
   let ptyOutputTail = '';
 
   try {
@@ -217,6 +233,7 @@ async function main() {
 
     session = backend.getSession(SESSION_ID);
     if (!session) throw new Error('the configured smoke session was not created');
+    const probeSession = session;
     session._packsBuiltRoot = builtRoot;
     session._extraClaudeArgs = ['--model', 'haiku'];
     session._spawnEnv = {
@@ -224,20 +241,20 @@ async function main() {
       CLAUDE_CONFIG_DIR: claudeConfigDirectory,
     };
     const spawnPty = session._ptySpawn;
-    session._ptySpawn = (file, args, options) => {
+    session._ptySpawn = (file: string, args: string[], options: { cwd?: string }) => {
       spawnCalls.push({ file, args: [...args], cwd: options.cwd });
       return spawnPty(file, args, options);
     };
     const originalIngest = session.ingestHookSignal.bind(session);
-    session.ingestHookSignal = (raw) => {
+    session.ingestHookSignal = (raw: HookSignal) => {
       hookSignals.push(raw);
       return originalIngest(raw);
     };
-    session.on('state-change', ({ from, to, event, detail }) => {
+    session.on('state-change', ({ from, to, event, detail }: { from: string; to: string; event: string; detail: unknown }) => {
       stateChanges.push({ from, to, event, detail });
       console.log(`  [state] ${from} -> ${to} (${event})`);
     });
-    session.on('data', (chunk) => {
+    session.on('data', (chunk: unknown) => {
       ptyOutputTail = `${ptyOutputTail}${String(chunk)}`.slice(-16384);
     });
 
@@ -247,25 +264,25 @@ async function main() {
     console.log(`Port: ${port}`);
     console.log('\nSpawn:');
     controlSocket.send(JSON.stringify({ type: 'start-session', id: SESSION_ID }));
-    await waitForValue(() => session.state === 'IDLE', 'the interactive Claude prompt');
+    await waitForValue(() => probeSession.state === 'IDLE', 'the interactive Claude prompt');
     const spawnCall = spawnCalls[0];
     const addDirectoryIndex = spawnCall?.args.indexOf('--add-dir') ?? -1;
-    check('the session spawned the real claude-code adapter', session.agentId === 'claude-code');
+    check('the session spawned the real claude-code adapter', probeSession.agentId === 'claude-code');
     check('the spawn used the cheap haiku model', spawnCall?.args.includes('--model') && spawnCall.args.includes('haiku'));
     check(
       'the spawn delivered the throwaway pack through --add-dir',
       addDirectoryIndex >= 0 && spawnCall.args[addDirectoryIndex + 1] === path.dirname(path.dirname(packFile)),
     );
-    check('the Read hook was injected for measurable pack delivery', session._hooks.detectsPackReads());
+    check('the Read hook was injected for measurable pack delivery', probeSession._hooks.detectsPackReads());
     await delay(5000);
-    if (session.state === 'FAILED') throw new Error('Claude exited before the first prompt');
+    if (probeSession.state === 'FAILED') throw new Error('Claude exited before the first prompt');
 
     console.log('\nFirst turn:');
     const firstPrompt = [
       `Use the Read tool to read the ${PACK_NAME} file at ${packFile}.`,
       `Answer with exactly one line containing ${SENTINEL}.`,
     ].join(' ');
-    await submitPrompt(session, firstPrompt);
+    await submitPrompt(probeSession, firstPrompt);
     await waitForValue(
       () => hookSignals.filter((signal) => String(signal?.event).toLowerCase() === 'userpromptsubmit').length >= 1,
       'the first UserPromptSubmit hook',
@@ -286,11 +303,11 @@ async function main() {
       ),
       'the persisted pack-read event',
     );
-    await waitForValue(() => session.state === 'COMPLETE', 'the first turn to complete');
-    check('the first prompt reached the hook-driven work cycle', session.hookSeen === true);
+    await waitForValue(() => probeSession.state === 'COMPLETE', 'the first turn to complete');
+    check('the first prompt reached the hook-driven work cycle', probeSession.hookSeen === true);
 
     console.log('\nFollow-up turn:');
-    await submitPrompt(session, 'Answer with exactly one line containing done.');
+    await submitPrompt(probeSession, 'Answer with exactly one line containing done.');
     await waitForValue(
       () => hookSignals.filter((signal) => String(signal?.event).toLowerCase() === 'userpromptsubmit').length >= 2,
       'the second UserPromptSubmit hook',
@@ -299,11 +316,11 @@ async function main() {
       () => promptEventCount(readMetricEvents(eventsDirectory)) >= 2,
       'two persisted prompt classifications',
     );
-    await waitForValue(() => session.state === 'COMPLETE', 'the follow-up turn to complete');
+    await waitForValue(() => probeSession.state === 'COMPLETE', 'the follow-up turn to complete');
 
     console.log('\nDashboard kill:');
     controlSocket.send(JSON.stringify({ type: 'kill', id: SESSION_ID }));
-    await waitForValue(() => session.state === 'DONE', 'the dashboard kill transition');
+    await waitForValue(() => probeSession.state === 'DONE', 'the dashboard kill transition');
     await waitForValue(
       () => readMetricEvents(eventsDirectory).find(
         (event) => event.kind === 'session-end' && event.sessionId === SESSION_ID,
@@ -312,8 +329,8 @@ async function main() {
     );
     const recordsDocument = await waitForValue(() => {
       if (!fs.existsSync(recordsPath)) return null;
-      const parsed = JSON.parse(fs.readFileSync(recordsPath, 'utf8'));
-      return parsed.sessions?.length > 0 ? parsed : null;
+      const parsed = JSON.parse(fs.readFileSync(recordsPath, 'utf8')) as RecordsDocument;
+      return parsed.sessions.length > 0 ? parsed : null;
     }, 'the persisted mill metrics session record');
 
     const events = readMetricEvents(eventsDirectory);
@@ -340,7 +357,7 @@ async function main() {
     check('events JSONL contains session-end', sessionEndEvents.length === 1);
     check('mill-metrics.json contains one smoke session record', sessionRecords.length === 1);
     check('the persisted pack record is opened', packRecord?.opened === true);
-    check('the persisted pack record counted at least one file', packRecord?.filesRead >= 1);
+    check('the persisted pack record counted at least one file', (packRecord?.filesRead ?? 0) >= 1);
     check('the dashboard kill was classified as user-kill', sessionRecord?.disposition === 'user-kill');
 
     console.log('\nPostToolUse Read payload:');
@@ -350,7 +367,7 @@ async function main() {
     console.log(JSON.stringify(buildScorecards(recordsDocument.sessions)[PACK_NAME], null, 2));
   } catch (error) {
     failed += 1;
-    console.error(`\nFAIL ${error.stack || error.message}`);
+    console.error(`\nFAIL ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
     if (ptyOutputTail) console.error(`PTY output tail: ${JSON.stringify(safeTextTail(ptyOutputTail, 4096))}`);
   } finally {
     await cleanUp();

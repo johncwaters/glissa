@@ -4,7 +4,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { writeSessionSettings, DIR_MODE, FILE_MODE } from '../detection/settings-injector.ts';
+import {
+  buildHookSettings,
+  writeSessionSettings,
+  DIR_MODE,
+  FILE_MODE,
+  PACK_READ_TOOL_MATCHER,
+  WAKEUP_TOOL_MATCHER,
+} from '../detection/settings-injector.ts';
 
 const POSIX = process.platform !== 'win32';
 
@@ -82,7 +89,7 @@ test('pack read detection adds one PostToolUse matcher and defaults byte-identic
   assert.equal(JSON.stringify(explicitlyOff), JSON.stringify(baseline));
 
   const enabled = buildHookSettings({ ...base, detectPackReads: true });
-  assert.deepEqual(enabled.hooks.PostToolUse.map((entry) => entry.matcher), [
+  assert.deepEqual(enabled.hooks.PostToolUse.map((entry: { matcher?: string }) => entry.matcher), [
     WAKEUP_TOOL_MATCHER,
     PACK_READ_TOOL_MATCHER,
   ]);

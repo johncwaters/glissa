@@ -1,30 +1,28 @@
-'use strict';
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-const { test } = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
-
-const ROOT = path.join(__dirname, '..');
+const ROOT = path.join(import.meta.dirname, '..');
 const SOURCE_DIRS = ['server', 'session', 'shared', 'public'];
 const HARDCODED_BRANCH = /['"`]develop['"`]|into develop/g;
 
-function collectSourceFiles(directory, files = []) {
+function collectSourceFiles(directory: string, files: string[] = []): string[] {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     const entryPath = path.join(directory, entry.name);
     if (entry.isDirectory()) {
       collectSourceFiles(entryPath, files);
       continue;
     }
-    if (!entry.isFile() || entry.name.endsWith('.test.js')) continue;
+    if (!entry.isFile() || entry.name.endsWith('.test.ts')) continue;
     files.push(entryPath);
   }
   return files;
 }
 
 test('runtime sources contain no hardcoded integration branch', () => {
-  const offenders = [];
+  const offenders: string[] = [];
   for (const sourceDir of SOURCE_DIRS) {
     for (const file of collectSourceFiles(path.join(ROOT, sourceDir))) {
       const source = fs.readFileSync(file, 'utf8');

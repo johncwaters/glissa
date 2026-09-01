@@ -55,7 +55,7 @@ const DEFAULT_CONFIG = {
 
   telegramNotifications: false,
 
-  integrationBranch: null,
+  integrationBranch: null as string | null,
 
   worktreeRoot: '',
 
@@ -416,7 +416,7 @@ function createConfigStore({ settingsDefaults }: { settingsDefaults?: Partial<De
     return value === effectiveDefaults[key];
   }
 
-  function applySettings(newConfig: GlissaConfig): void {
+  function applySettings(newConfig: Partial<GlissaConfig>): void {
     for (const key of RUNTIME_CONFIG_SCALAR_KEYS) {
       if (key === 'integrationBranch') {
         if (newConfig[key] === undefined) continue;

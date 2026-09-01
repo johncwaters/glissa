@@ -1,18 +1,18 @@
-'use strict';
+import test from 'node:test';
+import type { TestContext } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const fsp = require('node:fs/promises');
-const os = require('node:os');
-const path = require('node:path');
-
-const { createMillMetricsStore } = require('../server/mill-metrics-store.ts');
-const { MAX_PACK_FILES_PER_SESSION } = require('../shared/contracts/mill-metrics.ts');
+import { createMillMetricsStore } from '../server/mill-metrics-store.ts';
+import { MAX_PACK_FILES_PER_SESSION } from '../shared/contracts/mill-metrics.ts';
+import type { MillMetricSession } from '../shared/contracts/mill-metrics.ts';
 
 const NOW = Date.parse('2026-08-30T12:00:00Z');
 
-function record(overrides = {}) {
+function record(overrides: Partial<MillMetricSession> = {}): MillMetricSession {
   return {
     sessionId: 's1',
     day: '2026-08-30',
@@ -39,7 +39,7 @@ function record(overrides = {}) {
   };
 }
 
-async function fixture(t) {
+async function fixture(t: TestContext) {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'glissa-mill-metrics-store-'));
   t.after(() => fsp.rm(root, { recursive: true, force: true }));
   return {
@@ -63,11 +63,11 @@ test('closed records round-trip through the durable store', async (t) => {
 
 test('two capped runs of one session fold into a record the next boot can still read', async (t) => {
   const paths = await fixture(t);
-  const filesFor = (prefix) => Array.from(
+  const filesFor = (prefix: string) => Array.from(
     { length: MAX_PACK_FILES_PER_SESSION },
     (_, index) => `${prefix}-${String(index).padStart(4, '0')}.md`,
   );
-  const runWithFiles = (prefix) => record({
+  const runWithFiles = (prefix: string) => record({
     packs: [{
       name: 'alpha',
       version: 'v1',
@@ -94,7 +94,7 @@ test('two capped runs of one session fold into a record the next boot can still 
 test('an unreadable records file starts empty and warns', async (t) => {
   const paths = await fixture(t);
   await fsp.writeFile(paths.recordsPath, '{ broken', 'utf8');
-  const warnings = [];
+  const warnings: string[] = [];
   const store = createMillMetricsStore({
     ...paths,
     retainDays: 90,
@@ -119,13 +119,13 @@ test('appendEvent writes one JSON line per accepted event and whenIdle drains th
   store.appendEvent(read);
   await store.whenIdle();
   const eventPath = path.join(paths.eventsDir, 'events-2026-08-30.jsonl');
-  const lines = (await fsp.readFile(eventPath, 'utf8')).trim().split('\n').map(JSON.parse);
+  const lines = (await fsp.readFile(eventPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as unknown);
   assert.deepEqual(lines, [delivered, read]);
 });
 
 test('invalid event shapes are dropped without throwing and warn once per kind', async (t) => {
   const paths = await fixture(t);
-  const warnings = [];
+  const warnings: string[] = [];
   const store = createMillMetricsStore({
     ...paths,
     retainDays: 90,
@@ -161,7 +161,7 @@ test('load prunes only dated event files older than the retention cutoff', async
 
 test('a record too large for the shape is refused rather than persisted', async (t) => {
   const paths = await fixture(t);
-  const warnings = [];
+  const warnings: string[] = [];
   const store = createMillMetricsStore({
     ...paths,
     retainDays: 90,
@@ -186,7 +186,11 @@ test('a record too large for the shape is refused rather than persisted', async 
   assert.match(warnings[0], /dropped invalid session record/);
 });
 
-function storeWithBlockedReads(paths, warnings, isReadable) {
+function storeWithBlockedReads(
+  paths: { recordsPath: string; eventsDir: string },
+  warnings: string[],
+  isReadable: () => boolean,
+) {
   return createMillMetricsStore({
     ...paths,
     retainDays: 90,
@@ -194,11 +198,9 @@ function storeWithBlockedReads(paths, warnings, isReadable) {
     logger: { warn: (message) => warnings.push(message) },
     fsPromises: {
       ...fsp,
-      readFile: async (target, encoding) => {
+      readFile: async (target: string, encoding: 'utf8') => {
         if (target === paths.recordsPath && !isReadable()) {
-          const error = new Error('permission denied');
-          error.code = 'EACCES';
-          throw error;
+          throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
         }
         return fsp.readFile(target, encoding);
       },
@@ -206,8 +208,8 @@ function storeWithBlockedReads(paths, warnings, isReadable) {
   });
 }
 
-async function persistedSessionIds(recordsPath) {
-  const parsed = JSON.parse(await fsp.readFile(recordsPath, 'utf8'));
+async function persistedSessionIds(recordsPath: string): Promise<string[]> {
+  const parsed = JSON.parse(await fsp.readFile(recordsPath, 'utf8')) as { sessions: { sessionId: string }[] };
   return parsed.sessions.map((entry) => entry.sessionId).sort();
 }
 
@@ -218,7 +220,7 @@ test('a records file that cannot be read is never persisted over', async (t) => 
     updatedAt: new Date(NOW).toISOString(),
     sessions: [record({ sessionId: 'kept' })],
   }), 'utf8');
-  const warnings = [];
+  const warnings: string[] = [];
   const store = storeWithBlockedReads(paths, warnings, () => false);
   await store.load();
   store.closeSession(record({ sessionId: 'fresh' }));
@@ -253,7 +255,7 @@ test('a store going idle retries the load and persists the closes it was holding
     sessions: [record({ sessionId: 'kept' })],
   }), 'utf8');
   let readable = false;
-  const warnings = [];
+  const warnings: string[] = [];
   const store = storeWithBlockedReads(paths, warnings, () => readable);
   await store.load();
   store.closeSession(record({ sessionId: 'fresh' }));

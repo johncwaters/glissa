@@ -105,11 +105,6 @@ interface SessionTokenTotals {
   identity: string | null;
 }
 
-// The vendor conversation the totals were read under travels with them: a card that starts a new
-// conversation mid-run gets a counter of its own, and the measurement lane can only tell that apart
-// from a rewind if it knows which identity a figure belongs to. A resumed card reports its identity
-// even before the scanner has read a total, or the lane would baseline the first sample at zero and
-// bill the whole prior conversation to this run.
 function tokensFromUsage(
   usage: { sessionTotals: (sessionId: string) => { tokens?: unknown; costUSD?: unknown } | null | undefined },
   sessions: Map<string, { resumeSessionId?: string | null }>,
