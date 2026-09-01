@@ -104,10 +104,12 @@ interface PosthogPollerDependencies {
   telegram?: (message: string) => void;
   readState?: () => Promise<PosthogState>;
   writeState?: (state: PosthogState) => Promise<void>;
-  setIntervalFn?: typeof setInterval;
-  clearIntervalFn?: typeof clearInterval;
-  setTimeoutFn?: typeof setTimeout;
-  clearTimeoutFn?: typeof clearTimeout;
+  // The narrow call shapes createTickLoop and raceWithAbort declare, not the globals: setInterval's and
+  // setTimeout's __promisify__ members make those types unimplementable by a hand-fired test timer.
+  setIntervalFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearIntervalFn?: (handle: NodeJS.Timeout) => void;
+  setTimeoutFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearTimeoutFn?: (handle: NodeJS.Timeout) => void;
   log?: Pick<Console, 'warn'>;
   onTickComplete?: (status: Record<string, unknown>) => void;
   now?: () => number;
@@ -163,9 +165,9 @@ function createPosthogPoller(deps: PosthogPollerDependencies): PosthogPoller {
     telegram = () => {},
     readState = async () => ({}),
     writeState = async () => {},
-    setIntervalFn = setInterval,
+    setIntervalFn = (fn, ms) => setInterval(fn, ms),
     clearIntervalFn = clearInterval,
-    setTimeoutFn = setTimeout,
+    setTimeoutFn = (fn, ms) => setTimeout(fn, ms),
     clearTimeoutFn = clearTimeout,
     log = console,
     onTickComplete = () => {},

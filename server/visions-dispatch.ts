@@ -90,8 +90,10 @@ interface VisionsDispatcherOptions {
   model?: string | null;
   logger?: Console;
   nowFn?: () => number;
-  setTimeoutFn?: typeof setTimeout;
-  clearTimeoutFn?: typeof clearTimeout;
+  // The narrow call shape raceWithAbort declares, not `typeof setTimeout`: the global's __promisify__
+  // member makes that type unimplementable by a hand-fired test timer.
+  setTimeoutFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearTimeoutFn?: (handle: NodeJS.Timeout) => void;
   makeWorkDir?: () => Promise<string>;
   removeWorkDir?: (dir: string) => Promise<void>;
   readResult?: typeof readCommentsResult;
@@ -240,7 +242,7 @@ function createVisionsDispatcher({
   model = null,
   logger = console,
   nowFn = Date.now,
-  setTimeoutFn = setTimeout,
+  setTimeoutFn = (fn, ms) => setTimeout(fn, ms),
   clearTimeoutFn = clearTimeout,
   makeWorkDir = makeVisionsWorkDir,
   removeWorkDir = async (dir: string) => { try { await fs.rm(dir, { recursive: true, force: true }); } catch { /* best-effort */ } },

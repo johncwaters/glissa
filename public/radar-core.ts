@@ -51,8 +51,10 @@ export interface RadarInvestigation {
 }
 
 export interface RadarSnapshot {
+  type?: string;
   projects?: RadarProject[];
-  investigations?: RadarInvestigation[];
+  // Off the wire, so a record here can be anything; investigationRows narrows before it reads one.
+  investigations?: unknown[];
   configured?: boolean;
   reason?: unknown;
   intervalMs?: unknown;
@@ -245,9 +247,9 @@ export function partitionRadarProjects(projects: unknown, nowTs: unknown, opts: 
 // It is a SECOND filter, not a replacement for `archived`: a payload the server built before (or a
 // cached one it replayed after) the archive still carries the record, and the row must stay gone.
 export function investigationRows(snapshot: RadarSnapshot | null | undefined, locallyArchivedIds: Set<string> | null = null) {
-  const list: RadarInvestigation[] = Array.isArray(snapshot?.investigations) ? snapshot.investigations : [];
+  const list: unknown[] = Array.isArray(snapshot?.investigations) ? snapshot.investigations : [];
   return list
-    .filter((record) => record && typeof record === 'object')
+    .filter((record): record is RadarInvestigation => typeof record === 'object' && record !== null)
     .filter((record): record is RadarInvestigation & { id: string } => typeof record.id === 'string' && record.id !== '')
     .filter((record) => record.archived !== true)
     .filter((record) => !locallyArchivedIds?.has(record.id))
@@ -275,10 +277,12 @@ export function investigationRows(snapshot: RadarSnapshot | null | undefined, lo
 // a caller can chain; mutating in place is deliberate, the panel holds one long-lived set.
 export function retainKnownInvestigationIds(snapshot: RadarSnapshot | null | undefined, ids: Set<string> | null) {
   if (!ids || ids.size === 0) return ids;
-  const list: RadarInvestigation[] = Array.isArray(snapshot?.investigations) ? snapshot.investigations : [];
+  const list: unknown[] = Array.isArray(snapshot?.investigations) ? snapshot.investigations : [];
   const present = new Set<string>();
   for (const record of list) {
-    if (record && typeof record === 'object' && typeof record.id === 'string') present.add(record.id);
+    if (typeof record !== 'object' || record === null) continue;
+    const { id } = record as { id?: unknown };
+    if (typeof id === 'string') present.add(id);
   }
   for (const id of [...ids]) {
     if (present.has(id)) continue;
@@ -347,7 +351,7 @@ export function opsRows({ update, health }: { update?: RadarUpdateFeed | null; h
 // Attention-worthy PRs only, flattened across projects. The needs-action predicate and the ordering
 // both come from pr-view-core: Radar summarizes the PR lane, it does not own a second reading of it.
 export function needsActionPrRows(snapshot: PrStatusSnapshot | null | undefined) {
-  const projects: PrProject[] = Array.isArray(snapshot?.projects) ? snapshot.projects : [];
+  const projects: (PrProject | null)[] = Array.isArray(snapshot?.projects) ? snapshot.projects : [];
   const rows: {
     projectId: string;
     projectLabel: string;
@@ -399,11 +403,11 @@ function radarAttentionParts({ posthog, health }: { posthog?: RadarSnapshot | nu
   return parts;
 }
 
-export function radarAttentionCount(input: { posthog?: RadarSnapshot | null; health?: RadarHealthFeed | null }) {
+export function radarAttentionCount(input: { posthog?: RadarSnapshot | null; health?: RadarHealthFeed | null } = {}) {
   return radarAttentionParts(input).length;
 }
 
-export function radarAttentionSignature(input: { posthog?: RadarSnapshot | null; health?: RadarHealthFeed | null }) {
+export function radarAttentionSignature(input: { posthog?: RadarSnapshot | null; health?: RadarHealthFeed | null } = {}) {
   return attentionSignature(radarAttentionParts(input));
 }
 

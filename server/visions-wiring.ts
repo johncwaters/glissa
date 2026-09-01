@@ -86,6 +86,7 @@ import {
 import type { TouchedRange } from './core/visions-touch-core.ts';
 import { createJsonStateWriter } from './json-file.ts';
 import { createLaneLog } from './lane-log.ts';
+import type { LaneLogger } from './lane-log.ts';
 
 // Quiet window before a document is swept.
 const VISIONS_DEBOUNCE_MS = 300;
@@ -161,7 +162,7 @@ interface VisionsWiringOptions {
   autoFix?: boolean;
   fixLogMax?: number;
   applyEditTimeoutMs?: number;
-  logger?: Console;
+  logger?: LaneLogger;
   broadcast?: ControlBroadcast | null;
   dispatchConfig?: unknown;
   dispatch?: ((options: {
@@ -173,7 +174,9 @@ interface VisionsWiringOptions {
     memory?: MemorySection | null;
     prompt?: string | null;
   }) => Promise<DispatchOutcome>) | null;
-  contextDigest?: ((options: { scopes: null; budgetChars: number; now: number }) => string | null) | null;
+  // Answers unknown: the digest comes from the ingest lane, and a non-string reading is treated as absent
+  // rather than stringified into a prompt.
+  contextDigest?: ((options: { scopes: null; budgetChars: number; now: number }) => unknown) | null;
   contextSeq?: (() => number | null) | null;
   scopeProjects?: ScopeProject[] | null;
   knownProjectIds?: string[] | null;
@@ -182,8 +185,9 @@ interface VisionsWiringOptions {
   memoryDeliveryLimit?: number;
   intentStatePath?: string | null;
   intentThreadTtlMs?: number;
-  fsFns?: typeof fs;
-  fsPromises?: typeof fsPromisesDefault;
+  fsFns?: IntentStateReader;
+  // The writer set createJsonStateWriter takes, rather than the whole fs/promises module.
+  fsPromises?: Parameters<typeof createJsonStateWriter>[0]['fsPromises'];
   digestBudgetChars?: number;
   hashFn?: (text: string) => string;
   buildPrompt?: typeof buildVisionsPrompt;
@@ -247,9 +251,15 @@ function shouldWarnForInvalidIntentFile(raw: unknown, revived: IntentState): boo
 
 // The prune runs AFTER the warn decision: a file whose only statements belonged to deleted projects was
 // valid when it was written, and calling that invalid would put a warning on a routine deletion.
+// The one sync read this module makes, rather than the whole fs module: a suite proving the lane touches
+// no storage has to be able to inject it.
+interface IntentStateReader {
+  readFileSync: (filePath: string, encoding: 'utf8') => string;
+}
+
 function loadIntentState({ intentStatePath, fsFns, warn, knownProjectIds }: {
   intentStatePath: string | null;
-  fsFns: typeof fs;
+  fsFns: IntentStateReader;
   warn: (message: string) => void;
   knownProjectIds: string[] | null;
 }): IntentState {

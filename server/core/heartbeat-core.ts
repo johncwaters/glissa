@@ -19,7 +19,7 @@ const DEFAULT_DEADLINE_MS = 75_000;
 
 export interface HeartbeatConnection<TKey> {
   key: TKey;
-  lastSeenAt: number;
+  lastSeenAt?: number;
 }
 
 export interface HeartbeatSweepPlan<TKey> {
@@ -35,7 +35,8 @@ function planHeartbeatSweep<TKey>(
   const ping: TKey[] = [];
   for (const entry of Array.isArray(connections) ? connections : []) {
     if (!entry) continue;
-    const lastSeenAt = Number.isFinite(entry.lastSeenAt) ? entry.lastSeenAt : now;
+    const seen = entry.lastSeenAt;
+    const lastSeenAt = typeof seen === 'number' && Number.isFinite(seen) ? seen : now;
     // Strictly greater: a deadline of exactly zero elapsed is not silence.
     if (now - lastSeenAt > deadlineMs) {
       terminate.push(entry.key);

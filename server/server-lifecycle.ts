@@ -9,7 +9,7 @@
 // and it exited BEFORE the async kill reaped the PTY tree (orphaned cmd/claude/conhost on Windows, an
 // orphaned process group off it). The guard + windowsHide + awaited reap below close all three.
 
-import type { spawn as safeSpawn } from './child-process-safe.ts';
+import type { SpawnOptions } from 'node:child_process';
 import { SUPERVISED_RESTART_EXIT_CODE, decideRestartStrategy } from './core/restart-strategy.ts';
 import {
   awaitBounded, normalizeShutdownResult, stopFailureText, summarizeStopOutcomes,
@@ -31,12 +31,16 @@ interface ClosableServer {
   closeAllConnections?: () => void;
 }
 
+// The respawn seam, declared by what this module does with the child (unref it and let it outlive the
+// process) rather than by the whole child-process-safe surface, so a suite can inject a double.
+type RespawnFn = (file: string, args: string[], options: SpawnOptions) => { unref(): unknown };
+
 interface LifecycleOptions {
   shutdown: () => unknown;
   httpServer: { close: (callback: () => void) => void };
   extraServers?: ClosableServer[];
   onRestart?: (() => void) | null;
-  spawn: typeof safeSpawn;
+  spawn: RespawnFn;
   exit?: (code?: number) => unknown;
   getArgv?: () => string[];
   cwd?: () => string;
@@ -204,4 +208,4 @@ function createLifecycle({
 }
 
 export { awaitReaps, awaitStoppers, awaitTeardown, createLifecycle };
-export type { Lifecycle, LifecycleOptions };
+export type { Lifecycle, LifecycleOptions, RespawnFn };

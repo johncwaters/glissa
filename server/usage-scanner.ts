@@ -1,6 +1,5 @@
-import type { Dirent, Stats } from 'node:fs';
+import type { Dirent } from 'node:fs';
 import nodeFsPromises from 'node:fs/promises';
-import type { FileHandle } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
@@ -60,7 +59,30 @@ const ANOMALY_BASELINE_DAYS = 30;
 const noopLogger = Object.freeze({ warn: () => {} });
 
 type ScannerLogger = Pick<Console, 'warn'> | { warn: (message: string) => void };
-type ScannerFileSystem = Pick<typeof nodeFsPromises, 'stat' | 'open' | 'readdir' | 'readFile' | 'mkdir' | 'writeFile' | 'rename' | 'rm' | 'appendFile'>;
+// The handle surface the chunked reader uses. Declared rather than Picked from fs/promises so a suite can
+// inject a handle that fails mid-file: an overloaded FileHandle has no test double.
+// The three stat fields this module reads.
+interface ScannerFileStat {
+  isDirectory(): boolean;
+  size: number;
+  mtimeMs: number;
+}
+
+interface ScannerFileHandle {
+  read(buffer: Buffer, offset: number, length: number, position: number): Promise<{ bytesRead: number }>;
+  close(): Promise<unknown>;
+}
+
+// mkdir/writeFile/rename/rm/appendFile stay the fs/promises signatures because the shared atomic writer
+// takes them; the read half is narrowed to the calls this module makes, so a suite can inject them.
+type ScannerFileSystem =
+  Pick<typeof nodeFsPromises, 'mkdir' | 'writeFile' | 'rename' | 'rm' | 'appendFile'>
+  & {
+    stat(filePath: string): Promise<ScannerFileStat>;
+    readdir(dir: string, options: { withFileTypes: true }): Promise<Dirent[]>;
+    readFile(filePath: string, encoding: 'utf8'): Promise<string>;
+    open(filePath: string, flags: string): Promise<ScannerFileHandle>;
+  };
 
 type StoredEntry = UsageEntry & {
   inlineSessionId?: string | null;
@@ -593,7 +615,7 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
       shouldYieldAfterLine: () => boolean;
     },
   ): Promise<{ bytesRead: number; partial: boolean; failed?: boolean }> {
-    let stat: Stats;
+    let stat: ScannerFileStat;
     try {
       stat = await fsPromises.stat(file);
     } catch (error) {
@@ -619,7 +641,7 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     const priorSnapshot = prior ? { ...prior, vendorState: cloneVendorState(prior.vendorState) } : null;
     fileStates.set(file, state);
 
-    let handle: FileHandle | undefined;
+    let handle: ScannerFileHandle | undefined;
     let bytesRead = 0;
     let partial = false;
     const decoder = new StringDecoder('utf8');
@@ -789,7 +811,7 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     return cachedRollupsForDays(lookback, lookback);
   }
 
-  function sortedModels(models: { tokens: number }[] | null | undefined) {
+  function sortedModels<T extends { tokens: number }>(models: T[] | null | undefined): T[] {
     return (models || []).slice().sort((a, b) => b.tokens - a.tokens);
   }
 
@@ -1033,13 +1055,22 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     return activePass;
   }
 
-  const api = { runPass, buildReport, sessionTotals, stats, budgetSpend };
-  Object.defineProperty(api, '_entriesForTest', {
-    value: () => entries.map((entry) => entry),
-    enumerable: false,
-  });
+  const api = {
+    runPass,
+    buildReport,
+    sessionTotals,
+    stats,
+    budgetSpend,
+    _entriesForTest: () => entries.map((entry) => entry),
+  };
+  // Kept off the enumerable surface so nothing serializes the whole entry store by accident.
+  Object.defineProperty(api, '_entriesForTest', { enumerable: false });
   return api;
 }
 
+// The lane-facing surface. The wiring declares its scanner dependency as this rather than as the concrete
+// factory, so the test hook below stays off the lane's contract.
+type UsageScannerApi = Omit<ReturnType<typeof createUsageScanner>, '_entriesForTest'>;
+
 export { createUsageScanner };
-export type { UsageScannerOptions };
+export type { UsageScannerApi, UsageScannerOptions };

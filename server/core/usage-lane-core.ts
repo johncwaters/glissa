@@ -24,6 +24,9 @@ export interface LaneLedgerEntry {
   ts: number;
 }
 
+// The ledger is read back off disk, where an array can hold a null the writer never put there.
+type RawLedgerEntries = (RawLaneLedgerEntry | null | undefined)[] | null | undefined;
+
 interface RawLaneLedgerEntry {
   vendor?: unknown;
   sessionId?: unknown;
@@ -77,7 +80,7 @@ function normalizeLedgerEntry(entry: RawLaneLedgerEntry | null | undefined): Lan
   return { vendor, sessionId, lane, ts: ts > 0 ? ts : 0 };
 }
 
-function normalizeLedger(entries: RawLaneLedgerEntry[] | null | undefined): LaneLedgerEntry[] {
+function normalizeLedger(entries: RawLedgerEntries): LaneLedgerEntry[] {
   const byKey = new Map<string, LaneLedgerEntry>();
   for (const raw of entries || []) {
     const entry = normalizeLedgerEntry(raw);
@@ -95,7 +98,7 @@ function normalizeLedger(entries: RawLaneLedgerEntry[] | null | undefined): Lane
 // Retention matches the warehouse's, so a lane row can still be explained for as long as the day it came
 // from is still on the daily series.
 function pruneLedger(
-  entries: RawLaneLedgerEntry[] | null | undefined,
+  entries: RawLedgerEntries,
   { now, retainDays }: { now?: unknown; retainDays?: unknown } = {},
 ): LaneLedgerEntry[] {
   const normalized = normalizeLedger(entries);
@@ -108,7 +111,7 @@ function pruneLedger(
   return normalized.filter((entry) => entry.ts === 0 || entry.ts >= cutoff);
 }
 
-function laneMapFromLedger(entries: RawLaneLedgerEntry[] | null | undefined): Map<string, string> {
+function laneMapFromLedger(entries: RawLedgerEntries): Map<string, string> {
   const laneByKey = new Map<string, string>();
   for (const entry of normalizeLedger(entries)) laneByKey.set(laneKey(entry.vendor, entry.sessionId), entry.lane);
   return laneByKey;

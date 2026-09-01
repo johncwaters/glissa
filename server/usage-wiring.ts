@@ -35,6 +35,7 @@ import { sendTelegramMessage } from './telegram-transport.ts';
 import { loadPricing } from './usage-pricing.ts';
 import type { PricingResult } from './usage-pricing.ts';
 import { createUsageScanner } from './usage-scanner.ts';
+import type { UsageScannerApi, UsageScannerOptions } from './usage-scanner.ts';
 
 const DEFAULT_USAGE_CONFIG = Object.freeze({
   enabled: true,
@@ -148,7 +149,7 @@ interface UsageWiringOptions {
   laneMap?: (() => Map<string, string>) | null;
   sendTelegram?: typeof sendTelegramMessage;
   fsPromises?: typeof nodeFsPromises;
-  createScanner?: typeof createUsageScanner;
+  createScanner?: (deps?: UsageScannerOptions) => UsageScannerApi;
   loadPricingFn?: typeof loadPricing;
   execFileAsync?: typeof defaultExecFileAsync;
   rtkPathFn?: () => string | null;
@@ -278,7 +279,7 @@ function createUsageWiring({
 }: UsageWiringOptions) {
   let cfg = resolveUsageConfig(config.usage);
   let lastKey = usageCfgKey(config);
-  let scanner: ReturnType<typeof createUsageScanner> | null = null;
+  let scanner: UsageScannerApi | null = null;
   let pricing: PricingResult | null = null;
   let startPromise: Promise<void> | null = null;
   let startRequested = false;

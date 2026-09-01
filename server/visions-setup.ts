@@ -22,6 +22,7 @@ import type { VsixManifest } from './core/vsix-core.ts';
 import { unwireEditors, wireEditors } from './editor-wire.ts';
 import type { EditorOutcome } from './editor-wire.ts';
 import { createLaneLog } from './lane-log.ts';
+import type { LaneLogger } from './lane-log.ts';
 import { bundled, cliPath, extensionDir, packageRoot, relayPath } from './runtime-paths.ts';
 
 const EXTENSION_DIR = extensionDir;
@@ -59,7 +60,7 @@ interface VisionsSetupOptions {
     configPath?: string;
     save: (mutator: (config: Record<string, unknown>) => void) => Record<string, unknown> | null;
   } | null;
-  logger?: Console;
+  logger?: LaneLogger;
   debug?: boolean | (() => boolean);
   env?: NodeJS.ProcessEnv;
   onConfigChanged?: (() => void | Promise<void>) | null;

@@ -39,6 +39,8 @@ interface SerializedDailyBucket extends UsageTotals {
   entries: number;
   models: ModelBucket[];
   vendors: string[];
+  // Stamped only on a row the warehouse remembered, so a reader can tell history from a live day.
+  source?: string;
 }
 
 function buildUsageReport(

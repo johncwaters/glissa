@@ -25,7 +25,13 @@ const SNAPSHOT_FIELDS = Object.freeze([
 ]);
 
 type ModelTable = Record<string, Record<string, unknown>>;
-type PricingFileSystem = Pick<typeof nodeFsPromises, 'readFile' | 'mkdir' | 'writeFile'>;
+// The three calls this module makes, rather than a Pick of the overloaded fs/promises signatures, so
+// the seam can take a double.
+interface PricingFileSystem {
+  readFile: (filePath: string, encoding: 'utf8') => Promise<string>;
+  mkdir: (dirPath: string, options: { recursive: true }) => Promise<string | undefined>;
+  writeFile: (filePath: string, data: string) => Promise<void>;
+}
 
 interface PricingResult {
   table: Map<string, ModelPrice>;

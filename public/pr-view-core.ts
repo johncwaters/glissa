@@ -24,11 +24,11 @@ export interface PrProject {
   name?: string;
   repoSlug?: string;
   lastTickAt?: number;
-  prs?: PrRow[];
+  prs?: PrRow[] | null;
 }
 
 export interface PrStatusSnapshot {
-  projects?: PrProject[];
+  projects?: (PrProject | null)[];
   configured?: boolean;
   reason?: unknown;
 }
@@ -125,7 +125,7 @@ export function summarizePrs(prs: unknown) {
 // resolved error empties the signature and a new one (or the same PR moving to a different broken
 // phase) re-lights the dot the operator already cleared.
 export function prAttentionSignature(snapshot: PrStatusSnapshot | null | undefined) {
-  const projects: PrProject[] = Array.isArray(snapshot?.projects) ? snapshot.projects : [];
+  const projects: (PrProject | null)[] = Array.isArray(snapshot?.projects) ? snapshot.projects : [];
   const parts: string[] = [];
   for (const project of projects) {
     const label = textOr(project?.repoSlug, textOr(project?.projectId, 'project'));

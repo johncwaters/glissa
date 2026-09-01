@@ -75,10 +75,12 @@ interface PrPollerDependencies {
   telegram?: (message: string) => void;
   readState?: () => Promise<PrState>;
   writeState?: (state: PrState) => Promise<void>;
-  setIntervalFn?: typeof setInterval;
-  clearIntervalFn?: typeof clearInterval;
-  setTimeoutFn?: typeof setTimeout;
-  clearTimeoutFn?: typeof clearTimeout;
+  // The narrow call shapes createTickLoop and raceWithAbort declare, not the globals: setInterval's and
+  // setTimeout's __promisify__ members make those types unimplementable by a hand-fired test timer.
+  setIntervalFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearIntervalFn?: (handle: NodeJS.Timeout) => void;
+  setTimeoutFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearTimeoutFn?: (handle: NodeJS.Timeout) => void;
   sleep?: (ms: number) => Promise<void>;
   log?: Pick<Console, 'warn'>;
   getProjectNameById?: (projectId: string) => string | null;
@@ -105,9 +107,9 @@ function createPrPoller(deps: PrPollerDependencies) {
     telegram = () => {},
     readState = async () => ({}),
     writeState = async () => {},
-    setIntervalFn = setInterval,
+    setIntervalFn = (fn, ms) => setInterval(fn, ms),
     clearIntervalFn = clearInterval,
-    setTimeoutFn = setTimeout,
+    setTimeoutFn = (fn, ms) => setTimeout(fn, ms),
     clearTimeoutFn = clearTimeout,
     sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms)),
     log = console,
