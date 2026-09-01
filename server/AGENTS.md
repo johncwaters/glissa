@@ -16,7 +16,7 @@ Backend runtime: the Express + WebSocket server factory and its control plane, p
 | `control-replay-core.js` | Pure control-broadcast replay log |
 | `server-lifecycle.js` | Boot/shutdown helpers; restart strategy in `core/restart-strategy.js` |
 | `ws-sender.js` | Data-WebSocket sender: batching and backpressure |
-| `post-turn-checker.js` | Post-turn hygiene IO runner (rules in `session/core/post-turn-rules.js`) |
+| `post-turn-checker.js` | Post-turn hygiene IO runner (rules in `session/core/post-turn-rules.ts`) |
 | `usage-wiring.js` | Usage lane IO shell |
 | `usage-scanner.js` | Claude Code transcript scanner |
 | `usage-pricing.js` | Claude model pricing loader |
@@ -47,7 +47,8 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 ### Worktree Auto-Rebase
 
-- It rides the existing change funnel (no timer) and runs BEFORE the signature dedup, since a moved integration branch leaves the signature byte-identical. Every guard is pure in `session/core/rebase-gate.js`, and the guard ORDER is stated only by `tests/rebase-gate.test.js`.
+- Initial creation and fresh restart sync the integration branch fast-forward-only and never block spawn (`tests/git-workspace-integration-sync.test.ts`, `tests/sessions-worktree.test.ts`).
+- It rides the existing change funnel (no timer) and runs BEFORE the signature dedup, since a moved integration branch leaves the signature byte-identical. Every guard is pure in `session/core/rebase-gate.ts`, and the guard ORDER is stated only by `tests/rebase-gate.test.ts`.
 - WAITING is the load-bearing exclusion: it is a permission prompt PAUSING a turn, and the agent resumes into the files an unattended rebase would have rewritten under it.
 - `rebaseOnly` never stashes and merges nothing back: it runs unattended under a live agent, so a dirty tree is a hard refusal.
 - A conflict is never escalated: the worktree is left byte-identical for the operator's own Merge. A cooldown key of both shas stops the retry loop; a sibling's resolution retriggers it.

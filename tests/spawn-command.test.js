@@ -7,7 +7,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { buildSpawnCommand, classifyClaudeKind } = require('../session/sessions');
-const { dedupePathMatches, resolveClaudeCommand } = require('../session/core/spawn-command');
+const { dedupePathMatches, resolveClaudeCommand } = require('../session/core/spawn-command.ts');
 
 const SETTINGS = ['--settings', 'C:\\tmp\\glissa\\settings.json'];
 const DANGER = ['--dangerously-skip-permissions'];

@@ -8,7 +8,7 @@ const path = require('node:path');
 const { Readable } = require('node:stream');
 
 const { main, runRtk } = require('../session/rtk-relay');
-const { RTK_PATH_ENV } = require('../session/core/rtk-hook-core');
+const { RTK_PATH_ENV } = require('../session/core/rtk-hook-core.ts');
 
 const ENVELOPE = '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git log"}}';
 const REWRITE = JSON.stringify({

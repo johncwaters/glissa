@@ -3,8 +3,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { writeSessionSettings, generateToken } = require("../detection/settings-injector.ts");
-const { HOOK_URL_ENV } = require("./core/hook-relay-core");
-const { RTK_PATH_ENV } = require("./core/rtk-hook-core");
+const { HOOK_URL_ENV } = require("./core/hook-relay-core.ts");
+const { RTK_PATH_ENV } = require("./core/rtk-hook-core.ts");
 
 const NO_HOOK_INJECTION = Object.freeze({ args: Object.freeze([]), env: Object.freeze({}) });
 const MAX_PROJECT_CONFIG_DEPTH = 12;
@@ -24,7 +24,7 @@ const MAX_PROJECT_CONFIG_DEPTH = 12;
  * @property {boolean} enableProjectMcp
  * @property {string | null} rtkPath
  * @property {boolean} planLimits
- * @property {(() => import('./core/user-hooks-core').UserHook[]) | null} [getUserHooks]
+ * @property {(() => import('./core/user-hooks-core.ts').UserHook[]) | null} [getUserHooks]
  * @property {boolean} bypassHookTrust
  * @property {() => string} effectiveCwd
  * @property {(signal: Record<string, any>) => void} ingestSignal

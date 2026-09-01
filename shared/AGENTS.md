@@ -17,13 +17,13 @@ TypeScript ESM modules used by BOTH the server and the browser bundle. Single so
 ## For AI Agents
 
 ### Working In This Directory
-- States are frozen string constants; transitions live in `session/core/state-machine.js` and `notification-manager.ts`, never here.
+- States are frozen string constants; transitions live in `session/core/state-machine.ts` and `notification-manager.ts`, never here.
 - `MERGEABLE_LIVE_STATES` is the merge-as-you-go gate shared by server and review sidebar; do not let the two copies drift.
 - Not everything here is browser-safe: `paths.ts` touches the filesystem and is consumed only by server code. Keep new browser-facing constants in `states.ts`.
 - Any path handed to `fs.watch` goes through `canonicalizePath` first. libuv expands each reported event filename to its long form and asserts it still starts with the watched dir, so an 8.3 short path (a CI runner's `C:\Users\RUNNER~1\...` %TEMP%) ABORTS the process from native code, past every try/catch.
 
 ### Testing Requirements
-- `tests/state-machine.test.js` and the notification tests exercise these constants; `npm test`.
+- `tests/state-machine.test.ts` and the notification tests exercise these constants; `npm test`.
 
 ## Dependencies
 

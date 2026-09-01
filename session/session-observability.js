@@ -1,6 +1,6 @@
 "use strict";
 
-const { pushDecision } = require("./core/decision-log");
+const { pushDecision } = require("./core/decision-log.ts");
 const { DEFAULT_AGENT_ID } = require("./adapters");
 
 const AUDIT_LOG_MAX = 200;

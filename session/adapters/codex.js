@@ -11,10 +11,10 @@ const path = require("node:path");
 
 const { execSync } = require("../../server/child-process-safe");
 const { PACK_NAME_RE } = require("../../server/core/pack-core");
-const { resolveAgentCommand, buildAgentSpawnCommand } = require("../core/spawn-command");
-const { buildAgentEnv } = require("../core/spawn-env");
-const { buildHookCommand } = require("../core/hook-command-core");
-const { PACK_DIRECTIVE, renderPackPointerText } = require("../core/pack-pointer-core");
+const { resolveAgentCommand, buildAgentSpawnCommand } = require("../core/spawn-command.ts");
+const { buildAgentEnv } = require("../core/spawn-env.ts");
+const { buildHookCommand } = require("../core/hook-command-core.ts");
+const { PACK_DIRECTIVE, renderPackPointerText } = require("../core/pack-pointer-core.ts");
 
 const ID = "codex";
 const COMMAND_NAME = "codex";

@@ -15,11 +15,11 @@ const path = require('node:path');
 const { Session } = require('../session/sessions');
 const { HookRouter } = require('../detection/hook-source.ts');
 const { createOscTitleSource } = require('../detection/osc-title-source.ts');
-const { explainNotification, createNotifyGate } = require('../session/core/notify-gate');
+const { explainNotification, createNotifyGate } = require('../session/core/notify-gate.ts');
 const { STATES } = require('../shared/states.ts');
 const codex = require('../session/adapters/codex');
 const adapters = require('../session/adapters');
-const { buildHookCommand } = require('../session/core/hook-command-core');
+const { buildHookCommand } = require('../session/core/hook-command-core.ts');
 
 // A real codex session id, live-captured; UUIDv7 rather than the UUIDv4 Claude Code mints.
 const CODEX_SESSION_ID = '01a030d4-6956-73c2-a74a-eedd17b6361d';

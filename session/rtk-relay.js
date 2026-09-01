@@ -4,7 +4,7 @@ const { readStdin } = require('./relay-stdin');
 
 const { spawn } = require('../server/child-process-safe');
 
-const { MAX_RTK_STDOUT_BYTES, RTK_PATH_ENV, normalizeRtkHookResponse } = require('./core/rtk-hook-core');
+const { MAX_RTK_STDOUT_BYTES, RTK_PATH_ENV, normalizeRtkHookResponse } = require('./core/rtk-hook-core.ts');
 
 // The agent's tool call blocks on this process and the rewrite is only an optimization.
 const RTK_TIMEOUT_MS = 3000;

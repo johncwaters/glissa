@@ -14,7 +14,7 @@ const { Session } = require('../session/sessions');
 const { STATES } = require('../shared/states.ts');
 const { mapHookToSignal } = require('../detection/hook-source.ts');
 const { buildHookSettings, WAKEUP_TOOL_MATCHER, HOOK_EVENTS } = require('../detection/settings-injector.ts');
-const wakeupTracker = require('../session/core/wakeup-tracker');
+const wakeupTracker = require('../session/core/wakeup-tracker.ts');
 
 function makeSession(state, overrides = {}) {
   const s = new Session({

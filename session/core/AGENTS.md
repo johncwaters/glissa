@@ -10,36 +10,36 @@ Pure cores seam-extracted from `sessions.js`: no fs, no git, no async, no Sessio
 
 | File | Description |
 |------|-------------|
-| `state-machine.js` | `TRANSITIONS`, `GUARDS`, `ENTRY_HOOKS`, `EXIT_HOOKS` lifecycle tables for the session state machine (states defined in `shared/states.ts`) |
-| `status-mapper.js` | Pure `mapSignalToEvent(signal, state, confidence, activeAgents)` -> event or null; `activeAgents > 0` suppresses `ready` -> `task_complete` |
-| `exit-transition.js` | Pure `decideExitTransition(state, exitCode, signal, receivedFirstOutput)` -> `{ event, detail }`: the real-PTY-exit decision extracted from `Session._handlePtyExit` |
-| `spawn-command.js` | Agent-neutral resolve-then-branch spawn mechanics (direct `.exe` vs `cmd.exe /c` shim fallback) plus the Claude-bound shims `classifyClaudeKind`, `resolveClaudeCommand`, `buildSpawnCommand`; the command constant lives in the adapter registry cache |
-| `spawn-env.js` | Pure `buildSpawnEnv(baseEnv)`: the 6-var scrub (`CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION` etc.) + always-on `CLAUDE_CODE_NO_FLICKER`, optional PATH prepend, returns a copy |
-| `agent-tracker.js` | Live background sub-agent bookkeeping over a `Map<agent_id, ts>` with TTL prune; feeds the completion gate |
-| `gate-release.js` | Pure `decideGateRelease(...)` -> `cancel` / `gated` / `wait` / `release`: the ONE judge of whether a gate-held (deferred) `ready` may complete the card. Cancels any hold with a newer non-ready signal (by sequence, not clock), so a Stop held across a new turn can never fire |
-| `wakeup-tracker.js` | Pending self-revival bookkeeping (ScheduleWakeup / CronCreate / CronDelete); advisory metadata only, never gates a transition; self-expiring entries |
-| `merge-prompt.js` | Pure builder of the manual-merge handoff prompt pasted into a parked worktree's PTY |
-| `rebase-gate.js` | Pure `decideAutoRebase(...)` -> `{ action: 'rebase' }` or a skip with its reason: may a worktree be rebased onto a moved integration branch right now, unattended. `AUTO_REBASE_STATES` excludes WAITING (a paused turn resumes into the files a rebase would rewrite); the guard order is stated only by its test |
-| `pack-notice.js` | Pure `buildPackNotice(deliveredPacks, latestVersions)` -> the one Glissa-authored line a `UserPromptSubmit` hook response injects when a delivered context pack has been rebuilt; hard-capped, never pack content |
-| `anti-slop-prompt.js` | Fixed deterministic anti-slop note for `--append-system-prompt`; single line, no double quotes (must survive the cmd.exe shim re-parse) |
-| `hook-relay-core.js` | Pure rules for `../hook-relay.js`: the `GLISSA_HOOK_URL` read, event-token normalization into the URL's last segment, the http/loopback/`/hook/` target refusals, and the payload size cap that matches the ingress body cap |
-| `post-turn-rules.js` | Pure idempotent post-turn hygiene rules, `(content) -> { content, findings }`; applied by `server/post-turn-checker.js` |
-| `slop-code-patterns.js` | Pure regex-based code-slop detection (`detectCodeSlop`), Noise/Lies/Soul taxonomy, offsets only |
+| `state-machine.ts` | `TRANSITIONS`, `GUARDS`, `ENTRY_HOOKS`, `EXIT_HOOKS` lifecycle tables for the session state machine (states defined in `shared/states.ts`) |
+| `status-mapper.ts` | Pure `mapSignalToEvent(signal, state, confidence, activeAgents)` -> event or null; `activeAgents > 0` suppresses `ready` -> `task_complete` |
+| `exit-transition.ts` | Pure `decideExitTransition(state, exitCode, signal, receivedFirstOutput)` -> `{ event, detail }`: the real-PTY-exit decision extracted from `Session._handlePtyExit` |
+| `spawn-command.ts` | Agent-neutral resolve-then-branch spawn mechanics (direct `.exe` vs `cmd.exe /c` shim fallback) plus the Claude-bound shims `classifyClaudeKind`, `resolveClaudeCommand`, `buildSpawnCommand`; the command constant lives in the adapter registry cache |
+| `spawn-env.ts` | Pure `buildAgentEnv(baseEnv, extraEnv, profile)`: the adapter's scrub/set profile applied plus the always-on Glissa marker scrub, optional PATH prepend, returns a copy |
+| `agent-tracker.ts` | Live background sub-agent bookkeeping over a `Map<agent_id, ts>` with TTL prune; feeds the completion gate |
+| `gate-release.ts` | Pure `decideGateRelease(...)` -> `cancel` / `gated` / `wait` / `release`: the ONE judge of whether a gate-held (deferred) `ready` may complete the card. Cancels any hold with a newer non-ready signal (by sequence, not clock), so a Stop held across a new turn can never fire |
+| `wakeup-tracker.ts` | Pending self-revival bookkeeping (ScheduleWakeup / CronCreate / CronDelete); advisory metadata only, never gates a transition; self-expiring entries |
+| `merge-prompt.ts` | Pure builder of the manual-merge handoff prompt pasted into a parked worktree's PTY |
+| `rebase-gate.ts` | Pure `decideAutoRebase(...)` -> `{ action: 'rebase' }` or a skip with its reason: may a worktree be rebased onto a moved integration branch right now, unattended. `AUTO_REBASE_STATES` excludes WAITING (a paused turn resumes into the files a rebase would rewrite); the guard order is stated only by its test |
+| `pack-notice.ts` | Pure `buildPackNotice(deliveredPacks, latestVersions)` -> the one Glissa-authored line a `UserPromptSubmit` hook response injects when a delivered context pack has been rebuilt; hard-capped, never pack content |
+| `anti-slop-prompt.ts` | Fixed deterministic anti-slop note for `--append-system-prompt`; single line, no double quotes (must survive the cmd.exe shim re-parse) |
+| `hook-relay-core.ts` | Pure rules for `../hook-relay.js`: the `GLISSA_HOOK_URL` read, event-token normalization into the URL's last segment, the http/loopback/`/hook/` target refusals, and the payload size cap that matches the ingress body cap |
+| `post-turn-rules.ts` | Pure idempotent post-turn hygiene rules, `(content) -> { content, findings }`; applied by `server/post-turn-checker.js` |
+| `slop-code-patterns.ts` | Pure regex-based code-slop detection (`detectCodeSlop`), Noise/Lies/Soul taxonomy, offsets only |
 
 ## For AI Agents
 
 ### Working In This Directory
 - Purity is the contract: no IO, no timers, no EventEmitter, no requires from `sessions.js`. If a change needs IO, it belongs in the root-level shell (`sessions.js`, `post-turn-checker.js`).
-- `post-turn-rules.js`, `slop-code-patterns.js`, `anti-slop-prompt.js` and their tests must contain no literal em dash, en dash, or ellipsis character; build them via `String.fromCharCode`.
-- Tracker modules (`agent-tracker.js`, `wakeup-tracker.js`) mutate the passed Map and return whether the set changed; follow that shape for any new tracker.
-- Strings destined for the cmd.exe shim spawn path must avoid embedded double quotes (see `anti-slop-prompt.js` header).
+- `post-turn-rules.ts`, `slop-code-patterns.ts`, `anti-slop-prompt.ts` and their tests must contain no literal em dash, en dash, or ellipsis character; build them via `String.fromCharCode`.
+- Tracker modules (`agent-tracker.ts`, `wakeup-tracker.ts`) mutate the passed Map and return whether the set changed; follow that shape for any new tracker.
+- Strings destined for the cmd.exe shim spawn path must avoid embedded double quotes (see `anti-slop-prompt.ts` header).
 
 ### Testing Requirements
-- Every module here has a matching `tests/<name>.test.js`; keep it green and extend it with the change.
+- Every module here has a matching test in `tests/`; keep it green and extend it with the change.
 
 ## Dependencies
 
 ### Internal
-- Consumed by `session/sessions.js` and `server/post-turn-checker.js`; depends only on siblings (e.g. `post-turn-rules.js` -> `slop-code-patterns.js`).
+- Consumed by `session/sessions.js` and `server/post-turn-checker.js`; depends only on siblings (e.g. `post-turn-rules.ts` -> `slop-code-patterns.ts`).
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

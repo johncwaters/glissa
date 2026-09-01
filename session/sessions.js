@@ -6,7 +6,7 @@ const { execFile } = require("../server/child-process-safe");
 const { STATES, KILLABLE_STATES, RESTARTABLE_STATES } = require("../shared/states.ts");
 const { createOscTitleSource } = require("../detection/osc-title-source.ts");
 const { createStatusSource } = require("../detection/status-source.ts");
-const { classifyClaudeKind, buildSpawnCommand } = require("./core/spawn-command");
+const { classifyClaudeKind, buildSpawnCommand } = require("./core/spawn-command.ts");
 const { DEFAULT_AGENT_ID, resolveAdapter, commandFor } = require("./adapters");
 
 const {
@@ -14,14 +14,14 @@ const {
   GUARDS,
   ENTRY_HOOKS,
   EXIT_HOOKS,
-} = require("./core/state-machine");
-const { mapSignalToEvent } = require("./core/status-mapper");
-const { decideExitTransition } = require("./core/exit-transition");
-const { shouldHoldTerminalStopForNotice } = require("./core/pack-notice");
-const agentTracker = require("./core/agent-tracker");
-const { DEFAULT_GATE_RELEASE_SETTLE_MS } = require("./core/gate-release");
-const { RESUME_ID_RE } = require("./core/auto-resume");
-const { projectSessionSnapshots } = require("./core/snapshot-projection");
+} = require("./core/state-machine.ts");
+const { mapSignalToEvent } = require("./core/status-mapper.ts");
+const { decideExitTransition } = require("./core/exit-transition.ts");
+const { shouldHoldTerminalStopForNotice } = require("./core/pack-notice.ts");
+const agentTracker = require("./core/agent-tracker.ts");
+const { DEFAULT_GATE_RELEASE_SETTLE_MS } = require("./core/gate-release.ts");
+const { RESUME_ID_RE } = require("./core/auto-resume.ts");
+const { projectSessionSnapshots } = require("./core/snapshot-projection.ts");
 const { createSessionObservability } = require("./session-observability");
 const { createSessionOutput } = require("./session-output");
 const { createSessionPackDelivery } = require("./session-pack-delivery");
@@ -91,7 +91,7 @@ const DISMISSIBLE_STATES = new Set([STATES.WAITING, STATES.COMPLETE]);
  * @property {string | null} [packVariantSlug]
  * @property {MillMetricsPort | null} [millMetricsPort]
  * @property {boolean} [planLimits]
- * @property {(() => import('./core/user-hooks-core').UserHook[]) | null} [getUserHooks]
+ * @property {(() => import('./core/user-hooks-core.ts').UserHook[]) | null} [getUserHooks]
  * @property {((file: string, args: string[], options: import('node-pty').IPtyForkOptions | import('node-pty').IWindowsPtyForkOptions) => import('node-pty').IPty) | null} [ptySpawn]
  * @property {((args: string[], options: import('node:child_process').ExecFileOptions, callback: (error: Error | null) => void) => unknown) | null} [killProc]
  * @property {((pid: number, signal: NodeJS.Signals | 0) => void) | null} [signalProc]

@@ -21,7 +21,7 @@ const {
   packVersionDirectory,
   parsePackPointer,
   renderPackPointer,
-} = require('../session/core/pack-pointer-core');
+} = require('../session/core/pack-pointer-core.ts');
 
 const SPEC_SUFFIX = '.pack.json';
 // Source patterns resolve against packs/, so a shared spec reads the same whether it runs from a repo

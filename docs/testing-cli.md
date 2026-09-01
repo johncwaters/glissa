@@ -316,7 +316,7 @@ npm unlink -g glissa
 
 Verify `GLISSA_PORT` and `GLISSA_CONFIG` don't leak to child Claude processes.
 
-Check the pure scrub in `session/core/spawn-env.js` (`buildSpawnEnv`), which unsets, at minimum:
+Check the pure scrub in `session/core/spawn-env.ts` (`buildAgentEnv`, applied with the Claude Code adapter's `envProfile`), which unsets, at minimum:
 
 ```javascript
 CLAUDECODE
@@ -326,7 +326,7 @@ GLISSA_PORT
 GLISSA_CONFIG
 ```
 
-This is a code-level verification: `buildSpawnEnv` returns a scrubbed copy of the environment before `pty.spawn()`, so the same check works standalone (`session/core/spawn-env.js` has no IO and no dependency on the rest of the session module).
+This is a code-level verification: `buildAgentEnv` returns a scrubbed copy of the environment before `pty.spawn()`, so the same check works standalone (`session/core/spawn-env.ts` has no IO and no dependency on the rest of the session module).
 
 ---
 

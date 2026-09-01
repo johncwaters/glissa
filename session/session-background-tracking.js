@@ -1,9 +1,9 @@
 "use strict";
 
-const agentTracker = require("./core/agent-tracker");
-const { decideGateRelease } = require("./core/gate-release");
-const { mapSignalToEvent } = require("./core/status-mapper");
-const wakeupTracker = require("./core/wakeup-tracker");
+const agentTracker = require("./core/agent-tracker.ts");
+const { decideGateRelease } = require("./core/gate-release.ts");
+const { mapSignalToEvent } = require("./core/status-mapper.ts");
+const wakeupTracker = require("./core/wakeup-tracker.ts");
 
 /**
  * @typedef {{ state: () => import('../shared/states').SessionState, isDestroyed: () => boolean, emit: (event: string, detail: Record<string, unknown>) => void, recordDecision: (entry: Record<string, unknown>) => void, transition: (event: string, detail: Record<string, unknown>) => unknown, resyncWorkingLatch: () => void }} SessionPort

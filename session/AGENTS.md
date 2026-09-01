@@ -12,7 +12,7 @@ The session domain: the stateful Session class (lifecycle, PTY spawn/kill, timer
 | `sessions.js` | Session class; consumes StatusSource and drives the 7-state machine |
 | `session-background-tracking.js` | Stateful background-work, readiness-gate, and scheduled-wakeup collaborator |
 | `session-recorder.js` | Always-on JSONL recorder of PTY data + signals; feeds `detection/replay.ts` |
-| `hook-relay.js` | Standalone command-hook relay for a non-Claude agent CLI: stdin envelope to the local hook ingress, always exit 0; never required by the server (decisions in `core/hook-relay-core.js`) |
+| `hook-relay.js` | Standalone command-hook relay for a non-Claude agent CLI: stdin envelope to the local hook ingress, always exit 0; never required by the server (decisions in `core/hook-relay-core.ts`) |
 | `adapters/` | One adapter per supervised agent CLI (`claude-code.js`, `codex.js`) plus the registry and its lazy per-agent command cache; see root `AGENTS.md` ("Agent Adapters") |
 | `core/` | Pure cores of a SEAM EXTRACTION from `sessions.js`: no IO, no Session import (see `core/AGENTS.md`) |
 
@@ -28,7 +28,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 ### Session Spawning
 
 - Claude CLI produces zero output with piped stdio, so a real PTY is required.
-- Resolve-then-branch: a PE image spawns directly, a shim falls back to `cmd.exe /c`, avoiding cmd's double command-line parse and console-title write (`session/core/spawn-command.js`).
+- Resolve-then-branch: a PE image spawns directly, a shim falls back to `cmd.exe /c`, avoiding cmd's double command-line parse and console-title write (`session/core/spawn-command.ts`).
 - The env scrub removes the Glissa marker vars, or Claude believes it runs inside itself.
 
 ### Auto-Resume and Shutdown

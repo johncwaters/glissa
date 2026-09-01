@@ -9,7 +9,7 @@ const assert = require('node:assert/strict');
 
 const { Session } = require('../session/sessions');
 const { STATES } = require('../shared/states.ts');
-const { decideGateRelease, DEFAULT_GATE_RELEASE_SETTLE_MS } = require('../session/core/gate-release');
+const { decideGateRelease, DEFAULT_GATE_RELEASE_SETTLE_MS } = require('../session/core/gate-release.ts');
 
 const SPIN_A = '⠋'; // braille spinner frames
 const SPIN_B = '⠙';

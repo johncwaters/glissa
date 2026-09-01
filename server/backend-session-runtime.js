@@ -5,7 +5,7 @@ const { sweepOrphans } = require('../detection/settings-injector.ts');
 const { createRtkInstallWiring } = require('./rtk-install-wiring');
 const { getRtkPath } = require('./rtk-resolver');
 const { createSessionFactory } = require('./session-factory');
-const { hooksForProject } = require('../session/core/user-hooks-core');
+const { hooksForProject } = require('../session/core/user-hooks-core.ts');
 const { buildSettingsPayload } = require('./settings-payload');
 
 /** @type {(options: { configStore: object, rtkInstallStatus?: Record<string, unknown>|null }) => Record<string, unknown>} */

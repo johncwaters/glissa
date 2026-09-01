@@ -13,7 +13,7 @@ The notification domain: the lifecycle state machine deciding when the operator 
 | `channels/` | Delivery adapters: web-notification (primary, via control WS) and OS toast (opt-in fallback); see `channels/AGENTS.md` |
 
 ## For AI Agents
-- The per-state notify decision lives in `../session/core/notify-gate.js`; the manager only owns entry lifecycle and timers.
+- The per-state notify decision lives in `../session/core/notify-gate.ts`; the manager only owns entry lifecycle and timers.
 - See root `AGENTS.md` ("Notifications (lifecycle + delivery)") for the delivery contract.
 
 ## Invariants

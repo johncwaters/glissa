@@ -12,7 +12,7 @@ const {
   applyRules,
   shouldCheckPath,
   looksBinary,
-} = require('../session/core/post-turn-rules');
+} = require('../session/core/post-turn-rules.ts');
 
 const GIT_TIMEOUT_MS = 5000;
 

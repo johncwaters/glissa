@@ -2,7 +2,7 @@
 
 const { decidePackDelivery, normalizePackNames, variantPackName } = require("../server/core/pack-core");
 const { DEFAULT_PACKS_DIR, defaultBuiltRoot, resolveBuiltPack } = require("../server/pack-builder");
-const { buildPackNotice, listStalePacks } = require("./core/pack-notice");
+const { buildPackNotice, listStalePacks } = require("./core/pack-notice.ts");
 
 /**
  * @typedef {{ name: string, version: string, dir?: string, tokenEstimate?: number | null }} DeliveredPack

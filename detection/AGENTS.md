@@ -26,14 +26,14 @@ Status detection and change watching. Session status is derived from machine-emi
 - Hook signals are authoritative; the title source is fallback only and must never emit `awaiting-input`.
 - Keep the bearer-token check in `hook-source.ts`; it is the trust boundary of the only HTTP write ingress.
 - Watchers are listeners, not pollers: they say "look again", `sessions.js` recomputes the truth. Keep recompute work async (shared event loop).
-- The signal x state transition matrix lives in `session/core/status-mapper.js` and is documented in `docs/postmortem-terminal-detection.md`.
+- The signal x state transition matrix lives in `session/core/status-mapper.ts` and is documented in `docs/postmortem-terminal-detection.md`.
 
 ### Testing Requirements
 - Unit tests: `tests/status-source.test.ts`, `hook-source.test.ts`, `osc-title-source.test.ts`, `worktree-watch.test.ts`, `integration-ref-watch.test.ts`.
 - Detection behavior changes must keep `tests/replay-harness.test.ts` green against the `tests/fixtures/*.jsonl` recordings; add a fixture for a new signal scenario.
 
 ### Common Patterns
-- Sources emit normalized signals; `sessions.js._onStatus` + `session/core/status-mapper.js` decide transitions.
+- Sources emit normalized signals; `sessions.js._onStatus` + `session/core/status-mapper.ts` decide transitions.
 - Injected dependencies (watcher factory, session map, recheck fn) so modules unit-test without a real fs or backend.
 
 ## Dependencies
@@ -41,7 +41,7 @@ Status detection and change watching. Session status is derived from machine-emi
 ### Internal
 - `session/sessions.js` - consumes StatusSource, owns transitions
 - `session/session-recorder.js` - produces the JSONL that `replay.ts` consumes
-- `../session/core/status-mapper.js` - the pure signal-to-event decision
+- `../session/core/status-mapper.ts` - the pure signal-to-event decision
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->
 
@@ -51,7 +51,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 ### Status Detection
 
-- Machine signals only: hooks authoritative, OSC-0 title a fallback that never emits `awaiting-input`. Scraping the rendered TUI false-fires on redraw races (`session/core/status-mapper.js`, `docs/postmortem-terminal-detection.md`).
+- Machine signals only: hooks authoritative, OSC-0 title a fallback that never emits `awaiting-input`. Scraping the rendered TUI false-fires on redraw races (`session/core/status-mapper.ts`, `docs/postmortem-terminal-detection.md`).
 - A held `ready` is cancelled by `working`/`resume` in the conflict window, since resolving it fired a false COMPLETE after a fast re-prompt; `/clear` and `/compact` latch the title off likewise. `idle_prompt` is low confidence: it may only confirm quiescence from RUNNING.
 - A main `Stop` is held for live work; an orphan `SubagentStop` proves a lost Start, so an empty Stop waits one quiet window (2026-08-25 recordings; `tests/sessions-detection.test.js`).
 - A held ready releases on live evidence, never the count, sequence-ordered, its quiet window starting at the first evaluation that OBSERVES the drain (false COMPLETEs, 2026-08-14).
@@ -60,7 +60,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 ### Operator Hooks
 
 - The Hooks tab's records (`config.hooks`) are appended to the per-session settings file AFTER Glissa's own entries for the same event, never merged into `~/.claude/settings.json`: a session with none configured writes a byte-identical file, and no operator hook can displace a status callback (`tests/settings-injector-user-hooks.test.ts`).
-- The core (`session/core/user-hooks-core.js`) is the one validator; the control handler, the spawn path and a hand edit of config.json all pass through it, and an unreadable record is dropped there rather than failing the spawn.
+- The core (`session/core/user-hooks-core.ts`) is the one validator; the control handler, the spawn path and a hand edit of config.json all pass through it, and an unreadable record is dropped there rather than failing the spawn.
 
 ### Session Recording
 

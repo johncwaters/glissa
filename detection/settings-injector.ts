@@ -9,9 +9,9 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-import { buildRtkHookEntry } from '../session/core/rtk-command.js';
-import { appendUserHooks } from '../session/core/user-hooks-core.js';
-import type { UserHook } from '../session/core/user-hooks-core.js';
+import { buildRtkHookEntry } from '../session/core/rtk-command.ts';
+import { appendUserHooks } from '../session/core/user-hooks-core.ts';
+import type { UserHook } from '../session/core/user-hooks-core.ts';
 import { safePathSegment } from '../shared/paths.ts';
 
 const DEFAULT_BASE_DIR = path.join(os.tmpdir(), 'glissa-hooks');

@@ -22,7 +22,7 @@ const {
   resolveHookTarget,
   decideRelayPost,
   decideHookStdout,
-} = require('../session/core/hook-relay-core');
+} = require('../session/core/hook-relay-core.ts');
 
 const BASE = 'http://127.0.0.1:41234/hook/sess-1?t=deadbeef';
 

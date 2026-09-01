@@ -25,7 +25,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { canonicalizePath } = require('../shared/paths.ts');
-const { claudeProjectsDir } = require('../session/core/conversation-history');
+const { claudeProjectsDir } = require('../session/core/conversation-history.ts');
 const {
   codexHomes, codexRootCandidates, codexSessionIdFromPath, grokHomes, grokRootCandidates, isUsageFile,
 } = require('./core/usage-scan-core');

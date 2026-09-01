@@ -31,7 +31,7 @@ const {
   decideMirrorSync,
   planMirrorReplay,
   replayDidOpenMessage,
-} = require('./core/visions-relay-core');
+} = require('./core/visions-relay-core.ts');
 
 const DEFAULT_PORTS = [5173, 3000];
 // A reconnect replays mirrored documents from the doc store; a marker has no store, so it is held here.

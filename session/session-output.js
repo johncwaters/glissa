@@ -1,6 +1,6 @@
 "use strict";
 
-const { createOutputRing } = require("./core/output-ring");
+const { createOutputRing } = require("./core/output-ring.ts");
 const { STATES, RESTARTABLE_STATES } = require("../shared/states.ts");
 
 /** @type {Set<string>} */

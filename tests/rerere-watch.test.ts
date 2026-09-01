@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { createRerereWatcher, RR_CACHE_DIR } from '../detection/rerere-watch.ts';
-import { decideRerereCooldownClear } from '../session/core/rebase-gate.js';
+import { decideRerereCooldownClear } from '../session/core/rebase-gate.ts';
 
 function tempGitDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-rerere-'));

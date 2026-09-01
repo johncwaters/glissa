@@ -14,7 +14,7 @@ const {
   emacsMerge, emacsRemove, helixMerge, helixRemove, jsonSettingsMerge, jsonSettingsRemove, kateSettings,
   neovimDropIn, sublimeSettings,
 } = require('./core/editor-wire-core');
-const { resolvePathCommandMatches } = require('../session/core/spawn-command');
+const { resolvePathCommandMatches } = require('../session/core/spawn-command.ts');
 
 function configHome(homeDir, env) {
   if (env.XDG_CONFIG_HOME) return env.XDG_CONFIG_HOME;

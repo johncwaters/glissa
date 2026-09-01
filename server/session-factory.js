@@ -18,7 +18,7 @@ const { resolveUsageConfig } = require('./usage-wiring');
  * @property {() => import('../session/session-worktree-lifecycle').GitWorkspace|null} getGitWorkspace
  * @property {() => MillMetricsPort|null} getMillMetricsPort
  * @property {(config: object) => string|null} rtkPathForConfig
- * @property {(projectId: string) => import('../session/core/user-hooks-core').UserHook[]} getUserHooks
+ * @property {(projectId: string) => import('../session/core/user-hooks-core.ts').UserHook[]} getUserHooks
  */
 
 /** @param {SessionFactoryDependencies} dependencies */

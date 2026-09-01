@@ -18,7 +18,7 @@ const {
   MAX_RESPONSE_BYTES,
   decideRelayPost,
   decideHookStdout,
-} = require('./core/hook-relay-core');
+} = require('./core/hook-relay-core.ts');
 
 // Bounded hard: the agent is waiting on this process, and the payload is telemetry.
 const POST_TIMEOUT_MS = 1500;

@@ -224,7 +224,7 @@ test('state-change chain: COMPLETE and WAITING emit state-change (backend notifi
 // mapper is its sole producer. Strictly >= the old bar (the behavioral tests above still prove
 // the live path reaches COMPLETE only here).
 test('COMPLETE is reached ONLY via the mapper task_complete (RUNNING; high-confidence WAITING/IDLE)', () => {
-  const { mapSignalToEvent } = require('../session/core/status-mapper');
+  const { mapSignalToEvent } = require('../session/core/status-mapper.ts');
   // ready@RUNNING completes at any confidence; ready@WAITING/IDLE completes ONLY when authoritative (high).
   assert.equal(mapSignalToEvent('ready', STATES.RUNNING, 'low'), 'task_complete');
   assert.equal(mapSignalToEvent('ready', STATES.RUNNING, 'high'), 'task_complete');
@@ -325,7 +325,7 @@ test('no idle/silence timer or content scraping remains - sessions.js AND the ma
   const fs = require('node:fs');
   const scrape = /_resetIdleTimer|isLayer4Chrome|patternDetector|hasPendingContent/;
   // require.resolve throws on a bad path, so a moved/renamed target FAILS CLOSED (never silently passes).
-  for (const rel of ['../session/sessions.js', '../session/core/status-mapper.js']) {
+  for (const rel of ['../session/sessions.js', '../session/core/status-mapper.ts']) {
     const src = fs.readFileSync(require.resolve(rel), 'utf8');
     assert.equal(scrape.test(src), false, `scrape pattern found in ${rel}`);
   }

@@ -9,7 +9,7 @@ const {
   ClientMessage, RUNTIME_CONFIG_SCALAR_KEYS, ConfigUpdate, configIssueMessage,
 } = require('../shared/contracts/index.ts');
 const { STATES } = require('../shared/states.ts');
-const { claudeProjectsDir, listRepoConversations } = require('../session/core/conversation-history');
+const { claudeProjectsDir, listRepoConversations } = require('../session/core/conversation-history.ts');
 const { normalizeClientTrust } = require('./core/request-trust');
 const { PACK_NAME_RE, applyPackDelta, isSelfReferentialPack, sameProjectRecords } = require('./core/pack-core');
 const {
@@ -18,10 +18,10 @@ const {
 const { readPosthogReport } = require('./posthog-report');
 const posthogCore = require('./core/posthog-core');
 const { buildSettingsPayload: buildSettingsPayloadFrom } = require('./settings-payload');
-const { RESUME_ID_RE } = require('../session/core/auto-resume');
+const { RESUME_ID_RE } = require('../session/core/auto-resume.ts');
 const { execFile } = require('./child-process-safe');
 const { DEFAULT_AGENT_ID, isKnownAgentId, listAgentIds, getAdapter, commandFor } = require('../session/adapters');
-const { HOOK_EVENT_CATALOG, ID_RE: HOOK_ID_RE, MAX_TIMEOUT_SEC: HOOK_MAX_TIMEOUT_SEC, normalizeHook, rawStoredHooks, readStoredHooks, removeHook, upsertHook } = require('../session/core/user-hooks-core');
+const { HOOK_EVENT_CATALOG, ID_RE: HOOK_ID_RE, MAX_TIMEOUT_SEC: HOOK_MAX_TIMEOUT_SEC, normalizeHook, rawStoredHooks, readStoredHooks, removeHook, upsertHook } = require('../session/core/user-hooks-core.ts');
 const { describeBuiltinHooks } = require('../detection/settings-injector.ts');
 const { getRtkPath } = require('./rtk-resolver');
 const {

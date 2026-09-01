@@ -13,7 +13,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { Session } = require('../session/sessions');
-const { createOutputRing } = require('../session/core/output-ring');
+const { createOutputRing } = require('../session/core/output-ring.ts');
 
 function fakePty() {
   return {

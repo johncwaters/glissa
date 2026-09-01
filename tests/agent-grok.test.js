@@ -20,7 +20,7 @@ const {
   ensureWritableHooksDirectory,
   replaceFileAtomically,
 } = require("../server/agent-setup-cli");
-const { renderGrokHooksFile, classifyGrokHooksFile } = require("../session/core/grok-hooks-file-core");
+const { renderGrokHooksFile, classifyGrokHooksFile } = require("../session/core/grok-hooks-file-core.ts");
 
 const GROK_SESSION_ID = "0198f4f7-53d7-7d9b-a610-e0633d7c9061";
 
@@ -335,6 +335,25 @@ test("the setup core renders seven env-inert hooks and distinguishes managed and
   const hostile = rendered.replace("node /opt/glissa/session/hook-relay.js Stop", "node /opt/glissa/session/hook-relay.js;touch /tmp/x Stop");
   assert.equal(classifyGrokHooksFile(hostile, {
     relayPath: "/opt/glissa/session/hook-relay.js",
+    events: grok.HOOK_EVENTS,
+  }), "foreign");
+});
+
+// A published build ships hook-relay.js and a run from source resolves hook-relay.ts, so both spellings
+// have to read as managed or a dev-mode file looks foreign and the refresh leaves it alone.
+test("a .ts relay path is recognized as managed, and a foreign basename still is not", () => {
+  const rendered = renderedHooks("/repo/session/hook-relay.ts");
+  assert.equal(classifyGrokHooksFile(rendered, {
+    relayPath: "/repo/session/hook-relay.ts",
+    events: grok.HOOK_EVENTS,
+  }), "current");
+  assert.equal(classifyGrokHooksFile(rendered, {
+    relayPath: "/opt/glissa/session/hook-relay.js",
+    events: grok.HOOK_EVENTS,
+  }), "managed-stale");
+  const foreignBasename = renderedHooks("/repo/session/hook-relay.mjs");
+  assert.equal(classifyGrokHooksFile(foreignBasename, {
+    relayPath: "/repo/session/hook-relay.ts",
     events: grok.HOOK_EVENTS,
   }), "foreign");
 });

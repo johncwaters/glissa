@@ -17,7 +17,7 @@ const { applyChanges, decideImpliedDefaults } = require('./core/visions-defaults
 const { isUnder, underTestRunner } = require('./core/db-path-guard');
 const { createLaneLog } = require('./lane-log');
 const { unwireEditors, wireEditors } = require('./editor-wire');
-const { resolvePathCommandMatches } = require('../session/core/spawn-command');
+const { resolvePathCommandMatches } = require('../session/core/spawn-command.ts');
 
 const PACKAGE_ROOT = path.join(__dirname, '..');
 const EXTENSION_DIR = path.join(PACKAGE_ROOT, 'tools', 'vscode-visions');

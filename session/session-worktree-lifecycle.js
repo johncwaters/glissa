@@ -9,10 +9,10 @@ const { STATES, MERGEABLE_LIVE_STATES, RESTARTABLE_STATES } = require("../shared
 const { createWorktreeWatcher, readWorktreeGitdirPointer } = require("../detection/worktree-watch.ts");
 const { createIntegrationRefWatcher } = require("../detection/integration-ref-watch.ts");
 const { createRerereWatcher } = require("../detection/rerere-watch.ts");
-const { buildMergePrompt } = require("./core/merge-prompt");
-const { decideSignatureDemotion, decideBaseSyncDemotion, decideDiffSelfHeal } = require("./core/merge-gate");
-const { decideAutoRebase, decideRerereCooldownClear, AUTO_REBASE_STATES, SPAWN_GAP_TRIGGER } = require("./core/rebase-gate");
-const { projectMergeState } = require("./core/worktree-state");
+const { buildMergePrompt } = require("./core/merge-prompt.ts");
+const { decideSignatureDemotion, decideBaseSyncDemotion, decideDiffSelfHeal } = require("./core/merge-gate.ts");
+const { decideAutoRebase, decideRerereCooldownClear, AUTO_REBASE_STATES, SPAWN_GAP_TRIGGER } = require("./core/rebase-gate.ts");
+const { projectMergeState } = require("./core/worktree-state.ts");
 const {
   GIT_FETCH_TIMEOUT_MS,
   parseLeftRightCount,

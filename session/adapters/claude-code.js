@@ -5,9 +5,9 @@
 // of docs/plan-agent-adapters.md, so a second agent is a sibling file rather than a branch in each
 // consumer. Data plus pure functions, except resolveCommand's PATH lookup (one exec, cached by the registry).
 
-const { buildAntiSlopArgs } = require("../core/anti-slop-prompt");
-const { resolveAgentCommand, buildAgentSpawnCommand } = require("../core/spawn-command");
-const { buildAgentEnv } = require("../core/spawn-env");
+const { buildAntiSlopArgs } = require("../core/anti-slop-prompt.ts");
+const { resolveAgentCommand, buildAgentSpawnCommand } = require("../core/spawn-command.ts");
+const { buildAgentEnv } = require("../core/spawn-env.ts");
 const { execSync } = require("../../server/child-process-safe");
 
 const ID = "claude-code";
