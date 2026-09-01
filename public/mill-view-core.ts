@@ -207,7 +207,7 @@ export function budgetTone(pct: unknown) {
   return 'ok';
 }
 
-function measured(value: unknown) {
+function measured(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
@@ -362,11 +362,17 @@ function meanCountText(value: unknown): string {
   return Number.isInteger(value) ? formatCount(value) : String(Number(value.toFixed(2)));
 }
 
+function outcomeAbortRateText(bucket: MillOutcomeBucket | null | undefined): string {
+  const abortRate = bucket?.abortRate;
+  if (!measured(abortRate)) return NO_VALUE;
+  return formatPercent(abortRate * 100);
+}
+
 function outcomeValue(bucket: MillOutcomeBucket | null | undefined): string {
   return [
     `${formatCount(bucket?.sessions)} sessions`,
     `${meanCountText(bucket?.meanInterruptions)} mean interruptions`,
-    `${typeof bucket?.abortRate === 'number' ? formatPercent(bucket?.abortRate * 100) : NO_VALUE} abort rate`,
+    `${outcomeAbortRateText(bucket)} abort rate`,
     `${measured(bucket?.meanTokens) ? formatTokens(bucket?.meanTokens) : NO_VALUE} mean tokens`,
   ].join(', ');
 }
