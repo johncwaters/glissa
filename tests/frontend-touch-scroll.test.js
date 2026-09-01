@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // touch-scroll-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/session-card/touch-scroll-core.mjs');
+const importCore = () => import('../public/session-card/touch-scroll-core.ts');
 
 test('isScrollGesture: travel under the threshold is a tap, not a scroll', async () => {
   const { isScrollGesture, TOUCH_SCROLL_THRESHOLD_PX } = await importCore();

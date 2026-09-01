@@ -33,8 +33,12 @@ test.before(async () => {
   prevEnv = process.env.GLISSA_CONFIG;
   process.env.GLISSA_CONFIG = cfgPath;
 
+  // The static root is a temp dir holding one .js file: public/ is TypeScript sources served by Vite,
+  // so nothing under it is a .js asset the production static handler would ever hand out.
+  fs.writeFileSync(path.join(tmpDir, 'media-type-probe.js'), 'export const probe = 1;\n', 'utf8');
+
   server = http.createServer();
-  backend = createBackend(server, { staticDir: path.join(__dirname, '..', 'public') });
+  backend = createBackend(server, { staticDir: tmpDir });
   server.on('request', backend.app);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   port = server.address().port;
@@ -67,7 +71,7 @@ test('the token endpoint answers a same-origin fetch and forbids caching', async
 });
 
 test('static JavaScript uses the current IANA media type', async () => {
-  const res = await fetch(`http://127.0.0.1:${port}/session-card/card-registry.js`);
+  const res = await fetch(`http://127.0.0.1:${port}/media-type-probe.js`);
   assert.equal(res.status, 200);
   assert.equal(res.headers.get('content-type'), 'text/javascript; charset=utf-8');
 });

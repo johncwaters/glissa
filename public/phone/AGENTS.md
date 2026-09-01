@@ -12,12 +12,12 @@ The job it serves is triage, per `PRODUCT.md`: scan the board, find the session 
 
 | File | Description |
 |------|-------------|
-| `phone-shell.js` | Owns the screen container, the bottom nav, screen switching, nested More screens, history integration, visual-viewport sizing, and the activate/deactivate handoff with the desktop layout |
-| `board-screen.js` | The default screen: attention-first session rows + the phone top bar (which adopts the desktop header's connection chip, "+ Session", help, and hamburger) |
-| `terminal-screen.js` | One session's full-bleed terminal: back control, name, state badge, the card's adopted action cluster, and the touch key strip |
-| `board-groups-core.mjs` | Pure composition of desktop project grouping with phone attention ordering |
-| `triage-core.mjs` | Pure attention-first ORDER (`orderSessionsForTriage`) only. The "needs you" rule and its readout wording are shared with the desktop rail head in `../focus-view/attention-core.mjs` |
-| `mobile-key-strip.js` | Esc / Tab / Ctrl+C / arrows / Paste, the keys a soft keyboard cannot produce (catalog in `../mobile-keys.ts`) |
+| `phone-shell.ts` | Owns the screen container, the bottom nav, screen switching, nested More screens, history integration, visual-viewport sizing, and the activate/deactivate handoff with the desktop layout |
+| `board-screen.ts` | The default screen: attention-first session rows + the phone top bar (which adopts the desktop header's connection chip, "+ Session", help, and hamburger) |
+| `terminal-screen.ts` | One session's full-bleed terminal: back control, name, state badge, the card's adopted action cluster, and the touch key strip |
+| `board-groups-core.ts` | Pure composition of desktop project grouping with phone attention ordering |
+| `triage-core.ts` | Pure attention-first ORDER (`orderSessionsForTriage`) only. The "needs you" rule and its readout wording are shared with the desktop rail head in `../focus-view/attention-core.ts` |
+| `mobile-key-strip.ts` | Esc / Tab / Ctrl+C / arrows / Paste, the keys a soft keyboard cannot produce (catalog in `../mobile-keys.ts`) |
 
 Review, Radar, PRs, Usage, Mill, Visions, Hooks and Settings have no phone-only module: each screen is a mount container that re-parents the real desktop panel in.
 
@@ -27,12 +27,12 @@ Review, Radar, PRs, Usage, Mill, Visions, Hooks and Settings have no phone-only 
 - Which layout runs is decided by `../form-factor-core.ts` (`coarse AND narrow`) and stamped on `<html data-layout>` by `../form-factor.ts`. Style phone surfaces off that attribute; never add a `max-width` override of a desktop selector.
 - Re-parent, never duplicate. `dom-helpers.ts` `adoptElement` / `releaseElement` for panels; `../card-host.ts` `borrowCard` / `releaseCard` for a session card (single borrower GLOBALLY, shared with the Focus center).
 - One state pipeline. The Board reads `session-card/card-registry` and is refreshed by the same `app.ts` control-WS handlers that refresh the desktop rail. Do not subscribe to the control WS from here.
-- One "needs you" rule. The Board and the desktop rail head render the same `{n} NEED YOU` readout, so the predicate and the wording live once in `../focus-view/attention-core.mjs`. Each surface supplies its own `unseen` bookkeeping (the Board a Set, the rail its pill's `data-unseen`); never re-implement the rule here.
-- Row clocks ride the shared tick (`session-card/session-tick.js` `onSessionTick`), never a timer of their own.
+- One "needs you" rule. The Board and the desktop rail head render the same `{n} NEED YOU` readout, so the predicate and the wording live once in `../focus-view/attention-core.ts`. Each surface supplies its own `unseen` bookkeeping (the Board a Set, the rail its pill's `data-unseen`); never re-implement the rule here.
+- Row clocks ride the shared tick (`session-card/session-tick.ts` `onSessionTick`), never a timer of their own.
 - History: at most ONE entry is pushed above the Board, and only while the phone shell is active. Desktop must never touch history.
 - Soft keyboard: the shell is sized from `window.visualViewport`, so the keyboard resizes the terminal instead of covering it; the card's existing ResizeObserver then refits cols/rows.
 - Every function reachable on desktop must be reachable here or its absence justified. A desktop mechanism that has no touch meaning gets the correct touch-native one (inline rename retargets to the Terminal top bar's name via `ui.renameTargetEl`), never a dead affordance.
-- `.mjs` files stay pure (no DOM, no window); they run under node:test too.
+- `*-core.ts` files stay pure (no DOM, no window); they run under node:test too.
 
 ### Testing Requirements
 - `tests/frontend-phone-triage.test.js` (ordering + counts), `tests/frontend-phone-board-groups.test.js` (Board project groups), and `tests/frontend-form-factor.test.js` (the layout decision). DOM behavior is verified manually; real-device rendering is not covered by the suite.
@@ -41,6 +41,6 @@ Review, Radar, PRs, Usage, Mill, Visions, Hooks and Settings have no phone-only 
 
 ### Internal
 - `../form-factor.ts`, `../card-host.ts`, `../dom-helpers.ts`
-- `../project-registry.ts`, `../session-actions.ts`, `../session-card/` (registry, tick, terminal input, toast), `../sidebar/review-sidebar.js` + `selection.js`, `../focus-view/attention-core.mjs` (the alphabetical base order), `../ui-prefs.ts`, `../control-ws.ts`
+- `../project-registry.ts`, `../session-actions.ts`, `../session-card/` (registry, tick, terminal input, toast), `../sidebar/review-sidebar.ts` + `selection.ts`, `../focus-view/attention-core.ts` (the alphabetical base order), `../ui-prefs.ts`, `../control-ws.ts`
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

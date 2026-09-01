@@ -1,7 +1,7 @@
 import { sendControlMsg } from './control-ws.ts';
-import { sessionUIs } from './session-card/card-registry.js';
-import { openConfirmDialog } from './session-card/modal.js';
-import { suggestSessionName } from './session-card/naming.js';
+import { sessionUIs } from './session-card/card-registry.ts';
+import { openConfirmDialog } from './session-card/modal.ts';
+import { suggestSessionName } from './session-card/naming.ts';
 
 export function quickAddSession(path: string | null | undefined, label: string | null | undefined) {
   if (!path) return;

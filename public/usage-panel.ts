@@ -592,7 +592,7 @@ function buildTotalsSection() {
  * of same-sized tiles just adds numbers to compare. The legend order matches the bar order, so the
  * mapping never rides on color alone.
  */
-function buildCompositionRow(totals) {
+function buildCompositionRow(totals: UsageTotals | null | undefined) {
   const parts = compositionParts(totals);
   if (parts.length === 0) return null;
   const wrap = el('div', 'usage-compo');
@@ -1027,15 +1027,14 @@ function buildBody() {
   _root.append(buildModelsSection(), buildSessionsSection());
 }
 
-/**
- * A band pairs one main section with a column of short sections beside it. With nothing for the
- * column the main section stands alone, so the grid never draws an empty track.
- * @param {string} className
- * @param {HTMLElement} main
- * @param {HTMLElement[]} sideSections
- * @param {{ sideFirst?: boolean }} [options]
- */
-function bandOf(className, main, sideSections, { sideFirst = false } = {}) {
+// A band pairs one main section with a column of short sections beside it. With nothing for the
+// column the main section stands alone, so the grid never draws an empty track.
+function bandOf(
+  className: string,
+  main: HTMLElement,
+  sideSections: HTMLElement[],
+  { sideFirst = false }: { sideFirst?: boolean } = {},
+): HTMLElement {
   if (sideSections.length === 0) return main;
   const band = el('div', `usage-band ${className}`);
   const col = el('div', 'usage-band-col');

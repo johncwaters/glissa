@@ -8,8 +8,8 @@
 // panel is DOM only; every string, the ordering and the draft rules come from hooks-view-core.mjs.
 
 import { buildPanelSection, buildStatChip, el, isPanelHidden, projectsOf } from './dom-helpers.ts';
-import { openConfirmDialog } from './session-card/modal.js';
-import { showErrorToast } from './session-card/toast.js';
+import { openConfirmDialog } from './session-card/modal.ts';
+import { showErrorToast } from './session-card/toast.ts';
 import {
   ALL_PROJECTS_LABEL,
   BUILTIN_HINT,

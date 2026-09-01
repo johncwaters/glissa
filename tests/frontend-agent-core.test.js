@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // agent-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/session-card/agent-core.mjs');
+const importCore = () => import('../public/session-card/agent-core.ts');
 
 test('agentBadgeText: the default agent renders no badge', async () => {
   const { agentBadgeText, DEFAULT_AGENT_ID } = await importCore();

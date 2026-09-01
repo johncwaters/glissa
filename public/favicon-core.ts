@@ -1,4 +1,4 @@
-import { needsAttention } from './focus-view/attention-core.mjs';
+import { needsAttention } from './focus-view/attention-core.ts';
 
 export type FaviconVariant = 'idle' | 'complete' | 'waiting';
 

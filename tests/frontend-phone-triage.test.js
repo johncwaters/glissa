@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // triage-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/phone/triage-core.mjs');
+const importCore = () => import('../public/phone/triage-core.ts');
 
 const row = (id, state) => ({ id, state });
 const ids = (rows) => rows.map((r) => r.id);

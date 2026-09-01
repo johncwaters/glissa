@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // link-detect-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/session-card/link-detect-core.mjs');
+const importCore = () => import('../public/session-card/link-detect-core.ts');
 
 test('findUrls: bare URL in prose, offsets cover exactly the URL', async () => {
   const { findUrls } = await importCore();

@@ -3,7 +3,7 @@
 // shared session tick (session-card/session-tick.js) advances the text without a page refresh, and
 // keeping the helper here stops the two panels from each carrying a copy.
 
-import { onSessionTick } from './session-card/session-tick.js';
+import { onSessionTick } from './session-card/session-tick.ts';
 
 // The unit ladder every elapsed readout here shares, taking a DURATION rather than a timestamp so a
 // span with no "ago" reading (Radar's "stale 12m") wears the same units as the ticking labels.

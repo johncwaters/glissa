@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 test('review copy names the effective base and its push action', async () => {
-  const { baseLabel, mergeActionTitle, mergeTargetText, parkedStatusText } = await import('../public/sidebar/review-copy-core.mjs');
+  const { baseLabel, mergeActionTitle, mergeTargetText, parkedStatusText } = await import('../public/sidebar/review-copy-core.ts');
   assert.equal(baseLabel('trunk'), 'trunk');
   assert.equal(baseLabel(null), 'base');
   assert.match(mergeActionTitle('trunk'), /Merge into trunk, push it/);
@@ -15,7 +15,7 @@ test('review copy names the effective base and its push action', async () => {
 });
 
 test('H1 base-diverged park keeps Merge rendered and enabled', async () => {
-  const { decideMergeAction } = await import('../public/sidebar/review-copy-core.mjs');
+  const { decideMergeAction } = await import('../public/sidebar/review-copy-core.ts');
   assert.deepEqual(decideMergeAction('parked', 'base-diverged', true), {
     isRendered: true,
     isEnabled: true,
@@ -27,7 +27,7 @@ test('H1 base-diverged park keeps Merge rendered and enabled', async () => {
 });
 
 test('base-diverged rendered Merge explains why it is disabled', async () => {
-  const { decideMergeAction, mergeDisabledReason } = await import('../public/sidebar/review-copy-core.mjs');
+  const { decideMergeAction, mergeDisabledReason } = await import('../public/sidebar/review-copy-core.ts');
   assert.deepEqual(decideMergeAction('parked', 'base-diverged', false), {
     isRendered: true,
     isEnabled: false,
@@ -43,7 +43,7 @@ test('base-diverged rendered Merge explains why it is disabled', async () => {
 });
 
 test('loading, no changes, and inactive session outrank base-diverged copy', async () => {
-  const { mergeDisabledReason } = await import('../public/sidebar/review-copy-core.mjs');
+  const { mergeDisabledReason } = await import('../public/sidebar/review-copy-core.ts');
   const baseDiverged = {
     status: 'parked', mergeReason: 'base-diverged', fetched: true, hasCommits: true, live: true,
     state: 'COMPLETE',

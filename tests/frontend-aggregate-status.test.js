@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // aggregate-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/session-card/aggregate-core.mjs');
+const importCore = () => import('../public/session-card/aggregate-core.ts');
 
 const C = (o) => ({ waiting: 0, failed: 0, done: 0, complete: 0, dormant: 0, total: 0, ...o });
 

@@ -7,9 +7,9 @@
 // shape onto an imported factory without checking either side. All three are now failures, not omissions.
 //
 // During the TypeScript migration the gate is generic: every root tsconfig*.json must be run by
-// `npm run typecheck`, the two loose (checkJs) projects keep their claimed trees and flag floor, and
-// the strict project, once it exists, keeps full strictness. Converted `.ts` files are strict-checked
-// automatically by the strict project's include glob; the loose globs shrink as files convert.
+// `npm run typecheck`, the remaining loose (checkJs) project keeps its claimed tree and flag floor, and
+// the strict projects keep full strictness. public/ finished converting, so tsconfig.public.json moved
+// from the loose set to the strict one and its include globs now name only .ts sources.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -27,7 +27,7 @@ const SERVER_INCLUDE_GLOBS = [
   'shared/**/*.d.ts',
 ];
 
-const PUBLIC_INCLUDE_GLOBS = ['public/**/*.js', 'public/**/*.mjs', 'public/**/*.ts', 'public/**/*.d.ts'];
+const PUBLIC_INCLUDE_GLOBS = ['public/**/*.ts', 'public/**/*.d.ts'];
 
 // Turning any of these off makes tsc pass by checking less, not by the code being sound.
 const LOOSE_REQUIRED_OPTIONS = {
@@ -43,7 +43,7 @@ const LOOSE_REQUIRED_OPTIONS = {
   noImplicitReturns: true,
 };
 
-// The strict project checks every migrated .ts file; weakening any of these reopens the migration.
+// The strict projects check every migrated .ts file; weakening any of these reopens the migration.
 const STRICT_REQUIRED_OPTIONS = {
   strict: true,
   noEmit: true,
@@ -51,6 +51,8 @@ const STRICT_REQUIRED_OPTIONS = {
   verbatimModuleSyntax: true,
   isolatedModules: true,
   noImplicitReturns: true,
+  noUnusedLocals: true,
+  noUnusedParameters: true,
 };
 
 const CHECKED_TREES = ['server', 'session', 'detection', 'notifications', 'shared', 'public'];
@@ -100,21 +102,37 @@ test('the browser typecheck gate keeps every tree it has claimed', () => {
   assert.deepEqual(readConfig('tsconfig.public.json').include, PUBLIC_INCLUDE_GLOBS);
 });
 
-test('neither loose gate can be weakened into checking nothing', () => {
-  for (const name of ['tsconfig.json', 'tsconfig.public.json']) {
+test('the loose gate cannot be weakened into checking nothing', () => {
+  const options = mergedCompilerOptions('tsconfig.json');
+  for (const [option, required] of Object.entries(LOOSE_REQUIRED_OPTIONS)) {
+    assert.equal(options[option], required, `tsconfig.json must keep ${option}: ${required}`);
+  }
+});
+
+test('every strict gate keeps full strictness', () => {
+  for (const name of ['tsconfig.strict.json', 'tsconfig.public.json']) {
+    if (!fs.existsSync(path.join(repoRoot, name))) continue;
     const options = mergedCompilerOptions(name);
-    for (const [option, required] of Object.entries(LOOSE_REQUIRED_OPTIONS)) {
+    for (const [option, required] of Object.entries(STRICT_REQUIRED_OPTIONS)) {
       assert.equal(options[option], required, `${name} must keep ${option}: ${required}`);
     }
   }
 });
 
-test('the strict gate, once present, keeps full strictness', () => {
-  if (!fs.existsSync(path.join(repoRoot, 'tsconfig.strict.json'))) return;
-  const options = mergedCompilerOptions('tsconfig.strict.json');
-  for (const [option, required] of Object.entries(STRICT_REQUIRED_OPTIONS)) {
-    assert.equal(options[option], required, `tsconfig.strict.json must keep ${option}: ${required}`);
-  }
+// The browser project is checked, not merely listed: a lib set without DOM would typecheck none of it.
+test('the browser gate keeps the DOM lib set and no node types', () => {
+  const options = mergedCompilerOptions('tsconfig.public.json');
+  assert.deepEqual(options.lib, ['ES2023', 'DOM', 'DOM.Iterable']);
+  assert.deepEqual(options.types, []);
+});
+
+// public/ finished its migration, so a reintroduced .js or .mjs there would fall outside every project.
+test('the browser tree holds no unchecked JavaScript', () => {
+  const offenders = sourceFilesUnder(path.join(repoRoot, 'public'))
+    .filter((file) => !file.includes(`${path.sep}node_modules${path.sep}`))
+    .filter((file) => /\.(js|mjs|cjs)$/.test(file))
+    .map((file) => path.relative(repoRoot, file));
+  assert.deepEqual(offenders, []);
 });
 
 // npm run typecheck is the single command the gate is claimed under; a config it never runs is not a gate.

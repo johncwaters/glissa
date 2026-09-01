@@ -10,15 +10,15 @@ The review sidebar: the single home for the worktree review gate of the selected
 
 | File | Description |
 |------|-------------|
-| `review-sidebar.js` | DOM module: summary, per-file collapsible diff markup, Merge/Discard actions |
-| `diff-core.mjs` | Pure unified-diff parser: `git diff` text -> file sections with hunks and typed lines; no DOM |
-| `selection.js` | Single source of truth for the selected session id, with subscriber notification; shared by grid clicks and Focus pill focusing |
+| `review-sidebar.ts` | DOM module: summary, per-file collapsible diff markup, Merge/Discard actions |
+| `diff-core.ts` | Pure unified-diff parser: `git diff` text -> file sections with hunks and typed lines; no DOM |
+| `selection.ts` | Single source of truth for the selected session id, with subscriber notification; shared by grid clicks and Focus pill focusing |
 
 ## For AI Agents
 
 ### Working In This Directory
-- Selection goes through `selection.js` only; never track a competing "current session" elsewhere.
-- `diff-core.mjs` stays pure and dependency-free (node:test runs it); rendering belongs in `review-sidebar.js`.
+- Selection goes through `selection.ts` only; never track a competing "current session" elsewhere.
+- `diff-core.ts` stays pure and dependency-free (node:test runs it); rendering belongs in `review-sidebar.ts`.
 - Merge semantics live server-side (rebase-then-FF, park on conflict, `session/core/merge-prompt.ts` handoff); the sidebar only sends control messages and renders results.
 - Diff text renders via textContent/escaped markup; never innerHTML raw diff content.
 - The panel is built once and MOVED between layouts, never rebuilt. It has no close control in either one (the desktop dock is permanent; the phone screen is dismissed by the bottom nav), so do not reintroduce a dismiss button without a layout that needs it.

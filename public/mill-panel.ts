@@ -146,7 +146,7 @@ function buildDeliveriesBlock(pack: MillPack) {
   return wrap;
 }
 
-function buildMeasurementBlock(pack) {
+function buildMeasurementBlock(pack: MillPack) {
   const wrap = el('div', 'mill-measurement');
   const emptyText = measurementEmptyText(pack);
   if (emptyText) {

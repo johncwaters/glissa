@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // roster-groups is ESM (.mjs); dynamic-import it from this CJS test file (mirrors frontend-diff-core).
-const importCore = () => import('../public/focus-view/roster-groups.mjs');
+const importCore = () => import('../public/focus-view/roster-groups.ts');
 
 // Minimal row shape: orderRoster yields { id, ui, ... }; grouping reads row.ui.path and row.id.
 const r = (id, path) => ({ id, ui: { path } });

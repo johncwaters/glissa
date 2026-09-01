@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // naming-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/session-card/naming-core.mjs');
+const importCore = () => import('../public/session-card/naming-core.ts');
 
 test('isAutoNameOf: exact match, numbered suffix, and non-matches', async () => {
   const { isAutoNameOf } = await importCore();

@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // diff-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/sidebar/diff-core.mjs');
+const importCore = () => import('../public/sidebar/diff-core.ts');
 
 test('parseUnifiedDiff: empty input returns []', async () => {
   const { parseUnifiedDiff } = await importCore();

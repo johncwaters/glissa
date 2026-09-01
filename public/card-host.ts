@@ -4,8 +4,9 @@
 // id lives in the cross-cutting UI store, so the WebGL pool can read it without an injected provider.
 
 import { adoptElement, releaseElement } from './dom-helpers.ts';
-import { container, sessionUIs } from './session-card/card-registry.js';
-import { activateTerminalViewer } from './session-card/terminal.js';
+import type { SessionUi } from './session-card/card-registry.ts';
+import { container, sessionUIs } from './session-card/card-registry.ts';
+import { activateTerminalViewer } from './session-card/terminal.ts';
 import { uiState } from './ui-state-core.ts';
 
 export function getBorrowedCardId() {
@@ -15,13 +16,7 @@ export function getBorrowedCardId() {
 // Move `ui.card` into `slotEl` and make its terminal live and correctly sized there. `className` is the
 // surface's own marker class (the Focus center and the phone Terminal screen style the borrowed card
 // differently); it is removed again on release, and swapping surfaces swaps the class.
-type HostedCard = HTMLElement & { _cardHostClass?: string };
-interface HostedSessionUi {
-  card?: HostedCard;
-  _unviewTerminal?: () => void;
-}
-
-export function borrowCard(ui: HostedSessionUi | null | undefined, sessionId: string, slotEl: HTMLElement | null | undefined, { className }: { className?: string } = {}) {
+export function borrowCard(ui: SessionUi | null | undefined, sessionId: string, slotEl: HTMLElement | null | undefined, { className }: { className?: string } = {}) {
   if (!ui?.card || !slotEl) return;
   const borrowedId = getBorrowedCardId();
   if (borrowedId && borrowedId !== sessionId) releaseCard();

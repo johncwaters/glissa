@@ -1,7 +1,5 @@
 {
   "compilerOptions": {
-    "allowJs": true,
-    "checkJs": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "lib": [
@@ -13,26 +11,24 @@
     "moduleResolution": "Bundler",
     "noEmit": true,
     "skipLibCheck": true,
-    "strict": false,
-    "strictNullChecks": true,
-    "strictBindCallApply": true,
-    "strictFunctionTypes": true,
-    "noImplicitThis": true,
-    "alwaysStrict": true,
-    "strictPropertyInitialization": true,
+    "strict": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
     "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "target": "ES2023",
     "types": [],
     "allowImportingTsExtensions": true
   },
   "include": [
-    "public/**/*.js",
-    "public/**/*.mjs",
     "public/**/*.ts",
     "public/**/*.d.ts"
   ],
   "exclude": [
     "node_modules/**",
+    "public/node_modules/**",
     "dist/**"
   ]
 }

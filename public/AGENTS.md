@@ -27,7 +27,7 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 | `usage-view-core.ts` | Pure Usage tab formatting, sorting, caveat text, warning text, and per-card chip text |
 | `theme.ts` | Theme definitions applied as CSS custom properties; terminal theme derived at runtime |
 | `ui-prefs.ts` / `local-store.ts` | THE localStorage home for UI state (sound, theme, active view, rail and sidebar widths), over quota-safe wrappers. Each key is declared once in `ui-prefs.ts`'s `PREFS` table with its default and normalizer; the accessors are one line each. The review sidebar's width keeps its own storage key so an existing install's saved width survives |
-| `shortcuts.ts` | Pure display catalog of keyboard shortcuts for the Settings view; handlers live in `app.ts` and `session-card/terminal.js`, keep in sync |
+| `shortcuts.ts` | Pure display catalog of keyboard shortcuts for the Settings view; handlers live in `app.ts` and `session-card/terminal.ts`, keep in sync |
 | `form-factor-core.ts` | Pure `decideLayout({ coarse, narrowWidth })` -> `'phone' \| 'desktop'`: the one predicate choosing between the two first-class layouts |
 | `form-factor.ts` | Its IO shell: evaluates the two media queries, stamps `<html data-layout>`, notifies subscribers on a live flip |
 | `card-host.ts` | THE session-card re-parenting seam (`borrowCard` / `releaseCard`), single borrower GLOBALLY; shared by the Focus center and the phone Terminal screen |
@@ -52,13 +52,13 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 ## For AI Agents
 
 ### Working In This Directory
-- ESM only (this is the Vite side; the server is CJS). Files at this level are `.ts`; the subdirectories are mid-migration and still `.js` / `.mjs`. A `*-core` module is PURE (no DOM) and shared with node:test, so it runs under Node type stripping: keep it dependency-free and give every relative import an explicit extension.
+- ESM only (this is the Vite side; the server is CJS), and every file under `public/` is `.ts`, checked strict by `tsconfig.public.json`. A `*-core` module is PURE (no DOM) and shared with node:test, so it runs under Node type stripping: keep it erasable, dependency-free, and give every relative import an explicit `.ts` extension.
 - CSS convention: Tailwind utilities in `index.html`; semantic classes in `style.css` for JS-created DOM; state-driven styles via `[data-state]`; keyframes and pseudo-elements in `style.css`; theme tokens in `tailwind.css`.
 - TWO first-class layouts, chosen by `form-factor-core.ts` and stamped on `<html data-layout>`. Phone styling keys off `[data-layout="phone"]`, never a `max-width` override of a desktop selector; a bare `max-width` block is only for content that must wrap in a narrow DESKTOP window. Neither layout duplicates the other's DOM: elements owning live state are re-parented (`adoptElement` / `card-host.ts`).
 - All terminal writes go through `render-scheduler.ts`; never call `term.write` with unbounded data outside it.
 - Use `id` (stable UUID) for any session keying; `name` is display only.
 - New persistent UI state goes through `ui-prefs.ts`, not raw localStorage: add a key to its `PREFS` table and a one-line accessor pair, never a second load/mutate/save copy.
-- A confirm prompt comes from `session-card/modal.js` `openConfirmDialog`, never a hand-rolled overlay.
+- A confirm prompt comes from `session-card/modal.ts` `openConfirmDialog`, never a hand-rolled overlay.
 - Section heads, stat chips, `projectsOf` and `isPanelHidden` come from `dom-helpers.ts`; a new tab panel passes its class prefix rather than copying the builders.
 
 ### Testing Requirements
@@ -88,7 +88,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 - Two first-class layouts, not one responsive shell. `decideLayout` needs a coarse pointer AND a narrow viewport: a narrowed desktop window keeps the three-panel IA, and a coarse-pointer tablet has room for it. All phone styling keys off `[data-layout="phone"]`.
 - Nothing is duplicated; live elements are RE-PARENTED into the phone screens and back, a second copy meaning a second state pipeline for the same facts. The card-borrow seam holds a GLOBAL single borrower, a session owning one xterm.
-- Board order is attention-first, the opposite of the rail's stable identity order: a rail needs a fixed spatial map, a phone answers "who needs me". The "needs you" RULE lives once, in `public/focus-view/attention-core.mjs`.
+- Board order is attention-first, the opposite of the rail's stable identity order: a rail needs a fixed spatial map, a phone answers "who needs me". The "needs you" RULE lives once, in `public/focus-view/attention-core.ts`.
 - Touch scroll is ours because xterm 6.0.0 has no touch path at all. The alternate buffer re-emits the drag as synthetic wheel notches so xterm's OWN listeners decide the meaning.
 - Predictive text bypasses xterm's input path on PHONE ONLY: xterm 6.0.0 mishandles autocorrect events (upstream `xtermjs/xterm.js#3600`, open). Desktop is untouched, where the same takeover would regress CJK composition.
 

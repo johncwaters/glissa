@@ -61,6 +61,33 @@ export interface MillConsumers {
   lanes?: MillConsumerLane[];
 }
 
+export interface MillLine {
+  label: string;
+  value: string;
+  tone: string;
+}
+
+export interface MillOutcomeBucket {
+  sessions?: unknown;
+  meanInterruptions?: unknown;
+  abortRate?: unknown;
+  meanTokens?: unknown;
+}
+
+export interface MillMeasurement {
+  deliveries?: unknown;
+  measurableDeliveries?: unknown;
+  unmeasurableDeliveries?: unknown;
+  openedSessions?: unknown;
+  openRate?: unknown;
+  distinctFilesRead?: unknown;
+  medianFilesRead?: unknown;
+  liveSessions?: unknown;
+  ambiguousPrompts?: unknown;
+  opened?: MillOutcomeBucket | null;
+  unopened?: MillOutcomeBucket | null;
+}
+
 export interface MillPack {
   name: string;
   group?: unknown;
@@ -74,6 +101,7 @@ export interface MillPack {
   hasConsumers?: unknown;
   consumers?: MillConsumers | null;
   deliveries?: MillDelivery[];
+  measurement?: MillMeasurement | null;
 }
 
 export interface MillProject {
@@ -310,18 +338,18 @@ export function deliveryEmptyText(pack: MillPack | null | undefined) {
   return 'no live sessions';
 }
 
-export function openRateText(measurement) {
+export function openRateText(measurement: MillMeasurement | null | undefined): string {
   const openRate = measurement?.openRate;
   if (typeof openRate !== 'number' || !Number.isFinite(openRate)) return NO_VALUE;
   return formatPercent(openRate * 100);
 }
 
-export function measurementEmptyText(pack) {
+export function measurementEmptyText(pack: MillPack | null | undefined): string {
   if (!pack?.measurement) return 'not yet measured';
   return '';
 }
 
-export function measurementLines(pack) {
+export function measurementLines(pack: MillPack | null | undefined): MillLine[] {
   const measurement = pack?.measurement;
   if (!measurement) return [];
   const lines = [
@@ -347,21 +375,21 @@ export function measurementLines(pack) {
   return lines;
 }
 
-function meanCountText(value) {
-  if (!measured(value)) return NO_VALUE;
+function meanCountText(value: unknown): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return NO_VALUE;
   return Number.isInteger(value) ? formatCount(value) : String(Number(value.toFixed(2)));
 }
 
-function outcomeValue(bucket) {
+function outcomeValue(bucket: MillOutcomeBucket | null | undefined): string {
   return [
     `${formatCount(bucket?.sessions)} sessions`,
     `${meanCountText(bucket?.meanInterruptions)} mean interruptions`,
-    `${measured(bucket?.abortRate) ? formatPercent(bucket.abortRate * 100) : NO_VALUE} abort rate`,
-    `${measured(bucket?.meanTokens) ? formatTokens(bucket.meanTokens) : NO_VALUE} mean tokens`,
+    `${typeof bucket?.abortRate === 'number' ? formatPercent(bucket?.abortRate * 100) : NO_VALUE} abort rate`,
+    `${measured(bucket?.meanTokens) ? formatTokens(bucket?.meanTokens) : NO_VALUE} mean tokens`,
   ].join(', ');
 }
 
-export function outcomeSplitLines(measurement) {
+export function outcomeSplitLines(measurement: MillMeasurement | null | undefined): MillLine[] {
   if (!measurement) return [];
   return [
     { label: 'opened outcomes', value: outcomeValue(measurement.opened), tone: 'ok' },

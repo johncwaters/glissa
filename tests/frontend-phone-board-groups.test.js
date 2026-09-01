@@ -3,8 +3,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const importBoardCore = () => import('../public/phone/board-groups-core.mjs');
-const importRosterCore = () => import('../public/focus-view/roster-groups.mjs');
+const importBoardCore = () => import('../public/phone/board-groups-core.ts');
+const importRosterCore = () => import('../public/focus-view/roster-groups.ts');
 
 const row = (id, projectPath, state) => ({ id, projectPath, state });
 const pathOf = (entry) => entry.projectPath;

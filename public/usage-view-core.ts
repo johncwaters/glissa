@@ -426,9 +426,9 @@ const COMPOSITION_PARTS = Object.freeze([
   { key: 'cacheRead', label: 'cache read' },
 ]);
 
-export function compositionParts(totals) {
+export function compositionParts(totals: UsageTotals | null | undefined) {
   const parts = COMPOSITION_PARTS.map((spec) => {
-    const raw = Number(totals?.[spec.key]);
+    const raw = Number(totals?.[spec.key as keyof UsageTotals]);
     return { spec, tokens: Number.isFinite(raw) && raw > 0 ? raw : 0 };
   });
   const sum = parts.reduce((total, part) => total + part.tokens, 0);

@@ -3,9 +3,9 @@
 import addSessionHTML from './components/add-session-dialog.html?raw';
 import { sendControlMsg, sendControlRequest } from './control-ws.ts';
 import { el, query, queryTag } from './dom-helpers.ts';
-import { applyDialogAria, buildDialogShell, createModalOverlay } from './session-card/modal.js';
-import { DEFAULT_AGENT_ID, decideAgentPicker } from './session-card/agent-core.mjs';
-import { countSessionsByName, suggestSessionName } from './session-card/naming.js';
+import { applyDialogAria, buildDialogShell, createModalOverlay } from './session-card/modal.ts';
+import { DEFAULT_AGENT_ID, decideAgentPicker } from './session-card/agent-core.ts';
+import { countSessionsByName, suggestSessionName } from './session-card/naming.ts';
 
 interface OptionSettings {
   value?: string;

@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // fit-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/session-card/fit-core.mjs');
+const importCore = () => import('../public/session-card/fit-core.ts');
 
 const NEVER_FITTED = { lastFittedCols: 0, lastFittedRows: 0, lastSentCols: 0, lastSentRows: 0 };
 

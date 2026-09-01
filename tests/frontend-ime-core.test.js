@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // ime-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/session-card/ime-core.mjs');
+const importCore = () => import('../public/session-card/ime-core.ts');
 
 const DEL = '\x7f';
 

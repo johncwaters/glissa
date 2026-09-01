@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // attention-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/focus-view/attention-core.mjs');
+const importCore = () => import('../public/focus-view/attention-core.ts');
 
 test('orderRoster: non-dormant before dormant, alphabetical within each group', async () => {
   const { orderRoster } = await importCore();

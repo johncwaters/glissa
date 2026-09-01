@@ -7,7 +7,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // pack-stale-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/session-card/pack-stale-core.mjs');
+const importCore = () => import('../public/session-card/pack-stale-core.ts');
 
 test('a delivered pack whose current version moved is stale', async () => {
   const { hasStalePack, stalePackNames } = await importCore();

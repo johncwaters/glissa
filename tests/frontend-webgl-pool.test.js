@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // webgl-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/session-card/webgl-core.mjs');
+const importCore = () => import('../public/session-card/webgl-core.ts');
 
 test('pickEvictionVictims: returns nothing while under the cap', async () => {
   const { pickEvictionVictims } = await importCore();
