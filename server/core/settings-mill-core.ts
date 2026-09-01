@@ -97,7 +97,7 @@ const INGEST_SPEC: MillBlockSpec = Object.freeze({
 function validateMillBlock(block: unknown, spec: MillBlockSpec): string | null {
   if (block == null) return null;
   if (!isPlainObject(block)) return `${spec.name} must be an object`;
-  for (const [key, value] of Object.entries(block)) {
+  for (const [key, value] of Object.entries(block as Record<string, unknown>)) {
     if (value == null) continue;
     if (spec.booleans.includes(key)) {
       if (typeof value !== 'boolean') return `${spec.name}.${key} must be a boolean`;
@@ -122,32 +122,34 @@ function validateMillBlock(block: unknown, spec: MillBlockSpec): string | null {
 
 function pickMillBlock(stored: unknown, spec: MillBlockSpec): Record<string, unknown> | null {
   if (!isPlainObject(stored)) return null;
+  const fields = stored as Record<string, unknown>;
   const out: Record<string, unknown> = {};
   for (const key of spec.booleans) {
-    if (stored[key] != null) out[key] = !!stored[key];
+    if (fields[key] != null) out[key] = !!fields[key];
   }
   for (const key of Object.keys(spec.integerRanges)) {
-    if (stored[key] != null) out[key] = stored[key];
+    if (fields[key] != null) out[key] = fields[key];
   }
   for (const [key, nested] of Object.entries(spec.blocks)) {
-    const picked = pickMillBlock(stored[key], nested);
+    const picked = pickMillBlock(fields[key], nested);
     if (picked) out[key] = picked;
   }
   return out;
 }
 
 function mergeMillBlock(stored: unknown, incoming: unknown, spec: MillBlockSpec): Record<string, unknown> {
-  const out: Record<string, unknown> = isPlainObject(stored) ? { ...stored } : {};
+  const out: Record<string, unknown> = isPlainObject(stored) ? { ...(stored as Record<string, unknown>) } : {};
   if (!isPlainObject(incoming)) return out;
+  const fields = incoming as Record<string, unknown>;
   for (const key of spec.booleans) {
-    if (incoming[key] != null) out[key] = !!incoming[key];
+    if (fields[key] != null) out[key] = !!fields[key];
   }
   for (const key of Object.keys(spec.integerRanges)) {
-    if (incoming[key] != null) out[key] = incoming[key];
+    if (fields[key] != null) out[key] = fields[key];
   }
   for (const [key, nested] of Object.entries(spec.blocks)) {
-    if (incoming[key] == null) continue;
-    out[key] = mergeMillBlock(out[key], incoming[key], nested);
+    if (fields[key] == null) continue;
+    out[key] = mergeMillBlock(out[key], fields[key], nested);
   }
   return out;
 }

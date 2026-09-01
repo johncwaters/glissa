@@ -13,7 +13,7 @@ function stringOrNull(value: unknown): string | null {
   return value;
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
+function isPlainObject(value: unknown): boolean {
   return value != null && typeof value === 'object' && !Array.isArray(value);
 }
 

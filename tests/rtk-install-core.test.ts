@@ -48,7 +48,8 @@ test('decision table', () => {
 
 test('an unsupported platform is a skip, never a throw', () => {
   assert.doesNotThrow(() => decideRtkInstall({ ...BASE, platform: 'aix', arch: 'ppc' }));
-  assert.equal(decideRtkInstall({ ...BASE, platform: 'aix', arch: 'ppc' }).asset, undefined);
+  const decision = decideRtkInstall({ ...BASE, platform: 'aix', arch: 'ppc' });
+  assert.equal(Object.hasOwn(decision, 'asset'), false);
 });
 
 test('an install decision carries the pinned asset for that platform', () => {

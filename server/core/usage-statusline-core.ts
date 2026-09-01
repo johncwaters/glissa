@@ -45,16 +45,18 @@ function resetsAtMs(value: unknown): number | null {
 // A window with neither usable field is absent, not empty: a 0% bar for it would invent a fact.
 function normalizeWindow(raw: unknown): RateLimitWindow | null {
   if (!isPlainObject(raw)) return null;
-  const pct = roundPct(raw.used_percentage);
-  const resetsAt = resetsAtMs(raw.resets_at);
+  const window = raw as Record<string, unknown>;
+  const pct = roundPct(window.used_percentage);
+  const resetsAt = resetsAtMs(window.resets_at);
   if (pct === null && resetsAt === null) return null;
   return { pct, resetsAtMs: resetsAt };
 }
 
 function normalizeRateLimits(raw: unknown): RateLimitWindows | null {
   if (!isPlainObject(raw)) return null;
-  const fiveHour = normalizeWindow(raw.five_hour);
-  const sevenDay = normalizeWindow(raw.seven_day);
+  const limits = raw as Record<string, unknown>;
+  const fiveHour = normalizeWindow(limits.five_hour);
+  const sevenDay = normalizeWindow(limits.seven_day);
   if (!fiveHour && !sevenDay) return null;
   return { fiveHour, sevenDay };
 }
@@ -62,11 +64,12 @@ function normalizeRateLimits(raw: unknown): RateLimitWindows | null {
 // ts is the receive time: the payload carries no timestamp and freshness is what the panel needs.
 function normalizeStatuslinePayload(payload: unknown, nowMs: unknown): StatuslineSnapshot | null {
   if (!isPlainObject(payload)) return null;
-  const sessionId = typeof payload.session_id === 'string' ? payload.session_id.trim() : '';
-  const cost = isPlainObject(payload.cost) ? payload.cost : null;
-  const context = isPlainObject(payload.context_window) ? payload.context_window : null;
+  const fields = payload as Record<string, unknown>;
+  const sessionId = typeof fields.session_id === 'string' ? fields.session_id.trim() : '';
+  const cost = isPlainObject(fields.cost) ? (fields.cost as Record<string, unknown>) : null;
+  const context = isPlainObject(fields.context_window) ? (fields.context_window as Record<string, unknown>) : null;
   return {
-    rateLimits: normalizeRateLimits(payload.rate_limits),
+    rateLimits: normalizeRateLimits(fields.rate_limits),
     sessionCostUSD: cost ? numberOrNull(cost.total_cost_usd) : null,
     contextPct: context ? roundPct(context.used_percentage) : null,
     claudeSessionId: sessionId || null,

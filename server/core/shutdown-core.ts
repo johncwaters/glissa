@@ -112,6 +112,12 @@ function normalizeShutdownResult(result: unknown): { reaps: unknown[]; stoppers:
   };
 }
 
+// A promise may reject with anything, so the one thing the log reads off a reason is guarded here.
+function stopFailureText(reason: unknown): string {
+  if (reason && typeof reason === 'object' && 'message' in reason && reason.message) return String(reason.message);
+  return String(reason);
+}
+
 /** Which named stoppers failed, for one honest log line instead of a silent swallow. */
 function summarizeStopOutcomes(
   entries: Array<{ name: string }>,
@@ -126,4 +132,4 @@ function summarizeStopOutcomes(
   return { timedOut: timedOut === true, failed };
 }
 
-export { awaitBounded, createStopperCollector, normalizeShutdownResult, summarizeStopOutcomes };
+export { awaitBounded, createStopperCollector, normalizeShutdownResult, stopFailureText, summarizeStopOutcomes };

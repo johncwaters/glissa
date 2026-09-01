@@ -48,20 +48,21 @@ function normalizePricingTable(rawLiteLlmJson: unknown): Map<string, ModelPrice>
 }
 
 function lookupModelPrice(
-  table: Map<string, ModelPrice> | null | undefined,
+  table: unknown,
   model: string | null | undefined,
   { aliases = {} }: { aliases?: Record<string, string> } = {},
 ): ResolvedModelPrice | null {
   if (!(table instanceof Map) || !model) return null;
-  const exact = table.get(model);
+  const priceTable = table as Map<string, ModelPrice>;
+  const exact = priceTable.get(model);
   if (exact !== undefined) return resolvedPrice(model, exact, true);
   const aliasKey = aliases[model];
-  const aliased = aliasKey ? table.get(aliasKey) : undefined;
+  const aliased = aliasKey ? priceTable.get(aliasKey) : undefined;
   if (aliasKey && aliased !== undefined) return resolvedPrice(aliasKey, aliased, false);
 
   const normalizedModel = normalizeFuzzyKey(model);
   let best: { key: string; price: ModelPrice; normalizedLength: number } | null = null;
-  for (const [key, price] of table.entries()) {
+  for (const [key, price] of priceTable.entries()) {
     if (isExactOnlyKey(key)) continue;
     const normalizedKey = normalizeFuzzyKey(key);
     if (!normalizedKey) continue;

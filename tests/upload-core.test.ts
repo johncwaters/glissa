@@ -38,10 +38,12 @@ test('extensionForImageMime tolerates the charset parameter and casing a browser
 test('decideUploadType accepts an image and refuses anything else with 415', () => {
   assert.deepEqual(decideUploadType('image/png'), { ok: true, extension: '.png' });
   const refused = decideUploadType('application/zip');
-  assert.equal(refused.ok, false);
+  assert.ok(!refused.ok);
   assert.equal(refused.status, 415);
   assert.equal(typeof refused.error, 'string');
-  assert.equal(decideUploadType(undefined).status, 415, 'an absent content type is refused too');
+  const absent = decideUploadType(undefined);
+  assert.ok(!absent.ok, 'an absent content type is refused too');
+  assert.equal(absent.status, 415);
 });
 
 test('exceedsUploadCap trips only past the cap', () => {

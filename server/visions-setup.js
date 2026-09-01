@@ -27,9 +27,6 @@ const LSP_CORE_PATH = path.join(PACKAGE_ROOT, 'server', 'core', 'visions-lsp-cor
 const CLI_PATH = path.join(PACKAGE_ROOT, 'bin', 'glissa.js');
 const EDITOR_TIMEOUT_MS = 60000;
 
-/** @type {(options: { manifest: Record<string, unknown>, extensionFiles?: { path: string, data: string }[] }) => Buffer} */
-const buildEditorVsix = /** @type {(options: { manifest: Record<string, unknown>, extensionFiles?: { path: string, data: string }[] }) => Buffer} */ (buildVsix);
-
 // The extension host is CommonJS with no type stripping of its own, so the packed copy of the core is
 // its types erased and its one ESM export rewritten.
 function packedLspCore(source) {
@@ -48,7 +45,7 @@ function packVsix() {
     lspCoreJs: packedLspCore(fs.readFileSync(LSP_CORE_PATH, 'utf8')),
     relayPath: RELAY_PATH,
   });
-  const vsix = buildEditorVsix({
+  const vsix = buildVsix({
     manifest,
     extensionFiles,
   });

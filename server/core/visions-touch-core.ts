@@ -164,7 +164,8 @@ function touchedRangesFor(state: TouchState, uri: string): TouchedRange[] {
   return ranges.map((range) => ({ ...range }));
 }
 
-function resetUri(state: TouchState, uri: string): TouchState {
+function resetUri(state: TouchState, uri: string | null): TouchState {
+  if (!uri) return state;
   state.touchedByUri.delete(uri);
   return state;
 }

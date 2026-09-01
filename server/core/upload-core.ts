@@ -27,12 +27,9 @@ const PASTE_END = '\x1b[201~';
 // is refused rather than sanitized (a live session id is always a plain uuid).
 const SAFE_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
 
-export interface UploadTypeVerdict {
-  ok: boolean;
-  extension?: string;
-  status?: number;
-  error?: string;
-}
+export type UploadTypeVerdict =
+  | { ok: true; extension: string }
+  | { ok: false; status: number; error: string };
 
 /** The extension for an accepted image content type, or null for anything else. */
 function extensionForImageMime(contentTypeHeader: unknown): string | null {

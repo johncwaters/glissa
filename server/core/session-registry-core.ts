@@ -7,6 +7,7 @@ import { normalizePackNames } from './pack-core.ts';
 export type AgentId = ProjectConfig['agent'];
 
 export interface RegistryProject {
+  [key: string]: unknown;
   id: string;
   name: string;
   path: string;
@@ -41,7 +42,7 @@ function decideWasActiveFlip(to: SessionState, event: string, pendingRestart: bo
   return null;
 }
 
-function shouldStartAfterModify(previousState: SessionState): boolean {
+function shouldStartAfterModify(previousState: string): boolean {
   return previousState !== STATES.DORMANT;
 }
 

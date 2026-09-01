@@ -11,6 +11,10 @@ export interface RtkAsset {
   sha256: string;
 }
 
+export type RtkInstallDecision =
+  | { action: 'skip'; reason: string }
+  | { action: 'install'; reason: string; asset: RtkAsset & { version: string; url: string } };
+
 const RTK_ASSETS: Record<string, RtkAsset> = {
   'linux-x64': {
     file: 'rtk-x86_64-unknown-linux-musl.tar.gz',
@@ -60,7 +64,7 @@ function decideRtkInstall({
   lastFailureAt?: number | null;
   nowMs?: number;
   cooldownMs?: number;
-} = {}) {
+} = {}): RtkInstallDecision {
   if (!rtkEnabled) return { action: 'skip', reason: 'rtk-disabled' };
   if (resolvedPath) return { action: 'skip', reason: 'already-resolved' };
   if (inFlight) return { action: 'skip', reason: 'install-in-flight' };

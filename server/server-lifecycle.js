@@ -13,7 +13,7 @@
 
 const { decideRestartStrategy, SUPERVISED_RESTART_EXIT_CODE } = require('./core/restart-strategy.ts');
 const {
-  awaitBounded, normalizeShutdownResult, summarizeStopOutcomes,
+  awaitBounded, normalizeShutdownResult, stopFailureText, summarizeStopOutcomes,
 } = require('./core/shutdown-core.ts');
 
 // Bounded wait for the pending PTY reaps a shutdown started, so the process does not exit (or respawn)
@@ -40,7 +40,7 @@ function awaitStoppers(stoppers, { capMs = 3000, warn = console.warn, ...timerOp
       const summary = summarizeStopOutcomes(entries, outcome);
       if (summary.timedOut) warn(`[lifecycle] lane shutdown exceeded ${capMs}ms - exiting anyway`);
       for (const { name, reason } of summary.failed) {
-        warn(`[lifecycle] ${name} failed to stop cleanly: ${reason?.message ? reason.message : reason}`);
+        warn(`[lifecycle] ${name} failed to stop cleanly: ${stopFailureText(reason)}`);
       }
     });
 }

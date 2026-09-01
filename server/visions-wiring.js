@@ -547,6 +547,7 @@ function createVisionsWiring({
     fixesByUri.set(uri, { fixes, textHash });
   }
 
+  /** @param {string | null} uri */
   function claimUri(uri, connection) {
     if (!uri) return;
     const owners = openOwnersByUri.get(uri) || new Set();
@@ -554,8 +555,9 @@ function createVisionsWiring({
     openOwnersByUri.set(uri, owners);
   }
 
+  /** @param {string | null} uri */
   function releaseUri(uri, connection) {
-    const owners = openOwnersByUri.get(uri);
+    const owners = uri ? openOwnersByUri.get(uri) : null;
     if (!owners) return true;
     owners.delete(connection);
     if (owners.size > 0) return false;
