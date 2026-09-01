@@ -414,19 +414,21 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
     }),
   });
   const packsAutoRebuildEnabled = config.packsAutoRebuild !== false;
-  const fixedLaneEntries: [string, unknown][] = [
-    ['branch-gc', branchGc],
-    ['pr-review', prReview],
-    ['posthog', posthog],
-    ['pack-service', packService],
-    ['usage', usage],
-    ['pack-distiller', packDistiller],
-    ['memory-ingest', memoryIngest],
-    ['memory-distill', memoryDistiller],
-    ['memory-store', memoryStore],
-  ];
-  const fixedLanes = new Map(fixedLaneEntries);
+  const fixedLaneEntries = {
+    'branch-gc': branchGc,
+    'pr-review': prReview,
+    posthog,
+    'pack-service': packService,
+    usage,
+    'pack-distiller': packDistiller,
+    'memory-ingest': memoryIngest,
+    'memory-distill': memoryDistiller,
+    'memory-store': memoryStore,
+  };
+  const fixedLanes = new Map<string, unknown>(Object.entries(fixedLaneEntries));
+  type LaneMap = typeof fixedLaneEntries & { ingest: typeof ingestLane; visions: typeof visionsLane };
 
+  function current<K extends keyof LaneMap>(name: K): LaneMap[K];
   function current(name: string): unknown {
     if (name === 'ingest') return ingestLane;
     if (name === 'visions') return visionsLane;

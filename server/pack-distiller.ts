@@ -1,11 +1,11 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
 import type { HookRouter } from '../detection/hook-source.ts';
-import type { Session, SessionOptions } from '../session/sessions.ts';
+import { Session } from '../session/sessions.ts';
+import type { SessionOptions } from '../session/sessions.ts';
 import { validatePackSpec } from './core/pack-core.ts';
 import { needsDistill } from './core/distill-core.ts';
 import { buildLanePermissions } from './core/lane-permissions-core.ts';
@@ -163,11 +163,6 @@ function writeStandaloneLaneSettings(permissions: unknown): { args: string[]; cl
   };
 }
 
-const requireFromHere = createRequire(import.meta.url);
-function loadSessionConstructor(): new (options: SessionOptions) => Session {
-  return (requireFromHere('../session/sessions.ts') as typeof import('../session/sessions.ts')).Session;
-}
-
 function createDistillSpawn({
   sessions = new Map(), closeSessionDataClients = () => {}, hookRouter = null, getHookPort = null,
   spawnGate = null, replayBufferKB = undefined,
@@ -175,7 +170,7 @@ function createDistillSpawn({
   makeSession = null,
 }: DistillSpawnOptions = {}): DistillSpawn {
   return async function spawnDistill({ id, name, cwd, signal = null }) {
-    const buildSession = makeSession || ((options: SessionOptions) => new (loadSessionConstructor())(options));
+    const buildSession = makeSession || ((options: SessionOptions) => new Session(options));
     const posture = packDistillerPermissions();
     const standalone = hookRouter ? null : writeStandaloneLaneSettings(posture.permissions);
     const sess = buildSession({

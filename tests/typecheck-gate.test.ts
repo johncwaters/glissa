@@ -77,6 +77,18 @@ function sourceFilesUnder(dir: string): string[] {
   return found;
 }
 
+function rootSourceFiles(): string[] {
+  return fs
+    .readdirSync(repoRoot, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && /\.(ts|mts|cts)$/.test(entry.name))
+    .map((entry) => path.join(repoRoot, entry.name));
+}
+
+function checkedSourceFiles(): string[] {
+  const inTrees = CHECKED_TREES.flatMap((tree) => sourceFilesUnder(path.join(repoRoot, tree)));
+  return [...inTrees, ...rootSourceFiles()];
+}
+
 function isSelfExempt(file: string): boolean {
   return SELF_EXEMPT.some((name) => path.basename(file).startsWith(name));
 }
@@ -135,16 +147,14 @@ test('no source tree holds a non-TypeScript module', () => {
 
 test('no checked file opts itself out of the gate', () => {
   const offenders: string[] = [];
-  for (const tree of CHECKED_TREES) {
-    for (const file of sourceFilesUnder(path.join(repoRoot, tree))) {
-      if (isSelfExempt(file)) continue;
-      const source = fs.readFileSync(file, 'utf8');
-      for (const suppression of SUPPRESSIONS) {
-        if (source.includes(suppression)) offenders.push(`${path.relative(repoRoot, file)}: ${suppression}`);
-      }
-      for (const castEscape of CAST_ESCAPES) {
-        if (castEscape.test(source)) offenders.push(`${path.relative(repoRoot, file)}: ${castEscape.source}`);
-      }
+  for (const file of checkedSourceFiles()) {
+    if (isSelfExempt(file)) continue;
+    const source = fs.readFileSync(file, 'utf8');
+    for (const suppression of SUPPRESSIONS) {
+      if (source.includes(suppression)) offenders.push(`${path.relative(repoRoot, file)}: ${suppression}`);
+    }
+    for (const castEscape of CAST_ESCAPES) {
+      if (castEscape.test(source)) offenders.push(`${path.relative(repoRoot, file)}: ${castEscape.source}`);
     }
   }
   assert.deepEqual(offenders, []);
@@ -152,15 +162,13 @@ test('no checked file opts itself out of the gate', () => {
 
 test('no checked file carries a comment', () => {
   const offenders: string[] = [];
-  for (const tree of CHECKED_TREES) {
-    for (const file of sourceFilesUnder(path.join(repoRoot, tree))) {
-      if (isSelfExempt(file)) continue;
-      const lines = fs.readFileSync(file, 'utf8').split('\n');
-      lines.forEach((line, index) => {
-        if (!COMMENT_LINE.test(line)) return;
-        offenders.push(`${path.relative(repoRoot, file)}:${index + 1}`);
-      });
-    }
+  for (const file of checkedSourceFiles()) {
+    if (isSelfExempt(file)) continue;
+    const lines = fs.readFileSync(file, 'utf8').split('\n');
+    lines.forEach((line, index) => {
+      if (!COMMENT_LINE.test(line)) return;
+      offenders.push(`${path.relative(repoRoot, file)}:${index + 1}`);
+    });
   }
   assert.deepEqual(offenders, [], 'code comments are banned; name or restructure instead');
 });

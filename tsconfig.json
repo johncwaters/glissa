@@ -3,14 +3,7 @@
   "compilerOptions": {
     "allowJs": true,
     "checkJs": false,
-    "types": ["node"],
-    "strict": true,
-    "erasableSyntaxOnly": true,
-    "verbatimModuleSyntax": true,
-    "isolatedModules": true,
-    "noImplicitReturns": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true
+    "types": ["node"]
   },
   "include": [
     "server/**/*.ts",

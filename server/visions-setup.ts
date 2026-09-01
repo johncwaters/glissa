@@ -78,7 +78,12 @@ function packedSource(filePath: string): string {
 }
 
 function packedLspCore(filePath: string): string {
-  return packedSource(filePath).replace(/^export \{([^}]*)\};/m, 'module.exports = {$1};');
+  const stripped = packedSource(filePath);
+  const exportStatement = /^export \{([^}]*)\};/m;
+  if (!exportStatement.test(stripped)) {
+    throw new Error(`${filePath} has no single-line export block to rewrite for the extension host`);
+  }
+  return stripped.replace(exportStatement, 'module.exports = {$1};');
 }
 
 function packedExtensionSources(): { extensionJs: string; convertJs: string; lspCoreJs: string } {

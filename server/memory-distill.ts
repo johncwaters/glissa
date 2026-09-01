@@ -1,10 +1,10 @@
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
 import type { HookRouter } from '../detection/hook-source.ts';
+import { Session } from '../session/sessions.ts';
 import type { SessionOptions } from '../session/sessions.ts';
 import { needsDistill } from './core/distill-core.ts';
 import { buildLanePermissions } from './core/lane-permissions-core.ts';
@@ -119,17 +119,11 @@ function writeStandaloneDenySettings(permissions: unknown): { args: string[]; cl
   };
 }
 
-const requireFromHere = createRequire(import.meta.url);
-function loadSessionConstructor() {
-  return (requireFromHere('../session/sessions.ts') as typeof import('../session/sessions.ts')).Session;
-}
-
 function createMemoryDistillSpawn({
   sessions = new Map(), closeSessionDataClients = () => {}, hookRouter = null, getHookPort = null,
   spawnGate = null, replayBufferKB = undefined, recordLane = null,
 }: MemoryDistillSpawnOptions = {}): SpawnDistill {
   return async function spawnMemoryDistill({ id, name, prompt, cwd, model = null, signal = null }) {
-    const Session = loadSessionConstructor();
     const posture = buildLanePermissions({ denyTools: MEMORY_DISTILL_DENY_TOOLS });
     const standalone = hookRouter ? null : writeStandaloneDenySettings(posture.permissions);
     const extraClaudeArgs = ['-p', ...posture.args, ...(standalone ? standalone.args : [])];

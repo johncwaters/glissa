@@ -63,6 +63,15 @@ function isDidOpen(value: unknown): value is DidOpenMessage {
   return typeof value.params.textDocument.uri === 'string';
 }
 
+test('the extension sources stay CommonJS-shaped, since the dev-mode packer only strips types', () => {
+  const sourceDir = path.join(import.meta.dirname, '..', 'tools', 'vscode-visions');
+  for (const name of ['extension.ts', 'lsp-convert.ts']) {
+    const source = fs.readFileSync(path.join(sourceDir, name), 'utf8');
+    assert.match(source, /^module\.exports = \{/m, `${name} must export via module.exports for the extension host`);
+    assert.doesNotMatch(source, /^export /m, `${name} must not use ESM exports`);
+  }
+});
+
 test('the packed extension carries every file it requires and the stamped relay path', async (t) => {
   const { manifest, vsix } = packVsix();
   const extensionDir = unpack(vsix);

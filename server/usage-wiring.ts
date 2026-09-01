@@ -1,5 +1,4 @@
 import nodeFsPromises from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import path from 'node:path';
 
 import { decideTelegramNotification } from '../notifications/channels/telegram.ts';
@@ -17,6 +16,7 @@ import {
 } from './core/usage-statusline-core.ts';
 import type { StatuslineSnapshot } from './core/usage-statusline-core.ts';
 import { createJsonStateWriter } from './json-file.ts';
+import { getRtkPath } from './rtk-resolver.ts';
 import { sendTelegramMessage } from './telegram-transport.ts';
 import { loadPricing } from './usage-pricing.ts';
 import type { PricingResult } from './usage-pricing.ts';
@@ -55,9 +55,8 @@ const RTK_GAIN_TIMEOUT_MS = 5000;
 const RTK_GAIN_MAX_BUFFER = 4 * 1024 * 1024;
 const RTK_UNAVAILABLE = Object.freeze({ available: false });
 
-const requireFromHere = createRequire(import.meta.url);
 function defaultRtkPath(): string | null {
-  return (requireFromHere('./rtk-resolver.ts') as typeof import('./rtk-resolver.ts')).getRtkPath();
+  return getRtkPath();
 }
 const COST_MODES = new Set<string>(USAGE_COST_MODES);
 const INTEGER_RANGES = USAGE_INTEGER_RANGES;

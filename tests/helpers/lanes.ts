@@ -15,27 +15,27 @@ type UsageLane = ReturnType<typeof createUsageWiring>;
 type VisionsLane = ReturnType<typeof createVisionsWiring>;
 
 function ingestLane(backend: Backend): IngestLane | null {
-  return backend.getLane('ingest') as IngestLane | null;
+  return backend.getLane('ingest');
 }
 
 function memoryDistillLane(backend: Backend): MemoryDistiller | null {
-  return backend.getLane('memory-distill') as MemoryDistiller | null;
+  return backend.getLane('memory-distill');
 }
 
 function memoryIngestLane(backend: Backend): MemoryIngest | null {
-  return backend.getLane('memory-ingest') as MemoryIngest | null;
+  return backend.getLane('memory-ingest');
 }
 
 function memoryStoreLane(backend: Backend): MemoryStore | null {
-  return backend.getLane('memory-store') as MemoryStore | null;
+  return backend.getLane('memory-store');
 }
 
 function usageLane(backend: Backend): UsageLane {
-  return backend.getLane('usage') as UsageLane;
+  return backend.getLane('usage');
 }
 
 function visionsLane(backend: Backend): VisionsLane | null {
-  return backend.getLane('visions') as VisionsLane | null;
+  return backend.getLane('visions');
 }
 
 export {

@@ -1,9 +1,9 @@
 import fs from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
 import type { HookRouter } from '../detection/hook-source.ts';
+import { Session } from '../session/sessions.ts';
 import type { SessionOptions } from '../session/sessions.ts';
 import { buildLanePermissions } from './core/lane-permissions-core.ts';
 import {
@@ -154,17 +154,11 @@ async function readCommentsResult(
   };
 }
 
-const requireFromHere = createRequire(import.meta.url);
-function loadSessionConstructor() {
-  return (requireFromHere('../session/sessions.ts') as typeof import('../session/sessions.ts')).Session;
-}
-
 function createVisionsSpawn({
   sessions = new Map(), closeSessionDataClients = () => {}, hookRouter = null, getHookPort = null,
   spawnGate = null, replayBufferKB = undefined, recordLane = null,
 }: VisionsSpawnOptions = {}): VisionsSpawn {
   return async function spawnVisionsSession({ id, name, cwd, model = null, signal = null, initialPrompt = VISIONS_BOOTSTRAP_PROMPT }) {
-    const Session = loadSessionConstructor();
     const posture = visionsPermissions();
     const extraClaudeArgs = ['-p', ...posture.args];
     if (model) extraClaudeArgs.push('--model', model);

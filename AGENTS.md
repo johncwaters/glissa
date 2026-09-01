@@ -34,7 +34,7 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 ### Working In This Directory
 
 - Everything is TypeScript ESM. Erasable syntax only (no enums, namespaces, parameter properties); relative imports carry explicit `.ts` extensions; the browser reaches `shared/` through the `#shared/*` imports map. Never `any`, never `as unknown as` (`tests/typecheck-gate.test.ts`).
-- Node >=22.18.0 makes native type stripping unflagged and exceeds the `node:sqlite` FTS5 floor. Windows 11 and Linux, developed on v24.
+- Node >=22.18.0 (where type stripping is on by default, which source mode and the `.test.ts` suite depend on; `node:sqlite` FTS5 at 22.16 is the secondary floor). Windows 11 and Linux, developed on v24.
 - Do NOT add dependencies without explicit instruction.
 - Status detection is structural (hooks plus OSC-0 title). Never reintroduce PTY body or content scraping.
 - Spawn sessions with `pty.spawn`, never `child_process.spawn`, and never `shell: true`. Scrub env via `session/core/spawn-env.ts`.
