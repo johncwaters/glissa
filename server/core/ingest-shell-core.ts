@@ -15,7 +15,7 @@
 
 import path from 'node:path';
 
-import { stringOrNull } from './usage-number-core.js';
+import { stringOrNull } from './usage-number-core.ts';
 
 const SOURCE = 'shellHistory';
 const SHELLS: readonly string[] = Object.freeze(['powershell', 'fish', 'bash', 'zsh']);

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import type { EditorState } from '../server/core/ingest-editor-core.ts';
 
 import { applyEditorNotification, createEditorState } from '../server/core/ingest-editor-core.ts';
-import { deepestRootFor } from '../server/core/visions-scope-core.js';
+import { deepestRootFor } from '../server/core/visions-scope-core.ts';
 
 const ROOTS = ['/home/op/Projects/glissa', '/home/op/Projects/glissa/vendor/inner'];
 const URI = 'file:///home/op/Projects/glissa/docs/plan.md';

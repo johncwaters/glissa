@@ -12,7 +12,7 @@
  * shellHistory source, so vendor transcript shapes live next door in ingest-agent-core.ts.
  */
 
-import { decideFileRead, splitLines } from './usage-scan-core.js';
+import { decideFileRead, splitLines } from './usage-scan-core.ts';
 
 // One read never spans more than this, so a file that grew by 50MB while the daemon was busy costs one
 // bounded read of its newest bytes rather than a stall on the event loop every session shares.

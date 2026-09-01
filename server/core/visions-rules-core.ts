@@ -1,0 +1,201 @@
+const WARNING = 2;
+const SOURCE = 'glissa-visions';
+const FENCE = '```';
+const FENCE_RE = /^(\s*)```/;
+const HEADING_RE = /^( {0,3})(#{1,6})(?:\s|$)/;
+// The lookbehind is load-bearing: without it a match starts INSIDE a token that begins with a digit, so
+// "a 1a fallback" reads as the word "a" twice and the fix deletes the token beside it.
+const WORD_RE = /(?<![A-Za-z0-9'])[A-Za-z][A-Za-z0-9']*/g;
+
+export interface DocumentPosition {
+  line: number;
+  character: number;
+}
+
+export interface DocumentRange {
+  start: DocumentPosition;
+  end: DocumentPosition;
+}
+
+export interface SweepDiagnostic {
+  range: DocumentRange;
+  severity: number;
+  source: string;
+  code: string;
+  message: string;
+}
+
+export interface SweepFix {
+  code: string;
+  message: string;
+  range: DocumentRange;
+  editRange: DocumentRange;
+  newText: string;
+}
+
+function sweepMarkdown(text: unknown): SweepDiagnostic[] {
+  return sweepMarkdownWithFixes(text).diagnostics;
+}
+
+function sweepMarkdownWithFixes(text: unknown): { diagnostics: SweepDiagnostic[]; fixes: SweepFix[] } {
+  const diagnostics: SweepDiagnostic[] = [];
+  const fixes: SweepFix[] = [];
+  const lines = splitLines(text);
+  let isInFence = false;
+  let lastFence: DocumentPosition | null = null;
+  let previousHeadingLevel = 0;
+
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    const line = lines[lineIndex];
+    const fenceMatch = line.match(FENCE_RE);
+    if (fenceMatch) {
+      lastFence = { line: lineIndex, character: fenceMatch[1].length };
+      isInFence = !isInFence;
+      continue;
+    }
+
+    if (isInFence) continue;
+
+    addRepeatedWordDiagnostics(diagnostics, fixes, line, lineIndex);
+
+    const headingMatch = line.match(HEADING_RE);
+    if (!headingMatch) continue;
+
+    const level = headingMatch[2].length;
+    if (previousHeadingLevel > 0 && level > previousHeadingLevel + 1) {
+      diagnostics.push(diagnostic(
+        lineIndex,
+        headingMatch[1].length,
+        lineIndex,
+        headingMatch[1].length + level,
+        'heading-skip',
+        `Heading jumps from level ${previousHeadingLevel} to ${level}`,
+      ));
+    }
+    previousHeadingLevel = level;
+  }
+
+  if (isInFence && lastFence) {
+    const unclosed = diagnostic(
+      lastFence.line,
+      lastFence.character,
+      lastFence.line,
+      lastFence.character + FENCE.length,
+      'unclosed-fence',
+      'Fence is not closed',
+    );
+    diagnostics.push(unclosed);
+    fixes.push(closingFenceFix(unclosed, lines));
+  }
+
+  return { diagnostics, fixes };
+}
+
+function splitLines(text: unknown): string[] {
+  return String(text).split(/\r?\n/);
+}
+
+function addRepeatedWordDiagnostics(
+  diagnostics: SweepDiagnostic[],
+  fixes: SweepFix[],
+  line: string,
+  lineIndex: number,
+): void {
+  const inlineCodeMask = maskInlineCode(line);
+  let previousWord: { normalizedWord: string; end: number } | null = null;
+
+  WORD_RE.lastIndex = 0;
+  while (true) {
+    const match = WORD_RE.exec(line);
+    if (!match) break;
+
+    const word = match[0];
+    const start = match.index;
+    const end = start + word.length;
+    if (isMasked(inlineCodeMask, start, end)) {
+      previousWord = null;
+      continue;
+    }
+
+    const normalizedWord = word.toLowerCase();
+    if (previousWord && previousWord.normalizedWord === normalizedWord) {
+      const repeated = diagnostic(lineIndex, start, lineIndex, end, 'repeated-word', `Repeated word "${word}"`);
+      diagnostics.push(repeated);
+      fixes.push(repeatedWordFix(repeated, lineIndex, previousWord.end, end));
+    }
+    previousWord = { normalizedWord, end };
+  }
+}
+
+// The separator goes with the word, or deleting "with" out of "with with a" leaves a double space.
+function repeatedWordFix(repeated: SweepDiagnostic, lineIndex: number, previousEnd: number, end: number): SweepFix {
+  return fix(repeated, range(lineIndex, previousEnd, lineIndex, end), '');
+}
+
+// A guess at WHERE the fence should close, which is why this one is never auto-applied.
+function closingFenceFix(unclosed: SweepDiagnostic, lines: string[]): SweepFix {
+  const lastLine = Math.max(lines.length - 1, 0);
+  const character = (lines[lastLine] || '').length;
+  const separator = character > 0 ? '\n' : '';
+  return fix(unclosed, range(lastLine, character, lastLine, character), `${separator}${FENCE}\n`);
+}
+
+function maskInlineCode(line: string): boolean[] {
+  const mask: boolean[] = new Array(line.length).fill(false);
+  let spanStart: number | null = null;
+  for (let index = 0; index < line.length; index++) {
+    if (line[index] !== '`') continue;
+    if (spanStart === null) {
+      spanStart = index;
+      continue;
+    }
+    for (let spanIndex = spanStart; spanIndex <= index; spanIndex++) {
+      mask[spanIndex] = true;
+    }
+    spanStart = null;
+  }
+  return mask;
+}
+
+function isMasked(mask: boolean[], start: number, end: number): boolean {
+  for (let index = start; index < end; index++) {
+    if (mask[index]) return true;
+  }
+  return false;
+}
+
+function range(startLine: number, startCharacter: number, endLine: number, endCharacter: number): DocumentRange {
+  return {
+    start: { line: startLine, character: startCharacter },
+    end: { line: endLine, character: endCharacter },
+  };
+}
+
+function diagnostic(
+  startLine: number,
+  startCharacter: number,
+  endLine: number,
+  endCharacter: number,
+  code: string,
+  message: string,
+): SweepDiagnostic {
+  return {
+    range: range(startLine, startCharacter, endLine, endCharacter),
+    severity: WARNING,
+    source: SOURCE,
+    code,
+    message,
+  };
+}
+
+function fix(sourceDiagnostic: SweepDiagnostic, editRange: DocumentRange, newText: string): SweepFix {
+  return {
+    code: sourceDiagnostic.code,
+    message: sourceDiagnostic.message,
+    range: sourceDiagnostic.range,
+    editRange,
+    newText,
+  };
+}
+
+export { SOURCE, WARNING, sweepMarkdown, sweepMarkdownWithFixes };

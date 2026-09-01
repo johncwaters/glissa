@@ -20,7 +20,7 @@ const WebSocket = require('ws');
 const { createBackend } = require('../server/backend');
 const { createConfigStore } = require('../server/config-store');
 const { CONFIG_SCALAR_KEYS, ConfigUpdate } = require('../shared/contracts/index.ts');
-const { MAX_PROMPT_BYTES } = require('../server/core/visions-dispatch-core');
+const { MAX_PROMPT_BYTES } = require('../server/core/visions-dispatch-core.ts');
 const { DIGEST_BUDGET_CHARS, createVisionsWiring, VISIONS_DEBOUNCE_MS } = require('../server/visions-wiring');
 
 const MARKDOWN_URI = 'file:///tmp/plan-visions.md';

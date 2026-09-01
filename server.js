@@ -3,8 +3,8 @@
 const http = require('node:http');
 const { createBackend } = require('./server/backend');
 const { createLifecycle } = require('./server/server-lifecycle');
-const { decideBindHost } = require('./server/core/remote-config');
-const { buildTitleSequence, buildTitleClearSequence } = require('./server/core/terminal-title');
+const { decideBindHost } = require('./server/core/remote-config.ts');
+const { buildTitleSequence, buildTitleClearSequence } = require('./server/core/terminal-title.ts');
 
 // Which address the listeners bind. Loopback unless GLISSA_HOST says otherwise, and a non-loopback
 // GLISSA_HOST is REFUSED unless GLISSA_INSECURE_BIND=1 states the intent: Glissa's control WebSocket

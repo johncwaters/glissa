@@ -19,7 +19,7 @@ const {
   readCommentsResult,
   visionsPermissions,
 } = require('../server/visions-dispatch');
-const { MAX_PROMPT_BYTES, buildVisionsPrompt } = require('../server/core/visions-dispatch-core');
+const { MAX_PROMPT_BYTES, buildVisionsPrompt } = require('../server/core/visions-dispatch-core.ts');
 
 const URI = 'file:///tmp/plan-visions.md';
 const TEXT = '# Title\n\nA plan with three lines.\n';

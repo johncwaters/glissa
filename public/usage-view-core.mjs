@@ -129,7 +129,7 @@ function dayKeysOf(days) {
 }
 
 // The report's own calendar day, in the SERVER's timezone. The daily buckets are keyed there
-// (server/core/usage-aggregate-core.js runs on the server clock), so asking the browser what day it is
+// (server/core/usage-aggregate-core.ts runs on the server clock), so asking the browser what day it is
 // reads the wrong bucket for any viewer in another zone, which remote mode makes routine.
 export function reportDayKey(report) {
   const ts = Number(report?.ts);
@@ -231,7 +231,7 @@ export function tokenLimitTone(pct) {
 }
 
 // The wire carries tokenLimit.pct as a RATIO of the largest completed block (see
-// server/core/usage-blocks-core.js), so the percent every threshold and meter here works in is derived
+// server/core/usage-blocks-core.ts), so the percent every threshold and meter here works in is derived
 // rather than assumed.
 // Absent has to stay distinct from zero here: Number(null) is 0, and a missing reference reported as
 // "0% of the limit" would read as a calm block rather than an unknown one.
@@ -389,7 +389,7 @@ export function cacheSavingsTile(savings) {
 }
 
 // ── Spend budgets ──
-// The rows and their tones come from server/core/usage-budget-core.js, which owns the ladder; nothing is
+// The rows and their tones come from server/core/usage-budget-core.ts, which owns the ladder; nothing is
 // recomputed here. These only format them, and decide when the tab dot is owed.
 
 // The tone ladder's own top step. A budget that far along is worth pulling an operator over, which is a

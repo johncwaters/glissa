@@ -141,7 +141,7 @@ test('the thread prefix passes the entropy screen, so a threaded intent enters t
 });
 
 test('the delivered bullet carries the thread prefix intact', () => {
-  const { memoryDeliveryLines } = require('../server/core/visions-memory-core');
+  const { memoryDeliveryLines } = require('../server/core/visions-memory-core.ts');
   const [line] = memoryDeliveryLines([{
     id: 'm-1', text: 'thread t-716d49b4: shipping the memory writers', rank: 'model', kind: 'intent',
   }]);

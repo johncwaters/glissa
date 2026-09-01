@@ -10,19 +10,19 @@ const {
   parseUsageLine,
   shouldReplace,
   totalTokensOf,
-} = require('./core/usage-entry-core');
-const { buildUsageReport, localDayKey, pruneEntries } = require('./core/usage-aggregate-core');
-const { buildBlocks, burnRate, projectBlock } = require('./core/usage-blocks-core');
-const { dailyBaseline, detectBurnAnomaly, detectDailyAnomaly } = require('./core/usage-anomaly-core');
-const { budgetStanding, normalizeBudgetConfig } = require('./core/usage-budget-core');
-const { laneRollup } = require('./core/usage-lane-core');
+} = require('./core/usage-entry-core.ts');
+const { buildUsageReport, localDayKey, pruneEntries } = require('./core/usage-aggregate-core.ts');
+const { buildBlocks, burnRate, projectBlock } = require('./core/usage-blocks-core.ts');
+const { dailyBaseline, detectBurnAnomaly, detectDailyAnomaly } = require('./core/usage-anomaly-core.ts');
+const { budgetStanding, normalizeBudgetConfig } = require('./core/usage-budget-core.ts');
+const { laneRollup } = require('./core/usage-lane-core.ts');
 const {
   mergeWarehouse,
   pruneWarehouse,
   rollupFromReport,
   warehouseDailyRows,
-} = require('./core/usage-warehouse-core');
-const { costForEntry, lookupModelPrice } = require('./core/usage-pricing-core');
+} = require('./core/usage-warehouse-core.ts');
+const { costForEntry, lookupModelPrice } = require('./core/usage-pricing-core.ts');
 const {
   codexFallbackRoots,
   codexHomes,
@@ -36,10 +36,10 @@ const {
   projectDirCandidates,
   resolveProjectsDirs,
   splitLines,
-} = require('./core/usage-scan-core');
+} = require('./core/usage-scan-core.ts');
 const { createJsonStateWriter } = require('./json-file');
-const { codexDedupIdentity, createCodexUsageState, parseCodexUsageLine } = require('./core/usage-codex-core');
-const { grokDedupIdentity, parseGrokUsageLine } = require('./core/usage-grok-core');
+const { codexDedupIdentity, createCodexUsageState, parseCodexUsageLine } = require('./core/usage-codex-core.ts');
+const { grokDedupIdentity, parseGrokUsageLine } = require('./core/usage-grok-core.ts');
 
 const DEFAULT_BYTE_BUDGET = 64 * 1024 * 1024;
 const DEFAULT_CHUNK_SIZE = 1024 * 1024;

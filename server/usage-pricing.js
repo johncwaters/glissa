@@ -2,7 +2,7 @@
 
 const path = require('node:path');
 const { glissaHomeDir } = require('./config-store');
-const { normalizePricingTable } = require('./core/usage-pricing-core');
+const { normalizePricingTable } = require('./core/usage-pricing-core.ts');
 const pricingSnapshot = require('./data/claude-pricing.json');
 
 const LITELLM_PRICING_URL = 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json';

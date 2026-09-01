@@ -21,7 +21,7 @@ const {
   laneRollup,
   normalizeLedger,
   pruneLedger,
-} = require('../server/core/usage-lane-core');
+} = require('../server/core/usage-lane-core.ts');
 const { createLaneLedger } = require('../server/usage-lane-ledger');
 const { registerEphemeralSession } = require('../server/ephemeral-session');
 

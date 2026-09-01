@@ -9,7 +9,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { createUsageWiring, resolveUsageConfig, DEFAULT_USAGE_CONFIG, RTK_SAVINGS_TTL_MS } = require('../server/usage-wiring');
-const { normalizePricingTable } = require('../server/core/usage-pricing-core');
+const { normalizePricingTable } = require('../server/core/usage-pricing-core.ts');
 
 const RTK_JSON = JSON.stringify({
   summary: {

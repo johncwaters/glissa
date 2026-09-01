@@ -8,10 +8,10 @@ const os = require('node:os');
 const { canonicalizePath, equalsIgnoringCaseOnWindows } = require('../shared/paths.ts');
 const { decideConfigPath, glissaHomeDir: resolveGlissaHomeDir } = require('./core/config-path-core.ts');
 const { Config, RUNTIME_CONFIG_SCALAR_KEYS } = require('../shared/contracts/index.ts');
-const { isPlainObject } = require('./core/usage-number-core');
+const { isPlainObject } = require('./core/usage-number-core.ts');
 const {
   INGEST_SPEC, MEMORY_SPEC, MILL_METRICS_SPEC, PACK_DISTILLER_SPEC, pickMillBlock,
-} = require('./core/settings-mill-core');
+} = require('./core/settings-mill-core.ts');
 const { writeJsonAtomicSync, writeTextAtomicSync } = require('./json-file');
 
 const DEFAULT_CONFIG = {

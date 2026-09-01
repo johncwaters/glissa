@@ -5,7 +5,7 @@
 // Advisory only - every failure path resolves null or degrades to the semver compare, never rejects, so
 // a boot is never blocked, delayed past the timeout, or crashed by this check. Notify only: nothing here
 // runs an update (on Windows the running server holds node_modules/node-pty open).
-// All decisions live in server/core/update-core.js; this file is the IO around them, with every IO seam
+// All decisions live in server/core/update-core.ts; this file is the IO around them, with every IO seam
 // injectable so the whole check runs offline in tests.
 
 const fs = require('node:fs');
@@ -22,7 +22,7 @@ const {
   parseLsRemoteTags,
   parseResolvedSha,
   normalizeSha,
-} = require('./core/update-core');
+} = require('./core/update-core.ts');
 
 const GIT_REMOTE_URL = 'https://github.com/johncwaters/glissa.git';
 const GITHUB_LATEST_RELEASE_URL = 'https://api.github.com/repos/johncwaters/glissa/releases/latest';

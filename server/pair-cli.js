@@ -13,7 +13,7 @@ const fs = require('node:fs');
 
 const { resolveConfigPath } = require('./config-store');
 const { formatTimestamp } = require('./text-format');
-const { normalizeRemoteConfig } = require('./core/remote-config');
+const { normalizeRemoteConfig } = require('./core/remote-config.ts');
 const {
   createPairingsStore, createSeenStore, defaultPairingsPath, defaultSeenPath,
   REVOCATION_PROPAGATION_SECONDS,

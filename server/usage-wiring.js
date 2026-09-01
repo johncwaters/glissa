@@ -21,15 +21,15 @@ const { createUsageScanner } = require('./usage-scanner');
 const { loadPricing } = require('./usage-pricing');
 const { execFileAsync: defaultExecFileAsync } = require('./child-process-safe');
 const { createJsonStateWriter } = require('./json-file');
-const { evaluateBudget, normalizeBudgetConfig } = require('./core/usage-budget-core');
-const { computeCacheSavings, normalizeRtkGain } = require('./core/usage-savings-core');
+const { evaluateBudget, normalizeBudgetConfig } = require('./core/usage-budget-core.ts');
+const { computeCacheSavings, normalizeRtkGain } = require('./core/usage-savings-core.ts');
 const { decideTelegramNotification } = require('../notifications/channels/telegram.ts');
 const { sendTelegramMessage } = require('./telegram-transport');
 const {
   buildPlanLimitsMessage,
   normalizeStatuslinePayload,
   shouldBroadcastPlanLimits,
-} = require('./core/usage-statusline-core');
+} = require('./core/usage-statusline-core.ts');
 
 const DEFAULT_USAGE_CONFIG = Object.freeze({
   enabled: true,

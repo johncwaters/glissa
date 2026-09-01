@@ -1,0 +1,94 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+import type { UsageEntryLike } from '../server/core/usage-entry-core.ts';
+import { buildUsageReport, pruneEntries } from '../server/core/usage-aggregate-core.ts';
+
+function entry(
+  timestampMs: number,
+  sessionId: string,
+  model: string,
+  tokens: { input?: number; output?: number; cacheCreate?: number; cacheRead?: number },
+  costUSD = 1,
+): UsageEntryLike {
+  return {
+    timestampMs,
+    sessionId,
+    model,
+    input: tokens.input || 0,
+    output: tokens.output || 0,
+    cacheCreate: tokens.cacheCreate || 0,
+    cacheRead: tokens.cacheRead || 0,
+    costUSD,
+    messageId: `${sessionId}-${timestampMs}`,
+    requestId: 'request-a',
+  };
+}
+
+function sessionProject(report: { sessions: { id: string; project: string | null }[] }, sessionId: string) {
+  return report.sessions.find((session) => session.id === sessionId)?.project;
+}
+
+test('buildUsageReport uses local date buckets and rolls up totals, models and sessions', () => {
+  const first = entry(new Date(2026, 7, 18, 23, 59, 0).getTime(), 'session-a', 'claude-a', { input: 1, output: 2 }, 0.5);
+  const second = entry(new Date(2026, 7, 19, 0, 1, 0).getTime(), 'session-b', 'claude-b', { cacheCreate: 3, cacheRead: 4 }, 1.5);
+  first.cwd = '/repo/alpha';
+  const sessionsById = new Map([['session-a', { name: 'Alpha' }]]);
+  const report = buildUsageReport([first, second], {
+    now: new Date(2026, 7, 20).getTime(),
+    retainDays: 30,
+    sessionsById,
+    tz: 'America/Denver',
+  });
+  assert.deepEqual(report.daily.map((day) => day.day), ['2026-08-18', '2026-08-19']);
+  // An entry with no vendor field is Claude: the field was added when other CLI vendors were, and every
+  // pre-existing entry shape predates it.
+  assert.deepEqual(report.totals, {
+    tokens: 10,
+    costUSD: 2,
+    input: 1,
+    output: 2,
+    cacheCreate: 3,
+    cacheRead: 4,
+    byVendor: { claude: { tokens: 10, costUSD: 2 } },
+  });
+  assert.deepEqual(report.daily[0].vendors, ['claude']);
+  assert.equal(report?.models?.find((model) => model.key === 'claude-a')?.vendor, 'claude');
+  assert.equal(report?.sessions?.find((session) => session.id === 'session-a')?.vendor, 'claude');
+  assert.deepEqual(report.daily[0].models.map((model) => ({ model: model.model, tokens: model.tokens, costUSD: model.costUSD })), [
+    { model: 'claude-a', tokens: 3, costUSD: 0.5 },
+  ]);
+  assert.equal(report?.models?.find((model) => model.key === 'claude-a')?.tokens, 3);
+  assert.equal(Object.hasOwn(report.models.find((model) => model.key === 'claude-a') || {}, 'day'), false);
+  assert.equal(report?.sessions?.find((session) => session.id === 'session-a')?.name, 'Alpha');
+  assert.equal(report?.sessions?.find((session) => session.id === 'session-a')?.project, '/repo/alpha');
+  assert.equal(report?.sessions?.find((session) => session.id === 'session-b')?.tokens, 7);
+});
+
+test('session rows carry project from cwd, fallback project, or null', () => {
+  const now = Date.UTC(2026, 7, 20);
+  const cwdEntry = entry(now, 'session-cwd', 'claude-a', { input: 1 });
+  cwdEntry.cwd = '/worktrees/glissa';
+  cwdEntry.project = '-worktrees-glissa';
+  const projectEntry = entry(now + 1, 'session-project', 'claude-a', { input: 1 });
+  projectEntry.project = '-encoded-project';
+  const nullEntry = entry(now + 2, 'session-null', 'claude-a', { input: 1 });
+  const laterBackfill = entry(now + 3, 'session-null', 'claude-a', { input: 1 });
+  laterBackfill.cwd = '/later/project';
+  const report = buildUsageReport([cwdEntry, projectEntry, nullEntry], { now: now + 10, retainDays: 30 });
+  const backfilledReport = buildUsageReport([nullEntry, laterBackfill], { now: now + 10, retainDays: 30 });
+
+  assert.equal(sessionProject(report, 'session-cwd'), '/worktrees/glissa');
+  assert.equal(sessionProject(report, 'session-project'), '-encoded-project');
+  assert.equal(sessionProject(report, 'session-null'), null);
+  assert.equal(sessionProject(backfilledReport, 'session-null'), '/later/project');
+});
+
+test('pruneEntries keeps retained entries and returns removed dedup keys', () => {
+  const now = Date.UTC(2026, 7, 20);
+  const oldEntry = entry(now - 3 * 24 * 60 * 60 * 1000, 'session-a', 'claude-a', { input: 1 });
+  const freshEntry = entry(now - 1 * 24 * 60 * 60 * 1000, 'session-b', 'claude-b', { input: 1 });
+  const pruned = pruneEntries([oldEntry, freshEntry, { timestampMs: oldEntry.timestampMs, messageId: null }], { now, retainDays: 2 });
+  assert.deepEqual(pruned.kept, [freshEntry]);
+  assert.deepEqual(pruned.removedKeys, [`session-a-${oldEntry.timestampMs}:request-a`]);
+});

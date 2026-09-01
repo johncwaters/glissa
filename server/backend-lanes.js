@@ -32,8 +32,8 @@ const { resolveDistillConfig: resolveMemoryDistillConfig } = require('./core/mem
 const { consumedPackNames, packVariantProjects } = require('./core/pack-core.ts');
 const { resolveMillMetricsConfig } = /** @type {MillMetricsCore} */ (require('./core/mill-metrics-core.ts'));
 const { numberOrNull } = require('./core/usage-number-core.js');
-const { resolveVisionsConfig } = require('./core/visions-dispatch-core');
-const { normalizeShapePath } = require('./core/visions-scope-core');
+const { resolveVisionsConfig } = require('./core/visions-dispatch-core.ts');
+const { normalizeShapePath } = require('./core/visions-scope-core.ts');
 
 /** @typedef {Record<string, unknown> & { id: string, name: string, path: string, packs?: string[] }} BackendLaneProject */
 /** @typedef {Record<string, unknown> & { projects: BackendLaneProject[], worktreeRerere?: boolean, usage?: Record<string, unknown>, ingest?: Record<string, unknown>, visions?: Record<string, unknown>, memory?: Record<string, unknown>, millMetrics?: { retainDays?: number }, replayBufferKB?: number, packDistiller?: { enabled?: boolean, intervalHours?: number, timeoutSeconds?: number }, packsAutoRebuild?: boolean }} BackendLaneConfig */

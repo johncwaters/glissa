@@ -401,7 +401,7 @@ function compareText(left, right) {
 // as an applied one: it says the lane tried and the buffer had already moved.
 
 export const VISIONS_FIXES_EMPTY_TEXT = 'No fixes yet. Silent fixes appear here once the lane applies or is refused one.';
-// Must agree with DEFAULT_FIX_LOG_MAX in server/core/visions-fix-core.js (CJS/ESM split forbids one import).
+// Must agree with DEFAULT_FIX_LOG_MAX in server/core/visions-fix-core.ts (CJS/ESM split forbids one import).
 export const MAX_RENDERED_FIXES = 20;
 
 export function fixCountText(count) {

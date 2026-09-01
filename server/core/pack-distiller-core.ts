@@ -1,5 +1,5 @@
 import { buildStampLine } from './distill-core.ts';
-import { firstLine } from './text-core.js';
+import { firstLine } from './text-core.ts';
 
 const DISTILL_RESULT_VERDICT_SET = new Set(['DISTILLED', 'NO_CHANGE', 'ERROR']);
 const MAX_DISTILL_PROMPT_BYTES = 512 * 1024;

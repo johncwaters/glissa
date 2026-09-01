@@ -18,7 +18,7 @@ const {
 const {
   hashSecret, decideDeviceAuth, deviceNameFromUserAgent, DEFAULT_DEVICE_MAX_AGE_MS,
 } = require('./core/pairing-token.ts');
-const { classifyRequestOrigin, decideRequestAccess, normalizePathname } = require('./core/request-trust');
+const { classifyRequestOrigin, decideRequestAccess, normalizePathname } = require('./core/request-trust.ts');
 
 const DEVICE_COOKIE_MAX_AGE_SECONDS = Math.floor(DEFAULT_DEVICE_MAX_AGE_MS / 1000);
 

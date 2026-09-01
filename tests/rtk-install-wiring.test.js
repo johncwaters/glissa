@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { createRtkInstallWiring } = require('../server/rtk-install-wiring');
-const { INSTALL_FAILURE_COOLDOWN_MS } = require('../server/core/rtk-install-core');
+const { INSTALL_FAILURE_COOLDOWN_MS } = require('../server/core/rtk-install-core.ts');
 
 const SILENT = { log() {}, warn() {} };
 

@@ -14,7 +14,7 @@ const path = require('node:path');
 const { needsDistill } = require('./core/distill-core.ts');
 const { buildMillReport } = require('./core/mill-core.ts');
 const { packConsumerGroups, packVariantProjects, planPackVariants } = require('./core/pack-core.ts');
-const { isPlainObject } = require('./core/usage-number-core');
+const { isPlainObject } = require('./core/usage-number-core.ts');
 const {
   defaultBuiltRoot,
   defaultSpecsDir,

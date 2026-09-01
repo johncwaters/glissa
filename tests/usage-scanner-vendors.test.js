@@ -12,7 +12,7 @@ const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createUsageScanner } = require('../server/usage-scanner');
-const { normalizePricingTable } = require('../server/core/usage-pricing-core');
+const { normalizePricingTable } = require('../server/core/usage-pricing-core.ts');
 
 const NOW = Date.parse('2026-07-09T00:00:00.000Z');
 
@@ -322,9 +322,9 @@ test('a machine with no vendor homes reports exactly one vendor and one root', a
 // Each vendor core puts its vendor name in the first segment of the key it returns, which is what makes a
 // shared entry store safe. Asserted directly rather than trusted.
 test('dedup identities cannot collide across vendors', async () => {
-  const { codexDedupIdentity } = require('../server/core/usage-codex-core');
-  const { grokDedupIdentity } = require('../server/core/usage-grok-core');
-  const { dedupKeys } = require('../server/core/usage-entry-core');
+  const { codexDedupIdentity } = require('../server/core/usage-codex-core.ts');
+  const { grokDedupIdentity } = require('../server/core/usage-grok-core.ts');
+  const { dedupKeys } = require('../server/core/usage-entry-core.ts');
   const codexKey = codexDedupIdentity({ vendor: 'codex', sessionId: 's', timestampMs: 1, model: 'm', input: 1, output: 1, cacheCreate: 0, cacheRead: 0 });
   const grokKey = grokDedupIdentity({ vendor: 'grok', sessionId: 's', messageId: 'p' });
   const claudeKey = dedupKeys({ messageId: 'm', requestId: 'r' }).primary;

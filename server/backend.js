@@ -37,7 +37,7 @@ const {
   runAutoResume,
 } = require('./session-registry');
 const { createBackendLanes } = require('./backend-lanes');
-const { decideWasActiveFlip, shouldStartAfterModify } = require('./core/session-registry-core');
+const { decideWasActiveFlip, shouldStartAfterModify } = require('./core/session-registry-core.ts');
 const { createBackendHealth } = require('./backend-health');
 const { createBackendNotifications } = require('./backend-notifications');
 const { createBackendControl } = require('./backend-control');

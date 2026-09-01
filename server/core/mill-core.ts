@@ -7,7 +7,7 @@
 // rest of the report is only ever as true as the moment it was built.
 
 import { DELIVERY_SKIP_EMPTY, MAX_INDEX_TOKENS, MAX_PACKS_PER_SESSION, decidePackDelivery, normalizePackNames, validatePackSpec } from './pack-core.ts';
-import { isPlainObject, numberOrNull, safeNumber, stringOrNull } from './usage-number-core.js';
+import { isPlainObject, numberOrNull, safeNumber, stringOrNull } from './usage-number-core.ts';
 
 // A pack delivering more files than this is a spec problem, not something a scrolling list fixes, so
 // the tail is counted rather than rendered.

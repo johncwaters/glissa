@@ -9,7 +9,7 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { normalizeProjectTag, projectFileSlug } from './memory-core.ts';
-import { isPlainObject } from './usage-number-core.js';
+import { isPlainObject } from './usage-number-core.ts';
 
 // A pack name becomes a directory name under <packsRoot>/built, so it stays a plain segment.
 const PACK_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;

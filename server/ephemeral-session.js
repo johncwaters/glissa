@@ -10,8 +10,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { awaitBounded } = require('./core/shutdown-core');
-const { firstLine } = require('./core/text-core');
+const { awaitBounded } = require('./core/shutdown-core.ts');
+const { firstLine } = require('./core/text-core.ts');
 
 // The fixed name inside a job's private result directory: the directory is already unique, so the file
 // inside it carries no identity and never has to be told apart from anything.

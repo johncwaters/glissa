@@ -14,7 +14,7 @@ Backend runtime: the Express + WebSocket server factory and its control plane, p
 | `session-{factory,registry,event-wiring}.js` | Session construction, config reconciliation, and one-time event wiring |
 | `control-handlers.js` | Control-WebSocket message handlers (kill, restart, rename, settings) |
 | `control-replay-core.js` | Pure control-broadcast replay log |
-| `server-lifecycle.js` | Boot/shutdown helpers; restart strategy in `core/restart-strategy.js` |
+| `server-lifecycle.js` | Boot/shutdown helpers; restart strategy in `core/restart-strategy.ts` |
 | `ws-sender.js` | Data-WebSocket sender: batching and backpressure |
 | `post-turn-checker.js` | Post-turn hygiene IO runner (rules in `session/core/post-turn-rules.ts`) |
 | `usage-wiring.js` | Usage lane IO shell |
@@ -33,8 +33,8 @@ Backend runtime: the Express + WebSocket server factory and its control plane, p
 | `pr-telegram.js` | PR-only Telegram push helper (never throws; NOT a `NotificationManager` channel) |
 | `core/pr-review-core.ts` | Pure PR-review decisions |
 | `core/branch-sync-core.ts` | Pure ahead/behind decisions for the branch-sync indicator |
-| `core/restart-strategy.js` | Pure restart strategy, keyed on systemd's `INVOCATION_ID` |
-| `core/upgrade-route.js` | Pure WS-upgrade target classification by PATHNAME |
+| `core/restart-strategy.ts` | Pure restart strategy, keyed on systemd's `INVOCATION_ID` |
+| `core/upgrade-route.ts` | Pure WS-upgrade target classification by PATHNAME |
 
 ## For AI Agents
 - These modules live one level below the repo root: filesystem assets (`dist/`, `public/`, `config.json`, `node_modules/`) resolve via `path.join(__dirname, '..', ...)`. Keep that offset when adding paths.
@@ -129,7 +129,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - Host allow-list first (`server/core/host-policy.ts`). An ABSENT Host passes, since rebinding always carries a name and refusing it would only break HTTP/1.0 clients.
 - Port-exact Origin, the port read from the socket so nothing a client sends decides it; a mismatch falls THROUGH to the allow-list. Browser channels demand an Origin, non-browser ingresses do not.
 - A per-process page token guards local control and data upgrades, riding the query string since a browser cannot set a WS handshake header. `GET /control-token` refuses a disallowed Origin outright.
-- Trust is the LISTENER PORT, never a header or IP: a reverse proxy makes remote traffic look loopback, so an IP or `X-Forwarded-For` rule would hand every visitor local trust (`tests/request-trust.test.js`).
+- Trust is the LISTENER PORT, never a header or IP: a reverse proxy makes remote traffic look loopback, so an IP or `X-Forwarded-For` rule would hand every visitor local trust (`tests/request-trust.test.ts`).
 - A pairing cookie is RCE as the server account, the control WS accepting any project path plus `dangerouslySkipPermissions`. Pairing URLs are single-use, short-TTL, never logged or stored in plaintext; the store fails CLOSED on corruption.
 - The `/pair/*` exemption is judged on the DECODED pathname: `express.static` resolves dot segments, so an un-normalized check served the dashboard bundle under `/pair/%2e%2e/`.
 - Remote config is unreachable from the control WS, and remote-off is fully inert: no route, no middleware, no file (`tests/backend-remote-disabled.test.js`). Binding wider needs `GLISSA_INSECURE_BIND=1`.

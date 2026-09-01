@@ -13,7 +13,7 @@ const {
   VISIONS_DISPATCH_NUMERIC_RANGES,
   VISIONS_INTENT_NUMERIC_RANGES,
 } = require('../server/control-handlers');
-const { MEMORY_SPEC, MILL_METRICS_SPEC, PACK_DISTILLER_SPEC } = require('../server/core/settings-mill-core');
+const { MEMORY_SPEC, MILL_METRICS_SPEC, PACK_DISTILLER_SPEC } = require('../server/core/settings-mill-core.ts');
 const { USAGE_INTEGER_RANGES } = require('../server/usage-wiring');
 
 test('server resolvers and wire specs reuse the shared range objects', () => {

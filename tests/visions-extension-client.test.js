@@ -18,7 +18,7 @@ const { ACTIVITY_METHOD } = require('../server/core/ingest-editor-core.ts');
 const STUB_PATH = require.resolve('./helpers/vscode-stub');
 // The framing module is COPIED beside the extension when the vsix is packed (server/visions-cli.js), so
 // in the repo it resolves only from the one place that owns it.
-const LSP_CORE_PATH = require.resolve('../server/core/visions-lsp-core');
+const LSP_CORE_PATH = require.resolve('../server/core/visions-lsp-core.ts');
 const RELAY_PATH = path.join(__dirname, '..', 'session', 'visions-relay.js');
 const WAIT_MS = 8000;
 const URI = 'file:///tmp/plan.md';

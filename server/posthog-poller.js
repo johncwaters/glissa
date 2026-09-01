@@ -2,7 +2,7 @@
 
 const core = require('./core/posthog-core.ts');
 const recurrence = require('./core/posthog-recurrence.ts');
-const traffic = require('./core/traffic-spike-core');
+const traffic = require('./core/traffic-spike-core.ts');
 const { normalizeIssues, parseSpikeIssueIds } = require('./posthog-api');
 const { firstLine, raceWithAbort } = require('./ephemeral-session');
 const { createTickLoop } = require('./lane-runner');

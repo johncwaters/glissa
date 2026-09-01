@@ -10,7 +10,7 @@ import {
   TIMEOUT_SECONDS_RANGE,
 } from '../../shared/settings-ranges.ts';
 
-import { contentMarker } from './visions-dispatch-core.js';
+import { contentMarker } from './visions-dispatch-core.ts';
 import type { MemoryRecord } from './memory-core.ts';
 import {
   KIND_HEADINGS, MAX_PROJECTION_LINE_CHARS, PROJECTED_KINDS, SOURCE_KINDS,

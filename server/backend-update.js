@@ -1,7 +1,7 @@
 'use strict';
 
 const { checkForUpdate: defaultCheckForUpdate } = require('./update-check');
-const { shortSha } = require('./core/update-core');
+const { shortSha } = require('./core/update-core.ts');
 
 const UPDATE_RECHECK_MS = 24 * 60 * 60 * 1000;
 

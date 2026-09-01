@@ -5,9 +5,9 @@ const { STATES } = require('../shared/states.ts');
 const { createReplayLog } = require('./control-replay-core');
 const { decideControlSend } = require('./core/control-send-core.ts');
 const { decideHostAllowed } = require('./core/host-policy.ts');
-const { classifyRequestOrigin, decideUpgradeAccess } = require('./core/request-trust');
-const { classifyUpgradePath, dataSessionIdFromUrl, upgradeTokenFromUrl } = require('./core/upgrade-route');
-const { isApplicableViewerSize, pickSizeAfterDeparture } = require('./core/viewer-size-core');
+const { classifyRequestOrigin, decideUpgradeAccess } = require('./core/request-trust.ts');
+const { classifyUpgradePath, dataSessionIdFromUrl, upgradeTokenFromUrl } = require('./core/upgrade-route.ts');
+const { isApplicableViewerSize, pickSizeAfterDeparture } = require('./core/viewer-size-core.ts');
 const { createWsSender } = require('./ws-sender');
 
 /** @type {(options: { remoteEnabled: boolean, trust: string, origin?: string, allowedOrigins: string[], authenticated: boolean, listenerPorts?: number[], dashboardRoute?: boolean, tokenOk?: boolean }) => { allow: boolean, reason: string|null }} */

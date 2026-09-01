@@ -2,8 +2,8 @@
 
 const { STATES } = require('../shared/states.ts');
 const { createNotifyGate, explainNotification } = require('../session/core/notify-gate.ts');
-const { INTERACTIVE_LANE } = require('./core/usage-lane-core');
-const { decideWasActiveFlip } = require('./core/session-registry-core');
+const { INTERACTIVE_LANE } = require('./core/usage-lane-core.ts');
+const { decideWasActiveFlip } = require('./core/session-registry-core.ts');
 const { runPostTurnChecks, resolveCheckConfig } = require('./post-turn-checker');
 
 /**

@@ -12,7 +12,7 @@ const {
   isRtkBinaryName,
   verifyDigest,
   findEscapingArchiveMember,
-} = require('./core/rtk-install-core');
+} = require('./core/rtk-install-core.ts');
 
 const DOWNLOAD_TIMEOUT_MS = 60000;
 const MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024;

@@ -4,16 +4,17 @@
 'use strict';
 
 const fs = require('node:fs');
+const { stripTypeScriptTypes } = require('node:module');
 const os = require('node:os');
 const path = require('node:path');
 
 const { execFileAsync, execSync } = require('./child-process-safe');
-const { buildVsix, extensionIdOf } = require('./core/vsix-core');
+const { buildVsix, extensionIdOf } = require('./core/vsix-core.ts');
 const {
   EDITOR_CANDIDATES, decideEditorTargets, isExtensionInstalled, visionsExtensionFiles,
 } = require('./core/editor-extension-core.ts');
 const { relayInvocation } = require('./core/editor-setup-core.ts');
-const { applyChanges, decideImpliedDefaults } = require('./core/visions-defaults-core');
+const { applyChanges, decideImpliedDefaults } = require('./core/visions-defaults-core.ts');
 const { isUnder, underTestRunner } = require('./core/db-path-guard.ts');
 const { createLaneLog } = require('./lane-log');
 const { unwireEditors, wireEditors } = require('./editor-wire');
@@ -22,12 +23,19 @@ const { resolvePathCommandMatches } = require('../session/core/spawn-command.ts'
 const PACKAGE_ROOT = path.join(__dirname, '..');
 const EXTENSION_DIR = path.join(PACKAGE_ROOT, 'tools', 'vscode-visions');
 const RELAY_PATH = path.join(PACKAGE_ROOT, 'session', 'visions-relay.js');
-const LSP_CORE_PATH = path.join(PACKAGE_ROOT, 'server', 'core', 'visions-lsp-core.js');
+const LSP_CORE_PATH = path.join(PACKAGE_ROOT, 'server', 'core', 'visions-lsp-core.ts');
 const CLI_PATH = path.join(PACKAGE_ROOT, 'bin', 'glissa.js');
 const EDITOR_TIMEOUT_MS = 60000;
 
 /** @type {(options: { manifest: Record<string, unknown>, extensionFiles?: { path: string, data: string }[] }) => Buffer} */
 const buildEditorVsix = /** @type {(options: { manifest: Record<string, unknown>, extensionFiles?: { path: string, data: string }[] }) => Buffer} */ (buildVsix);
+
+// The extension host is CommonJS with no type stripping of its own, so the packed copy of the core is
+// its types erased and its one ESM export rewritten.
+function packedLspCore(source) {
+  const stripped = stripTypeScriptTypes(source, { mode: 'strip' });
+  return stripped.replace(/^export \{([^}]*)\};/m, 'module.exports = {$1};');
+}
 
 function packVsix() {
   const manifestJson = fs.readFileSync(path.join(EXTENSION_DIR, 'package.json'), 'utf8');
@@ -37,7 +45,7 @@ function packVsix() {
     manifestJson,
     extensionJs: fs.readFileSync(path.join(EXTENSION_DIR, 'extension.js'), 'utf8'),
     convertJs: fs.readFileSync(path.join(EXTENSION_DIR, 'lsp-convert.js'), 'utf8'),
-    lspCoreJs: fs.readFileSync(LSP_CORE_PATH, 'utf8'),
+    lspCoreJs: packedLspCore(fs.readFileSync(LSP_CORE_PATH, 'utf8')),
     relayPath: RELAY_PATH,
   });
   const vsix = buildEditorVsix({

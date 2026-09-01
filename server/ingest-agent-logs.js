@@ -28,8 +28,8 @@ const { canonicalizePath } = require('../shared/paths.ts');
 const { claudeProjectsDir } = require('../session/core/conversation-history.ts');
 const {
   codexHomes, codexRootCandidates, codexSessionIdFromPath, grokHomes, grokRootCandidates, isUsageFile,
-} = require('./core/usage-scan-core');
-const { INTERACTIVE_LANE, laneKey } = require('./core/usage-lane-core');
+} = require('./core/usage-scan-core.ts');
+const { INTERACTIVE_LANE, laneKey } = require('./core/usage-lane-core.ts');
 const {
   MAX_CATCH_UP_BYTES, applyRead, canTrustCachedListing, createTailState, isActiveMtime, pickStaleByMtime,
   planRead,

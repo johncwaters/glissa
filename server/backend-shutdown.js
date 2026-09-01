@@ -1,6 +1,6 @@
 'use strict';
 
-const { createStopperCollector } = require('./core/shutdown-core');
+const { createStopperCollector } = require('./core/shutdown-core.ts');
 
 /**
  * @typedef {object} BackendShutdownDependencies

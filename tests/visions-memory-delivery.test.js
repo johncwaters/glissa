@@ -12,7 +12,7 @@ const path = require('node:path');
 
 const { createVisionsWiring } = require('../server/visions-wiring');
 const { createMemoryStore } = require('../server/memory-store');
-const { buildVisionsPrompt } = require('../server/core/visions-dispatch-core');
+const { buildVisionsPrompt } = require('../server/core/visions-dispatch-core.ts');
 const { memoryInputFromEvent } = require('../server/core/memory-ingest-core.ts');
 const { resolveMemoryConfig } = require('../server/core/memory-core.ts');
 

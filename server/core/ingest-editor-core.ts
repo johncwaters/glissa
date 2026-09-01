@@ -1,7 +1,7 @@
 // Markers only: buffer text here would put the document a dispatch is about into that dispatch's own
 // DATA section (docs/plan-ingestion.md, M6 Sources).
 
-import { deepestRootFor, normalizeShapePath, pathOfFileUri } from './visions-scope-core.js';
+import { deepestRootFor, normalizeShapePath, pathOfFileUri } from './visions-scope-core.ts';
 
 const SOURCE = 'editor';
 // The one notification for a buffer the lane does not mirror; both ends key on this constant.

@@ -4,10 +4,10 @@ const fs = require('node:fs');
 const { STATES } = require('../shared/states.ts');
 const { isSameDirectoryPath } = require('../shared/paths.ts');
 const { pickAutoResume } = require('../session/core/auto-resume.ts');
-const { diffProjects, shouldStartAfterModify } = require('./core/session-registry-core');
-const { configuredIntegrationBranch } = require('./core/integration-branch-core');
+const { diffProjects, shouldStartAfterModify } = require('./core/session-registry-core.ts');
+const { configuredIntegrationBranch } = require('./core/integration-branch-core.js');
 
-/** @typedef {import('./core/session-registry-core').RegistryProject & Record<string, unknown>} RegistryProject */
+/** @typedef {import('./core/session-registry-core.ts').RegistryProject & Record<string, unknown>} RegistryProject */
 /** @typedef {Record<string, unknown> & { projects: RegistryProject[], integrationBranch?: string|null }} RegistryConfig */
 /** @typedef {{ id: string, cwd: string, branch: string, integrationBranch?: string, hasWork: boolean }} RegistryWorktree */
 /** @typedef {{ id: string, name: string, path: string, state: string, stateSince: number, pendingRestart?: boolean, dangerouslySkipPermissions?: boolean, isWorktree?: boolean, resumeSessionId?: string|null, _killReap?: Promise<unknown>|null, start: () => unknown, destroy: () => void, toSnapshot: () => Record<string, unknown>, getWorktreeCarry?: () => Record<string, unknown>|null, adoptWorktree: (worktree: Record<string, unknown>) => void, discardWorktree?: () => unknown, discardWorktreeIfClean: () => unknown }} RegistrySession */
@@ -32,7 +32,7 @@ const { configuredIntegrationBranch } = require('./core/integration-branch-core'
  * @property {(input: { projects: RegistryProject[], sessions: Map<string, RegistrySession>, gitWorkspaceSync: RegistryGitWorkspace, integrationBranch: string|null }) => void} reconcileSessionWorktrees
  * @property {(oldSession: RegistrySession, newSession: RegistrySession) => unknown} carryWorktreeAcrossRecreate
  * @property {(projects: RegistryProject[]) => boolean} ensureProjectIds
- * @property {(agent: import('./core/session-registry-core').AgentId) => string} resolveAgentId
+ * @property {(agent: import('./core/session-registry-core.ts').AgentId) => string} resolveAgentId
  * @property {Pick<Console, 'log'|'warn'>} logger
  */
 

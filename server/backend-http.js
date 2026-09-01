@@ -16,7 +16,7 @@ const {
   framePathPaste,
   isSafePathSegment,
   planUploadRetention,
-} = require('./core/upload-core');
+} = require('./core/upload-core.ts');
 
 /**
  * @typedef {object} BackendHttpDependencies

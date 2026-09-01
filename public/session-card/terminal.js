@@ -248,7 +248,7 @@ export function setupTerminal(termWrap, ui) {
   // last-write-wins, so a phone opening a session reflows the desktop's terminal to phone width. The
   // desktop cannot notice: its own box never changed, so the cache above suppresses any re-send. The
   // viewer that STOPS looking therefore hands its claim back and the server re-applies the most recent
-  // surviving viewer's size (server/core/viewer-size-core.js). The cache is dropped with it because
+  // surviving viewer's size (server/core/viewer-size-core.ts). The cache is dropped with it because
   // this card may become the visible viewer again at exactly the dimensions it just gave up, and the
   // fit that follows would otherwise early-return and leave the PTY at the other viewer's size.
   ui._unviewTerminal = () => {

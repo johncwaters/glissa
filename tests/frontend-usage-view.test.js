@@ -167,7 +167,7 @@ test('blockProgress: elapsed and remaining within the block window, clamped at b
   assert.equal(blockProgress(null), null);
 });
 
-// The wire carries tokenLimit.pct as a RATIO (server/core/usage-blocks-core.js builds
+// The wire carries tokenLimit.pct as a RATIO (server/core/usage-blocks-core.ts builds
 // activeBlock.tokens / max, pinned by tests/usage-blocks-core.test.js). Treating it as a percentage
 // left the meter near empty, the line reading 0%, and the attention dot unable to fire at all.
 test('limitPct: the wire ratio converted to the percent every threshold works in', async () => {

@@ -1,7 +1,7 @@
 'use strict';
 
 /*
- * Durable session-id to Glissa-lane ledger: the IO shell around server/core/usage-lane-core.js.
+ * Durable session-id to Glissa-lane ledger: the IO shell around server/core/usage-lane-core.ts.
  *
  * Written from the ONE place a session id becomes known, the `claude-session-id` event a Session emits when
  * a hook payload carries it (event name kept for wire/back-compat; the payload now carries { vendor,
@@ -14,7 +14,7 @@
  * and it grows per session rather than per project.
  */
 
-const { laneMapFromLedger, pruneLedger } = require('./core/usage-lane-core');
+const { laneMapFromLedger, pruneLedger } = require('./core/usage-lane-core.ts');
 const { createJsonStateWriter } = require('./json-file');
 
 /** @param {{ ledgerPath?: string | null, fsPromises?: typeof import('node:fs/promises'), nowFn?: () => number, retainDays?: number, logger?: Pick<Console, 'warn'> | null }} [options] */

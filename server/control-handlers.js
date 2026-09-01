@@ -10,11 +10,11 @@ const {
 } = require('../shared/contracts/index.ts');
 const { STATES } = require('../shared/states.ts');
 const { claudeProjectsDir, listRepoConversations } = require('../session/core/conversation-history.ts');
-const { normalizeClientTrust } = require('./core/request-trust');
+const { normalizeClientTrust } = require('./core/request-trust.ts');
 const { PACK_NAME_RE, applyPackDelta, isSelfReferentialPack, sameProjectRecords } = require('./core/pack-core.ts');
 const {
   INGEST_SPEC, MEMORY_SPEC, MILL_METRICS_SPEC, PACK_DISTILLER_SPEC, mergeMillBlock, validateMillBlock,
-} = require('./core/settings-mill-core');
+} = require('./core/settings-mill-core.ts');
 const { readPosthogReport } = require('./posthog-report');
 const posthogCore = require('./core/posthog-core.ts');
 const { buildSettingsPayload: buildSettingsPayloadFrom } = require('./settings-payload');
@@ -663,7 +663,7 @@ function registerControlHandlers(controlWss, deps) {
    * session, change an issue status in PostHog, re-run an investigation), so they carry no remote
    * refusal: a paired phone is meant to be able to act on an error the same way the desk dashboard
    * can, and the control WS can already spawn a session anywhere. See
-   * server/core/request-trust.js for the actions that do need the local listener.
+   * server/core/request-trust.ts for the actions that do need the local listener.
    *
    * Every reply is a requestId round-trip, so an OLD client (which never sends these) sees nothing
    * new on the wire.

@@ -273,7 +273,7 @@ test('no forbidden characters reach the DOM from the new builders', async () => 
 });
 
 // ── Spend budgets ──
-// The rows and their tones come from server/core/usage-budget-core.js; these only format them and decide
+// The rows and their tones come from server/core/usage-budget-core.ts; these only format them and decide
 // when the tab dot is owed, so an unset budget must render nothing rather than a zero ceiling.
 
 test('budgetRows: only rows with a real ceiling, nothing at all without a budget', async () => {

@@ -7,7 +7,7 @@ const fsPromisesDefault = require('node:fs/promises');
 const { WebSocketServer } = require('ws');
 const {
   applyDidChange, applyDidClose, applyDidOpen, createDocStore, detectBlankLineBoundary, formatRange, getDoc, listDocs, uriOfParams,
-} = require('./core/visions-buffer-core');
+} = require('./core/visions-buffer-core.ts');
 const {
   ERROR_BACKOFF_THRESHOLD,
   ORIENTATION_REASON,
@@ -27,11 +27,11 @@ const {
   recordDispatch,
   resolveDispatchConfig,
   sanitizeModelDiagnostics,
-} = require('./core/visions-dispatch-core');
+} = require('./core/visions-dispatch-core.ts');
 const {
   createTouchState, formatTouchedRanges, recordChanges, resetUri: resetTouchedUri, touchedRangesFor,
-} = require('./core/visions-touch-core');
-const { isUriInProjects, projectForUri, scopePathsOf } = require('./core/visions-scope-core');
+} = require('./core/visions-touch-core.ts');
+const { isUriInProjects, projectForUri, scopePathsOf } = require('./core/visions-scope-core.ts');
 const {
   DEFAULT_THREAD_TTL_MS,
   applyModelIntent: mergeModelIntent,
@@ -43,7 +43,7 @@ const {
   pruneIntentProjects,
   retireStaleThreads,
   reviveIntentState,
-} = require('./core/visions-intent-core');
+} = require('./core/visions-intent-core.ts');
 const {
   createBoundedKeySet,
   dismissFeedbackInput,
@@ -59,8 +59,8 @@ const {
   servedFeedbackInput,
   servedFindingOf,
   servedKey,
-} = require('./core/visions-memory-core');
-const { sweepMarkdownWithFixes } = require('./core/visions-rules-core');
+} = require('./core/visions-memory-core.ts');
+const { sweepMarkdownWithFixes } = require('./core/visions-rules-core.ts');
 const {
   DEFAULT_FIX_LOG_MAX,
   appendFixLog,
@@ -72,7 +72,7 @@ const {
   fixPayload,
   isFixSetFresh,
   readSweepResult,
-} = require('./core/visions-fix-core');
+} = require('./core/visions-fix-core.ts');
 const { createJsonStateWriter } = require('./json-file');
 const { ACTIVITY_METHOD } = require('./core/ingest-editor-core.ts');
 const { createLaneLog } = require('./lane-log');
@@ -618,7 +618,7 @@ function createVisionsWiring({
     intentStateWriter.write(payload, () => JSON.stringify(payload, null, 2));
   }
 
-  /** @param {{ changed: boolean, state: import('./core/visions-intent-core').IntentState, thread: import('./core/visions-intent-core').IntentThread | null }} merged @param {string | null} projectId @param {string | null} [uri] */
+  /** @param {{ changed: boolean, state: import('./core/visions-intent-core.ts').IntentState, thread: import('./core/visions-intent-core.ts').IntentThread | null }} merged @param {string | null} projectId @param {string | null} [uri] */
   function commitIntent(merged, projectId, uri = null) {
     if (!merged.changed) return false;
     intentState = merged.state;

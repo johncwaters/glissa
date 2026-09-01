@@ -13,7 +13,7 @@ const {
   createParserState,
   feedFrameBytes,
   serializeFrame,
-} = require('../server/core/visions-lsp-core');
+} = require('../server/core/visions-lsp-core.ts');
 const {
   CODE_ACTION_TIMEOUT_MS, SYNC_KIND_INCREMENTAL, readConfiguredPort, resolvePortPlan, sendWsFrame, sendWsJson,
 } = require('../session/visions-relay');

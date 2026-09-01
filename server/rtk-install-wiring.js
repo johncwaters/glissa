@@ -2,7 +2,7 @@
 
 const os = require('node:os');
 
-const { decideRtkInstall } = require('./core/rtk-install-core');
+const { decideRtkInstall } = require('./core/rtk-install-core.ts');
 const { installRtk } = require('./rtk-installer');
 const { getRtkPath } = require('./rtk-resolver');
 

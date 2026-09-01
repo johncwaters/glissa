@@ -6,7 +6,7 @@ const { createRecorder } = require('../session/session-recorder');
 const { DEFAULT_CONFIG } = require('./config-store');
 const { configuredIntegrationBranch } = require('./core/integration-branch-core.js');
 const { projectVariantSlug } = require('./core/pack-core.ts');
-const { projectSkipsPermissions } = require('./core/session-registry-core');
+const { projectSkipsPermissions } = require('./core/session-registry-core.ts');
 const { resolveUsageConfig } = require('./usage-wiring');
 
 

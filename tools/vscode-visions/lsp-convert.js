@@ -63,7 +63,7 @@ function toCodeActions(vscodeApi, actions) {
 }
 
 // A versioned edit answers for the buffer it was computed from, so a stale one is REFUSED rather than
-// landing on text the carbon unit has since typed into (`server/core/visions-fix-core.js`).
+// landing on text the carbon unit has since typed into (`server/core/visions-fix-core.ts`).
 function decideEditFreshness(edit, versionOfUri) {
   const changes = documentChangesOf(edit);
   if (changes.length === 0) return { fresh: false, reason: 'no-document-changes' };

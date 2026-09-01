@@ -9,7 +9,7 @@ const { spawn } = require('node:child_process');
 const { once } = require('node:events');
 const { WebSocketServer } = require('ws');
 
-const { createParserState, feedFrameBytes, serializeFrame } = require('../server/core/visions-lsp-core');
+const { createParserState, feedFrameBytes, serializeFrame } = require('../server/core/visions-lsp-core.ts');
 
 const CLI_PATH = path.join(__dirname, '..', 'bin', 'glissa.js');
 const WAIT_MS = 8000;

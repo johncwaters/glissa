@@ -23,7 +23,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { createBackend } = require('../server/backend');
-const { MAX_UPLOAD_BYTES } = require('../server/core/upload-core');
+const { MAX_UPLOAD_BYTES } = require('../server/core/upload-core.ts');
 
 const SESSION_ID = 'a0000000-0000-4000-8000-000000000001';
 

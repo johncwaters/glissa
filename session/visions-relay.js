@@ -11,7 +11,7 @@ const {
   createParserState,
   feedFrameBytes,
   serializeFrame,
-} = require('../server/core/visions-lsp-core');
+} = require('../server/core/visions-lsp-core.ts');
 const {
   applyDidChange,
   applyDidClose,
@@ -21,7 +21,7 @@ const {
   getDoc,
   listDocs,
   uriOfParams,
-} = require('../server/core/visions-buffer-core');
+} = require('../server/core/visions-buffer-core.ts');
 const { decideConfigPath, glissaHomeDir } = require('../server/core/config-path-core.ts');
 const { ACTIVITY_METHOD } = require('../server/core/ingest-editor-core.ts');
 const {

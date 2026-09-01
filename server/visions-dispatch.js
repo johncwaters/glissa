@@ -34,9 +34,9 @@ const {
   countLines,
   decidePromptSize,
   sanitizeCommentsWithDrops,
-} = require('./core/visions-dispatch-core');
+} = require('./core/visions-dispatch-core.ts');
 const { buildLanePermissions } = require('./core/lane-permissions-core.ts');
-const { readIntentProposal, sanitizeIntentText } = require('./core/visions-intent-core');
+const { readIntentProposal, sanitizeIntentText } = require('./core/visions-intent-core.ts');
 const { createLaneLog } = require('./lane-log');
 
 const RESULT_VERDICTS = new Set(['COMMENTS', 'NONE', 'ERROR']);

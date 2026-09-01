@@ -10,7 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { createVisionsSetup } = require('../server/visions-setup');
-const { IMPLIED_INGEST, decideImpliedDefaults } = require('../server/core/visions-defaults-core');
+const { IMPLIED_INGEST, decideImpliedDefaults } = require('../server/core/visions-defaults-core.ts');
 
 function harness(initialConfig) {
   const config = initialConfig;

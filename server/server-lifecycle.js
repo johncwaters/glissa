@@ -11,10 +11,10 @@
 // and it exited BEFORE the async kill reaped the PTY tree (orphaned cmd/claude/conhost on Windows, an
 // orphaned process group off it). The guard + windowsHide + awaited reap below close all three.
 
-const { decideRestartStrategy, SUPERVISED_RESTART_EXIT_CODE } = require('./core/restart-strategy');
+const { decideRestartStrategy, SUPERVISED_RESTART_EXIT_CODE } = require('./core/restart-strategy.ts');
 const {
   awaitBounded, normalizeShutdownResult, summarizeStopOutcomes,
-} = require('./core/shutdown-core');
+} = require('./core/shutdown-core.ts');
 
 // Bounded wait for the pending PTY reaps a shutdown started, so the process does not exit (or respawn)
 // before the tree is reaped: taskkill's cmd/claude/conhost on Windows, the killed process group off it.
@@ -140,7 +140,7 @@ function createLifecycle({
     }
     // Production: close the listener so the port is released, then hand off to the replacement. WHO
     // starts that replacement depends on whether anything supervises this process (see
-    // core/restart-strategy.js): under systemd the self-respawn silently bricks the service, so the
+    // core/restart-strategy.ts): under systemd the self-respawn silently bricks the service, so the
     // process exits NON-ZERO and lets `Restart=on-failure` start the unit again. Unsupervised, the
     // original respawn is the only thing that can bring Glissa back, so it is kept verbatim: detached
     // so it outlives this process, windowsHide so it does NOT pop its own console window. Shutdown
