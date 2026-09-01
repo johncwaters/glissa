@@ -1,5 +1,3 @@
-'use strict';
-
 /*
  * `memory.enabled` implies the agent-log SOURCE and nothing else (docs/plan-visions-3.md, M14, operator
  * decision 2026-08-22). This is the pin for the half that could go wrong quietly: with memory on and
@@ -11,19 +9,35 @@
  * operator's own conversations.
  */
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const http = require('node:http');
-const os = require('node:os');
-const path = require('node:path');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import type { Server } from 'node:http';
+import type WebSocket from 'ws';
 
-const { createBackend } = require('../server/backend.ts');
-const { dashboardClient } = require('./helpers/dashboard-ws');
-const { isolateTranscriptHomes } = require('./helpers/transcript-homes');
-const WebSocket = require('ws');
+import { createBackend } from '../server/backend.ts';
+import { dashboardClient, openRecordingSocket } from './helpers/dashboard-ws.ts';
+import { boundPort, closeServer, listenOnLoopback } from './helpers/http-server.ts';
+import { ingestLane, memoryIngestLane, visionsLane } from './helpers/lanes.ts';
+import type { Backend } from './helpers/lanes.ts';
+import { isolateTranscriptHomes } from './helpers/transcript-homes.ts';
 
-async function boot(extra) {
+interface ControlFrame {
+  type: string;
+}
+
+interface BootedBackend {
+  dir: string;
+  backend: Backend;
+  server: Server;
+  track(ws: WebSocket): WebSocket;
+  close(): Promise<void>;
+}
+
+async function boot(extra: Record<string, unknown>): Promise<BootedBackend> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memory-ingest-'));
   const configPath = path.join(dir, 'config.json');
   fs.writeFileSync(configPath, JSON.stringify({
@@ -35,18 +49,18 @@ async function boot(extra) {
   const server = http.createServer();
   const backend = createBackend(server, { staticDir: null });
   server.on('request', backend.app);
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const sockets = [];
+  await listenOnLoopback(server);
+  const sockets: WebSocket[] = [];
   return {
     dir,
     backend,
     server,
-    track: (ws) => { sockets.push(ws); return ws; },
+    track: (ws: WebSocket) => { sockets.push(ws); return ws; },
     async close() {
       for (const ws of sockets) ws.close();
       backend.shutdown();
       server.closeAllConnections();
-      await new Promise((resolve) => server.close(resolve));
+      await closeServer(server);
       restoreHomes();
       if (previousConfig == null) delete process.env.GLISSA_CONFIG;
       if (previousConfig != null) process.env.GLISSA_CONFIG = previousConfig;
@@ -55,28 +69,17 @@ async function boot(extra) {
   };
 }
 
-// The connect frames land the instant the socket does, so recording starts before 'open' resolves.
-function openRecordingSocket(dash) {
-  const ws = new WebSocket(dash.url('/control'), dash.options);
-  const received = [];
-  ws.on('message', (raw) => received.push(JSON.parse(raw.toString())));
-  return new Promise((resolve, reject) => {
-    ws.once('error', reject);
-    ws.once('open', () => resolve({ ws, received }));
-  });
-}
-
-function settle() {
-  return new Promise((resolve) => { setTimeout(resolve, 150).unref(); });
+function settle(): Promise<void> {
+  return new Promise((resolve) => { setTimeout(() => resolve(), 150).unref(); });
 }
 
 test('memory on with ingest off runs the source and nothing else of that lane', async () => {
   const booted = await boot({ memory: { enabled: true } });
   try {
-    assert.equal(booted.backend.getLane('ingest'), null, 'no ring, no batch timer, no digest');
-    const ingest = booted.backend.getLane('memory-ingest');
-    assert.notEqual(ingest, null);
-    assert.notEqual(ingest.source, null, 'the agent-log source was constructed for the memory lane');
+    assert.equal(ingestLane(booted.backend), null, 'no ring, no batch timer, no digest');
+    const ingest = memoryIngestLane(booted.backend);
+    assert.ok(ingest, 'the memory ingest consumer exists');
+    assert.ok(ingest.source, 'the agent-log source was constructed for the memory lane');
     assert.equal(ingest.source.isDisabled, false);
   } finally {
     await booted.close();
@@ -86,8 +89,8 @@ test('memory on with ingest off runs the source and nothing else of that lane', 
 test('with ingest off no ingest frame reaches the control WS', async () => {
   const booted = await boot({ memory: { enabled: true } });
   try {
-    const dash = await dashboardClient(booted.server.address().port);
-    const { ws, received } = await openRecordingSocket(dash);
+    const dash = await dashboardClient(boundPort(booted.server));
+    const { ws, received } = await openRecordingSocket<ControlFrame>(dash);
     booted.track(ws);
     await settle();
     assert.ok(received.some((message) => message.type === 'snapshot'), 'the ordinary snapshot still lands');
@@ -102,10 +105,14 @@ test('the dispatch digest stays unwired, so memory alone never widens a prompt',
   // never builds one.
   const booted = await boot({ memory: { enabled: true }, visions: { enabled: true }, ingest: { enabled: false } });
   try {
-    assert.equal(booted.backend.getLane('ingest'), null);
+    assert.equal(ingestLane(booted.backend), null);
+    const visions = visionsLane(booted.backend);
+    const ingest = memoryIngestLane(booted.backend);
+    assert.ok(visions, 'the visions lane is running');
+    assert.ok(ingest, 'the memory ingest consumer exists');
     // Null is what the Visions lane reports when it was handed no digest and no movement signal at all.
-    assert.equal(booted.backend.getLane('visions').latestContextSeq(), null);
-    assert.notEqual(booted.backend.getLane('memory-ingest').source, null);
+    assert.equal(visions.latestContextSeq(), null);
+    assert.notEqual(ingest.source, null);
   } finally {
     await booted.close();
   }
@@ -117,8 +124,10 @@ test('with the ingest lane running the memory consumer rides ITS source rather t
     ingest: { enabled: true, sources: { agentLogs: { enabled: true } } },
   });
   try {
-    assert.notEqual(booted.backend.getLane('ingest'), null);
-    assert.equal(booted.backend.getLane('memory-ingest').source, null, 'one source, two targets');
+    assert.notEqual(ingestLane(booted.backend), null);
+    const ingest = memoryIngestLane(booted.backend);
+    assert.ok(ingest, 'the memory ingest consumer exists');
+    assert.equal(ingest.source, null, 'one source, two targets');
   } finally {
     await booted.close();
   }
@@ -130,8 +139,12 @@ test('an ingest lane whose agent-log source is off still leaves memory a source 
     ingest: { enabled: true, sources: { terminal: { enabled: true } } },
   });
   try {
-    assert.equal(booted.backend.getLane('ingest').agentLogsEnabled, false);
-    assert.notEqual(booted.backend.getLane('memory-ingest').source, null);
+    const lane = ingestLane(booted.backend);
+    const ingest = memoryIngestLane(booted.backend);
+    assert.ok(lane, 'the ingest lane is running');
+    assert.ok(ingest, 'the memory ingest consumer exists');
+    assert.equal(lane.agentLogsEnabled, false);
+    assert.notEqual(ingest.source, null);
   } finally {
     await booted.close();
   }
@@ -140,7 +153,7 @@ test('an ingest lane whose agent-log source is off still leaves memory a source 
 test('memory off constructs no ingest consumer at all', async () => {
   const booted = await boot({});
   try {
-    assert.equal(booted.backend.getLane('memory-ingest'), null);
+    assert.equal(memoryIngestLane(booted.backend), null);
     assert.deepEqual(fs.readdirSync(booted.dir).filter((name) => name.startsWith('memory')), []);
   } finally {
     await booted.close();

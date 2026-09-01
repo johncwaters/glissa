@@ -14,16 +14,17 @@ const { execFileSync } = require('node:child_process');
 const { once } = require('node:events');
 const { WebSocketServer } = require('ws');
 
-const vscode = require('./helpers/vscode-stub');
+const vscode = require('./helpers/vscode-stub.ts').default;
 const { packVsix } = require('../server/visions-setup.ts');
 
-const STUB_PATH = require.resolve('./helpers/vscode-stub');
 const WAIT_MS = 8000;
 
-const originalResolve = Module._resolveFilename;
-Module._resolveFilename = function resolveWithVscodeStub(request, ...rest) {
-  if (request === 'vscode') return STUB_PATH;
-  return originalResolve.call(this, request, ...rest);
+// The stub is an ES module now, so a resolve-time redirect would hand the packed extension's
+// CommonJS `require('vscode')` the namespace wrapper instead of the namespace itself.
+const originalLoad = Module._load;
+Module._load = function loadWithVscodeStub(request, ...rest) {
+  if (request === 'vscode') return vscode;
+  return originalLoad.call(this, request, ...rest);
 };
 
 function unpack(vsix) {

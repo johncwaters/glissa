@@ -1,22 +1,29 @@
-'use strict';
-
 // M13 of docs/plan-visions-3.md: with memory on, the Visions lane must actually HOLD the store, which is
-// only true because the store is now constructed above the lane in backend.js.
+// only true because the store is now constructed above the lane in backend.ts.
 //
 // SAFETY: the boot points at a throwaway temp config with ZERO projects via GLISSA_CONFIG, like every
 // other backend boot test (the boot worktree reconcile would otherwise touch real repos).
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const http = require('node:http');
-const os = require('node:os');
-const path = require('node:path');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
 
-const { createBackend } = require('../server/backend.ts');
-const { isolateTranscriptHomes } = require('./helpers/transcript-homes');
+import { createBackend } from '../server/backend.ts';
+import { closeServer, listenOnLoopback } from './helpers/http-server.ts';
+import { memoryStoreLane, visionsLane } from './helpers/lanes.ts';
+import type { Backend } from './helpers/lanes.ts';
+import { isolateTranscriptHomes } from './helpers/transcript-homes.ts';
 
-async function bootWithConfig(extra) {
+interface BootedBackend {
+  dir: string;
+  backend: Backend;
+  close(): Promise<void>;
+}
+
+async function bootWithConfig(extra: Record<string, unknown>): Promise<BootedBackend> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memory-writers-'));
   const configPath = path.join(dir, 'config.json');
   const base = { projects: [], teams: [], repoRoots: [] };
@@ -28,14 +35,14 @@ async function bootWithConfig(extra) {
   const server = http.createServer();
   const backend = createBackend(server, { staticDir: null });
   server.on('request', backend.app);
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await listenOnLoopback(server);
   return {
     dir,
     backend,
     async close() {
       backend.shutdown();
       server.closeAllConnections();
-      await new Promise((resolve) => server.close(resolve));
+      await closeServer(server);
       restoreHomes();
       if (previousConfig == null) delete process.env.GLISSA_CONFIG;
       if (previousConfig != null) process.env.GLISSA_CONFIG = previousConfig;
@@ -47,10 +54,10 @@ async function bootWithConfig(extra) {
 test('an accepted intent proposal reaches the memory store the lane was handed', async () => {
   const booted = await bootWithConfig({ memory: { enabled: true }, visions: { enabled: true } });
   try {
-    const lane = booted.backend.getLane('visions');
-    const store = booted.backend.getLane('memory-store');
-    assert.notEqual(lane, null);
-    assert.notEqual(store, null);
+    const lane = visionsLane(booted.backend);
+    const store = memoryStoreLane(booted.backend);
+    assert.ok(lane, 'the visions lane is running');
+    assert.ok(store, 'the memory store is running');
 
     lane.applyModelIntent('the writers are wired');
     await lane.whenMemoryIdle();
@@ -68,8 +75,9 @@ test('an accepted intent proposal reaches the memory store the lane was handed',
 test('the same proposal with memory off is recorded nowhere and costs the lane nothing', async () => {
   const booted = await bootWithConfig({ visions: { enabled: true } });
   try {
-    const lane = booted.backend.getLane('visions');
-    assert.equal(booted.backend.getLane('memory-store'), null);
+    const lane = visionsLane(booted.backend);
+    assert.ok(lane, 'the visions lane is running');
+    assert.equal(memoryStoreLane(booted.backend), null);
 
     lane.applyModelIntent('nothing to write to');
     await lane.whenMemoryIdle();

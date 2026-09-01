@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { createWorktreeWatcher, resolveWorktreeGitDir } from '../detection/worktree-watch.ts';
-import { SHORT_NAMES_AVAILABLE, shortPathOf } from './helpers/short-path.js';
+import { SHORT_NAMES_AVAILABLE, shortPathOf } from './helpers/short-path.ts';
 
 function tmpdir(prefix: string) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));

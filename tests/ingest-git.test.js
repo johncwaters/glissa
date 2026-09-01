@@ -24,7 +24,7 @@ const { createGitIngest } = require('../server/ingest-git.ts');
 const { createIngestLane } = require('../server/ingest-wiring.ts');
 const { resolveIngestConfig } = require('../server/core/ingest-core.ts');
 const { LOG_FIELD_SEPARATOR } = require('../server/core/ingest-git-core.ts');
-const { hasGit, git } = require('./helpers/git-fixture');
+const { hasGit, git } = require('./helpers/git-fixture.ts');
 
 const GIT = hasGit();
 const SHA = '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b';

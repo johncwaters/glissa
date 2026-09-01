@@ -1,5 +1,3 @@
-'use strict';
-
 // The statusline event on the ONE write ingress, POST /hook/:glissaId/:event. Three things this pins:
 // the token gate is the same one every other hook event goes through, an accepted callback stores the
 // official plan limits, and the reply stays the plain ok JSON (the additionalContext injection shape is
@@ -12,24 +10,38 @@
 // booting the backend against the real config once destroyed an active worktree). No wasActive, so boot
 // auto-resume never spawns a real claude PTY.
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const http = require('node:http');
-const os = require('node:os');
-const path = require('node:path');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import type { Server } from 'node:http';
 
-const { createBackend } = require('../server/backend.ts');
+import { createBackend } from '../server/backend.ts';
+import type { Session } from '../session/sessions.ts';
+import { boundPort, closeServer, listenOnLoopback } from './helpers/http-server.ts';
+import { usageLane } from './helpers/lanes.ts';
+import type { Backend } from './helpers/lanes.ts';
 
 const SESSION_ID = 'statusline-session';
 
-let tmpDir = null;
-let prevEnv = null;
-let server = null;
-let backend = null;
-let base = null;
-let session = null;
-let token = null;
+interface StatuslineContext {
+  tmpDir: string;
+  prevEnv: string | undefined;
+  server: Server;
+  backend: Backend;
+  base: string;
+  session: Session;
+  token: string;
+}
+
+const booted: { context: StatuslineContext | null } = { context: null };
+
+function ctx(): StatuslineContext {
+  if (!booted.context) throw new Error('the backend was never booted');
+  return booted.context;
+}
 
 function payload({ five = 12, seven = 68.4, cost = 1.5 } = {}) {
   return {
@@ -46,8 +58,8 @@ function payload({ five = 12, seven = 68.4, cost = 1.5 } = {}) {
   };
 }
 
-function postStatusline(body, hookToken = token) {
-  const url = `${base}/hook/${SESSION_ID}/statusline?t=${encodeURIComponent(hookToken)}`;
+function postStatusline(body: unknown, hookToken = ctx().token): Promise<Response> {
+  const url = `${ctx().base}/hook/${SESSION_ID}/statusline?t=${encodeURIComponent(hookToken)}`;
   return fetch(url, {
     method: 'POST',
     body: JSON.stringify(body),
@@ -55,8 +67,19 @@ function postStatusline(body, hookToken = token) {
   });
 }
 
+function storedLimits() {
+  return usageLane(ctx().backend).getPlanLimitsMessage();
+}
+
+function storedFiveHourPct(): number | null {
+  const stored = storedLimits();
+  assert.ok(stored, 'there is a stored snapshot');
+  assert.ok(stored.fiveHour, 'the snapshot carries a five-hour window');
+  return stored.fiveHour.pct;
+}
+
 test.before(async () => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-statusline-route-'));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-statusline-route-'));
   const projectDir = path.join(tmpDir, 'project');
   fs.mkdirSync(projectDir);
   const cfgPath = path.join(tmpDir, 'config.json');
@@ -66,31 +89,34 @@ test.before(async () => {
     packsAutoRebuild: false,
     autoResume: false,
   }, null, 2), 'utf8');
-  prevEnv = process.env.GLISSA_CONFIG;
+  const prevEnv = process.env.GLISSA_CONFIG;
   process.env.GLISSA_CONFIG = cfgPath;
 
-  server = http.createServer();
-  backend = createBackend(server, { staticDir: null });
+  const server = http.createServer();
+  const backend = createBackend(server, { staticDir: null });
   server.on('request', backend.app);
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  base = `http://127.0.0.1:${server.address().port}`;
+  await listenOnLoopback(server);
 
-  session = backend.getSession(SESSION_ID);
+  const session = backend.getSession(SESSION_ID);
   assert.ok(session, 'the boot loop created the configured session');
   // Registers the bearer token with the shared HookRouter without spawning a PTY: exactly what the
   // spawn path does, minus node-pty.
   session._hooks.inject();
-  token = session._hooks.token();
+  const token = session._hooks.token();
   assert.ok(token, 'hook injection produced a token');
+
+  booted.context = { tmpDir, prevEnv, server, backend, base: `http://127.0.0.1:${boundPort(server)}`, session, token };
 });
 
 test.after(async () => {
-  if (backend) backend.shutdown();
-  if (server) server.closeAllConnections();
-  if (server) await new Promise((resolve) => server.close(resolve));
+  if (!booted.context) return;
+  const { backend, server, prevEnv, tmpDir } = booted.context;
+  backend.shutdown();
+  server.closeAllConnections();
+  await closeServer(server);
   if (prevEnv == null) delete process.env.GLISSA_CONFIG;
   if (prevEnv != null) process.env.GLISSA_CONFIG = prevEnv;
-  if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+  fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 test('a bad token is refused 403 and stores nothing', async () => {
@@ -99,20 +125,21 @@ test('a bad token is refused 403 and stores nothing', async () => {
   const body = await res.json();
   assert.equal(body.ok, false);
   assert.equal(body.reason, 'bad-token');
-  assert.equal(backend.getLane('usage').getPlanLimitsMessage(), null, 'a refused callback never reaches the lane');
+  assert.equal(storedLimits(), null, 'a refused callback never reaches the lane');
 });
 
 test('a missing token is refused and stores nothing', async () => {
-  const res = await fetch(`${base}/hook/${SESSION_ID}/statusline`, {
+  const res = await fetch(`${ctx().base}/hook/${SESSION_ID}/statusline`, {
     method: 'POST',
     body: JSON.stringify(payload()),
     headers: { 'content-type': 'application/json' },
   });
   assert.notEqual(res.status, 200);
-  assert.equal(backend.getLane('usage').getPlanLimitsMessage(), null);
+  assert.equal(storedLimits(), null);
 });
 
 test('an unknown session is 404, exactly as for any other event', async () => {
+  const { base, token } = ctx();
   const res = await fetch(`${base}/hook/no-such-session/statusline?t=${token}`, {
     method: 'POST',
     body: JSON.stringify(payload()),
@@ -124,6 +151,7 @@ test('an unknown session is 404, exactly as for any other event', async () => {
 });
 
 test('an accepted callback stores the plan limits and answers the plain ok JSON', async () => {
+  const { session } = ctx();
   const stateBefore = session.state;
   const res = await postStatusline(payload({ five: 21.5 }));
   assert.equal(res.status, 200);
@@ -134,8 +162,10 @@ test('an accepted callback stores the plan limits and answers the plain ok JSON'
   assert.equal(body.ok, true);
   assert.equal(body.reason, 'ignored-event', 'statusline is telemetry, so it maps to no detection signal');
 
-  const stored = backend.getLane('usage').getPlanLimitsMessage();
+  const stored = storedLimits();
   assert.ok(stored, 'the lane stored the snapshot');
+  assert.ok(stored.fiveHour, 'the snapshot carries a five-hour window');
+  assert.ok(stored.sevenDay, 'the snapshot carries a seven-day window');
   assert.equal(stored.type, 'plan-limits');
   assert.equal(stored.source, 'statusline');
   assert.equal(stored.fiveHour.pct, 21.5);
@@ -157,6 +187,7 @@ test('an accepted callback stores the plan limits and answers the plain ok JSON'
  * only be 'ok' if the payload survived the trip.
  */
 test('the request payload reaches the router, not an empty object', async () => {
+  const { base, token } = ctx();
   const res = await fetch(`${base}/hook/${SESSION_ID}/notification?t=${encodeURIComponent(token)}`, {
     method: 'POST',
     body: JSON.stringify({ notification_type: 'permission_prompt' }),
@@ -171,8 +202,9 @@ test('the request payload reaches the router, not an empty object', async () => 
 
 test('the stored snapshot keeps nothing but the numbers', async () => {
   await postStatusline(payload({ five: 22.5 }));
-  assert.ok(backend.getLane('usage').getPlanLimitsMessage(), 'there is a snapshot to inspect');
-  const serialized = JSON.stringify(backend.getLane('usage').getPlanLimitsMessage());
+  const stored = storedLimits();
+  assert.ok(stored, 'there is a snapshot to inspect');
+  const serialized = JSON.stringify(stored);
   assert.equal(serialized.includes('transcript'), false);
   assert.equal(serialized.includes('C:/fixture'), false);
   assert.equal(serialized.includes('Opus'), false);
@@ -180,12 +212,13 @@ test('the stored snapshot keeps nothing but the numbers', async () => {
 
 test('the freshest payload wins', async () => {
   await postStatusline(payload({ five: 30 }));
-  assert.equal(backend.getLane('usage').getPlanLimitsMessage().fiveHour.pct, 30);
+  assert.equal(storedFiveHourPct(), 30);
   await postStatusline(payload({ five: 44.4 }));
-  assert.equal(backend.getLane('usage').getPlanLimitsMessage().fiveHour.pct, 44.4);
+  assert.equal(storedFiveHourPct(), 44.4);
 });
 
 test('a malformed body is tolerated: the route answers and the snapshot survives', async () => {
+  const { base, token } = ctx();
   await postStatusline(payload({ five: 55 }));
   const res = await fetch(`${base}/hook/${SESSION_ID}/statusline?t=${encodeURIComponent(token)}`, {
     method: 'POST',
@@ -193,12 +226,12 @@ test('a malformed body is tolerated: the route answers and the snapshot survives
     headers: { 'content-type': 'application/json' },
   });
   assert.equal(res.status, 200);
-  assert.equal(backend.getLane('usage').getPlanLimitsMessage().fiveHour.pct, 55, 'garbage does not blank a good snapshot');
+  assert.equal(storedFiveHourPct(), 55, 'garbage does not blank a good snapshot');
 });
 
 test('a startup payload (no rate_limits) is accepted and changes no snapshot', async () => {
   await postStatusline(payload({ five: 66 }));
   const res = await postStatusline({ session_id: 'c1', cost: { total_cost_usd: 0.5 } });
   assert.equal(res.status, 200);
-  assert.equal(backend.getLane('usage').getPlanLimitsMessage().fiveHour.pct, 66);
+  assert.equal(storedFiveHourPct(), 66);
 });

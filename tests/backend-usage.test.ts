@@ -1,5 +1,3 @@
-'use strict';
-
 // The usage lane end to end through the REAL backend and a REAL control WebSocket: lazy start on the
 // first connection, the usage-sessions push and its connect replay, the request-usage-report round
 // trip, the enabled:false kill switch, and the cfg-key gating of a settings-triggered restart.
@@ -16,27 +14,74 @@
 // (CLAUDE_CONFIG_DIR), and pricing is loaded snapshot-only, so nothing here reads the operator's real
 // ~/.claude or touches the network.
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const realFsp = require('node:fs/promises');
-const http = require('node:http');
-const os = require('node:os');
-const path = require('node:path');
-const WebSocket = require('ws');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import realFsp from 'node:fs/promises';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
 
-const { createBackend } = require('../server/backend.ts');
-const { dashboardClient } = require('./helpers/dashboard-ws');
-const { createUsageWiring } = require('../server/usage-wiring.ts');
-const { createUsageScanner } = require('../server/usage-scanner.ts');
-const { loadPricing } = require('../server/usage-pricing.ts');
+import { createBackend } from '../server/backend.ts';
+import { createUsageWiring } from '../server/usage-wiring.ts';
+import { createUsageScanner } from '../server/usage-scanner.ts';
+import { loadPricing } from '../server/usage-pricing.ts';
+import { closeSocket, dashboardClient, openRecordingSocket, waitForMessage } from './helpers/dashboard-ws.ts';
+import type { DashboardClient } from './helpers/dashboard-ws.ts';
+import { boundPort, closeServer, listenOnLoopback } from './helpers/http-server.ts';
 
 const SESSION_ID = 'b0000000-0000-4000-8000-000000000001';
 const CLAUDE_SESSION_ID = 'c1c1c1c1-2222-4333-8444-555555555555';
 const MODEL = 'claude-opus-4-5';
 const MESSAGE_WAIT_MS = 5000;
 
-function transcriptLine({ sessionId, requestId, messageId, input, output, timestampMs }) {
+interface UsageSessionRow {
+  id: string;
+  tokens: number;
+  costUSD: number;
+  lastTs: number;
+}
+
+// The frames this suite reads. A refused report carries only its requestId and error, so every body
+// field of usage-report is optional here.
+type ControlFrame =
+  | { type: 'usage-sessions'; pricingSource: string; ts: number; sessions: UsageSessionRow[] }
+  | {
+    type: 'usage-report';
+    requestId: string | null;
+    error: string | null;
+    warning?: string | null;
+    blockHours?: number;
+    totals?: { tokens: number; input: number; output: number };
+    daily?: unknown[];
+    models?: { model: string }[];
+    sessions?: unknown[];
+    blocks?: unknown[];
+    activeBlock?: unknown;
+    pricing?: { source: string; missing: string[] };
+    scan?: { files: number; entries: number; partial: boolean; dirs: string[] };
+  }
+  | { type: 'settings-updated'; requestId: string | null; settings: { usage?: unknown } }
+  | { type: 'snapshot' };
+
+type UsageSessions = Extract<ControlFrame, { type: 'usage-sessions' }>;
+type UsageReport = Extract<ControlFrame, { type: 'usage-report' }>;
+type SettingsUpdated = Extract<ControlFrame, { type: 'settings-updated' }>;
+
+const isUsageSessions = (m: ControlFrame): m is UsageSessions => m.type === 'usage-sessions';
+const isUsageReport = (m: ControlFrame): m is UsageReport => m.type === 'usage-report';
+const isSnapshot = (m: ControlFrame) => m.type === 'snapshot';
+const settingsUpdatedFor = (requestId: string) => (m: ControlFrame): m is SettingsUpdated =>
+  m.type === 'settings-updated' && m.requestId === requestId;
+
+function transcriptLine({ sessionId, requestId, messageId, input, output, timestampMs }: {
+  sessionId: string;
+  requestId: string;
+  messageId: string;
+  input: number;
+  output: number;
+  timestampMs: number;
+}): string {
   return `${JSON.stringify({
     sessionId,
     requestId,
@@ -59,7 +104,7 @@ function transcriptLine({ sessionId, requestId, messageId, input, output, timest
 
 // A minimal but REAL transcript tree: <claudeHome>/projects/<encoded-dir>/<uuid>.jsonl, the shape
 // resolveProjectsDirs + the scanner walk expect.
-function writeTranscriptFixture(claudeHome) {
+function writeTranscriptFixture(claudeHome: string): void {
   const projectDir = path.join(claudeHome, 'projects', 'C--fixture-repo');
   fs.mkdirSync(projectDir, { recursive: true });
   const now = Date.now();
@@ -71,32 +116,45 @@ function writeTranscriptFixture(claudeHome) {
   );
 }
 
+interface ScanCounts {
+  scanners: number;
+  stat: number;
+  readdir: number;
+  open: number;
+}
+
 // Counts every fs call the scanner makes plus every scanner construction, which is how the lazy-start
 // and restart assertions observe the lane without reaching into it.
-function makeUsageProbe(claudeHome) {
-  const counts = { scanners: 0, stat: 0, readdir: 0, open: 0 };
+function makeUsageProbe(claudeHome: string) {
+  const counts: ScanCounts = { scanners: 0, stat: 0, readdir: 0, open: 0 };
   const fsPromises = {
-    stat: (...args) => { counts.stat += 1; return realFsp.stat(...args); },
-    readdir: (...args) => { counts.readdir += 1; return realFsp.readdir(...args); },
-    open: (...args) => { counts.open += 1; return realFsp.open(...args); },
+    stat: (...args: Parameters<typeof realFsp.stat>) => { counts.stat += 1; return realFsp.stat(...args); },
+    readdir: (...args: Parameters<typeof realFsp.readdir>) => { counts.readdir += 1; return realFsp.readdir(...args); },
+    open: (...args: Parameters<typeof realFsp.open>) => { counts.open += 1; return realFsp.open(...args); },
   };
   const options = {
     // Snapshot-only pricing: no network fetch, no ~/.glissa cache read, whatever config.usage says.
-    loadPricingFn: (args) => loadPricing({ ...args, fetchEnabled: false }),
-    createScanner: (deps) => {
+    loadPricingFn: (args: Parameters<typeof loadPricing>[0]) => loadPricing({ ...args, fetchEnabled: false }),
+    createScanner: (deps: Parameters<typeof createUsageScanner>[0]) => {
       counts.scanners += 1;
       return createUsageScanner(deps);
     },
     // HOME is pinned to the fixture as well as CLAUDE_CONFIG_DIR: the scanner also resolves the Codex and
     // Grok homes from it, so without this the lane would walk the operator's real ~/.codex and ~/.grok.
     scannerDeps: { env: { CLAUDE_CONFIG_DIR: claudeHome, HOME: path.dirname(claudeHome), USERPROFILE: path.dirname(claudeHome) }, fsPromises },
-    logger: { warn: () => {} },
+    logger: { warn: () => {}, log: () => {} },
   };
   return { counts, options };
 }
 
-function withBackend({ usage } = {}, fn) {
-  return async (t) => {
+interface UsageHarness {
+  dash: DashboardClient;
+  counts: ScanCounts;
+  cfgPath: string;
+}
+
+function withBackend({ usage }: { usage?: Record<string, unknown> }, fn: (harness: UsageHarness) => Promise<void>) {
+  return async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-usage-'));
     const projectDir = path.join(tmpDir, 'project');
     const claudeHome = path.join(tmpDir, 'claude');
@@ -104,7 +162,7 @@ function withBackend({ usage } = {}, fn) {
     writeTranscriptFixture(claudeHome);
 
     const cfgPath = path.join(tmpDir, 'config.json');
-    const cfg = {
+    const cfg: Record<string, unknown> = {
       projects: [{ id: SESSION_ID, name: 'usage probe', path: projectDir, resumeSessionId: CLAUDE_SESSION_ID }],
       teams: [],
       repoRoots: [],
@@ -119,15 +177,15 @@ function withBackend({ usage } = {}, fn) {
     const server = http.createServer();
     const backend = createBackend(server, { staticDir: null, usageWiringOptions: probe.options });
     server.on('request', backend.app);
-    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const dash = await dashboardClient(server.address().port);
+    await listenOnLoopback(server);
+    const dash = await dashboardClient(boundPort(server));
 
     try {
-      await fn(t, { dash, counts: probe.counts, cfgPath });
+      await fn({ dash, counts: probe.counts, cfgPath });
     } finally {
       backend.shutdown();
       server.closeAllConnections();
-      await new Promise((resolve) => server.close(resolve));
+      await closeServer(server);
       if (prevEnv == null) delete process.env.GLISSA_CONFIG;
       if (prevEnv != null) process.env.GLISSA_CONFIG = prevEnv;
       fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -135,58 +193,36 @@ function withBackend({ usage } = {}, fn) {
   };
 }
 
-// Recording starts before 'open' resolves: the server sends the snapshot the instant the connection
-// lands, and ws can emit 'open' and 'message' within one socket read.
-function openRecordingSocket(dash, pathAndSearch = '/control') {
-  const ws = new WebSocket(dash.url(pathAndSearch), dash.options);
-  const received = [];
-  ws.on('message', (raw) => received.push(JSON.parse(raw.toString())));
-  return new Promise((resolve, reject) => {
-    ws.once('error', reject);
-    ws.once('open', () => resolve({ ws, received }));
-  });
+function openControl(dash: DashboardClient, pathAndSearch = '/control') {
+  return openRecordingSocket<ControlFrame>(dash, pathAndSearch);
 }
 
-function closeSocket(ws) {
-  return new Promise((resolve) => {
-    ws.once('close', resolve);
-    ws.close();
-  });
-}
-
-async function waitFor(predicate, label) {
+async function waitUntil(predicate: () => boolean, label: string): Promise<void> {
   const deadline = Date.now() + MESSAGE_WAIT_MS;
   while (Date.now() < deadline) {
-    const hit = predicate();
-    if (hit) return hit;
+    if (predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(`timed out waiting for ${label}`);
 }
 
-function waitForMessage(received, matches, label) {
-  return waitFor(() => received.find(matches), label);
+function settle(ms = 250): Promise<void> {
+  return new Promise((resolve) => { setTimeout(() => resolve(), ms); });
 }
 
-function settle(ms = 250) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-const isUsageSessions = (m) => m.type === 'usage-sessions';
-
-test('no transcript is read until the first control connection, then the boot pass runs once', withBackend({}, async (_t, { dash, counts }) => {
+test('no transcript is read until the first control connection, then the boot pass runs once', withBackend({}, async ({ dash, counts }) => {
   await settle();
   assert.equal(counts.scanners, 0, 'cold boot constructs no scanner');
   assert.equal(counts.readdir, 0, 'cold boot walks no directory');
   assert.equal(counts.open, 0, 'cold boot reads no transcript');
 
-  const first = await openRecordingSocket(dash);
+  const first = await openControl(dash);
   await waitForMessage(first.received, isUsageSessions, 'the first usage-sessions push');
   assert.equal(counts.scanners, 1);
   assert.ok(counts.readdir > 0, 'the deferred boot pass walked the transcript tree');
   assert.ok(counts.open > 0, 'the deferred boot pass read the transcript');
 
-  const second = await openRecordingSocket(dash);
+  const second = await openControl(dash);
   await waitForMessage(second.received, isUsageSessions, 'usage-sessions replayed to a later client');
   assert.equal(counts.scanners, 1, 'a second connection reuses the warm scanner');
 
@@ -194,8 +230,8 @@ test('no transcript is read until the first control connection, then the boot pa
   await closeSocket(second.ws);
 }));
 
-test('usage-sessions attributes the fixture transcript to the card through its live Claude session id', withBackend({}, async (_t, { dash }) => {
-  const client = await openRecordingSocket(dash);
+test('usage-sessions attributes the fixture transcript to the card through its live Claude session id', withBackend({}, async ({ dash }) => {
+  const client = await openControl(dash);
   const message = await waitForMessage(client.received, isUsageSessions, 'usage-sessions');
 
   assert.equal(message.pricingSource, 'snapshot');
@@ -209,52 +245,52 @@ test('usage-sessions attributes the fixture transcript to the card through its l
   await closeSocket(client.ws);
 }));
 
-test('request-usage-report replies to the requesting socket only, with the full report shape', withBackend({}, async (_t, { dash }) => {
-  const asker = await openRecordingSocket(dash);
+test('request-usage-report replies to the requesting socket only, with the full report shape', withBackend({}, async ({ dash }) => {
+  const asker = await openControl(dash);
   await waitForMessage(asker.received, isUsageSessions, 'the boot push');
-  const bystander = await openRecordingSocket(dash);
+  const bystander = await openControl(dash);
   await waitForMessage(bystander.received, isUsageSessions, 'the bystander connect replay');
   bystander.received.length = 0;
 
   asker.ws.send(JSON.stringify({ type: 'request-usage-report', requestId: 'r1', days: 30 }));
-  const report = await waitForMessage(asker.received, (m) => m.type === 'usage-report', 'usage-report');
+  const report = await waitForMessage(asker.received, isUsageReport, 'usage-report');
 
   assert.equal(report.requestId, 'r1');
   assert.equal(report.error, null);
   assert.equal(report.warning, null);
   assert.equal(report.blockHours, 5);
-  assert.equal(report.totals.tokens, 375);
-  assert.equal(report.totals.input, 300);
-  assert.equal(report.totals.output, 75);
-  assert.equal(report.daily.length, 1, 'both entries land in one local-tz day');
-  assert.deepEqual(report.models.map((m) => m.model), [MODEL]);
-  assert.equal(report.sessions.length, 1);
-  assert.ok(report.blocks.length >= 1);
+  assert.equal(report.totals?.tokens, 375);
+  assert.equal(report.totals?.input, 300);
+  assert.equal(report.totals?.output, 75);
+  assert.equal(report.daily?.length, 1, 'both entries land in one local-tz day');
+  assert.deepEqual(report.models?.map((m) => m.model), [MODEL]);
+  assert.equal(report.sessions?.length, 1);
+  assert.ok((report.blocks?.length ?? 0) >= 1);
   assert.ok(report.activeBlock, 'the fixture entries are minutes old, so the block is still active');
-  assert.equal(report.pricing.source, 'snapshot');
-  assert.deepEqual(report.pricing.missing, []);
-  assert.equal(report.scan.files, 1);
-  assert.equal(report.scan.entries, 2);
-  assert.equal(report.scan.partial, false);
-  assert.ok(Array.isArray(report.scan.dirs) && report.scan.dirs.length === 1);
+  assert.equal(report.pricing?.source, 'snapshot');
+  assert.deepEqual(report.pricing?.missing, []);
+  assert.equal(report.scan?.files, 1);
+  assert.equal(report.scan?.entries, 2);
+  assert.equal(report.scan?.partial, false);
+  assert.equal(report.scan?.dirs.length, 1);
 
   await settle();
-  assert.equal(bystander.received.filter((m) => m.type === 'usage-report').length, 0, 'the report is replied, never broadcast');
+  assert.equal(bystander.received.filter(isUsageReport).length, 0, 'the report is replied, never broadcast');
 
   // A client connecting after a report exists gets it replayed, with no requestId of its own.
-  const latecomer = await openRecordingSocket(dash);
-  const replayed = await waitForMessage(latecomer.received, (m) => m.type === 'usage-report', 'the replayed report');
+  const latecomer = await openControl(dash);
+  const replayed = await waitForMessage(latecomer.received, isUsageReport, 'the replayed report');
   assert.equal(replayed.requestId, null);
-  assert.equal(replayed.totals.tokens, 375);
+  assert.equal(replayed.totals?.tokens, 375);
 
   await closeSocket(asker.ws);
   await closeSocket(bystander.ws);
   await closeSocket(latecomer.ws);
 }));
 
-test('usage.enabled false: no scanner, no messages, and a refused report request', withBackend({ usage: { enabled: false } }, async (_t, { dash, counts }) => {
-  const client = await openRecordingSocket(dash);
-  await waitForMessage(client.received, (m) => m.type === 'snapshot', 'the snapshot');
+test('usage.enabled false: no scanner, no messages, and a refused report request', withBackend({ usage: { enabled: false } }, async ({ dash, counts }) => {
+  const client = await openControl(dash);
+  await waitForMessage(client.received, isSnapshot, 'the snapshot');
   await settle();
 
   assert.equal(counts.scanners, 0, 'a disabled lane constructs no scanner');
@@ -262,8 +298,9 @@ test('usage.enabled false: no scanner, no messages, and a refused report request
   assert.equal(client.received.filter(isUsageSessions).length, 0, 'no usage message on the wire');
 
   client.ws.send(JSON.stringify({ type: 'request-usage-report', requestId: 'r9' }));
-  const report = await waitForMessage(client.received, (m) => m.type === 'usage-report', 'the refusal');
+  const report = await waitForMessage(client.received, isUsageReport, 'the refusal');
   assert.equal(report.requestId, 'r9');
+  assert.ok(report.error, 'the refusal names a reason');
   assert.match(report.error, /disabled/);
   assert.equal(report.totals, undefined, 'a refusal carries no report body');
   assert.equal(counts.scanners, 0, 'the refused request still constructed nothing');
@@ -271,13 +308,13 @@ test('usage.enabled false: no scanner, no messages, and a refused report request
   await closeSocket(client.ws);
 }));
 
-test('a settings save restarts the lane only when the usage block actually changed', withBackend({}, async (_t, { dash, counts }) => {
-  const client = await openRecordingSocket(dash);
+test('a settings save restarts the lane only when the usage block actually changed', withBackend({}, async ({ dash, counts }) => {
+  const client = await openControl(dash);
   await waitForMessage(client.received, isUsageSessions, 'the boot push');
   assert.equal(counts.scanners, 1);
 
   client.ws.send(JSON.stringify({ type: 'update-settings', requestId: 's1', settings: { cursorBlink: true } }));
-  await waitForMessage(client.received, (m) => m.type === 'settings-updated' && m.requestId === 's1', 'the unrelated save');
+  await waitForMessage(client.received, settingsUpdatedFor('s1'), 'the unrelated save');
   await settle();
   assert.equal(counts.scanners, 1, 'a save that touches no usage key leaves the warm scanner alone');
 
@@ -286,57 +323,58 @@ test('a settings save restarts the lane only when the usage block actually chang
     requestId: 's2',
     settings: { usage: { enabled: true, fetchPricing: false, scanIntervalMinutes: 7, costMode: 'calculate' } },
   }));
-  await waitForMessage(client.received, (m) => m.type === 'settings-updated' && m.requestId === 's2', 'the usage save');
-  await waitFor(() => counts.scanners === 2, 'the lane to restart with a fresh scanner');
+  const updated = await waitForMessage(client.received, settingsUpdatedFor('s2'), 'the usage save');
+  await waitUntil(() => counts.scanners === 2, 'the lane to restart with a fresh scanner');
 
-  const updated = client.received.find((m) => m.type === 'settings-updated' && m.requestId === 's2');
   assert.deepEqual(updated.settings.usage, { enabled: true, fetchPricing: false, scanIntervalMinutes: 7, costMode: 'calculate' });
 
   await closeSocket(client.ws);
 }));
 
-// --- pass scheduling, against a stub scanner (no fs, no backend) ---
+// --- pass scheduling, against a stubbed pass (no fs, no backend) ---
 //
 // The scanner caps each pass at a byte budget, so a large transcript tree comes back partial and the
 // lane must finish it on its own short timer rather than waiting out scanIntervalMinutes. Measured on
 // a real machine: 6927 files, budget exhausted, 36 of the entries found on the first pass.
 
-function stubScannerWiring({ passResults, clients = 1 }) {
-  const passes = [];
-  const scanner = {
-    runPass: async (args) => {
-      passes.push(args);
-      return passResults[Math.min(passes.length - 1, passResults.length - 1)];
-    },
-    buildReport: () => ({
-      ts: 1, tz: null, blockHours: 5, totals: {}, daily: [], models: [], sessions: [],
-      blocks: [], activeBlock: null, tokenLimit: null, pricing: { missing: [] },
-      scan: { dirs: [], files: 0, entries: 0, lastScanMs: 1, partial: false },
-    }),
-    sessionTotals: () => new Map(),
-    stats: () => ({ dirs: [], files: 0, entries: 0, lastScanMs: 1, resolutionError: null }),
+type PassResult = Awaited<ReturnType<ReturnType<typeof createUsageScanner>['runPass']>>;
+type PassArgs = Parameters<ReturnType<typeof createUsageScanner>['runPass']>[0];
+
+// A real scanner whose ONE pass is scripted: everything the wiring reads afterwards (the report, the
+// per-session totals, the scan stats) stays the genuine article over an empty entry set.
+function scriptedScanner(passes: PassArgs[], passResults: PassResult[]) {
+  const scanner = createUsageScanner({ env: {}, homeDir: path.join(os.tmpdir(), 'glissa-usage-nowhere') });
+  scanner.runPass = async (args?: PassArgs) => {
+    passes.push(args);
+    return passResults[Math.min(passes.length - 1, passResults.length - 1)];
   };
+  return scanner;
+}
+
+function stubScannerWiring({ passResults, clients = 1 }: { passResults: PassResult[]; clients?: number }) {
+  const passes: PassArgs[] = [];
+  const scanner = scriptedScanner(passes, passResults);
   const wiring = createUsageWiring({
     config: {},
     sessions: new Map(),
     controlClientCount: () => clients,
     createScanner: () => scanner,
-    loadPricingFn: async () => ({ table: {}, source: 'snapshot', fetchedAt: null }),
+    loadPricingFn: async () => ({ table: new Map(), source: 'snapshot', fetchedAt: null }),
     partialContinueMs: 10,
-    logger: { warn: () => {} },
+    logger: { warn: () => {}, log: () => {} },
   });
   return { wiring, passes };
 }
 
-const PARTIAL_PASS = { files: 1, entries: 1, newEntries: 1, partial: true, durationMs: 1 };
-const COMPLETE_PASS = { files: 1, entries: 1, newEntries: 0, partial: false, durationMs: 1 };
+const PARTIAL_PASS: PassResult = { files: 1, entries: 1, newEntries: 1, partial: true, durationMs: 1 };
+const COMPLETE_PASS: PassResult = { files: 1, entries: 1, newEntries: 0, partial: false, durationMs: 1 };
 
 test('a partial pass is continued on the short timer until the scan completes', async () => {
   const { wiring, passes } = stubScannerWiring({ passResults: [PARTIAL_PASS, PARTIAL_PASS, COMPLETE_PASS] });
   await wiring.start();
   assert.equal(passes.length, 1, 'the boot pass');
 
-  await waitFor(() => passes.length === 3, 'the truncated scan to be continued to completion');
+  await waitUntil(() => passes.length === 3, 'the truncated scan to be continued to completion');
   await settle(60);
   assert.equal(passes.length, 3, 'a complete pass schedules no further continuation');
   await wiring.stop();
@@ -361,12 +399,12 @@ test('stop() cancels a pending continuation', async () => {
   assert.equal(passes.length, 1, 'no pass runs after stop');
 });
 
-test('a config with no usage block never materializes one on an unrelated save', withBackend({}, async (_t, { dash, cfgPath }) => {
-  const client = await openRecordingSocket(dash);
-  await waitForMessage(client.received, (m) => m.type === 'snapshot', 'the snapshot');
+test('a config with no usage block never materializes one on an unrelated save', withBackend({}, async ({ dash, cfgPath }) => {
+  const client = await openControl(dash);
+  await waitForMessage(client.received, isSnapshot, 'the snapshot');
 
   client.ws.send(JSON.stringify({ type: 'update-settings', requestId: 'u1', settings: { cursorBlink: false } }));
-  const updated = await waitForMessage(client.received, (m) => m.type === 'settings-updated' && m.requestId === 'u1', 'the save');
+  const updated = await waitForMessage(client.received, settingsUpdatedFor('u1'), 'the save');
   assert.equal(updated.settings.usage, null, 'getSettings echoes null while the block is unconfigured');
   assert.equal(JSON.parse(fs.readFileSync(cfgPath, 'utf8')).usage, undefined, 'config.json still has no usage key');
 
@@ -374,50 +412,48 @@ test('a config with no usage block never materializes one on an unrelated save',
 }));
 
 test('a settings restart during an in-flight start arms the NEW interval cadence', async () => {
-  let releaseFirstPass;
-  const firstPassGate = new Promise((resolve) => { releaseFirstPass = resolve; });
-  const armed = [];
-  const cleared = [];
-  let passCount = 0;
-  const scanner = {
-    runPass: async () => {
-      passCount += 1;
-      if (passCount === 1) await firstPassGate;
-      return { files: 0, entries: 0, newEntries: 0, partial: false, durationMs: 1 };
-    },
-    buildReport: () => ({
-      ts: 1, tz: null, blockHours: 5, totals: {}, daily: [], models: [], sessions: [],
-      blocks: [], activeBlock: null, tokenLimit: null, pricing: { missing: [] },
-      scan: { dirs: [], files: 0, entries: 0, lastScanMs: 1, partial: false },
-    }),
-    sessionTotals: () => new Map(),
-    stats: () => ({ dirs: [], files: 0, entries: 0, lastScanMs: 1, resolutionError: null }),
+  const gate: { release: (() => void) | null } = { release: null };
+  const firstPassGate = new Promise<void>((resolve) => { gate.release = resolve; });
+  const armed: { ms: number; handle: NodeJS.Timeout }[] = [];
+  const cleared: NodeJS.Timeout[] = [];
+  const counted = { passes: 0 };
+  const scanner = createUsageScanner({ env: {}, homeDir: path.join(os.tmpdir(), 'glissa-usage-nowhere') });
+  scanner.runPass = async () => {
+    counted.passes += 1;
+    if (counted.passes === 1) await firstPassGate;
+    return { files: 0, entries: 0, newEntries: 0, partial: false, durationMs: 1 };
   };
-  const config = { usage: { scanIntervalMinutes: 1 } };
+  const config: { usage: Record<string, unknown> } = { usage: { scanIntervalMinutes: 1 } };
   const wiring = createUsageWiring({
     config,
     sessions: new Map(),
     controlClientCount: () => 1,
     createScanner: () => scanner,
-    loadPricingFn: async () => ({ table: {}, source: 'snapshot', fetchedAt: null }),
-    setIntervalFn: (_fn, ms) => { const handle = { ms }; armed.push(handle); return handle; },
-    clearIntervalFn: (handle) => { cleared.push(handle); },
-    logger: { warn: () => {} },
+    loadPricingFn: async () => ({ table: new Map(), source: 'snapshot', fetchedAt: null }),
+    setIntervalFn: (fn: () => void, ms: number) => {
+      const handle = setInterval(fn, ms);
+      handle.unref();
+      armed.push({ ms, handle });
+      return handle;
+    },
+    clearIntervalFn: (handle: NodeJS.Timeout) => { cleared.push(handle); clearInterval(handle); },
+    logger: { warn: () => {}, log: () => {} },
   });
 
   const startPending = wiring.start();
   config.usage = { scanIntervalMinutes: 7 };
   wiring.restartIfConfigChanged();
-  releaseFirstPass();
+  assert.ok(gate.release, 'the first pass gate is armed');
+  gate.release();
   await startPending;
 
   const wantedMs = 7 * 60 * 1000;
-  for (let i = 0; i < 200 && !armed.some((handle) => handle.ms === wantedMs); i += 1) {
+  for (let i = 0; i < 200 && !armed.some((entry) => entry.ms === wantedMs); i += 1) {
     await new Promise((resolve) => setImmediate(resolve));
   }
-  assert.ok(armed.some((handle) => handle.ms === wantedMs), 'the restarted lane armed the new cadence');
-  for (const handle of armed.filter((entry) => entry.ms !== wantedMs)) {
-    assert.ok(cleared.includes(handle), 'every stale interval from the aborted start was cleared');
+  assert.ok(armed.some((entry) => entry.ms === wantedMs), 'the restarted lane armed the new cadence');
+  for (const entry of armed.filter((candidate) => candidate.ms !== wantedMs)) {
+    assert.ok(cleared.includes(entry.handle), 'every stale interval from the aborted start was cleared');
   }
   await wiring.stop();
 });

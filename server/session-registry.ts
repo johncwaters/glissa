@@ -46,7 +46,7 @@ interface SessionRegistryDependencies {
   spawnGate: RegistrySpawnGate;
   gitWorkspaceSync: RegistryGitWorkspace;
   reconcileSessionWorktrees: (input: ReconcileWorktreesOptions) => void;
-  carryWorktreeAcrossRecreate: (oldSession: Session, newSession: Session) => unknown;
+  carryWorktreeAcrossRecreate: (oldSession: Session | null, newSession: Session) => unknown;
   ensureProjectIds: (projects: RegistryProject[]) => boolean;
   resolveAgentId: (agent: AgentId) => string;
   logger: Pick<Console, 'log' | 'warn'>;
@@ -100,9 +100,9 @@ function runAutoResume(
   return Promise.all(runs);
 }
 
-function carryWorktreeAcrossRecreate(oldSession: Session, newSession: Session): unknown {
+function carryWorktreeAcrossRecreate(oldSession: Session | null, newSession: Session): unknown {
   const carry = oldSession?.getWorktreeCarry?.();
-  if (!carry) return;
+  if (!oldSession || !carry) return;
   if (isSameDirectoryPath(newSession.path, oldSession.path)) {
     try {
       newSession.adoptWorktree({

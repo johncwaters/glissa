@@ -33,7 +33,7 @@ const {
   renderDistilledOutput,
   validateDistillResult,
 } = require('../server/core/pack-distiller-core.ts');
-const { recordingSessionFactory } = require('./helpers/fake-session');
+const { recordingSessionFactory } = require('./helpers/fake-session.ts');
 
 const HASHES = [
   { path: 'AGENTS.md', fullPath: 'C:/repo/AGENTS.md', sha256: 'a'.repeat(64) },

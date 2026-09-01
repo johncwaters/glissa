@@ -25,11 +25,11 @@ const { EventEmitter } = require('node:events');
 const WebSocket = require('ws');
 
 const { createBackend } = require('../server/backend.ts');
-const { dashboardClient } = require('./helpers/dashboard-ws');
+const { dashboardClient } = require('./helpers/dashboard-ws.ts');
 const { createReplayLog } = require('../server/control-replay-core.ts');
 const { ACTIVITY_METHOD } = require('../server/core/ingest-editor-core.ts');
 const { registerEphemeralSession } = require('../server/ephemeral-session.ts');
-const { hasGit, git } = require('./helpers/git-fixture');
+const { hasGit, git } = require('./helpers/git-fixture.ts');
 
 const INGEST_ON = { enabled: true, sources: { terminal: { enabled: true } } };
 const MESSAGE_WAIT_MS = 5000;

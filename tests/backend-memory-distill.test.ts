@@ -1,22 +1,31 @@
-'use strict';
-
 // The memory-distill lane is constructed only beside a memory store (docs/plan-visions-3.md, M15), and
 // its kill switch is an explicit false rather than an opt-in true. Memory off must construct nothing.
 //
 // SAFETY: createBackend runs a boot worktree reconcile against the configured projects, so every boot
 // here points at a throwaway temp config with ZERO projects via GLISSA_CONFIG.
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const http = require('node:http');
-const os = require('node:os');
-const path = require('node:path');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
 
-const { createBackend } = require('../server/backend.ts');
-const { isolateTranscriptHomes } = require('./helpers/transcript-homes');
+import { createBackend } from '../server/backend.ts';
+import type { ShutdownOutcome } from '../server/backend-shutdown.ts';
+import { closeServer, listenOnLoopback } from './helpers/http-server.ts';
+import { memoryDistillLane, memoryStoreLane } from './helpers/lanes.ts';
+import type { Backend } from './helpers/lanes.ts';
+import { isolateTranscriptHomes } from './helpers/transcript-homes.ts';
 
-async function bootWithConfig(memory) {
+interface BootedBackend {
+  dir: string;
+  backend: Backend;
+  shutdownOnce(): ShutdownOutcome;
+  close(): Promise<void>;
+}
+
+async function bootWithConfig(memory?: Record<string, unknown>): Promise<BootedBackend> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memory-distill-backend-'));
   const configPath = path.join(dir, 'config.json');
   const base = { projects: [], teams: [], repoRoots: [] };
@@ -27,22 +36,22 @@ async function bootWithConfig(memory) {
   const server = http.createServer();
   const backend = createBackend(server, { staticDir: null });
   server.on('request', backend.app);
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await listenOnLoopback(server);
   // Every stopper fires on the first call, so a test reading the names and the close() below share one.
-  let shutdownResult = null;
-  const shutdownOnce = () => {
-    shutdownResult = shutdownResult || backend.shutdown();
-    return shutdownResult;
+  const outcome: { result: ShutdownOutcome | null } = { result: null };
+  const shutdownOnce = (): ShutdownOutcome => {
+    outcome.result = outcome.result || backend.shutdown();
+    return outcome.result;
   };
   return {
     dir,
     backend,
     shutdownOnce,
     async close() {
-      const outcome = shutdownOnce();
-      await Promise.allSettled((outcome.stoppers || []).map((entry) => entry.promise));
+      const settled = shutdownOnce();
+      await Promise.allSettled((settled.stoppers || []).map((entry) => entry.promise));
       server.closeAllConnections();
-      await new Promise((resolve) => server.close(resolve));
+      await closeServer(server);
       restoreHomes();
       if (previousConfig == null) delete process.env.GLISSA_CONFIG;
       if (previousConfig != null) process.env.GLISSA_CONFIG = previousConfig;
@@ -54,7 +63,7 @@ async function bootWithConfig(memory) {
 test('memory off constructs no distill lane', async () => {
   const booted = await bootWithConfig(undefined);
   try {
-    assert.equal(booted.backend.getLane('memory-distill'), null);
+    assert.equal(memoryDistillLane(booted.backend), null);
   } finally {
     await booted.close();
   }
@@ -63,8 +72,8 @@ test('memory off constructs no distill lane', async () => {
 test('memory on constructs the lane and registers its shutdown stopper', async () => {
   const booted = await bootWithConfig({ enabled: true });
   try {
-    const distiller = booted.backend.getLane('memory-distill');
-    assert.notEqual(distiller, null);
+    const distiller = memoryDistillLane(booted.backend);
+    assert.ok(distiller, 'the lane was constructed');
     assert.equal(distiller.isEnabled(), true);
     const names = booted.shutdownOnce().stoppers.map((entry) => entry.name);
     assert.equal(names.includes('memory-distill'), true);
@@ -77,8 +86,10 @@ test('memory on constructs the lane and registers its shutdown stopper', async (
 test('the distill kill switch leaves the store on and the lane inert', async () => {
   const booted = await bootWithConfig({ enabled: true, distill: { enabled: false } });
   try {
-    assert.notEqual(booted.backend.getLane('memory-store'), null);
-    assert.equal(booted.backend.getLane('memory-distill').isEnabled(), false);
+    assert.notEqual(memoryStoreLane(booted.backend), null);
+    const distiller = memoryDistillLane(booted.backend);
+    assert.ok(distiller, 'the lane still exists beside the store');
+    assert.equal(distiller.isEnabled(), false);
   } finally {
     await booted.close();
   }

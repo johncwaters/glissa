@@ -1,5 +1,3 @@
-'use strict';
-
 // reconcileSessionWorktrees: the boot pass over the on-disk glissa/session/* worktrees a prior run left
 // behind. Its whole job is deciding, per worktree, between adopt / keep / remove without ever destroying
 // work or stranding a resumable session - including the survive-shutdown case, where a CLEAN worktree
@@ -8,21 +6,39 @@
 // carryWorktreeAcrossRecreate / decideWasActiveFlip): booting createBackend to reach the real pass would
 // delete the checkout's own session worktrees.
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const http = require('node:http');
-const os = require('node:os');
-const path = require('node:path');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
 
-const { reconcileSessionWorktrees, createBackend } = require('../server/backend.ts');
-const { createGitWorkspace } = require('../server/git-workspace.ts');
-const { hasGit, git } = require('./helpers/git-fixture');
+import { reconcileSessionWorktrees, createBackend } from '../server/backend.ts';
+import { createGitWorkspace } from '../server/git-workspace.ts';
+import type { SessionWorktree, WorktreeArgs } from '../server/git-workspace.ts';
+import type { RegistryProject } from '../server/core/session-registry-core.ts';
+import { Session } from '../session/sessions.ts';
+import { fakePty } from './helpers/fake-pty.ts';
+import { hasGit, git } from './helpers/git-fixture.ts';
 
 const GIT = hasGit();
 
+type AdoptOptions = Parameters<Session['adoptWorktree']>[0];
+
+interface SessionFixture {
+  session: Session;
+  adopted: AdoptOptions[];
+}
+
+interface FakeEngine {
+  removed: WorktreeArgs[];
+  listed: { projectPath: string; integrationBranch?: string | null }[];
+  listSessionWorktrees(args: WorktreeArgs): SessionWorktree[];
+  removeWorktreeByPath(args: WorktreeArgs): void;
+}
+
 // A throwaway repo checked out on the integration branch, the shape the boot reconcile expects.
-function initRepoOnDevelop() {
+function initRepoOnDevelop(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-reconcile-repo-'));
   try { git(['init', '-b', 'main'], dir); } catch { git(['init'], dir); }
   git(['config', 'user.email', 'test@example.com'], dir);
@@ -37,37 +53,54 @@ function initRepoOnDevelop() {
   return dir;
 }
 
-function fakeSession(name, sessionProjectPath = 'C:/proj') {
-  const adopted = [];
-  return { name, path: sessionProjectPath, adopted, adoptWorktree(args) { adopted.push(args); } };
+function fakeSession(name: string, sessionProjectPath = 'C:/proj'): SessionFixture {
+  const adopted: AdoptOptions[] = [];
+  const session = new Session({ id: name, name, path: sessionProjectPath, ptySpawn: () => fakePty() });
+  session.adoptWorktree = (args: AdoptOptions) => { adopted.push(args); };
+  return { session, adopted };
 }
 
-// Mirrors the shape gitWorkspaceSync.listSessionWorktrees yields per worktree (server/git-workspace.js).
-function worktreeEntry({ id, hasWork = false, integrationBranch }) {
+// Mirrors the shape gitWorkspaceSync.listSessionWorktrees yields per worktree (server/git-workspace.ts).
+function worktreeEntry({ id, hasWork = false, integrationBranch = null }: {
+  id: string;
+  hasWork?: boolean;
+  integrationBranch?: string | null;
+}): SessionWorktree {
   return {
     id,
     cwd: `C:/wts/proj-${id}`,
     branch: `glissa/session/${id}`,
     hasWork,
-    ...(integrationBranch ? { integrationBranch } : {}),
+    integrationBranch,
   };
 }
 
-function fakeEngine(byProjectPath) {
-  const removed = [];
-  const listed = [];
+function fakeEngine(byProjectPath: Record<string, SessionWorktree[]>): FakeEngine {
+  const removed: WorktreeArgs[] = [];
+  const listed: { projectPath: string; integrationBranch?: string | null }[] = [];
   return {
     removed,
     listed,
-    listSessionWorktrees({ projectPath, integrationBranch }) {
+    listSessionWorktrees({ projectPath, integrationBranch }: WorktreeArgs): SessionWorktree[] {
       listed.push({ projectPath, integrationBranch });
       return byProjectPath[projectPath] || [];
     },
-    removeWorktreeByPath(args) { removed.push(args); },
+    removeWorktreeByPath(args: WorktreeArgs): void { removed.push(args); },
   };
 }
 
-function run({ projects, sessions, engine, integrationBranch = 'develop', onAdopt, worktreeDirExists = () => true }) {
+function project(id: string, projectPath: string): RegistryProject {
+  return { id, name: id, path: projectPath };
+}
+
+function run({ projects, sessions, engine, integrationBranch = 'develop', onAdopt, worktreeDirExists = () => true }: {
+  projects: RegistryProject[];
+  sessions: Map<string, Session>;
+  engine: FakeEngine;
+  integrationBranch?: string;
+  onAdopt?: (session: Session, worktree: SessionWorktree) => void;
+  worktreeDirExists?: (target: string) => boolean;
+}): void {
   reconcileSessionWorktrees({
     projects, sessions, gitWorkspaceSync: engine, integrationBranch, onAdopt, worktreeDirExists,
     log: () => {}, warn: () => {},
@@ -77,10 +110,10 @@ function run({ projects, sessions, engine, integrationBranch = 'develop', onAdop
 test('CLEAN + claimed: adopted ungated (no review banner) and NOT removed - the survive-shutdown case', () => {
   const sess = fakeSession('alpha');
   const engine = fakeEngine({ 'C:/proj': [worktreeEntry({ id: 'sess-1', hasWork: false })] });
-  const adoptedSessions = [];
+  const adoptedSessions: string[] = [];
   run({
-    projects: [{ id: 'sess-1', path: 'C:/proj' }],
-    sessions: new Map([['sess-1', sess]]),
+    projects: [project('sess-1', 'C:/proj')],
+    sessions: new Map([['sess-1', sess.session]]),
     engine,
     onAdopt: (s) => adoptedSessions.push(s.name),
   });
@@ -98,7 +131,7 @@ test('CLEAN + claimed: adopted ungated (no review banner) and NOT removed - the 
 test('DIRTY + claimed: adopted as pending-review (unchanged behavior)', () => {
   const sess = fakeSession('alpha');
   const engine = fakeEngine({ 'C:/proj': [worktreeEntry({ id: 'sess-1', hasWork: true })] });
-  run({ projects: [{ id: 'sess-1', path: 'C:/proj' }], sessions: new Map([['sess-1', sess]]), engine });
+  run({ projects: [project('sess-1', 'C:/proj')], sessions: new Map([['sess-1', sess.session]]), engine });
   assert.equal(sess.adopted.length, 1);
   assert.equal(sess.adopted[0].hasUnmergedWork, true, 'unmerged work still raises the review gate');
   assert.deepEqual(engine.removed, []);
@@ -106,7 +139,7 @@ test('DIRTY + claimed: adopted as pending-review (unchanged behavior)', () => {
 
 test('CLEAN + unclaimed: removed junction-safe (a true leftover orphan)', () => {
   const engine = fakeEngine({ 'C:/proj': [worktreeEntry({ id: 'gone-1', hasWork: false })] });
-  run({ projects: [{ id: 'sess-1', path: 'C:/proj' }], sessions: new Map(), engine });
+  run({ projects: [project('sess-1', 'C:/proj')], sessions: new Map(), engine });
   assert.deepEqual(engine.removed, [{
     projectPath: 'C:/proj', cwd: 'C:/wts/proj-gone-1', branch: 'glissa/session/gone-1',
   }]);
@@ -114,7 +147,7 @@ test('CLEAN + unclaimed: removed junction-safe (a true leftover orphan)', () => 
 
 test('DIRTY + unclaimed: kept - neither adopted nor removed (no data loss without an owner)', () => {
   const engine = fakeEngine({ 'C:/proj': [worktreeEntry({ id: 'gone-1', hasWork: true })] });
-  run({ projects: [{ id: 'sess-1', path: 'C:/proj' }], sessions: new Map(), engine });
+  run({ projects: [project('sess-1', 'C:/proj')], sessions: new Map(), engine });
   assert.deepEqual(engine.removed, [], 'unclaimed uncommitted work is left for manual review');
 });
 
@@ -122,8 +155,8 @@ test('CLEAN + claimed but the directory vanished: pruned, not adopted onto a dea
   const sess = fakeSession('alpha');
   const engine = fakeEngine({ 'C:/proj': [worktreeEntry({ id: 'sess-1', hasWork: false })] });
   run({
-    projects: [{ id: 'sess-1', path: 'C:/proj' }],
-    sessions: new Map([['sess-1', sess]]),
+    projects: [project('sess-1', 'C:/proj')],
+    sessions: new Map([['sess-1', sess.session]]),
     engine,
     worktreeDirExists: () => false,
   });
@@ -141,8 +174,8 @@ test('claimed but the session now lives in a DIFFERENT repo: dirty kept, clean r
     ],
   });
   run({
-    projects: [{ id: 'sess-1', path: 'C:/proj' }],
-    sessions: new Map([['sess-1', movedDirty], ['sess-2', movedClean]]),
+    projects: [project('sess-1', 'C:/proj')],
+    sessions: new Map([['sess-1', movedDirty.session], ['sess-2', movedClean.session]]),
     engine,
   });
   assert.equal(movedDirty.adopted.length, 0, 'a wrong-repo tree must not be adopted');
@@ -160,8 +193,8 @@ test('base comes from the worktree marker when present, else the configured inte
     ],
   });
   run({
-    projects: [{ id: 'sess-1', path: 'C:/proj' }],
-    sessions: new Map([['sess-1', marked], ['sess-2', plain]]),
+    projects: [project('sess-1', 'C:/proj')],
+    sessions: new Map([['sess-1', marked.session], ['sess-2', plain.session]]),
     engine,
   });
   assert.equal(marked.adopted[0].base, 'release/2.0');
@@ -172,9 +205,9 @@ test('each repo root is visited once and a project with no path is skipped', () 
   const engine = fakeEngine({ 'C:/proj': [] });
   run({
     projects: [
-      { id: 'sess-1', path: 'C:/proj' },
-      { id: 'sess-2', path: 'C:/proj' },
-      { id: 'sess-3' },
+      project('sess-1', 'C:/proj'),
+      project('sess-2', 'C:/proj'),
+      project('sess-3', ''),
     ],
     sessions: new Map(),
     engine,
@@ -194,8 +227,8 @@ test('a mixed repo resolves every worktree independently in one pass', () => {
     ],
   });
   run({
-    projects: [{ id: 'sess-1', path: 'C:/proj' }],
-    sessions: new Map([['sess-1', dirtyOwner], ['sess-2', cleanOwner]]),
+    projects: [project('sess-1', 'C:/proj')],
+    sessions: new Map([['sess-1', dirtyOwner.session], ['sess-2', cleanOwner.session]]),
     engine,
   });
   assert.equal(dirtyOwner.adopted[0].hasUnmergedWork, true);
@@ -215,8 +248,7 @@ test('boot wiring: createBackend runs the reconcile (clean orphan removed, dirty
   const worktreeBase = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-reconcile-wts-'));
   const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-reconcile-cfg-'));
   const prevEnv = process.env.GLISSA_CONFIG;
-  let backend = null;
-  let server = null;
+  const booted: { backend: ReturnType<typeof createBackend> | null } = { backend: null };
   try {
     const gw = createGitWorkspace();
     const cleanWorktree = await gw.create({ projectPath: repo, teamId: 'session', label: 'orphan-clean', baseBranch: 'develop', worktreeBase });
@@ -231,13 +263,12 @@ test('boot wiring: createBackend runs the reconcile (clean orphan removed, dirty
     }, null, 2), 'utf8');
     process.env.GLISSA_CONFIG = cfgPath;
 
-    server = http.createServer();
-    backend = createBackend(server, { staticDir: null });
+    booted.backend = createBackend(http.createServer(), { staticDir: null });
 
     assert.ok(!fs.existsSync(cleanWorktree.cwd), 'boot removed the clean orphan worktree');
     assert.ok(fs.existsSync(path.join(dirtyWorktree.cwd, 'wip.js')), 'boot kept the orphan holding unmerged work');
   } finally {
-    if (backend) backend.shutdown();
+    if (booted.backend) booted.backend.shutdown();
     if (prevEnv == null) delete process.env.GLISSA_CONFIG;
     if (prevEnv != null) process.env.GLISSA_CONFIG = prevEnv;
     fs.rmSync(worktreeBase, { recursive: true, force: true });

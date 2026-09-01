@@ -23,7 +23,7 @@ const path = require('node:path');
 const WebSocket = require('ws');
 
 const { createBackend } = require('../server/backend.ts');
-const { dashboardClient } = require('./helpers/dashboard-ws');
+const { dashboardClient } = require('./helpers/dashboard-ws.ts');
 const { createReplayLog } = require('../server/control-replay-core.ts');
 
 const MARKDOWN_URI = 'file:///tmp/plan-visions.md';

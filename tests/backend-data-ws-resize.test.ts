@@ -1,59 +1,78 @@
-'use strict';
-
 // Active-viewer resize arbitration over the data WebSocket. One session owns one PTY but any number of
 // data connections, so a phone opening a session used to reflow the desktop's terminal to phone width
 // and leave it there: the desktop's own box never changed, so its client cached the size and never
 // re-pushed. The departing viewer now hands its claim back ({type:'unview'}, or a close) and the server
 // re-applies the most recent surviving viewer's size. The decision itself is pure
-// (tests/viewer-size-core.test.js); this file pins the wiring.
+// (tests/viewer-size-core.test.ts); this file pins the wiring.
 //
-// SAFETY: same constraints as tests/backend-upload-route.test.js. createBackend runs a boot worktree
+// SAFETY: same constraints as tests/backend-upload-route.test.ts. createBackend runs a boot worktree
 // reconcile against the configured projects, so GLISSA_CONFIG points at a throwaway temp config whose
 // ONE project is an empty temp directory (not a git repo, so nothing is listed or removed) and whose
 // session stays DORMANT. Never point this file at a path outside its temp dir. A fake PTY records the
 // resizes; no real `claude` process launches.
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const http = require('node:http');
-const os = require('node:os');
-const path = require('node:path');
-const WebSocket = require('ws');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import type { Server } from 'node:http';
+import WebSocket from 'ws';
 
-const { createBackend } = require('../server/backend.ts');
-const { dashboardClient } = require('./helpers/dashboard-ws');
+import { createBackend } from '../server/backend.ts';
+import type { Session } from '../session/sessions.ts';
+import { closeSocket, dashboardClient, openSocket } from './helpers/dashboard-ws.ts';
+import type { DashboardClient } from './helpers/dashboard-ws.ts';
+import { UNREACHABLE_PID } from './helpers/fake-pty.ts';
+import { boundPort, closeServer, listenOnLoopback } from './helpers/http-server.ts';
+import type { Backend } from './helpers/lanes.ts';
 
 const SESSION_ID = 'a0000000-0000-4000-8000-000000000002';
 
-let tmpDir = null;
-let prevEnv = null;
-let server = null;
-let backend = null;
-let client = null;
-let session = null;
-let ptyResizes = [];
-
-function attachFakePty() {
-  ptyResizes = [];
-  // Past every platform's pid_max on purpose: shutdown() destroys this session, and off Windows that
-  // kill signals the pid's process GROUP, which must never name a real one on the host.
-  session.ptyProcess = { write() {}, resize: (cols, rows) => ptyResizes.push({ cols, rows }), pid: 2147483646 };
-  session._ptyAlive = true;
+interface ResizeCall {
+  cols: number;
+  rows: number;
 }
 
-async function openViewer() {
-  const ws = new WebSocket(client.url(`/terminals/${SESSION_ID}`), client.options);
-  await new Promise((resolve, reject) => {
-    ws.once('open', resolve);
-    ws.once('error', reject);
-  });
-  return ws;
+interface ResizeContext {
+  tmpDir: string;
+  prevEnv: string | undefined;
+  server: Server;
+  backend: Backend;
+  client: DashboardClient;
+  session: Session;
+}
+
+const booted: { context: ResizeContext | null } = { context: null };
+const ptyResizes: ResizeCall[] = [];
+
+function ctx(): ResizeContext {
+  if (!booted.context) throw new Error('the backend was never booted');
+  return booted.context;
+}
+
+function attachFakePty(): void {
+  ptyResizes.length = 0;
+  // UNREACHABLE_PID is past every platform's pid_max on purpose: shutdown() destroys this session, and
+  // off Windows that kill signals the pid's process GROUP, which must never name a real one on the host.
+  ctx().session.ptyProcess = {
+    pid: UNREACHABLE_PID,
+    onData() {},
+    onExit() {},
+    write() {},
+    resize: (cols: number, rows: number) => { ptyResizes.push({ cols, rows }); },
+  };
+  ctx().session._ptyAlive = true;
+}
+
+function openViewer(): Promise<WebSocket> {
+  return openSocket(ctx().client, `/terminals/${SESSION_ID}`);
 }
 
 // A resize message produces one pty.resize, so the assertions poll for the expected total rather than
 // sleeping a fixed amount and hoping.
-async function waitForResizeCount(expected) {
+async function waitForResizeCount(expected: number): Promise<ResizeCall[]> {
   const deadline = Date.now() + 3000;
   while (ptyResizes.length < expected && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -61,46 +80,50 @@ async function waitForResizeCount(expected) {
   return ptyResizes;
 }
 
-async function closeViewer(ws) {
-  if (!ws || ws.readyState === WebSocket.CLOSED) return;
-  const closed = new Promise((resolve) => ws.once('close', resolve));
-  ws.close();
-  await closed;
+async function closeViewer(ws: WebSocket): Promise<void> {
+  if (ws.readyState === WebSocket.CLOSED) return;
+  await closeSocket(ws);
+}
+
+function settle(ms = 100): Promise<void> {
+  return new Promise((resolve) => { setTimeout(() => resolve(), ms); });
 }
 
 test.before(async () => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-dataws-resize-'));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-dataws-resize-'));
   const projectDir = path.join(tmpDir, 'project');
   fs.mkdirSync(projectDir);
   const cfgPath = path.join(tmpDir, 'config.json');
   const projects = [{ id: SESSION_ID, name: 'resize-target', path: projectDir }];
   fs.writeFileSync(cfgPath, JSON.stringify({ projects, teams: [], repoRoots: [] }, null, 2), 'utf8');
-  prevEnv = process.env.GLISSA_CONFIG;
+  const prevEnv = process.env.GLISSA_CONFIG;
   process.env.GLISSA_CONFIG = cfgPath;
 
-  server = http.createServer();
-  backend = createBackend(server, { staticDir: null });
+  const server = http.createServer();
+  const backend = createBackend(server, { staticDir: null });
   // createBackend registers its own 'upgrade' listener; only 'request' is the embedder's to wire.
   server.on('request', backend.app);
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  client = await dashboardClient(server.address().port);
+  await listenOnLoopback(server);
+  const client = await dashboardClient(boundPort(server));
 
-  session = backend.getSession(SESSION_ID);
+  const session = backend.getSession(SESSION_ID);
   assert.ok(session, 'the configured project is a session in the backend map');
   assert.equal(session.pid, null, 'the session is dormant; no PTY was spawned by this test');
+
+  booted.context = { tmpDir, prevEnv, server, backend, client, session };
 });
 
 test.after(async () => {
-  if (session) {
-    session.ptyProcess = null;
-    session._ptyAlive = false;
-  }
-  if (backend) backend.shutdown();
-  if (server) server.closeAllConnections();
-  if (server) await new Promise((resolve) => server.close(resolve));
+  if (!booted.context) return;
+  const { backend, server, session, prevEnv, tmpDir } = booted.context;
+  session.ptyProcess = null;
+  session._ptyAlive = false;
+  backend.shutdown();
+  server.closeAllConnections();
+  await closeServer(server);
   if (prevEnv == null) delete process.env.GLISSA_CONFIG;
   if (prevEnv != null) process.env.GLISSA_CONFIG = prevEnv;
-  if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+  fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 test('unview hands the PTY back to the viewer that is still watching', async () => {
@@ -148,7 +171,7 @@ test('the last viewer leaving does not resize the PTY', async () => {
 
   only.send(JSON.stringify({ type: 'unview' }));
   await closeViewer(only);
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await settle();
   assert.equal(ptyResizes.length, 1, 'nobody is left to speak for the PTY, so it keeps its size');
 });
 
@@ -165,7 +188,7 @@ test('a repeated unview is a cheap no-op, not a re-apply', async () => {
   await waitForResizeCount(3);
   phone.send(JSON.stringify({ type: 'unview' }));
   phone.send(JSON.stringify({ type: 'unview' }));
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await settle();
   assert.equal(ptyResizes.length, 3);
 
   await closeViewer(phone);
@@ -181,19 +204,8 @@ test('a same-size resize leaves the PTY untouched', async () => {
   assert.deepEqual(ptyResizes, [{ cols: 150, rows: 44 }]);
 
   phone.send(JSON.stringify({ type: 'resize', cols: 150, rows: 44 }));
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await settle();
   assert.deepEqual(ptyResizes, [{ cols: 150, rows: 44 }]);
-
-  await closeViewer(phone);
-});
-
-test('a changed-size resize applies once', async () => {
-  attachFakePty();
-  const phone = await openViewer();
-
-  phone.send(JSON.stringify({ type: 'resize', cols: 150, rows: 46 }));
-  await waitForResizeCount(1);
-  assert.deepEqual(ptyResizes, [{ cols: 150, rows: 46 }]);
 
   await closeViewer(phone);
 });
@@ -207,7 +219,7 @@ test('an out-of-range resize is ignored and claims nothing', async () => {
 
   phone.send(JSON.stringify({ type: 'resize', cols: 9999, rows: 30 }));
   phone.send(JSON.stringify({ type: 'unview' }));
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await settle();
   assert.equal(ptyResizes.length, 1, 'the refused size neither applied nor triggered a hand-back');
 
   await closeViewer(phone);

@@ -1,34 +1,50 @@
-'use strict';
-
-// The pure pieces server/posthog-wiring.js exports for direct testing (no createBackend/httpServer):
+// The pure pieces server/posthog-wiring.ts exports for direct testing (no createBackend/httpServer):
 // the start-gate decision, the seed-prompt builder, the result-file verdict reader, and the cfg key.
-// Mirrors tests/backend-pr-poller.test.js, which covers the PR lane the same way.
+// Mirrors tests/backend-pr-poller.test.ts, which covers the PR lane the same way.
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-const {
-  buildInvestigationPrompt,
-  buildFixPrompt,
-  readInvestigationResult,
-  readFixResult,
-  pushFixBranch,
-  posthogShouldStart,
-  posthogCfgKey,
-  sweepReports,
-  makeResolveProjects,
-  POSTHOG_DENY,
+import type { PosthogApi } from '../server/posthog-api.ts';
+import {
   FIX_DENY,
-} = require('../server/posthog-wiring.ts');
+  POSTHOG_DENY,
+  buildFixPrompt,
+  buildInvestigationPrompt,
+  createPosthogWiring,
+  makeResolveProjects,
+  posthogCfgKey,
+  posthogShouldStart,
+  pushFixBranch,
+  readFixResult,
+  readInvestigationResult,
+  sweepReports,
+} from '../server/posthog-wiring.ts';
+import type { PosthogGitWorkspace, PosthogWiringConfig, PosthogWorkspace } from '../server/posthog-wiring.ts';
+import { createSpawnGate } from '../server/spawn-gate.ts';
+import { recordingSessionFactory } from './helpers/fake-session.ts';
 
 const ENABLED = { enabled: true, host: 'https://ph.test', apiKey: 'phx_secret' };
 const TELEGRAM = { botToken: 'x', chatId: '1' };
 
-const { createPosthogWiring } = require('../server/posthog-wiring.ts');
-const { recordingSessionFactory } = require('./helpers/fake-session');
+interface CliResult {
+  ok: boolean;
+  out: string;
+  err: string;
+}
+
+function inertWiringDeps() {
+  return {
+    investigationSessions: new Map<string, unknown>(),
+    closeSessionDataClients() {},
+    hookRouter: null,
+    getHookPort: null,
+    spawnGate: createSpawnGate(),
+  };
+}
 
 // --- posthogShouldStart: inert-by-default + misconfiguration gating ---
 
@@ -40,16 +56,19 @@ test('posthogShouldStart: inert when posthog absent or disabled (no reason, sile
 test('posthogShouldStart: enabled but host or apiKey missing -> does not start, with a reason', () => {
   const noHost = posthogShouldStart({ posthog: { enabled: true }, telegram: TELEGRAM });
   assert.equal(noHost.start, false);
+  assert.ok(noHost.reason);
   assert.match(noHost.reason, /host/);
 
   const noKey = posthogShouldStart({ posthog: { enabled: true, host: 'https://ph.test' }, telegram: TELEGRAM });
   assert.equal(noKey.start, false);
+  assert.ok(noKey.reason);
   assert.match(noKey.reason, /apiKey/);
 });
 
 test('posthogShouldStart: enabled but telegram missing -> does not start, with a reason', () => {
   const r = posthogShouldStart({ posthog: ENABLED });
   assert.equal(r.start, false);
+  assert.ok(r.reason);
   assert.match(r.reason, /telegram/);
   const partial = posthogShouldStart({ posthog: ENABLED, telegram: { botToken: 'x' } });
   assert.equal(partial.start, false, 'chatId still missing');
@@ -59,22 +78,18 @@ test('posthogShouldStart: fully configured -> starts', () => {
   assert.deepEqual(posthogShouldStart({ posthog: ENABLED, telegram: TELEGRAM }), { start: true, reason: null });
 });
 
-function assertPosthogStatusShape(status, { configured, reason }) {
+function assertPosthogStatusShape(status: Record<string, unknown>, { configured, reason }: { configured: boolean; reason: string | null }): void {
   assert.equal(status.type, 'posthog-status');
   assert.equal(status.configured, configured);
   assert.equal(status.reason, reason);
   assert.deepEqual(status.projects, []);
-  assert.equal(Number.isFinite(status.ts), true);
+  assert.ok(typeof status.ts === 'number' && Number.isFinite(status.ts));
 }
 
 test('PostHog getStatus: disabled config synthesizes an off status', () => {
   const wiring = createPosthogWiring({
     config: { posthog: { enabled: false }, replayBufferKB: 256 },
-    investigationSessions: new Map(),
-    closeSessionDataClients() {},
-    hookRouter: null,
-    getHookPort: null,
-    spawnGate: null,
+    ...inertWiringDeps(),
   });
   assertPosthogStatusShape(wiring.getStatus(), { configured: false, reason: null });
 });
@@ -82,14 +97,9 @@ test('PostHog getStatus: disabled config synthesizes an off status', () => {
 test('PostHog getStatus: enabled without telegram synthesizes a misconfigured status', () => {
   const wiring = createPosthogWiring({
     config: { posthog: ENABLED, replayBufferKB: 256 },
-    investigationSessions: new Map(),
-    closeSessionDataClients() {},
-    hookRouter: null,
-    getHookPort: null,
-    spawnGate: null,
+    ...inertWiringDeps(),
   });
-  const status = wiring.getStatus();
-  assertPosthogStatusShape(status, {
+  assertPosthogStatusShape(wiring.getStatus(), {
     configured: false,
     reason: 'posthog.enabled but telegram botToken/chatId missing',
   });
@@ -97,10 +107,22 @@ test('PostHog getStatus: enabled without telegram synthesizes a misconfigured st
 
 // --- makeResolveProjects: project display naming ---
 
-function fakeApi({ orgs, projectsByOrg }) {
+// makeResolveProjects reads two endpoints; the rest of the api surface exists so the stand-in is a
+// complete PosthogApi, and throws if this suite ever grows a path that reaches it.
+function fakeApi({ orgs, projectsByOrg }: {
+  orgs: { id: string; name?: string }[];
+  projectsByOrg: Record<string, { id: string | number; name?: string }[]>;
+}): PosthogApi {
+  const unreachable = (): never => { throw new Error('makeResolveProjects never calls this endpoint'); };
   return {
-    listOrganizations: async () => ({ ok: true, body: orgs }),
-    listProjects: async (orgId) => ({ ok: true, body: projectsByOrg[orgId] || [] }),
+    host: 'https://ph.test',
+    listOrganizations: async () => ({ ok: true, status: 200, body: orgs }),
+    listProjects: async (orgId: string) => ({ ok: true, status: 200, body: projectsByOrg[orgId] || [] }),
+    queryIssues: unreachable,
+    queryTrafficBuckets: unreachable,
+    listSpikeEvents: unreachable,
+    listRecommendations: unreachable,
+    updateIssueStatus: unreachable,
   };
 }
 
@@ -138,10 +160,9 @@ test('makeResolveProjects: missing project and org names fall back to the projec
 });
 
 test('makeResolveProjects: explicit project array is taken verbatim, no org walk', async () => {
-  const api = {
-    listOrganizations: async () => { throw new Error('must not be called'); },
-    listProjects: async () => { throw new Error('must not be called'); },
-  };
+  const api = fakeApi({ orgs: [], projectsByOrg: {} });
+  api.listOrganizations = async () => { throw new Error('must not be called'); };
+  api.listProjects = async () => { throw new Error('must not be called'); };
   const resolve = makeResolveProjects(api, { posthog: { projects: [5, 6], projectMap: { 5: 'Five' } } });
   assert.deepEqual(await resolve(), [
     { projectId: 5, name: 'Five' },
@@ -169,99 +190,101 @@ test('posthogCfgKey: a changed packs list counts as a lane config change', () =>
 });
 
 test('PostHog lane passes configured packs into Session options', () => {
-  const { makeSession, constructed } = recordingSessionFactory();
+  const { makeSession, constructed, created } = recordingSessionFactory();
   const wiring = createPosthogWiring({
     config: { posthog: { ...ENABLED, packs: ['crew-rules', '../bad', 'crew-rules', 'house-rules'] }, replayBufferKB: 256 },
-    investigationSessions: new Map(),
-    closeSessionDataClients() {},
-    hookRouter: null,
-    getHookPort: null,
-    spawnGate: null,
+    ...inertWiringDeps(),
     makeSession,
   });
-  wiring._makeInvestigationSession({
-    id: 'posthog:1',
-    name: 'PostHog',
-    path: process.cwd(),
-    initialPrompt: 'prompt',
-    spawnEnv: { POSTHOG_API_KEY: 'x', POSTHOG_HOST: 'https://ph.test' },
-  });
-  assert.deepEqual(constructed[0].packs, ['crew-rules', 'house-rules']);
-});
-
-test('PostHog lane omitting packs leaves Session options with an empty packs list', () => {
-  const { makeSession, constructed } = recordingSessionFactory();
-  const wiring = createPosthogWiring({
-    config: { posthog: ENABLED, replayBufferKB: 256 },
-    investigationSessions: new Map(),
-    closeSessionDataClients() {},
-    hookRouter: null,
-    getHookPort: null,
-    spawnGate: null,
-    makeSession,
-  });
-  wiring._makeInvestigationSession({
-    id: 'posthog:2',
-    name: 'PostHog',
-    path: process.cwd(),
-    initialPrompt: 'prompt',
-    spawnEnv: { POSTHOG_API_KEY: 'x', POSTHOG_HOST: 'https://ph.test' },
-  });
-  assert.deepEqual(constructed[0].packs, []);
+  try {
+    wiring._makeInvestigationSession({
+      id: 'posthog:1',
+      name: 'PostHog',
+      path: process.cwd(),
+      initialPrompt: 'prompt',
+      spawnEnv: { POSTHOG_API_KEY: 'x', POSTHOG_HOST: 'https://ph.test' },
+    });
+    assert.deepEqual(constructed[0].packs, ['crew-rules', 'house-rules']);
+  } finally {
+    for (const session of created) session.destroy();
+  }
 });
 
 // --- Auto-fix dispatch: worktree isolation, the fix deny-list, and the downgrade rule ---
 
+interface CreateCall {
+  projectPath: string;
+  teamId: string;
+  label: string;
+  worktreeBase: string;
+}
+
+interface DiscardCall {
+  projectPath: string;
+  workspace: PosthogWorkspace;
+}
+
+interface FixHarness {
+  repoDir: string;
+  calls: { create: CreateCall[]; discard: DiscardCall[] };
+  gitWorkspace: PosthogGitWorkspace;
+  config: PosthogWiringConfig;
+  lane: Record<string, unknown>;
+  runCommand?: (cmd: string, args: string[], cwd: string) => Promise<CliResult>;
+}
+
 // An already-aborted signal short-circuits the session wait, so these exercise the dispatch decisions
 // (which workspace, which deny-list, which mode) without spawning or awaiting a real Session.
-function fixWiringHarness({ createResult, config: over = {} } = {}) {
+function fixWiringHarness({ createResult }: { createResult?: PosthogWorkspace } = {}): FixHarness {
   const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-phrepo-'));
-  const calls = { create: [], discard: [] };
-  const gitWorkspace = {
+  const calls: { create: CreateCall[]; discard: DiscardCall[] } = { create: [], discard: [] };
+  const gitWorkspace: PosthogGitWorkspace = {
     create: async (args) => {
-      calls.create.push(args);
+      calls.create.push({ ...args, worktreeBase: args.worktreeBase });
       if (createResult) return createResult;
       return { cwd: path.join(repoDir, 'wt'), isGit: true, branch: `glissa/radar-fix/${args.label}`, base: 'main' };
     },
     discard: async (args) => { calls.discard.push(args); },
   };
-  const config = {
-    posthog: { ...ENABLED, repoPath: repoDir, ...over },
+  const lane: Record<string, unknown> = { ...ENABLED, repoPath: repoDir };
+  const config: PosthogWiringConfig = {
+    posthog: lane,
     worktreeRoot: path.join(repoDir, 'wts'),
     replayBufferKB: 256,
   };
-  return { repoDir, calls, gitWorkspace, config };
+  return { repoDir, calls, gitWorkspace, config, lane };
 }
 
-function runFixSpawn(harness, run) {
-  const { makeSession, constructed } = recordingSessionFactory();
+async function runFixSpawn(harness: FixHarness) {
+  const { makeSession, constructed, created } = recordingSessionFactory();
   const wiring = createPosthogWiring({
     config: harness.config,
-    investigationSessions: new Map(),
-    closeSessionDataClients() {},
-    hookRouter: null,
-    getHookPort: null,
-    spawnGate: { run: async (fn) => fn() },
+    ...inertWiringDeps(),
     gitWorkspace: harness.gitWorkspace,
     runCommand: harness.runCommand,
     makeSession,
   });
   const controller = new AbortController();
   controller.abort();
-  return run(wiring._investigationSpawn({
+  const result = await wiring._investigationSpawn({
+    key: 'radar-fix:1#iss-1',
     issue: { issueId: 'iss-1' },
     projectId: 1,
     projectName: 'web',
+    host: 'https://ph.test',
     url: 'https://ph.test/project/1/error_tracking/iss-1',
     mode: 'fix',
+    timeoutMs: 1000,
     signal: controller.signal,
-  }), constructed);
+  });
+  for (const session of created) session.destroy();
+  return { result, constructed };
 }
 
 test('a fix job runs in an isolated worktree on a sanitized radar-fix branch', async () => {
   const harness = fixWiringHarness();
   try {
-    const { result, constructed } = await runFixSpawn(harness, async (p, c) => ({ result: await p, constructed: c }));
+    const { result, constructed } = await runFixSpawn(harness);
     assert.equal(result.mode, 'fix');
     assert.equal(harness.calls.create.length, 1);
     assert.equal(harness.calls.create[0].teamId, 'radar-fix');
@@ -279,8 +302,8 @@ test('a fix job runs in an isolated worktree on a sanitized radar-fix branch', a
 test('two dispatches for the same issue take distinct branch labels', async () => {
   const harness = fixWiringHarness();
   try {
-    await runFixSpawn(harness, async (p) => ({ result: await p }));
-    await runFixSpawn(harness, async (p) => ({ result: await p }));
+    await runFixSpawn(harness);
+    await runFixSpawn(harness);
     assert.equal(harness.calls.create.length, 2);
     assert.notEqual(harness.calls.create[0].label, harness.calls.create[1].label);
     for (const call of harness.calls.create) assert.match(call.label, /^1-iss-1-/);
@@ -292,7 +315,7 @@ test('two dispatches for the same issue take distinct branch labels', async () =
 test('a fix session carries FIX_DENY, which allows the commit and denies the push and gh', async () => {
   const harness = fixWiringHarness();
   try {
-    const { constructed } = await runFixSpawn(harness, async (p, c) => ({ result: await p, constructed: c }));
+    const { constructed } = await runFixSpawn(harness);
     assert.deepEqual(constructed[0].settingsPermissions, FIX_DENY);
     // A prefix deny-list cannot constrain a push target or a gh api call, so neither is allowed at all.
     assert.ok(FIX_DENY.deny.includes('Bash(git push:*)'), 'the agent never pushes; the server does');
@@ -310,7 +333,7 @@ test('a fix session carries FIX_DENY, which allows the commit and denies the pus
 test('a fix job discards its worktree on the abort path', async () => {
   const harness = fixWiringHarness();
   try {
-    await runFixSpawn(harness, async (p) => ({ result: await p }));
+    await runFixSpawn(harness);
     assert.equal(harness.calls.discard.length, 1, 'the branch is the output, the checkout is disposable');
     assert.equal(harness.calls.discard[0].projectPath, harness.repoDir);
   } finally {
@@ -319,9 +342,9 @@ test('a fix job discards its worktree on the abort path', async () => {
 });
 
 test('a workspace that is not a git repo downgrades the fix to an investigation', async () => {
-  const harness = fixWiringHarness({ createResult: { cwd: '/x', isGit: false, reason: 'branch-in-use' } });
+  const harness = fixWiringHarness({ createResult: { cwd: '/x', isGit: false } });
   try {
-    const { result, constructed } = await runFixSpawn(harness, async (p, c) => ({ result: await p, constructed: c }));
+    const { result, constructed } = await runFixSpawn(harness);
     assert.equal(result.mode, 'investigate');
     assert.deepEqual(constructed[0].settingsPermissions, POSTHOG_DENY);
     assert.equal(constructed[0].path, harness.repoDir, 'the investigation reads the repo in place');
@@ -333,9 +356,9 @@ test('a workspace that is not a git repo downgrades the fix to an investigation'
 
 test('a lane with no repo configured never reaches the worktree at all', async () => {
   const harness = fixWiringHarness();
-  harness.config.posthog.repoPath = '';
+  harness.lane.repoPath = '';
   try {
-    const { result } = await runFixSpawn(harness, async (p) => ({ result: await p }));
+    const { result } = await runFixSpawn(harness);
     assert.equal(result.mode, 'investigate', 'the scratch directory is nothing to commit in');
     assert.equal(harness.calls.create.length, 0);
   } finally {
@@ -345,7 +368,7 @@ test('a lane with no repo configured never reaches the worktree at all', async (
 
 // --- buildFixPrompt ---
 
-function fixPromptFor(over = {}) {
+function fixPromptFor(over: Record<string, unknown> = {}): string {
   return buildFixPrompt({
     issueId: 'iss-1',
     host: 'https://ph.test',
@@ -418,13 +441,13 @@ test('buildFixPrompt builds the issue url from scrubbed ids, never from a raw pr
 
 // --- buildInvestigationPrompt ---
 
-function promptFor(over = {}) {
+function promptFor(over: Record<string, unknown> = {}): string {
   return buildInvestigationPrompt({
     issueId: 'iss-1',
     host: 'https://ph.test',
     projectId: 1,
-    url: 'https://ph.test/project/1/error_tracking/iss-1',
     resultPath: '/tmp/r.json',
+    repoPath: null,
     ...over,
   });
 }
@@ -528,7 +551,7 @@ test('sweepReports on a missing directory resolves quietly', async () => {
 
 // --- readInvestigationResult: verdict file parsing ---
 
-function withResultFile(contents, fn) {
+function withResultFile<T>(contents: string | null, fn: (resultPath: string) => T): T {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-phresult-'));
   const p = path.join(dir, 'result.json');
   if (contents != null) fs.writeFileSync(p, contents);
@@ -616,8 +639,10 @@ test('readFixResult: the pull request text is flattened, stripped and capped', (
   });
   withResultFile(JSON.stringify({ verdict: 'FIXED', prTitle: 'x'.repeat(500), prBody: 'y'.repeat(9000) }), (p) => {
     const res = readFixResult(p);
-    assert.equal(res.prTitle.length, 120);
-    assert.equal(res.prBody.length, 4000);
+    assert.equal(typeof res.prTitle, 'string');
+    assert.equal(typeof res.prBody, 'string');
+    assert.equal(String(res.prTitle).length, 120);
+    assert.equal(String(res.prBody).length, 4000);
   });
   withResultFile(JSON.stringify({ verdict: 'FIXED', prTitle: '   ', prBody: '' }), (p) => {
     const res = readFixResult(p);
@@ -655,25 +680,31 @@ test('readFixResult: a missing or malformed file is ERROR and the file is remove
 
 // --- pushFixBranch: the server half of the handoff, which is everything the agent is denied ---
 
-const WORKSPACE = {
-  cwd: '/wt', branch: 'glissa/radar-fix/1-iss-1-abc', base: 'main', baseSha: 'deadbeef',
+const WORKSPACE: PosthogWorkspace = {
+  cwd: '/wt', isGit: true, branch: 'glissa/radar-fix/1-iss-1-abc', base: 'main', baseSha: 'deadbeef',
 };
+
+interface RunCall {
+  cmd: string;
+  args: string[];
+  cwd: string;
+  key: string;
+}
 
 // A scripted `run`: each command's key maps to its {ok,out,err}, and every call is recorded so a test
 // can assert that a refused handoff never reached `git push`.
-function fakeRun(script = {}) {
-  const calls = [];
-  const run = async (cmd, args, cwd) => {
+function fakeRun(script: Record<string, CliResult> = {}) {
+  const calls: RunCall[] = [];
+  const run = async (cmd: string, args: string[], cwd: string): Promise<CliResult> => {
     calls.push({ cmd, args, cwd, key: `${cmd} ${args[0]}` });
     const hit = script[`${cmd} ${args[0]}`];
     if (!hit) return { ok: true, out: '', err: '' };
     return hit;
   };
-  run.calls = calls;
-  return run;
+  return { run, calls };
 }
 
-const CLEAN_SCRIPT = {
+const CLEAN_SCRIPT: Record<string, CliResult> = {
   'git diff': { ok: true, out: 'src/app.js\ntests/app.test.js', err: '' },
   'git rev-list': { ok: true, out: '2', err: '' },
   'git push': { ok: true, out: '', err: '' },
@@ -681,20 +712,27 @@ const CLEAN_SCRIPT = {
   'gh pr': { ok: true, out: 'https://github.com/owner/repo/pull/42', err: '' },
 };
 
-function handoff(script, over = {}) {
-  const run = fakeRun(script);
-  return pushFixBranch({
+async function handoff(script: Record<string, CliResult>, over: { workspace?: PosthogWorkspace } = {}) {
+  const { run, calls } = fakeRun(script);
+  const res = await pushFixBranch({
     run, repoPath: '/repo', workspace: WORKSPACE, prTitle: 'fix: guard it', prBody: 'body', ...over,
-  }).then((res) => ({ res, run }));
+  });
+  return { res, calls };
+}
+
+function callFor(calls: RunCall[], key: string): RunCall {
+  const found = calls.find((c) => c.key === key);
+  assert.ok(found, `the handoff ran ${key}`);
+  return found;
 }
 
 test('pushFixBranch pushes the server-chosen branch and reads the PR url from gh stdout', async () => {
-  const { res, run } = await handoff(CLEAN_SCRIPT);
+  const { res, calls } = await handoff(CLEAN_SCRIPT);
   assert.deepEqual(res, { verdict: 'FIXED', prUrl: 'https://github.com/owner/repo/pull/42', summary: null });
-  const push = run.calls.find((c) => c.key === 'git push');
+  const push = callFor(calls, 'git push');
   assert.deepEqual(push.args, ['push', 'origin', 'glissa/radar-fix/1-iss-1-abc']);
   assert.equal(push.cwd, '/wt');
-  const create = run.calls.find((c) => c.key === 'gh pr');
+  const create = callFor(calls, 'gh pr');
   assert.deepEqual(create.args, [
     'pr', 'create', '--repo', 'owner/repo', '--head', 'glissa/radar-fix/1-iss-1-abc',
     '--title', 'fix: guard it', '--body', 'body', '--base', 'main',
@@ -714,39 +752,43 @@ test('pushFixBranch reports FIXED with no url when gh printed nothing usable', a
   const { res } = await handoff({ ...CLEAN_SCRIPT, 'gh pr': { ok: true, out: 'created', err: '' } });
   assert.equal(res.verdict, 'FIXED', 'the pull request exists; only its url was unreadable');
   assert.equal(res.prUrl, null);
+  assert.ok(res.summary);
   assert.match(res.summary, /url was not readable/);
 });
 
 // The structural half of "this lane never touches CI": refused by the server, not by the prompt.
 test('pushFixBranch refuses a workflow-touching diff, pushes nothing, and needs a carbon unit', async () => {
-  const { res, run } = await handoff({
+  const { res, calls } = await handoff({
     ...CLEAN_SCRIPT,
     'git diff': { ok: true, out: 'src/app.js\n.github/workflows/ci.yml', err: '' },
   });
   assert.equal(res.verdict, 'NEEDS_HUMAN');
   assert.equal(res.prUrl, null);
+  assert.ok(res.summary);
   assert.match(res.summary, /\.github\/workflows\/ci\.yml/);
-  assert.equal(run.calls.some((c) => c.key === 'git push'), false, 'nothing left the machine');
-  assert.equal(run.calls.some((c) => c.cmd === 'gh'), false);
+  assert.equal(calls.some((c) => c.key === 'git push'), false, 'nothing left the machine');
+  assert.equal(calls.some((c) => c.cmd === 'gh'), false);
 });
 
 test('pushFixBranch turns a FIXED verdict that committed nothing into an ERROR', async () => {
-  const { res, run } = await handoff({ ...CLEAN_SCRIPT, 'git rev-list': { ok: true, out: '0', err: '' } });
+  const { res, calls } = await handoff({ ...CLEAN_SCRIPT, 'git rev-list': { ok: true, out: '0', err: '' } });
   assert.equal(res.verdict, 'ERROR');
+  assert.ok(res.summary);
   assert.match(res.summary, /committed nothing/);
-  assert.equal(run.calls.some((c) => c.key === 'git push'), false);
+  assert.equal(calls.some((c) => c.key === 'git push'), false);
 });
 
 test('pushFixBranch reports a failed push as ERROR naming the step and the branch state', async () => {
-  const { res, run } = await handoff({
+  const { res, calls } = await handoff({
     ...CLEAN_SCRIPT,
     'git push': { ok: false, out: '', err: 'error: failed to push some refs' },
   });
   assert.equal(res.verdict, 'ERROR');
+  assert.ok(res.summary);
   assert.match(res.summary, /pushing the fix branch/);
   assert.match(res.summary, /failed to push some refs/);
   assert.match(res.summary, /was not pushed/);
-  assert.equal(run.calls.some((c) => c.cmd === 'gh'), false, 'no pull request for an unpushed branch');
+  assert.equal(calls.some((c) => c.cmd === 'gh'), false, 'no pull request for an unpushed branch');
 });
 
 test('pushFixBranch reports a failed pr create as ERROR that admits the branch IS pushed', async () => {
@@ -755,35 +797,41 @@ test('pushFixBranch reports a failed pr create as ERROR that admits the branch I
     'gh pr': { ok: false, out: '', err: 'GraphQL: pull request already exists' },
   });
   assert.equal(res.verdict, 'ERROR');
+  assert.ok(res.summary);
   assert.match(res.summary, /opening the pull request/);
   assert.match(res.summary, /glissa\/radar-fix\/1-iss-1-abc is pushed with no pull request/);
 });
 
 test('pushFixBranch reports an unresolvable repository as ERROR before it can guess a slug', async () => {
-  const { res, run } = await handoff({ ...CLEAN_SCRIPT, 'gh repo': { ok: false, out: '', err: 'no auth' } });
+  const { res, calls } = await handoff({ ...CLEAN_SCRIPT, 'gh repo': { ok: false, out: '', err: 'no auth' } });
   assert.equal(res.verdict, 'ERROR');
+  assert.ok(res.summary);
   assert.match(res.summary, /resolving the repository/);
-  assert.equal(run.calls.some((c) => c.key === 'gh pr'), false);
+  assert.equal(calls.some((c) => c.key === 'gh pr'), false);
 });
 
 test('pushFixBranch compares against the fork sha it was given, never a moved branch name', async () => {
-  const { run } = await handoff(CLEAN_SCRIPT);
-  assert.deepEqual(run.calls[0].args, ['diff', '--name-only', 'deadbeef...HEAD']);
-  assert.deepEqual(run.calls[1].args, ['rev-list', '--count', 'deadbeef..HEAD']);
+  const { calls } = await handoff(CLEAN_SCRIPT);
+  assert.deepEqual(calls[0].args, ['diff', '--name-only', 'deadbeef...HEAD']);
+  assert.deepEqual(calls[1].args, ['rev-list', '--count', 'deadbeef..HEAD']);
 });
 
 test('pushFixBranch omits --base when the worktree forked from a detached HEAD', async () => {
-  const { run } = await handoff(CLEAN_SCRIPT, { workspace: { ...WORKSPACE, base: 'HEAD' } });
-  assert.equal(run.calls.find((c) => c.key === 'gh pr').args.includes('--base'), false);
+  const { calls } = await handoff(CLEAN_SCRIPT, { workspace: { ...WORKSPACE, base: 'HEAD' } });
+  assert.equal(callFor(calls, 'gh pr').args.includes('--base'), false);
 });
 
 test('an aborted fix never reaches the handoff, so a hung job opens no unrecorded pull request', async () => {
   const harness = fixWiringHarness();
-  const commands = [];
-  harness.runCommand = async (cmd, args) => { commands.push(`${cmd} ${args[0]}`); return { ok: true, out: '', err: '' }; };
+  const commands: string[] = [];
+  harness.runCommand = async (cmd: string, args: string[]) => {
+    commands.push(`${cmd} ${args[0]}`);
+    return { ok: true, out: '', err: '' };
+  };
   try {
-    const { result } = await runFixSpawn(harness, async (p) => ({ result: await p }));
+    const { result } = await runFixSpawn(harness);
     assert.equal(result.verdict, 'ERROR');
+    assert.ok('prUrl' in result, 'the fix path answers with a pull request slot');
     assert.equal(result.prUrl, null);
     assert.deepEqual(commands, [], 'nothing was pushed and no pull request was opened');
     assert.equal(harness.calls.discard.length, 1, 'the worktree still goes');

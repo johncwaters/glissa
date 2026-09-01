@@ -1,7 +1,5 @@
-'use strict';
-
-// Steps 3 and 5 of graceful-shutdown-auto-resume: the module-level helpers backend.js exports for
-// direct testing (no httpServer/createBackend needed - see the exports at the bottom of backend.js).
+// Steps 3 and 5 of graceful-shutdown-auto-resume: the module-level helpers backend.ts exports for
+// direct testing (no httpServer/createBackend needed - see the exports at the bottom of backend.ts).
 //
 // persistSessionField: the read-modify-write config.json persists resumeSessionId/wasActive
 // through. Exercised against a real configStore (temp file), matching config-store.test.js's
@@ -10,23 +8,34 @@
 //
 // runAutoResume: the boot pass that spawns picked, still-DORMANT sessions through spawnGate.
 // Exercised with real Session instances and an injected ptySpawn/spawnCommand (mirrors
-// sessions-resume.test.js / spawn-integration.test.js), so no real `claude` process ever launches.
+// sessions-resume.test.ts / spawn-integration.test.js), so no real `claude` process ever launches.
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const http = require('node:http');
-const os = require('node:os');
-const path = require('node:path');
-const pty = require('node-pty');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import pty from 'node-pty';
 
-const { createBackend, runAutoResume, persistSessionField, decideWasActiveFlip } = require('../server/backend.ts');
-const { createConfigStore } = require('../server/config-store.ts');
-const { createSpawnGate } = require('../server/spawn-gate.ts');
-const { Session } = require('../session/sessions.ts');
-const { STATES } = require('../shared/states.ts');
+import { createBackend, runAutoResume, persistSessionField, decideWasActiveFlip } from '../server/backend.ts';
+import { createConfigStore } from '../server/config-store.ts';
+import type { ConfigStore } from '../server/config-store.ts';
+import type { RegistryConfig } from '../server/session-registry.ts';
+import { createSpawnGate } from '../server/spawn-gate.ts';
+import { Session } from '../session/sessions.ts';
+import { STATES } from '../shared/states.ts';
+import { UNREACHABLE_PID, fakePty } from './helpers/fake-pty.ts';
+import { closeServer, listenOnLoopback } from './helpers/http-server.ts';
+import { waitFor } from './helpers/wait-for.ts';
 
-function withStore(cfg, fn) {
+interface SpawnCall {
+  id?: string;
+  file: string;
+  args: string[];
+}
+
+function withStore<T>(cfg: Record<string, unknown>, fn: (store: ConfigStore, configPath: string) => T): T {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-autoresume-'));
   const p = path.join(dir, 'config.json');
   fs.writeFileSync(p, JSON.stringify(cfg, null, 2), 'utf8');
@@ -44,7 +53,10 @@ function withStore(cfg, fn) {
 // Async-aware sibling of withStore: `finally` must not sweep the temp dir before an async fn's
 // awaited work (disk reads, _handlePtyExit) finishes. withStore's plain try/finally would run
 // cleanup the instant fn returns a pending promise, not once it settles.
-async function withStoreAsync(cfg, fn) {
+async function withStoreAsync<T>(
+  cfg: Record<string, unknown>,
+  fn: (store: ConfigStore, configPath: string) => Promise<T>,
+): Promise<T> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-autoresume-'));
   const p = path.join(dir, 'config.json');
   fs.writeFileSync(p, JSON.stringify(cfg, null, 2), 'utf8');
@@ -60,13 +72,14 @@ async function withStoreAsync(cfg, fn) {
 }
 
 // Run `fn` with process.platform pinned to 'win32', then restore it (mirrors
-// tests/session-killproc.test.js): kill() branches on platform, and pinning win32 exercises the
+// tests/session-killproc.test.ts): kill() branches on platform, and pinning win32 exercises the
 // taskkill (killProc) path deterministically on any host.
-async function asWin32(fn) {
-  const orig = Object.getOwnPropertyDescriptor(process, 'platform');
+async function asWin32(fn: () => Promise<void>): Promise<void> {
+  const original = Object.getOwnPropertyDescriptor(process, 'platform');
+  assert.ok(original, 'process.platform is an own property to restore');
   Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-  try { return await fn(); }
-  finally { Object.defineProperty(process, 'platform', orig); }
+  try { await fn(); }
+  finally { Object.defineProperty(process, 'platform', original); }
 }
 
 // --- decideWasActiveFlip ---
@@ -133,32 +146,47 @@ test('persistSessionField clears resumeSessionId with null', () => {
 
 // --- runAutoResume ---
 
-function fakePty(pid = 2147483646) {
-  return { pid, onData() {}, onExit() {}, write() {}, resize() {}, kill() {} };
+// node-pty's own IPty, which is what a patched pty.spawn has to answer with. Session drives only a
+// handful of these (session/sessions.ts SessionPty); the rest exist so the stand-in is a complete IPty.
+function fakeIPty(): pty.IPty {
+  const disposable = { dispose() {} };
+  return {
+    pid: UNREACHABLE_PID,
+    cols: 80,
+    rows: 24,
+    process: 'fake',
+    handleFlowControl: false,
+    onData: () => disposable,
+    onExit: () => disposable,
+    resize() {},
+    clear() {},
+    write() {},
+    kill() {},
+    pause() {},
+    resume() {},
+  };
 }
 
-async function waitFor(predicate) {
-  const deadline = Date.now() + 1000;
-  while (Date.now() < deadline) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  assert.ok(predicate(), 'condition became true');
-}
-
-function fakeSession(id, resumeSessionId, calls) {
+function fakeSession(id: string, resumeSessionId: string | null, calls: SpawnCall[]): Session {
   return new Session({
     id,
     name: id,
     path: process.cwd(),
     spawnCommand: { path: process.execPath, kind: 'exe' },
-    ptySpawn: (file, args) => { calls.push({ id, file, args }); return fakePty(); },
+    ptySpawn: (file: string, args: string[]) => { calls.push({ id, file, args }); return fakePty(); },
     resumeSessionId,
   });
 }
 
+function autoResumeConfig(projects: Record<string, unknown>[], autoResume: boolean): RegistryConfig {
+  return {
+    autoResume,
+    projects: projects.map((project) => ({ name: String(project.id), path: process.cwd(), ...project })) as RegistryConfig['projects'],
+  };
+}
+
 test('runAutoResume spawns a picked session with --resume <id> and leaves non-picked ones alone', async () => {
-  const calls = [];
+  const calls: SpawnCall[] = [];
   const picked = fakeSession('picked', '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5', calls);
   const dormantNoFlag = fakeSession('not-active', null, calls);
   const noId = fakeSession('no-id', null, calls);
@@ -167,14 +195,11 @@ test('runAutoResume spawns a picked session with --resume <id> and leaves non-pi
     ['not-active', dormantNoFlag],
     ['no-id', noId],
   ]);
-  const cfg = {
-    autoResume: true,
-    projects: [
-      { id: 'picked', wasActive: true, resumeSessionId: '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5' },
-      { id: 'not-active', wasActive: false, resumeSessionId: '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5' },
-      { id: 'no-id', wasActive: true },
-    ],
-  };
+  const cfg = autoResumeConfig([
+    { id: 'picked', wasActive: true, resumeSessionId: '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5' },
+    { id: 'not-active', wasActive: false, resumeSessionId: '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5' },
+    { id: 'no-id', wasActive: true },
+  ], true);
   try {
     await runAutoResume(sessionsMap, cfg, createSpawnGate());
     assert.equal(calls.length, 1, 'only the picked session spawned');
@@ -191,13 +216,13 @@ test('runAutoResume spawns a picked session with --resume <id> and leaves non-pi
 });
 
 test('runAutoResume spawns nothing when autoResume is false (kill switch)', async () => {
-  const calls = [];
+  const calls: SpawnCall[] = [];
   const picked = fakeSession('picked', '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5', calls);
   const sessionsMap = new Map([['picked', picked]]);
-  const cfg = {
-    autoResume: false,
-    projects: [{ id: 'picked', wasActive: true, resumeSessionId: '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5' }],
-  };
+  const cfg = autoResumeConfig(
+    [{ id: 'picked', wasActive: true, resumeSessionId: '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5' }],
+    false,
+  );
   try {
     await runAutoResume(sessionsMap, cfg, createSpawnGate());
     assert.equal(calls.length, 0);
@@ -208,30 +233,30 @@ test('runAutoResume spawns nothing when autoResume is false (kill switch)', asyn
 });
 
 test('runAutoResume skips a picked id with no live session in the map', async () => {
-  const cfg = {
-    autoResume: true,
-    projects: [{ id: 'gone', wasActive: true, resumeSessionId: '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5' }],
-  };
+  const cfg = autoResumeConfig(
+    [{ id: 'gone', wasActive: true, resumeSessionId: '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5' }],
+    true,
+  );
   await assert.doesNotReject(() => runAutoResume(new Map(), cfg, createSpawnGate()));
 });
 
 // The DORMANT check must run at gate-execution time, not at enqueue time: the gate can serialize a
 // picked session's start() well behind another queued job, and in that window the plain
-// start-session control path (control-handlers.js, ungated) could start the very same session.
+// start-session control path (control-handlers.ts, ungated) could start the very same session.
 // Session.start()'s single-flight guard only collapses starts still in flight, not one that already
 // settled, so a stale enqueue-time check would still respawn an externally started session here.
 test('runAutoResume does not double-spawn a session started externally while queued behind the gate', async () => {
-  const calls = [];
+  const calls: SpawnCall[] = [];
   const sess = fakeSession('race', '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5', calls);
   const sessionsMap = new Map([['race', sess]]);
-  const cfg = {
-    autoResume: true,
-    projects: [{ id: 'race', wasActive: true, resumeSessionId: '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5' }],
-  };
+  const cfg = autoResumeConfig(
+    [{ id: 'race', wasActive: true, resumeSessionId: '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5' }],
+    true,
+  );
   const gate = createSpawnGate();
   try {
-    let releaseBlocker;
-    const blocked = gate.run(() => new Promise((resolve) => { releaseBlocker = resolve; }));
+    const blocker: { release: (() => void) | null } = { release: null };
+    const blocked = gate.run(() => new Promise<void>((resolve) => { blocker.release = resolve; }));
 
     const done = runAutoResume(sessionsMap, cfg, gate); // enqueues behind the blocker while sess is still DORMANT
 
@@ -240,7 +265,8 @@ test('runAutoResume does not double-spawn a session started externally while que
     assert.equal(calls.length, 1, 'the external start spawned once');
     assert.equal(sess.state, STATES.STARTING);
 
-    releaseBlocker();
+    assert.ok(blocker.release, 'the blocker is holding the gate');
+    blocker.release();
     await blocked;
     await done;
 
@@ -270,23 +296,21 @@ test('createBackend defers boot auto-resume until the HTTP listener has a hook p
   }, null, 2), 'utf8');
   const prevEnv = process.env.GLISSA_CONFIG;
   const originalSpawn = pty.spawn;
-  const calls = [];
-  let backend = null;
-  let server = null;
+  const calls: SpawnCall[] = [];
+  const live: { backend: ReturnType<typeof createBackend> | null } = { backend: null };
   process.env.GLISSA_CONFIG = cfgPath;
-  pty.spawn = (file, args, opts) => {
-    calls.push({ file, args, opts });
-    return fakePty();
+  pty.spawn = (file: string, args: string[] | string) => {
+    calls.push({ file, args: Array.isArray(args) ? args : [args] });
+    return fakeIPty();
   };
+  const server = http.createServer();
   try {
-    server = http.createServer();
-    backend = createBackend(server, { staticDir: null });
+    live.backend = createBackend(server, { staticDir: null });
     assert.equal(calls.length, 0, 'auto-resume waits until the HTTP listener is bound');
 
-    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = await listenOnLoopback(server);
     await waitFor(() => calls.length === 1);
 
-    const port = server.address().port;
     const settingsIndex = calls[0].args.indexOf('--settings');
     assert.notEqual(settingsIndex, -1, 'auto-resume spawn includes injected settings');
     const settingsPath = calls[0].args[settingsIndex + 1];
@@ -296,8 +320,8 @@ test('createBackend defers boot auto-resume until the HTTP listener has a hook p
     assert.notEqual(resumeIndex, -1, 'auto-resume keeps the resume argument');
     assert.equal(calls[0].args[resumeIndex + 1], resumeSessionId);
   } finally {
-    if (backend) backend.shutdown();
-    if (server?.listening) await new Promise((resolve) => server.close(resolve));
+    if (live.backend) live.backend.shutdown();
+    if (server.listening) await closeServer(server);
     pty.spawn = originalSpawn;
     if (prevEnv == null) delete process.env.GLISSA_CONFIG;
     if (prevEnv != null) process.env.GLISSA_CONFIG = prevEnv;
@@ -325,21 +349,20 @@ test('createBackend shutdown removes pending boot auto-resume listener before li
   }, null, 2), 'utf8');
   const prevEnv = process.env.GLISSA_CONFIG;
   const originalSpawn = pty.spawn;
-  let backend = null;
-  let server = null;
+  const live: { backend: ReturnType<typeof createBackend> | null } = { backend: null };
   process.env.GLISSA_CONFIG = cfgPath;
-  pty.spawn = () => fakePty();
+  pty.spawn = () => fakeIPty();
+  const server = http.createServer();
   try {
-    server = http.createServer();
     const listenersBeforeBackend = server.listenerCount('listening');
-    backend = createBackend(server, { staticDir: null });
+    live.backend = createBackend(server, { staticDir: null });
     assert.equal(server.listenerCount('listening'), listenersBeforeBackend + 1);
-    backend.shutdown();
-    backend = null;
+    live.backend.shutdown();
+    live.backend = null;
     assert.equal(server.listenerCount('listening'), listenersBeforeBackend);
   } finally {
-    if (backend) backend.shutdown();
-    if (server?.listening) await new Promise((resolve) => server.close(resolve));
+    if (live.backend) live.backend.shutdown();
+    if (server.listening) await closeServer(server);
     pty.spawn = originalSpawn;
     if (prevEnv == null) delete process.env.GLISSA_CONFIG;
     if (prevEnv != null) process.env.GLISSA_CONFIG = prevEnv;
@@ -355,7 +378,7 @@ test('createBackend shutdown removes pending boot auto-resume listener before li
 // (decideWasActiveFlip -> persistSessionField). Regression target: forceRestart's kill is not the
 // operator giving up on the session, so no wasActive:false write may land on disk during that window.
 
-function restartableSession(id, killCalls) {
+function restartableSession(id: string, killCalls: string[][]): Session {
   return new Session({
     id,
     name: id,
@@ -366,15 +389,15 @@ function restartableSession(id, killCalls) {
   });
 }
 
-// Mirrors wireSessionEvents' state-change listener (backend.js), scoped to just the wasActive
+// Mirrors wireSessionEvents' state-change listener (backend.ts), scoped to just the wasActive
 // persistence, against a real configStore project record.
-function wireWasActive(sess, store) {
-  let lastPersisted = null;
-  const writes = [];
+function wireWasActive(sess: Session, store: ConfigStore): boolean[] {
+  const last: { persisted: boolean | null } = { persisted: null };
+  const writes: boolean[] = [];
   sess.on('state-change', ({ to, event }) => {
     const next = decideWasActiveFlip(to, event, sess.pendingRestart);
-    if (next === null || next === lastPersisted) return;
-    lastPersisted = next;
+    if (next === null || next === last.persisted) return;
+    last.persisted = next;
     writes.push(next);
     persistSessionField(store, store.config, sess.id, 'wasActive', next);
   });
@@ -384,7 +407,7 @@ function wireWasActive(sess, store) {
 test('forceRestart never persists wasActive:false during its transient kill-then-respawn window', async () => {
   await asWin32(async () => {
     await withStoreAsync({ projects: [{ id: 'fr1', name: 'fr1', path: 'C:/fr1' }] }, async (store, p) => {
-      const killCalls = [];
+      const killCalls: string[][] = [];
       const sess = restartableSession('fr1', killCalls);
       const writes = wireWasActive(sess, store);
       try {
@@ -392,7 +415,7 @@ test('forceRestart never persists wasActive:false during its transient kill-then
         assert.deepEqual(writes, [true]);
         assert.equal(JSON.parse(fs.readFileSync(p, 'utf8')).projects[0].wasActive, true);
 
-        sess.state = STATES.RUNNING; // direct set (mirrors session-killproc.test.js); no event, no new write
+        sess.state = STATES.RUNNING; // direct set (mirrors session-killproc.test.ts); no event, no new write
 
         sess.forceRestart(); // synchronously: pendingRestart=true, kill(), transition('user_kill') -> DONE
         assert.equal(sess.state, STATES.DONE);
@@ -408,7 +431,7 @@ test('forceRestart never persists wasActive:false during its transient kill-then
         assert.deepEqual(writes, [true], 'never flipped false across the whole restart cycle');
         assert.equal(JSON.parse(fs.readFileSync(p, 'utf8')).projects[0].wasActive, true);
       } finally {
-        sess._killPollTimer && clearTimeout(sess._killPollTimer);
+        if (sess._killPollTimer) clearTimeout(sess._killPollTimer);
         sess.destroy();
       }
     });
@@ -418,7 +441,7 @@ test('forceRestart never persists wasActive:false during its transient kill-then
 test('a genuine kill (not a restart) still persists wasActive:false', async () => {
   await asWin32(async () => {
     await withStoreAsync({ projects: [{ id: 'fr2', name: 'fr2', path: 'C:/fr2' }] }, async (store, p) => {
-      const killCalls = [];
+      const killCalls: string[][] = [];
       const sess = restartableSession('fr2', killCalls);
       const writes = wireWasActive(sess, store);
       try {
@@ -429,7 +452,7 @@ test('a genuine kill (not a restart) still persists wasActive:false', async () =
         assert.deepEqual(writes, [true, false], 'an intentional kill still clears wasActive');
         assert.equal(JSON.parse(fs.readFileSync(p, 'utf8')).projects[0].wasActive, false);
       } finally {
-        sess._killPollTimer && clearTimeout(sess._killPollTimer);
+        if (sess._killPollTimer) clearTimeout(sess._killPollTimer);
         sess.destroy();
       }
     });

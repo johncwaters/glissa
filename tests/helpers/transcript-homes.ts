@@ -1,4 +1,5 @@
-'use strict';
+import fs from 'node:fs';
+import path from 'node:path';
 
 /*
  * SAFETY helper for every test that boots a backend with `memory.enabled`. That switch implies the
@@ -7,13 +8,10 @@
  * conversations. Point all three somewhere empty and throwaway first.
  */
 
-const fs = require('node:fs');
-const path = require('node:path');
-
 const VENDOR_HOME_VARS = Object.freeze(['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'GROK_HOME']);
 
-function isolateTranscriptHomes(dir, env = process.env) {
-  const previous = new Map(VENDOR_HOME_VARS.map((name) => [name, env[name]]));
+function isolateTranscriptHomes(dir: string, env: NodeJS.ProcessEnv = process.env): () => void {
+  const previous = new Map<string, string | undefined>(VENDOR_HOME_VARS.map((name) => [name, env[name]]));
   const home = path.join(dir, 'vendor-homes');
   fs.mkdirSync(home, { recursive: true });
   for (const name of VENDOR_HOME_VARS) env[name] = path.join(home, name.toLowerCase());
@@ -25,4 +23,4 @@ function isolateTranscriptHomes(dir, env = process.env) {
   };
 }
 
-module.exports = { VENDOR_HOME_VARS, isolateTranscriptHomes };
+export { VENDOR_HOME_VARS, isolateTranscriptHomes };

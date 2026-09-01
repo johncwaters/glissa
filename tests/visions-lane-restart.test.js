@@ -15,7 +15,7 @@ const path = require('node:path');
 const WebSocket = require('ws');
 
 const { createBackend } = require('../server/backend.ts');
-const { dashboardClient } = require('./helpers/dashboard-ws');
+const { dashboardClient } = require('./helpers/dashboard-ws.ts');
 
 const WAIT_MS = 5000;
 

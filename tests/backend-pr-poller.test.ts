@@ -1,25 +1,49 @@
-'use strict';
-
-// The pure pieces server/pr-review-wiring.js exports for direct testing (no createBackend/httpServer):
+// The pure pieces server/pr-review-wiring.ts exports for direct testing (no createBackend/httpServer):
 // the start-gate decision, the seed-prompt builder, and the result-file verdict reader. Mirrors
-// backend-auto-resume.test.js, which tests backend's module-level helpers the same way. The
+// backend-auto-resume.test.ts, which tests backend's module-level helpers the same way. The
 // applySettingsReload hot-apply test at the bottom still boots a real backend, since that wiring is
 // only reachable through createBackend.
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const http = require('node:http');
-const os = require('node:os');
-const path = require('node:path');
-const WebSocket = require('ws');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import type { TestContext } from 'node:test';
+import type WebSocket from 'ws';
 
-const { buildReviewPrompt, readReviewResult, prPollerShouldStart } = require('../server/pr-review-wiring.ts');
-const { createBackend } = require('../server/backend.ts');
-const { dashboardClient } = require('./helpers/dashboard-ws');
+import { createBackend } from '../server/backend.ts';
+import {
+  buildReviewPrompt, createPrReviewWiring, prPollerShouldStart, prReviewCfgKey, readReviewResult,
+} from '../server/pr-review-wiring.ts';
+import type { PrGitWorkspace } from '../server/pr-poller.ts';
+import { createSpawnGate } from '../server/spawn-gate.ts';
+import { closeSocket, dashboardClient, openSocket } from './helpers/dashboard-ws.ts';
+import type { DashboardClient } from './helpers/dashboard-ws.ts';
+import { recordingSessionFactory } from './helpers/fake-session.ts';
+import { boundPort, closeServer, listenOnLoopback } from './helpers/http-server.ts';
 
-const { createPrReviewWiring } = require('../server/pr-review-wiring.ts');
-const { recordingSessionFactory } = require('./helpers/fake-session');
+// The lane never dispatches in this file (the gate refuses before any git runs), so the workspace is
+// an inert stand-in that would fail loudly if a test ever reached it.
+const INERT_WORKSPACE: PrGitWorkspace = {
+  listWorktreeBranches: async () => [],
+  create: async () => null,
+  discard: async () => { throw new Error('no PR review is dispatched in this suite'); },
+  removeWorktreeByPath: async () => { throw new Error('no PR review is dispatched in this suite'); },
+};
+
+function inertWiringDeps() {
+  return {
+    reviewSessions: new Map<string, unknown>(),
+    closeSessionDataClients() {},
+    hookRouter: null,
+    getHookPort: null,
+    spawnGate: createSpawnGate(),
+    gitWorkspace: INERT_WORKSPACE,
+    getProjectPathById: () => null,
+  };
+}
 
 // --- prPollerShouldStart: inert-by-default + misconfiguration gating ---
 
@@ -31,6 +55,7 @@ test('prPollerShouldStart: inert when prReview absent or disabled (no reason, si
 test('prPollerShouldStart: enabled but telegram missing -> does not start, with a reason', () => {
   const r = prPollerShouldStart({ prReview: { enabled: true } });
   assert.equal(r.start, false);
+  assert.ok(r.reason);
   assert.match(r.reason, /telegram/);
   const r2 = prPollerShouldStart({ prReview: { enabled: true }, telegram: { botToken: 'x' } });
   assert.equal(r2.start, false, 'chatId still missing');
@@ -41,24 +66,18 @@ test('prPollerShouldStart: enabled + telegram configured -> starts', () => {
   assert.deepEqual(r, { start: true, reason: null });
 });
 
-function assertPrStatusShape(status, { configured, reason }) {
+function assertPrStatusShape(status: Record<string, unknown>, { configured, reason }: { configured: boolean; reason: string | null }): void {
   assert.equal(status.type, 'pr-status');
   assert.equal(status.configured, configured);
   assert.equal(status.reason, reason);
   assert.deepEqual(status.projects, []);
-  assert.equal(Number.isFinite(status.ts), true);
+  assert.ok(typeof status.ts === 'number' && Number.isFinite(status.ts));
 }
 
 test('PR review getStatus: disabled config synthesizes an off status', () => {
   const wiring = createPrReviewWiring({
     config: { prReview: { enabled: false }, replayBufferKB: 256 },
-    reviewSessions: new Map(),
-    closeSessionDataClients() {},
-    hookRouter: null,
-    getHookPort: null,
-    spawnGate: null,
-    gitWorkspace: null,
-    getProjectPathById: () => null,
+    ...inertWiringDeps(),
   });
   assertPrStatusShape(wiring.getStatus(), { configured: false, reason: null });
 });
@@ -66,13 +85,7 @@ test('PR review getStatus: disabled config synthesizes an off status', () => {
 test('PR review getStatus: enabled without telegram synthesizes a misconfigured status', () => {
   const wiring = createPrReviewWiring({
     config: { prReview: { enabled: true }, replayBufferKB: 256 },
-    reviewSessions: new Map(),
-    closeSessionDataClients() {},
-    hookRouter: null,
-    getHookPort: null,
-    spawnGate: null,
-    gitWorkspace: null,
-    getProjectPathById: () => null,
+    ...inertWiringDeps(),
   });
   const status = wiring.getStatus();
   assertPrStatusShape(status, { configured: false, reason: 'prReview.enabled but telegram botToken/chatId missing' });
@@ -118,7 +131,7 @@ test('buildReviewPrompt (conflict lane) includes checkout+rebase+push and forbid
 
 // --- readReviewResult: verdict file parsing ---
 
-function withResultFile(contents, fn) {
+function withResultFile<T>(contents: string | null, fn: (resultPath: string) => T): T {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-prresult-'));
   const p = path.join(dir, 'result.json');
   if (contents != null) fs.writeFileSync(p, contents);
@@ -147,60 +160,38 @@ test('readReviewResult: a missing file is ERROR (never a false clean pass)', () 
 // --- prReviewCfgKey: identity used to gate a restart to actual prReview/telegram changes ---
 
 test('prReviewCfgKey: identical prReview/telegram produce the same key regardless of key order', () => {
-  const { prReviewCfgKey } = require('../server/pr-review-wiring.ts');
   const a = prReviewCfgKey({ prReview: { enabled: true, projects: ['p1'] }, telegram: { botToken: 'x', chatId: 'y' } });
   const b = prReviewCfgKey({ telegram: { botToken: 'x', chatId: 'y' }, prReview: { enabled: true, projects: ['p1'] } });
   assert.equal(a, b);
 });
 
 test('prReviewCfgKey: absent prReview/telegram normalizes to null, distinct from a disabled/empty object', () => {
-  const { prReviewCfgKey } = require('../server/pr-review-wiring.ts');
   assert.equal(prReviewCfgKey({}), prReviewCfgKey({ prReview: undefined, telegram: undefined }));
   assert.notEqual(prReviewCfgKey({}), prReviewCfgKey({ prReview: { enabled: false } }));
 });
 
 test('prReviewCfgKey: a changed packs list counts as a lane config change', () => {
-  const { prReviewCfgKey } = require('../server/pr-review-wiring.ts');
   const base = { prReview: { enabled: true, projects: ['p1'], packs: ['crew-rules'] }, telegram: { botToken: 'x', chatId: 'y' } };
   const changed = { prReview: { enabled: true, projects: ['p1'], packs: ['house-rules'] }, telegram: { botToken: 'x', chatId: 'y' } };
   assert.notEqual(prReviewCfgKey(base), prReviewCfgKey(changed));
 });
 
 test('PR review lane passes configured packs into Session options', () => {
-  const { makeSession, constructed } = recordingSessionFactory();
+  const { makeSession, constructed, created } = recordingSessionFactory();
   const wiring = createPrReviewWiring({
     config: { prReview: { packs: ['crew-rules', '../bad', 'crew-rules', 'house-rules'] }, replayBufferKB: 256 },
-    reviewSessions: new Map(),
-    closeSessionDataClients() {},
-    hookRouter: null,
-    getHookPort: null,
-    spawnGate: null,
-    gitWorkspace: null,
-    getProjectPathById: () => null,
+    ...inertWiringDeps(),
     makeSession,
   });
-  wiring._makeReviewSession({ id: 'pr:1', name: 'PR', path: process.cwd(), initialPrompt: 'prompt' });
-  assert.deepEqual(constructed[0].packs, ['crew-rules', 'house-rules']);
+  try {
+    wiring._makeReviewSession({ id: 'pr:1', name: 'PR', path: process.cwd(), initialPrompt: 'prompt' });
+    assert.deepEqual(constructed[0].packs, ['crew-rules', 'house-rules']);
+  } finally {
+    for (const session of created) session.destroy();
+  }
 });
 
-test('PR review lane omitting packs leaves Session options with an empty packs list', () => {
-  const { makeSession, constructed } = recordingSessionFactory();
-  const wiring = createPrReviewWiring({
-    config: { prReview: {}, replayBufferKB: 256 },
-    reviewSessions: new Map(),
-    closeSessionDataClients() {},
-    hookRouter: null,
-    getHookPort: null,
-    spawnGate: null,
-    gitWorkspace: null,
-    getProjectPathById: () => null,
-    makeSession,
-  });
-  wiring._makeReviewSession({ id: 'pr:2', name: 'PR', path: process.cwd(), initialPrompt: 'prompt' });
-  assert.deepEqual(constructed[0].packs, []);
-});
-
-// --- applySettingsReload hot-applies the poller, gated + serialized (pr-review-wiring.js startPoller
+// --- applySettingsReload hot-applies the poller, gated + serialized (pr-review-wiring.ts startPoller
 // runs only when prReviewCfgKey(config) changes; see AGENTS.md GitHub PR Auto-Review). startPoller and
 // its `prPoller` instance are private to the wiring closure, so there is no seam to inspect them
 // directly. This exercises the wiring end to end through a real boot + real control-WS 'update-settings'
@@ -208,10 +199,10 @@ test('PR review lane omitting packs leaves Session options with an empty packs l
 // the gate before any gh/git/fs IO runs, so the test never touches a real gh binary or
 // ~/.glissa/pr-review-state.json. The restart itself runs on an async promise chain (prPollerChain), so
 // assertions poll briefly instead of checking immediately after the settings-updated ack.
-// SAFETY: same throwaway-config pattern as backend-hook-route.test.js (zero projects, temp GLISSA_CONFIG).
+// SAFETY: same throwaway-config pattern as backend-hook-route.test.ts (zero projects, temp GLISSA_CONFIG).
 
-function withBackend(fn) {
-  return async (t) => {
+function withBackend(fn: (t: TestContext, dash: DashboardClient) => Promise<void>) {
+  return async (t: TestContext) => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-prrestart-'));
     const cfgPath = path.join(tmpDir, 'config.json');
     fs.writeFileSync(cfgPath, JSON.stringify({ projects: [], teams: [], repoRoots: [] }, null, 2), 'utf8');
@@ -221,15 +212,15 @@ function withBackend(fn) {
     const server = http.createServer();
     const backend = createBackend(server, { staticDir: null });
     server.on('request', backend.app);
-    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const dash = await dashboardClient(server.address().port);
+    await listenOnLoopback(server);
+    const dash = await dashboardClient(boundPort(server));
 
     try {
       await fn(t, dash);
     } finally {
       backend.shutdown();
       server.closeAllConnections();
-      await new Promise((resolve) => server.close(resolve));
+      await closeServer(server);
       if (prevEnv == null) delete process.env.GLISSA_CONFIG;
       if (prevEnv != null) process.env.GLISSA_CONFIG = prevEnv;
       fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -237,31 +228,29 @@ function withBackend(fn) {
   };
 }
 
-function connectControl(dash) {
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(dash.url('/control'), dash.options);
-    ws.once('open', () => resolve(ws));
-    ws.once('error', reject);
-  });
+interface SettingsFrame {
+  type: string;
+  requestId?: string | null;
+  settings?: Record<string, unknown>;
 }
 
-function sendAndWait(ws, msg, matchType) {
+function sendAndWait(ws: WebSocket, message: unknown, matchType: string): Promise<SettingsFrame> {
   return new Promise((resolve) => {
-    function onMessage(raw) {
+    function onMessage(raw: Buffer) {
       const parsed = JSON.parse(raw.toString());
       if (parsed.type !== matchType) return;
       ws.off('message', onMessage);
       resolve(parsed);
     }
     ws.on('message', onMessage);
-    ws.send(JSON.stringify(msg));
+    ws.send(JSON.stringify(message));
   });
 }
 
 // The restart runs on the wiring's prPollerChain, appended (not awaited) by applySettingsReload, so a
 // warning it logs can land after the settings-updated ack the client already received. Poll briefly
 // instead of asserting immediately, bounded so a genuinely missing warning still fails promptly.
-async function waitFor(predicate, { timeoutMs = 2000, intervalMs = 20 } = {}) {
+async function waitFor(predicate: () => boolean, { timeoutMs = 2000, intervalMs = 20 } = {}): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (predicate()) return true;
@@ -270,13 +259,16 @@ async function waitFor(predicate, { timeoutMs = 2000, intervalMs = 20 } = {}) {
   return predicate();
 }
 
-function prPollerWarns(warnSpy) {
-  return warnSpy.mock.calls.filter((c) => /pr-poller/i.test(String(c.arguments[0])));
+function settle(ms: number): Promise<void> {
+  return new Promise((resolve) => { setTimeout(() => resolve(), ms); });
 }
 
 test('update-settings hot-applies the poller only when prReview/telegram actually changed', withBackend(async (t, dash) => {
   const warnSpy = t.mock.method(console, 'warn');
-  const ws = await connectControl(dash);
+  const prPollerWarnings = () => warnSpy.mock.calls
+    .map((call) => String(call.arguments[0]))
+    .filter((line) => /pr-poller/i.test(line));
+  const ws = await openSocket(dash, '/control');
 
   await sendAndWait(ws, { type: 'get-settings', requestId: '1' }, 'settings');
 
@@ -290,9 +282,9 @@ test('update-settings hot-applies the poller only when prReview/telegram actuall
     settings: { prReview: { enabled: true }, telegram: { botToken: '', chatId: '' } },
   }, 'settings-updated');
 
-  assert.deepEqual(updated.settings.prReview, { enabled: true });
+  assert.deepEqual(updated.settings?.prReview, { enabled: true });
   assert.ok(
-    await waitFor(() => prPollerWarns(warnSpy).some((c) => /not starting.*telegram/i.test(String(c.arguments[0])))),
+    await waitFor(() => prPollerWarnings().some((line) => /not starting.*telegram/i.test(line))),
     'startPrPoller ran on this settings save and logged the misconfiguration reason',
   );
 
@@ -304,8 +296,8 @@ test('update-settings hot-applies the poller only when prReview/telegram actuall
     requestId: '3',
     settings: { cursorBlink: true },
   }, 'settings-updated');
-  await new Promise((r) => setTimeout(r, 300)); // bounded settle window for a negative assertion
-  assert.equal(prPollerWarns(warnSpy).length, 0, 'an unrelated settings save never restarts the poller');
+  await settle(300); // bounded settle window for a negative assertion
+  assert.equal(prPollerWarnings().length, 0, 'an unrelated settings save never restarts the poller');
 
   // Disabling is a real prReview change -> a restart IS queued, but it is a clean gate failure
   // (reason: null) so no warning, and the wiring must not throw on a second consecutive restart
@@ -316,8 +308,8 @@ test('update-settings hot-applies the poller only when prReview/telegram actuall
     requestId: '4',
     settings: { prReview: { enabled: false } },
   }, 'settings-updated');
-  await new Promise((r) => setTimeout(r, 300));
-  assert.equal(prPollerWarns(warnSpy).length, 0, 'a clean disable does not warn');
+  await settle(300);
+  assert.equal(prPollerWarnings().length, 0, 'a clean disable does not warn');
 
-  ws.close();
+  await closeSocket(ws);
 }));

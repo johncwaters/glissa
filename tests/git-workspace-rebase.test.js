@@ -13,7 +13,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
 const { createGitWorkspace } = require('../server/git-workspace.ts');
-const { hasGit, git } = require('./helpers/git-fixture');
+const { hasGit, git } = require('./helpers/git-fixture.ts');
 
 const GIT = hasGit();
 

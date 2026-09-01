@@ -15,7 +15,7 @@ import type { SessionOptions } from '../session/sessions.ts';
 import type { MergeStatus } from '../session/core/worktree-state.ts';
 import type { SessionState } from '../shared/states.ts';
 import { STATES } from '../shared/states.ts';
-import { hasGit, git } from './helpers/git-fixture.js';
+import { hasGit, git } from './helpers/git-fixture.ts';
 import type {
   IntegrationSyncResult, MergeResult, RebaseResult, Workspace,
 } from '../session/session-worktree-lifecycle.ts';

@@ -12,10 +12,9 @@ const path = require('node:path');
 const { once } = require('node:events');
 const { WebSocketServer } = require('ws');
 
-const vscode = require('./helpers/vscode-stub');
+const vscode = require('./helpers/vscode-stub.ts').default;
 const { ACTIVITY_METHOD } = require('../server/core/ingest-editor-core.ts');
 
-const STUB_PATH = require.resolve('./helpers/vscode-stub');
 // The framing module is COPIED beside the extension when the vsix is packed (server/visions-cli.js), so
 // in the repo it resolves only from the one place that owns it.
 const LSP_CORE_PATH = require.resolve('../server/core/visions-lsp-core.ts');
@@ -24,9 +23,17 @@ const RELAY_PATH = path.join(__dirname, '..', 'session', 'visions-relay.ts');
 const WAIT_MS = 8000;
 const URI = 'file:///tmp/plan.md';
 
+// The stub is an ES module now, so a resolve-time redirect would hand the extension's CommonJS
+// `require('vscode')` the namespace wrapper instead of the namespace itself. Intercepting the load is
+// what puts the stub object in its hands.
+const originalLoad = Module._load;
+Module._load = function loadWithVscodeStub(request, ...rest) {
+  if (request === 'vscode') return vscode;
+  return originalLoad.call(this, request, ...rest);
+};
+
 const originalResolve = Module._resolveFilename;
-Module._resolveFilename = function resolveWithVscodeStub(request, ...rest) {
-  if (request === 'vscode') return STUB_PATH;
+Module._resolveFilename = function resolveVisionsSources(request, ...rest) {
   if (request === './visions-lsp-core.js') return LSP_CORE_PATH;
   if (request === './lsp-convert.js') return CONVERT_PATH;
   return originalResolve.call(this, request, ...rest);

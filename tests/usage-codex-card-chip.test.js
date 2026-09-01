@@ -18,7 +18,7 @@ const path = require('node:path');
 const { createUsageWiring } = require('../server/usage-wiring.ts');
 const { createUsageScanner } = require('../server/usage-scanner.ts');
 const { loadPricing } = require('../server/usage-pricing.ts');
-const { isolateTranscriptHomes } = require('./helpers/transcript-homes');
+const { isolateTranscriptHomes } = require('./helpers/transcript-homes.ts');
 
 const CODEX_SESSION_ID = '019f43ea-76ac-7041-bd4b-6362e85f6630';
 const CARD_ID = 'b0000000-0000-4000-8000-0000000000c0';

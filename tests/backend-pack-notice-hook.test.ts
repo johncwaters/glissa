@@ -1,5 +1,3 @@
-'use strict';
-
 // HTTP-level pin of the live context-pack channel on the hook ingress: a UserPromptSubmit response
 // carries hookSpecificOutput.additionalContext when (and only when) the session owes a pack notice,
 // in the ONE nesting Claude Code actually injects, and every other reply stays byte-identical to what
@@ -10,31 +8,45 @@
 // (memory: booting the backend against the real config once destroyed an active worktree). Pack
 // auto-rebuild is off here too, so booting never touches the real ~/.glissa/packs tree.
 
-const test = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const http = require('node:http');
-const os = require('node:os');
-const path = require('node:path');
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import type { Server } from 'node:http';
 
-const { createBackend } = require('../server/backend.ts');
-const grok = require('../session/adapters/grok.ts').default;
+import { createBackend } from '../server/backend.ts';
+import grok from '../session/adapters/grok.ts';
+import type { DeliveredPack } from '../session/session-pack-delivery.ts';
+import type { Session } from '../session/sessions.ts';
+import { boundPort, closeServer, listenOnLoopback } from './helpers/http-server.ts';
+import type { Backend } from './helpers/lanes.ts';
 
 const SESSION_ID = 'pack-notice-session';
 
-let tmpDir = null;
-let prevEnv = null;
-let server = null;
-let backend = null;
-let base = null;
-let session = null;
-let token = null;
-
-function hookUrl(event, hookToken = token) {
-  return `${base}/hook/${SESSION_ID}/${event}?t=${encodeURIComponent(hookToken)}`;
+interface PackNoticeContext {
+  tmpDir: string;
+  prevEnv: string | undefined;
+  server: Server;
+  backend: Backend;
+  base: string;
+  session: Session;
+  token: string;
 }
 
-function postHook(event, hookToken = token) {
+const booted: { context: PackNoticeContext | null } = { context: null };
+
+function ctx(): PackNoticeContext {
+  if (!booted.context) throw new Error('the backend was never booted');
+  return booted.context;
+}
+
+function hookUrl(event: string, hookToken: string): string {
+  return `${ctx().base}/hook/${SESSION_ID}/${event}?t=${encodeURIComponent(hookToken)}`;
+}
+
+function postHook(event: string, hookToken = ctx().token): Promise<Response> {
   return fetch(hookUrl(event, hookToken), {
     method: 'POST',
     body: JSON.stringify({}),
@@ -43,14 +55,15 @@ function postHook(event, hookToken = token) {
 }
 
 // Stands in for a spawn: _resolvePacks records what the PTY was launched with, and launching a real
-// `claude` here is not an option. Spawn-time resolution itself is covered by tests/session-packs.test.js.
-function pretendSpawnedWith(deliveredPacks) {
+// `claude` here is not an option. Spawn-time resolution itself is covered by tests/session-packs.test.ts.
+function pretendSpawnedWith(deliveredPacks: DeliveredPack[]): void {
+  const { session } = ctx();
   session._packDelivery.replaceDelivered(deliveredPacks.map((pack) => ({ ...pack })));
   session._packDelivery.clearNotice();
 }
 
 test.before(async () => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-packnotice-hook-'));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-packnotice-hook-'));
   const projectDir = path.join(tmpDir, 'project');
   fs.mkdirSync(projectDir);
   const cfgPath = path.join(tmpDir, 'config.json');
@@ -60,32 +73,35 @@ test.before(async () => {
     packsAutoRebuild: false,
     autoResume: false,
   }, null, 2), 'utf8');
-  prevEnv = process.env.GLISSA_CONFIG;
+  const prevEnv = process.env.GLISSA_CONFIG;
   process.env.GLISSA_CONFIG = cfgPath;
 
-  server = http.createServer();
-  backend = createBackend(server, { staticDir: null });
+  const server = http.createServer();
+  const backend = createBackend(server, { staticDir: null });
   server.on('request', backend.app);
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  base = `http://127.0.0.1:${server.address().port}`;
+  await listenOnLoopback(server);
 
-  session = backend.getSession(SESSION_ID);
+  const session = backend.getSession(SESSION_ID);
   assert.ok(session, 'the boot loop created the configured session');
   // Register the session's bearer token with the shared HookRouter without spawning a PTY: this is
   // exactly what the spawn path does, minus node-pty.
   session._hooks.inject();
-  token = session._hooks.token();
+  const token = session._hooks.token();
   assert.ok(token, 'hook injection produced a token');
+
+  booted.context = { tmpDir, prevEnv, server, backend, base: `http://127.0.0.1:${boundPort(server)}`, session, token };
 });
 
 test.after(async () => {
-  if (session) session._hooks.cleanup();
-  if (backend) backend.shutdown();
-  if (server) server.closeAllConnections();
-  if (server) await new Promise((resolve) => server.close(resolve));
+  if (!booted.context) return;
+  const { backend, server, session, prevEnv, tmpDir } = booted.context;
+  session._hooks.cleanup();
+  backend.shutdown();
+  server.closeAllConnections();
+  await closeServer(server);
   if (prevEnv == null) delete process.env.GLISSA_CONFIG;
   if (prevEnv != null) process.env.GLISSA_CONFIG = prevEnv;
-  if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+  fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 test('with no notice pending the response body is byte-identical to the pre-channel reply', async () => {
@@ -105,7 +121,7 @@ test('an ignored event and a rejected token are unchanged too', async () => {
 
 test('a pending notice rides the next UserPromptSubmit in the exact injectable shape', async () => {
   pretendSpawnedWith([{ name: 'alpha', version: 'v1' }]);
-  session.notePackUpdate('alpha', 'v2');
+  ctx().session.notePackUpdate('alpha', 'v2');
 
   const body = await (await postHook('UserPromptSubmit')).json();
   assert.equal(body.ok, true);
@@ -121,7 +137,7 @@ test('a pending notice rides the next UserPromptSubmit in the exact injectable s
 
 test('a rejected callback cannot drain the pending notice', async () => {
   pretendSpawnedWith([{ name: 'alpha', version: 'v1' }]);
-  session.notePackUpdate('alpha', 'v2');
+  ctx().session.notePackUpdate('alpha', 'v2');
 
   const refused = await postHook('UserPromptSubmit', 'not-the-token');
   assert.equal(refused.status, 403);
@@ -132,7 +148,7 @@ test('a rejected callback cannot drain the pending notice', async () => {
 
 test('no other event carries the notice, even with one pending', async () => {
   pretendSpawnedWith([{ name: 'alpha', version: 'v1' }]);
-  session.notePackUpdate('alpha', 'v2');
+  ctx().session.notePackUpdate('alpha', 'v2');
 
   for (const event of ['Stop', 'Notification', 'SessionStart', 'SubagentStop', 'PreCompact']) {
     const res = await postHook(event);
@@ -145,6 +161,7 @@ test('no other event carries the notice, even with one pending', async () => {
 });
 
 test('an adapter can declare Stop as its notice delivery event', async () => {
+  const { session } = ctx();
   const originalAdapter = session._adapter;
   session._adapter = grok;
   try {

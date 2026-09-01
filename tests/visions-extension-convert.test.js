@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const vscode = require('./helpers/vscode-stub');
+const vscode = require('./helpers/vscode-stub.ts').default;
 const {
   decideEditFreshness, toCodeActions, toDiagnostics, toWorkspaceEdit,
 } = require('../tools/vscode-visions/lsp-convert.ts');

@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { createIntegrationRefWatcher } from '../detection/integration-ref-watch.ts';
-import { SHORT_NAMES_AVAILABLE, shortPathOf } from './helpers/short-path.js';
+import { SHORT_NAMES_AVAILABLE, shortPathOf } from './helpers/short-path.ts';
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

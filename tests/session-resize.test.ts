@@ -13,7 +13,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Session } from '../session/sessions.ts';
 import { STATES } from '../shared/states.ts';
-import { waitFor } from './helpers/wait-for.js';
+import { waitFor } from './helpers/wait-for.ts';
 interface ResizeCall {
   cols: number;
   rows: number;
