@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The whole project is TypeScript**: every module is strict ESM `.ts`, Vite bundles the server, CLI, relays, and editor extension alongside the dashboard, and the published package ships `dist/` only. The Node floor rises to 22.18. After upgrading, re-run `glissa agent setup grok`: the managed hook entry in `~/.grok/hooks.json` points at the old relay path.
+- Provisioned servers that start Glissa with `node server.js` must switch to `node dist/server/index.js` (a source checkout uses `node server/main.ts`).
+
 ## [0.24.1] - 2026-08-31
 
 ### Fixed

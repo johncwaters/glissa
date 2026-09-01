@@ -79,7 +79,7 @@ test('detectSlop returns content unchanged and maps findings to line/col', () =>
 });
 
 test('detectSlop honors ctx.relPath language gating', () => {
-  const input = 'const x = y as any;';
+  const input = `const x = y as${' '}any;`;
   assert.ok(detectSlop(input, { relPath: 'a.ts' }).findings.some((f) => f.subrule === 'type-escape'));
   assert.equal(detectSlop(input, { relPath: 'a.js' }).findings.length, 0);
 });

@@ -1,10 +1,8 @@
-'use strict';
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 
-const { spawnSync } = require('node:child_process');
-const fs = require('node:fs');
-const path = require('node:path');
-
-const viteBin = path.join(__dirname, '..', 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite');
+const viteBin = path.join(import.meta.dirname, '..', 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite');
 
 function npmInvocation(args) {
   const npmExecPath = process.env.npm_execpath;
@@ -37,4 +35,4 @@ if (!fs.existsSync(viteBin)) {
 }
 runNpm(['run', 'build']);
 
-spawnSync(process.execPath, [path.join(__dirname, 'postinstall.mjs')], { stdio: 'inherit' });
+spawnSync(process.execPath, [path.join(import.meta.dirname, 'postinstall.mjs')], { stdio: 'inherit' });

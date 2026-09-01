@@ -7,7 +7,7 @@
 The automated test suite, run with `npm test` (node:test, no test framework dependency). Covers the pure cores, detection stack, session lifecycle, and the frontend's pure `.mjs` modules. Recorded-session fixtures drive the version-aware replay harness.
 
 ## Key Files
-Tests are named `<module>.test.js` after the module under test. Notable clusters:
+Tests are named `<module>.test.ts` after the module under test. Notable clusters:
 
 | Cluster | Files |
 |---------|-------|
@@ -24,7 +24,7 @@ Tests are named `<module>.test.js` after the module under test. Notable clusters
 | Directory | Purpose |
 |-----------|---------|
 | `fixtures/` | JSONL session recordings (v1 legacy and v2 structural-signal format) consumed by `replay-harness.test.ts` |
-| `helpers/` | Shared test fixtures that are not themselves tests (the `*.test.js` glob skips them). `short-path.js` mints 8.3 aliases so the CI runner's short `%TEMP%` is reproducible locally; `transcript-homes.js` redirects the three vendor transcript homes, which every boot with `memory.enabled` needs since that switch implies the agent-log source |
+| `helpers/` | Shared test fixtures that are not themselves tests (the `*.test.ts` glob skips them). `short-path.ts` mints 8.3 aliases so the CI runner's short `%TEMP%` is reproducible locally; `transcript-homes.ts` redirects the three vendor transcript homes, which every boot with `memory.enabled` needs since that switch implies the agent-log source |
 
 ## For AI Agents
 

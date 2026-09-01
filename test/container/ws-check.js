@@ -1,6 +1,4 @@
-'use strict';
-
-const WebSocket = require('ws');
+import WebSocket from 'ws';
 
 function argValue(flag) {
   const idx = process.argv.indexOf(flag);

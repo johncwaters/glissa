@@ -33,7 +33,7 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 
 ### Working In This Directory
 
-- Server `.js` stays CommonJS; the Mill measurement lane is `.ts` run by Node type stripping as the migration beachhead. Frontend is ESM bundled by Vite.
+- Everything is TypeScript ESM. Erasable syntax only (no enums, namespaces, parameter properties); relative imports carry explicit `.ts` extensions; the browser reaches `shared/` through the `#shared/*` imports map. Never `any`, never `as unknown as` (`tests/typecheck-gate.test.ts`).
 - Node >=22.18.0 makes native type stripping unflagged and exceeds the `node:sqlite` FTS5 floor. Windows 11 and Linux, developed on v24.
 - Do NOT add dependencies without explicit instruction.
 - Status detection is structural (hooks plus OSC-0 title). Never reintroduce PTY body or content scraping.
@@ -47,8 +47,8 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 - Inter-module communication via Node `EventEmitter`, not globals or direct coupling.
 - The published package ships `dist/` only and runs built `.js`, because Node refuses type stripping inside `node_modules`. Resolve a shipped asset (relay, pack spec, CLI, dashboard) through `server/runtime-paths.ts`, never from `import.meta.dirname`: the same module runs from a source checkout and from `dist/`.
 - Sessions are keyed by stable UUID `id`; `name` is display-only.
-- Wire and persisted shapes are Zod schemas in `shared/contracts/`; boundaries parse and fail closed (`tests/contracts-*.test.js`).
-- `npm run typecheck` gates `server/`, `session/`, `detection/`, `notifications/`, `shared/` and `public/` at zero errors under `strictNullChecks` and the rest of the strict family `tests/typecheck-gate.test.js` pins. The checked set only grows, no file may opt out with `@ts-nocheck`/`@ts-ignore`, and no file may launder an assertion through `unknown` (`tests/typecheck-gate.test.js`).
+- Wire and persisted shapes are Zod schemas in `shared/contracts/`; boundaries parse and fail closed (`tests/contracts-config.test.ts` and siblings), and types come from `z.infer`, never hand-duplicated.
+- `npm run typecheck` gates every tree at zero errors under full `strict` plus `erasableSyntaxOnly` and `verbatimModuleSyntax` (`tsconfig.json` for node code, `tsconfig.public.json` for the browser). No suppressions of any kind: `@ts-*` pragmas, `biome-ignore`, `as any`, and `as unknown as` all fail the gate (`tests/typecheck-gate.test.ts`).
 
 ### Testing Requirements
 
@@ -78,15 +78,13 @@ Each subsystem states its own rules beside its code, so a rule is loaded when th
 
 ## Coding Style
 
-- Server `.js` is CommonJS: `const x = require('x')`, `module.exports = { ... }`.
 - No classes unless the pattern genuinely requires instance state.
 - Propagate errors via EventEmitter `error` events or callbacks, not thrown exceptions in async paths.
-- Comments are a last resort and carry only the why.
+- Code comments are banned entirely; name or restructure instead (`tests/typecheck-gate.test.ts` fails on any comment line).
 
 ## Development Workflow
 
 - `npm run dev` - Vite dev server with HMR on 5173, backend attached via plugin (one process)
-- `npm run dev:server-only` - Express backend only on 3000
 - `npm run build` / `npm start` - whole package to `dist/` (dashboard, node bundles, extension); the built server entry
 - `npm test` - the `node:test` suite; `npm run test:container` adds the Docker remote-mode run
 
