@@ -21,15 +21,15 @@
 // of them would mean a second state pipeline for the same facts.
 
 import { STATES } from '#shared/states.ts';
-import { sendControlMsg } from '../control-ws.js';
-import { adoptElement, el, releaseElement } from '../dom-helpers.js';
+import { sendControlMsg } from '../control-ws.ts';
+import { adoptElement, el, releaseElement } from '../dom-helpers.ts';
 import { pickStrongestAttention } from '../focus-view/attention-core.mjs';
 import { sessionUIs } from '../session-card/card-registry.js';
 import { reparentReviewPanel } from '../sidebar/review-sidebar.js';
 import { setSelectedId } from '../sidebar/selection.js';
-import { uiState } from '../ui-state-core.mjs';
-import { closeSettingsSectionPicker } from '../settings-panel.js';
-import { getLastFocusedSessionId, setLastFocusedSessionId } from '../ui-prefs.js';
+import { uiState } from '../ui-state-core.ts';
+import { closeSettingsSectionPicker } from '../settings-panel.ts';
+import { getLastFocusedSessionId, setLastFocusedSessionId } from '../ui-prefs.ts';
 import { createBoardScreen } from './board-screen.js';
 import { createTerminalScreen } from './terminal-screen.js';
 

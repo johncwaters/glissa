@@ -11,8 +11,8 @@
 // remove "x" is the kebab's Remove.
 
 import { STATES } from '#shared/states.ts';
-import { borrowCard, getBorrowedCardId, releaseCard } from '../card-host.js';
-import { adoptElement, el, queryTag, releaseElement, stateChip } from '../dom-helpers.js';
+import { borrowCard, getBorrowedCardId, releaseCard } from '../card-host.ts';
+import { adoptElement, el, queryTag, releaseElement, stateChip } from '../dom-helpers.ts';
 import { isRenameInProgress } from '../session-card/card-dom.js';
 import { sessionUIs } from '../session-card/card-registry.js';
 import { onSessionTick, sessionElapsedText } from '../session-card/session-tick.js';

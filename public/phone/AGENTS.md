@@ -17,16 +17,16 @@ The job it serves is triage, per `PRODUCT.md`: scan the board, find the session 
 | `terminal-screen.js` | One session's full-bleed terminal: back control, name, state badge, the card's adopted action cluster, and the touch key strip |
 | `board-groups-core.mjs` | Pure composition of desktop project grouping with phone attention ordering |
 | `triage-core.mjs` | Pure attention-first ORDER (`orderSessionsForTriage`) only. The "needs you" rule and its readout wording are shared with the desktop rail head in `../focus-view/attention-core.mjs` |
-| `mobile-key-strip.js` | Esc / Tab / Ctrl+C / arrows / Paste, the keys a soft keyboard cannot produce (catalog in `../mobile-keys.mjs`) |
+| `mobile-key-strip.js` | Esc / Tab / Ctrl+C / arrows / Paste, the keys a soft keyboard cannot produce (catalog in `../mobile-keys.ts`) |
 
 Review, Radar, PRs, Usage, Mill, Visions, Hooks and Settings have no phone-only module: each screen is a mount container that re-parents the real desktop panel in.
 
 ## For AI Agents
 
 ### Working In This Directory
-- Which layout runs is decided by `../form-factor-core.mjs` (`coarse AND narrow`) and stamped on `<html data-layout>` by `../form-factor.js`. Style phone surfaces off that attribute; never add a `max-width` override of a desktop selector.
-- Re-parent, never duplicate. `dom-helpers.js` `adoptElement` / `releaseElement` for panels; `../card-host.js` `borrowCard` / `releaseCard` for a session card (single borrower GLOBALLY, shared with the Focus center).
-- One state pipeline. The Board reads `session-card/card-registry` and is refreshed by the same `app.js` control-WS handlers that refresh the desktop rail. Do not subscribe to the control WS from here.
+- Which layout runs is decided by `../form-factor-core.ts` (`coarse AND narrow`) and stamped on `<html data-layout>` by `../form-factor.ts`. Style phone surfaces off that attribute; never add a `max-width` override of a desktop selector.
+- Re-parent, never duplicate. `dom-helpers.ts` `adoptElement` / `releaseElement` for panels; `../card-host.ts` `borrowCard` / `releaseCard` for a session card (single borrower GLOBALLY, shared with the Focus center).
+- One state pipeline. The Board reads `session-card/card-registry` and is refreshed by the same `app.ts` control-WS handlers that refresh the desktop rail. Do not subscribe to the control WS from here.
 - One "needs you" rule. The Board and the desktop rail head render the same `{n} NEED YOU` readout, so the predicate and the wording live once in `../focus-view/attention-core.mjs`. Each surface supplies its own `unseen` bookkeeping (the Board a Set, the rail its pill's `data-unseen`); never re-implement the rule here.
 - Row clocks ride the shared tick (`session-card/session-tick.js` `onSessionTick`), never a timer of their own.
 - History: at most ONE entry is pushed above the Board, and only while the phone shell is active. Desktop must never touch history.
@@ -40,7 +40,7 @@ Review, Radar, PRs, Usage, Mill, Visions, Hooks and Settings have no phone-only 
 ## Dependencies
 
 ### Internal
-- `../form-factor.js`, `../card-host.js`, `../dom-helpers.js`
-- `../project-registry.js`, `../session-actions.js`, `../session-card/` (registry, tick, terminal input, toast), `../sidebar/review-sidebar.js` + `selection.js`, `../focus-view/attention-core.mjs` (the alphabetical base order), `../ui-prefs.js`, `../control-ws.js`
+- `../form-factor.ts`, `../card-host.ts`, `../dom-helpers.ts`
+- `../project-registry.ts`, `../session-actions.ts`, `../session-card/` (registry, tick, terminal input, toast), `../sidebar/review-sidebar.js` + `selection.js`, `../focus-view/attention-core.mjs` (the alphabetical base order), `../ui-prefs.ts`, `../control-ws.ts`
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

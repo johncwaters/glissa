@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // perf-corpus is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCorpus = () => import('../public/perf-corpus.mjs');
+const importCorpus = () => import('../public/perf-corpus.ts');
 
 test('generateCorpus is deterministic for a seed', async () => {
   const { generateCorpus } = await importCorpus();

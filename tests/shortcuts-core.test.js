@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // shortcuts is ESM (.mjs); dynamic-import it from this CJS test file.
-const importData = () => import('../public/shortcuts.mjs');
+const importData = () => import('../public/shortcuts.ts');
 
 test('SHORTCUT_GROUPS: every group is well-formed', async () => {
   const { SHORTCUT_GROUPS } = await importData();

@@ -5,13 +5,13 @@
 
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
-import { writeClipboardText } from '../dom-helpers.js';
+import { writeClipboardText } from '../dom-helpers.ts';
 import { isFocusAltShortcut } from '../focus-view/focus-shortcuts.mjs';
-import { nextReconnectDelayMs } from '../reconnect-backoff.mjs';
-import { renderScheduler } from '../render-scheduler.mjs';
-import { getTerminalTheme } from '../theme.js';
-import { buildWebSocketUrl } from '../ws-url-core.mjs';
-import { clearPageToken, loadPageToken, withPageToken } from '../ws-token.js';
+import { nextReconnectDelayMs } from '../reconnect-backoff.ts';
+import { renderScheduler } from '../render-scheduler.ts';
+import { getTerminalTheme } from '../theme.ts';
+import { buildWebSocketUrl } from '../ws-url-core.ts';
+import { clearPageToken, loadPageToken, withPageToken } from '../ws-token.ts';
 import { noteSessionOutput } from './activity.js';
 import { sessionUIs } from './card-registry.js';
 import { decideFitAction } from './fit-core.mjs';

@@ -6,8 +6,8 @@ const { SETTINGS_RANGES } = require('../shared/settings-ranges.ts');
 
 async function load() {
   const [{ SETTINGS_MAP }, core] = await Promise.all([
-    import('../public/settings-map.mjs'),
-    import('../public/settings-view-core.mjs'),
+    import('../public/settings-map.ts'),
+    import('../public/settings-view-core.ts'),
   ]);
   return { SETTINGS_MAP, ...core };
 }

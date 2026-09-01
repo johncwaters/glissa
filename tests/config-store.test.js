@@ -363,7 +363,7 @@ test('getSettings resolves branchGc defaults while opt-in blocks stay null; proj
 });
 
 test('getSettings redacts the telegram bot token and the PostHog api key to presence flags', async () => {
-  const { SECRET_PRESENCE_SUFFIX: clientSuffix } = await import('../public/settings-view-core.mjs');
+  const { SECRET_PRESENCE_SUFFIX: clientSuffix } = await import('../public/settings-view-core.ts');
   withStore({ projects: [] }, (store) => {
     store.config.telegram = { botToken: 'tok-secret', chatId: '123' };
     store.config.posthog = { enabled: true, host: 'https://us.posthog.com', apiKey: 'phx_secret', repoPath: '/repo' };

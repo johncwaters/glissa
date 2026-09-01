@@ -25,7 +25,7 @@ function schemaTypes(schema) {
 
 test('control dispatch tables contain only contract message types', () => {
   const clientTypes = dispatchTypes('server/control-handlers.ts', 'const handlers = {', "controlWss.on('connection'");
-  const serverTypes = dispatchTypes('public/app.js', 'const messageHandlers = {', 'onControlMessage((msg)');
+  const serverTypes = dispatchTypes('public/app.ts', 'const messageHandlers = {', 'onControlMessage((msg)');
   const clientSchemaTypes = schemaTypes(ClientMessage);
   const serverSchemaTypes = schemaTypes(ServerMessage);
   assert.deepEqual(clientTypes.filter((type) => !clientSchemaTypes.has(type)), []);

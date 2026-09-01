@@ -6,7 +6,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // visions-view-core is ESM; dynamic-import it from this CJS test file.
-const importCore = () => import('../public/visions-view-core.mjs');
+const importCore = () => import('../public/visions-view-core.ts');
 
 function finding(line, character, code, message) {
   return {

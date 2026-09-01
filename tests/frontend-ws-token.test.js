@@ -2,19 +2,18 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 
-// data: URL import forces ESM despite the CJS package type; same as tests/frontend-client-trust.test.js.
+// A unique query defeats the ESM module cache so tests do not share token state; the .ts pathname is
+// what Node keys its type stripping on, so the module still loads as source.
 let freshModuleCounter = 0;
 
 function importWsToken() {
-  const source = fs.readFileSync(path.join(__dirname, '..', 'public', 'ws-token.js'), 'utf8');
-  // The counter line defeats the ESM module cache so tests do not share token state.
   freshModuleCounter += 1;
-  const uniqueSource = `${source}\nconst freshModuleId = ${freshModuleCounter};\nexport { freshModuleId };\n`;
-  const dataUrl = `data:text/javascript;base64,${Buffer.from(uniqueSource).toString('base64')}`;
-  return import(dataUrl);
+  const moduleUrl = pathToFileURL(path.join(__dirname, '..', 'public', 'ws-token.ts'));
+  moduleUrl.searchParams.set('fresh', String(freshModuleCounter));
+  return import(moduleUrl.href);
 }
 
 function stubTokenFetch(tokensInOrder) {

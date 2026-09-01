@@ -188,7 +188,7 @@ test('the per-connection snapshot has no seq, but a snapshot sent through broadc
 
 // Envelope versioning (2026-08 review, section 1). The dashboard is served by the same process, so
 // the only skew case is a tab left open across a server update: it reconnects to a backend whose
-// frames its bundle may predate. The client reloads on a CHANGE (public/app.js noteServerBuild).
+// frames its bundle may predate. The client reloads on a CHANGE (public/app.ts noteServerBuild).
 test('the connect snapshot identifies the backend build it came from', () => {
   const controlWss = new EventEmitter();
   const sent = [];

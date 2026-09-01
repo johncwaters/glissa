@@ -3,7 +3,7 @@
 // opener). Lives in session-card/ rather than dialogs.js so card-dom.js can use it too without a
 // dialogs.js <-> card-dom.js cycle (see the header note in card-dom.js).
 
-import { el } from '../dom-helpers.js';
+import { el } from '../dom-helpers.ts';
 
 export function createModalOverlay({ dialogClass = 'dialog', closeOnBackdrop = true } = {}) {
   const opener = document.activeElement;

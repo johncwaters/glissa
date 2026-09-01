@@ -37,7 +37,7 @@ test('server resolvers and wire specs reuse the shared range objects', () => {
 });
 
 test('every map number resolves directly to the shared catalog', async () => {
-  const { SETTINGS_MAP } = await import('../public/settings-map.mjs');
+  const { SETTINGS_MAP } = await import('../public/settings-map.ts');
   for (const setting of SETTINGS_MAP.flatMap((section) => section.settings)) {
     if (setting.control !== 'number') continue;
     assert.strictEqual(ranges.SETTINGS_RANGES[setting.range], ranges[setting.range], setting.id);

@@ -1,8 +1,8 @@
 // The touch key strip's DOM. A soft keyboard gives xterm printable characters only, so Esc / Tab /
 // Ctrl+C / arrows have no other way in; byte catalog in ../mobile-keys.mjs.
 
-import { el } from '../dom-helpers.js';
-import { isClipboardKey, isUploadKey, mobileKeyBytes, MOBILE_KEYS } from '../mobile-keys.mjs';
+import { el } from '../dom-helpers.ts';
+import { isClipboardKey, isUploadKey, mobileKeyBytes, MOBILE_KEYS } from '../mobile-keys.ts';
 import { showErrorToast } from '../session-card/toast.js';
 
 // send(data) writes into the currently shown session; getSessionId() names that session for the

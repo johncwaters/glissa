@@ -3,14 +3,14 @@
 
 // Virtual module generated from shared/states.js (Vite plugin in dev/build, backend route in no-build)
 import { KILLABLE_STATES, RESTARTABLE_STATES, STATES } from '#shared/states.ts';
-import { playAlertSound } from '../alert-sound.js';
-import { sendControlMsg } from '../control-ws.js';
-import { el } from '../dom-helpers.js';
-import { setHealthMonitorVisible } from '../health-monitor.js';
+import { playAlertSound } from '../alert-sound.ts';
+import { sendControlMsg } from '../control-ws.ts';
+import { el } from '../dom-helpers.ts';
+import { setHealthMonitorVisible } from '../health-monitor.ts';
 import { seedReviewMergeStatus, setReviewDiff, setReviewMergeStatus } from '../sidebar/review-sidebar.js';
 import { setSelectedId } from '../sidebar/selection.js';
-import { getSoundId, isSoundEnabled } from '../ui-prefs.js';
-import { sessionChipText, sessionChipTitle } from '../usage-view-core.mjs';
+import { getSoundId, isSoundEnabled } from '../ui-prefs.ts';
+import { sessionChipText, sessionChipTitle } from '../usage-view-core.ts';
 import { setRunningActivity } from './activity.js';
 import { agentBadgeText } from './agent-core.mjs';
 import { computeAggregate } from './aggregate-core.mjs';

@@ -12,16 +12,16 @@
 // returned to its exact home slot in the off-screen grid on leave/swap.
 
 import { STATES } from '#shared/states.ts';
-import { borrowCard, getBorrowedCardId, releaseCard } from '../card-host.js';
-import { sendControlMsg } from '../control-ws.js';
-import { el, MERGE_TAGS, query, stateChip } from '../dom-helpers.js';
-import { emptyProjectKeys, forgetProject } from '../project-registry.js';
-import { quickAddSession, requestSessionRemoval } from '../session-actions.js';
+import { borrowCard, getBorrowedCardId, releaseCard } from '../card-host.ts';
+import { sendControlMsg } from '../control-ws.ts';
+import { el, MERGE_TAGS, query, stateChip } from '../dom-helpers.ts';
+import { emptyProjectKeys, forgetProject } from '../project-registry.ts';
+import { quickAddSession, requestSessionRemoval } from '../session-actions.ts';
 import { setActivityRenderer } from '../session-card/activity.js';
 import { sessionUIs } from '../session-card/card-registry.js';
 import { setSelectedId } from '../sidebar/selection.js';
-import { getLastFocusedSessionId, getRailWidth, setLastFocusedSessionId, setRailWidth } from '../ui-prefs.js';
-import { uiState } from '../ui-state-core.mjs';
+import { getLastFocusedSessionId, getRailWidth, setLastFocusedSessionId, setRailWidth } from '../ui-prefs.ts';
+import { uiState } from '../ui-state-core.ts';
 import { attentionSummaryText, countSessionsNeedingAttention, needsAttention, orderRoster, pickAdjacent, pickNextAttention } from './attention-core.mjs';
 import { groupRoster, NO_PATH_KEY, visibleOrder } from './roster-groups.mjs';
 

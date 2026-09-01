@@ -10,7 +10,7 @@ const {
 } = require('../server/core/settings-mill-core.ts');
 const settingsRanges = require('../shared/settings-ranges.ts');
 
-const loadMap = () => import('../public/settings-map.mjs');
+const loadMap = () => import('../public/settings-map.ts');
 
 const DASHBOARD_SETTING_PATH_SET = new Set(DASHBOARD_SETTING_PATHS);
 const OPTION_CATALOGS = new Set(['sounds', 'themes']);
@@ -99,7 +99,7 @@ test('aliases resolve without shadowing canonical section ids', async () => {
 
 test('file-only paths exist in defaults and never enter a dirty payload', async () => {
   const { SETTINGS_MAP } = await loadMap();
-  const { collectDirtyBlocks, hydrateFromSettings } = await import('../public/settings-view-core.mjs');
+  const { collectDirtyBlocks, hydrateFromSettings } = await import('../public/settings-view-core.ts');
   const fileOnlySettings = SETTINGS_MAP.flatMap((section) => section.settings).filter((setting) => setting.fileOnly);
   const original = hydrateFromSettings(SETTINGS_MAP, DEFAULT_CONFIG);
   const edited = hydrateFromSettings(SETTINGS_MAP, DEFAULT_CONFIG);

@@ -3,7 +3,7 @@
 // never a competing notion of selection. The value lives in the cross-cutting UI store; these three
 // functions are the sidebar's named view of it, so callers keep speaking selection, not store keys.
 
-import { uiState } from '../ui-state-core.mjs';
+import { uiState } from '../ui-state-core.ts';
 
 export function getSelectedId() {
   return uiState.snapshot().selectedSessionId;

@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // radar-hold-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/radar-hold-core.mjs');
+const importCore = () => import('../public/radar-hold-core.ts');
 
 // Fake clock: timers fire only when the test advances it, so a whole interleaving runs synchronously
 // and no test waits out a real 4 second hold.

@@ -5,7 +5,7 @@
 // pure eviction policy lives in webgl-core.mjs.
 
 import { WebglAddon } from '@xterm/addon-webgl';
-import { uiState } from '../ui-state-core.mjs';
+import { uiState } from '../ui-state-core.ts';
 import { sessionUIs } from './card-registry.js';
 import { pickEvictionVictims } from './webgl-core.mjs';
 

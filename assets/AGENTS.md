@@ -16,6 +16,6 @@ Repo-level static assets for documentation and source media. Runtime-served audi
 ## For AI Agents
 
 ### Working In This Directory
-- Adding a notification sound: place the file in BOTH `assets/audio/` and `public/audio/`, then register it in `public/alert-sound.js` `SOUND_OPTIONS`.
+- Adding a notification sound: place the file in BOTH `assets/audio/` and `public/audio/`, then register it in `public/alert-sound.ts` `SOUND_OPTIONS`.
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

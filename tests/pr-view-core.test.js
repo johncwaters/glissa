@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // pr-view-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/pr-view-core.mjs');
+const importCore = () => import('../public/pr-view-core.ts');
 
 const keysOf = (prs) => prs.map((pr) => pr.key);
 

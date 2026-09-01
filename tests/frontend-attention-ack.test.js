@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // attention-ack-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/attention-ack-core.mjs');
+const importCore = () => import('../public/attention-ack-core.ts');
 
 test('attentionSignature: sorts and dedupes, so the same facts in any order are one signature', async () => {
   const { attentionSignature } = await importCore();

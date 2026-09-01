@@ -34,7 +34,7 @@
   <div id="out"></div>
   <div id="mount"></div>
   <script type="module">
-    import { runStress } from './perf-harness.js';
+    import { runStress } from './perf-harness.ts';
 
     const $ = (id) => document.getElementById(id);
     $('run').addEventListener('click', async () => {

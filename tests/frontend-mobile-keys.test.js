@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // mobile-keys is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/mobile-keys.mjs');
+const importCore = () => import('../public/mobile-keys.ts');
 
 test('MOBILE_KEYS: the strip carries exactly the seven touch controls, in order', async () => {
   const { MOBILE_KEYS } = await importCore();

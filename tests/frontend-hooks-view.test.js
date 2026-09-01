@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // hooks-view-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/hooks-view-core.mjs');
+const importCore = () => import('../public/hooks-view-core.ts');
 
 const EVENTS = [
   { name: 'PreToolUse', matcher: 'tool name (regex)', description: 'Before a tool runs.' },

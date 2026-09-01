@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // settings-projects-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const load = () => import('../public/settings-projects-core.mjs');
+const load = () => import('../public/settings-projects-core.ts');
 
 test('a checked box is the selection when every stored id was rendered', async () => {
   const { unionProjectSelection } = await load();

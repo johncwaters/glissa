@@ -67,7 +67,7 @@ test('the token endpoint answers a same-origin fetch and forbids caching', async
 });
 
 test('static JavaScript uses the current IANA media type', async () => {
-  const res = await fetch(`http://127.0.0.1:${port}/app.js`);
+  const res = await fetch(`http://127.0.0.1:${port}/session-card/card-registry.js`);
   assert.equal(res.status, 200);
   assert.equal(res.headers.get('content-type'), 'text/javascript; charset=utf-8');
 });

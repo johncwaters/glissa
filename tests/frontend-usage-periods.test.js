@@ -7,7 +7,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const importCore = () => import('../public/usage-view-core.mjs');
+const importCore = () => import('../public/usage-view-core.ts');
 
 function day(dayKey, { tokens = 100, costUSD = 1, models = null, source = undefined } = {}) {
   const row = {

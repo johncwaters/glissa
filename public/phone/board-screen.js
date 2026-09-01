@@ -11,11 +11,11 @@
 // Down), so the client-trust gating and every existing listener come along untouched.
 
 import { STATES } from '#shared/states.ts';
-import { el, MERGE_TAGS, observeHeaderHeight, queryTag, stateChip } from '../dom-helpers.js';
+import { el, MERGE_TAGS, observeHeaderHeight, queryTag, stateChip } from '../dom-helpers.ts';
 import { attentionSummaryText, countSessionsNeedingAttention, orderRoster } from '../focus-view/attention-core.mjs';
 import { NO_PATH_KEY } from '../focus-view/roster-groups.mjs';
-import { emptyProjectKeys, forgetProject } from '../project-registry.js';
-import { quickAddSession, requestSessionRemoval } from '../session-actions.js';
+import { emptyProjectKeys, forgetProject } from '../project-registry.ts';
+import { quickAddSession, requestSessionRemoval } from '../session-actions.ts';
 import { sessionUIs } from '../session-card/card-registry.js';
 import { onSessionTick, sessionElapsedText } from '../session-card/session-tick.js';
 import { groupSessionsForBoard } from './board-groups-core.mjs';

@@ -1,6 +1,6 @@
 'use strict';
 
-// Test-side twin of public/ws-token.js. The control and data channels are dashboard-only routes: they
+// Test-side twin of public/ws-token.ts. The control and data channels are dashboard-only routes: they
 // require a browser Origin on a listener port and the per-process page token, so a test client that
 // stands in for the page has to carry both. Everything here is what the browser does, in one place, so
 // a suite exercising the real upgrade path does not restate the handshake.

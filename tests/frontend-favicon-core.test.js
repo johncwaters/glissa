@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const importCore = () => import('../public/favicon-core.mjs');
+const importCore = () => import('../public/favicon-core.ts');
 
 test('decideFaviconVariant: waiting takes priority over complete', async () => {
   const { decideFaviconVariant } = await importCore();

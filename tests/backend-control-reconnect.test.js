@@ -2,7 +2,7 @@
 
 // The dashboard's in-page reconnect, through the REAL upgrade path.
 //
-// public/control-ws.js reconnects with '/control?since=<lastSeq>' once it has processed a single
+// public/control-ws.ts reconnects with '/control?since=<lastSeq>' once it has processed a single
 // message, so every reconnect after the first carries a query string. The upgrade router used to match
 // the control path by exact equality against req.url (query string included), which put every one of
 // those reconnects in the unknown-path bucket: destroyed remotely, stranded locally. Only a full page

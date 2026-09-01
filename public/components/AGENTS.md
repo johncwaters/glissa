@@ -4,7 +4,7 @@
 # components
 
 ## Purpose
-Static HTML fragments imported by `dialogs.js` via Vite's `?raw` suffix and injected into dialog shells at runtime.
+Static HTML fragments imported by `dialogs.ts` via Vite's `?raw` suffix and injected into dialog shells at runtime.
 
 ## Key Files
 
@@ -16,7 +16,7 @@ Static HTML fragments imported by `dialogs.js` via Vite's `?raw` suffix and inje
 
 ### Working In This Directory
 - These are fragments, not documents: no `<html>`/`<head>`. Tailwind utilities plus semantic classes from `style.css`.
-- Element ids/classes here are queried by `dialogs.js`; change both sides together.
+- Element ids/classes here are queried by `dialogs.ts`; change both sides together.
 
 ### Testing Requirements
 - Open the dialogs under `npm run dev`.
@@ -24,6 +24,6 @@ Static HTML fragments imported by `dialogs.js` via Vite's `?raw` suffix and inje
 ## Dependencies
 
 ### Internal
-- `../dialogs.js` - the only importer
+- `../dialogs.ts` - the only importer
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

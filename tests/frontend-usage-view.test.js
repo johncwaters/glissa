@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // usage-view-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/usage-view-core.mjs');
+const importCore = () => import('../public/usage-view-core.ts');
 
 test('formatUsd: cents, thousands grouping, sub-cent precision and a missing value', async () => {
   const { formatUsd, NO_VALUE } = await importCore();

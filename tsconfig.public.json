@@ -28,6 +28,7 @@
   "include": [
     "public/**/*.js",
     "public/**/*.mjs",
+    "public/**/*.ts",
     "public/**/*.d.ts"
   ],
   "exclude": [

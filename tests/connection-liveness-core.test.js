@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const importCore = () => import('../public/connection-liveness-core.mjs');
+const importCore = () => import('../public/connection-liveness-core.ts');
 
 test('retryPending reconnects immediately before inspecting the socket', async () => {
   const { decideLivenessAction } = await importCore();

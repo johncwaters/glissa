@@ -8,8 +8,8 @@
 // session-card/modal.js, which both sides can reach without a cycle.
 
 import { STATES } from '#shared/states.ts';
-import { sendControlMsg } from '../control-ws.js';
-import { el, escapeHtml } from '../dom-helpers.js';
+import { sendControlMsg } from '../control-ws.ts';
+import { el, escapeHtml } from '../dom-helpers.ts';
 import { sessionUIs } from './card-registry.js';
 import { showErrorToast } from './toast.js';
 

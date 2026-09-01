@@ -27,7 +27,7 @@ const SERVER_INCLUDE_GLOBS = [
   'shared/**/*.d.ts',
 ];
 
-const PUBLIC_INCLUDE_GLOBS = ['public/**/*.js', 'public/**/*.mjs', 'public/**/*.d.ts'];
+const PUBLIC_INCLUDE_GLOBS = ['public/**/*.js', 'public/**/*.mjs', 'public/**/*.ts', 'public/**/*.d.ts'];
 
 // Turning any of these off makes tsc pass by checking less, not by the code being sound.
 const LOOSE_REQUIRED_OPTIONS = {

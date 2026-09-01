@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // radar-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/radar-core.mjs');
+const importCore = () => import('../public/radar-core.ts');
 
 const changesOf = (issues) => issues.map((i) => i.change);
 

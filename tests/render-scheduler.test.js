@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // render-scheduler is ESM (.mjs); dynamic-import it from this CJS test file.
-const importSched = () => import('../public/render-scheduler.mjs');
+const importSched = () => import('../public/render-scheduler.ts');
 
 // A sink whose write callbacks the test fires manually (models xterm's async
 // parse-drain). drainOne/drainAll fire pending callbacks in FIFO order.

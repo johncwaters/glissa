@@ -1,13 +1,13 @@
 'use strict';
 
-// The envelope-version rule (public/server-build-core.mjs). A tab left open across a server update
+// The envelope-version rule (public/server-build-core.ts). A tab left open across a server update
 // reconnects to a backend whose frames its bundle may predate; this decides when that is worth a
 // reload, and - more importantly - when it is not.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const importCore = () => import('../public/server-build-core.mjs');
+const importCore = () => import('../public/server-build-core.ts');
 
 test('the first snapshot records the build and never reloads', async () => {
   const { decideReloadOnBuild } = await importCore();

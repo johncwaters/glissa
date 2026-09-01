@@ -2,7 +2,7 @@
 // bottom dock. Leaf module: depends only on the DOM-element helper, so any
 // session-card module can import it without creating an import cycle.
 
-import { el, queryTag } from '../dom-helpers.js';
+import { el, queryTag } from '../dom-helpers.ts';
 
 // Transient notices clear themselves; persistent ones (real failures) wait for
 // the operator to dismiss them.

@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // ui-state-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/ui-state-core.mjs');
+const importCore = () => import('../public/ui-state-core.ts');
 
 test('a fresh store starts on the declared initial state', async () => {
   const { createUiStateStore, INITIAL_UI_STATE } = await importCore();

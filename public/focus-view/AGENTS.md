@@ -19,8 +19,8 @@ The Focus view: a watch-and-steer layout with a persistent left roster rail (one
 
 ### Working In This Directory
 - The stable-map rule is load-bearing: order is identity-based, never status-based. A state change must never reorder a pill or a group.
-- Kept projects: closing the last session of a project keeps its path as an empty rail group (header + "+" quick-add + a dismiss "×") so the operator re-adds a session without re-picking the folder. `../project-registry.js` owns the one `knownProjectPaths` Set shared by the Focus rail and phone Board; `noteKnownProjectPath` is called from the session lifecycle in `app.js`, and persistence stays in `ui-prefs` `keptProjects`. Membership drives the empty group; `forgetProject` removes a path permanently until a session is added on it again.
-- Keep `focus-shortcuts.mjs` in lockstep with the dispatch in `app.js` and the display catalog in `../shortcuts.mjs` when adding a binding.
+- Kept projects: closing the last session of a project keeps its path as an empty rail group (header + "+" quick-add + a dismiss "×") so the operator re-adds a session without re-picking the folder. `../project-registry.ts` owns the one `knownProjectPaths` Set shared by the Focus rail and phone Board; `noteKnownProjectPath` is called from the session lifecycle in `app.ts`, and persistence stays in `ui-prefs` `keptProjects`. Membership drives the empty group; `forgetProject` removes a path permanently until a session is added on it again.
+- Keep `focus-shortcuts.mjs` in lockstep with the dispatch in `app.ts` and the display catalog in `../shortcuts.ts` when adding a binding.
 - `.mjs` files stay pure (no DOM, no window, no localStorage); they run under node:test too.
 - The center holds the REAL card (re-parented), not a copy; rail activity paints only on the pill, never on the centered terminal.
 
@@ -30,6 +30,6 @@ The Focus view: a watch-and-steer layout with a persistent left roster rail (one
 ## Dependencies
 
 ### Internal
-- `../session-card/` (cards, activity flags), `../sidebar/selection.js` (focusing selects in the review sidebar), `../app.js` (shortcut dispatch)
+- `../session-card/` (cards, activity flags), `../sidebar/selection.js` (focusing selects in the review sidebar), `../app.ts` (shortcut dispatch)
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

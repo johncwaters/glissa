@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const importCore = () => import('../public/ws-url-core.mjs');
+const importCore = () => import('../public/ws-url-core.ts');
 
 test('webSocketProtocolFor: upgrades https pages to wss', async () => {
   const { webSocketProtocolFor } = await importCore();

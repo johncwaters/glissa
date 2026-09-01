@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // mill-view-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/mill-view-core.mjs');
+const importCore = () => import('../public/mill-view-core.ts');
 
 const VERSION = 'abcdef0123456789';
 

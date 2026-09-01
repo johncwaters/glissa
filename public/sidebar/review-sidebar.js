@@ -19,11 +19,11 @@
 // tells the two apart client-side. This never touches the worktree merge gate above it.
 
 import { MERGEABLE_LIVE_STATES, STATES } from '#shared/states.ts';
-import { sendControlMsg } from '../control-ws.js';
-import { adoptElement, el, releaseElement } from '../dom-helpers.js';
+import { sendControlMsg } from '../control-ws.ts';
+import { adoptElement, el, releaseElement } from '../dom-helpers.ts';
 import { sessionUIs } from '../session-card/card-registry.js';
 import { openConfirmDialog } from '../session-card/modal.js';
-import { getSidebarWidth, setSidebarWidth } from '../ui-prefs.js';
+import { getSidebarWidth, setSidebarWidth } from '../ui-prefs.ts';
 import { parseUnifiedDiff, shouldDropDiffCache, summarizeFiles } from './diff-core.mjs';
 import {
   baseLabel,

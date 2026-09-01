@@ -1,13 +1,13 @@
 'use strict';
 
-// Tests for the shared WebSocket reconnect delay (public/reconnect-backoff.mjs), used by both the
+// Tests for the shared WebSocket reconnect delay (public/reconnect-backoff.ts), used by both the
 // control-WS client and each card's data-WS client. `random` is injected, so jitter is pinned rather
 // than sampled.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const importCore = () => import('../public/reconnect-backoff.mjs');
+const importCore = () => import('../public/reconnect-backoff.ts');
 
 test('the first retry waits 50-100% of the 500ms base', async () => {
   const { nextReconnectDelayMs } = await importCore();

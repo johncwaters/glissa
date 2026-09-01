@@ -11,32 +11,32 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 | File | Description |
 |------|-------------|
 | `index.html` | Dashboard shell (Tailwind utility classes) |
-| `app.js` | Thin boot entry: wires modules, owns the document-level Alt+key shortcut dispatch |
-| `control-ws.js` | Control WebSocket client: connection, reconnect, request/response |
-| `reconnect-backoff.mjs` | Pure `nextReconnectDelayMs(attempt, random)`: the ONE retry delay for both WS clients (500ms doubling to a 30s cap, jittered to 50-100%) |
-| `dialogs.js` | Add Session and investigation-report dialog factories |
-| `settings-map.mjs` / `settings-view-core.mjs` / `settings-panel.js` | Declarative settings source, pure search/hash/project/dirty rules, primary-view DOM shell |
-| `settings-link.js` | `createSettingsLink`, the one anchor builder for `#settings/` deep links from other views |
-| `render-scheduler.mjs` | Global xterm WRITE scheduler: callback-gated round-robin with per-frame budget |
-| `notifications.js` | Native Web Notifications (browser routes to Windows Action Center); replaces the server-side toast path |
-| `notify-dedupe-core.mjs` | Pure cross-tab claim (short-TTL localStorage) so exactly one open tab raises each notification |
-| `alert-sound.js` | Notification sounds: audio files from `audio/` + synth-beep fallback |
-| `health-monitor.js` | Footer panel rendering server memory/leak telemetry from `health-snapshot` messages |
-| `usage-panel.js` | Usage tab DOM shell fed by `usage-sessions` pushes and `request-usage-report` replies |
-| `hooks-panel.js` / `hooks-view-core.mjs` | Hooks tab: operator Claude Code hooks (`request-hooks-report`, `save-hook`, `delete-hook`) over a pure core owning every string and draft rule |
-| `usage-view-core.mjs` | Pure Usage tab formatting, sorting, caveat text, warning text, and per-card chip text |
-| `theme.js` | Theme definitions applied as CSS custom properties; terminal theme derived at runtime |
-| `ui-prefs.js` / `local-store.js` | THE localStorage home for UI state (sound, theme, active view, rail and sidebar widths), over quota-safe wrappers. Each key is declared once in `ui-prefs.js`'s `PREFS` table with its default and normalizer; the accessors are one line each. The review sidebar's width keeps its own storage key so an existing install's saved width survives |
-| `shortcuts.mjs` | Pure display catalog of keyboard shortcuts for the Settings view; handlers live in `app.js` and `session-card/terminal.js`, keep in sync |
-| `form-factor-core.mjs` | Pure `decideLayout({ coarse, narrowWidth })` -> `'phone' \| 'desktop'`: the one predicate choosing between the two first-class layouts |
-| `form-factor.js` | Its IO shell: evaluates the two media queries, stamps `<html data-layout>`, notifies subscribers on a live flip |
-| `card-host.js` | THE session-card re-parenting seam (`borrowCard` / `releaseCard`), single borrower GLOBALLY; shared by the Focus center and the phone Terminal screen |
-| `project-registry.js` | Project grouping registry shared by the desktop roster and phone Board |
-| `session-actions.js` | Shared session action entry points for dashboard surfaces |
-| `dom-helpers.js` | `el()` / `escapeHtml()` DOM utilities, `adoptElement()` / `releaseElement()` (move a live element and put it back), and the chrome the tab panels share: `buildPanelSection()` / `buildStatChip()` (class prefix parameterized, so the per-panel CSS is unchanged), `projectsOf()` and `isPanelHidden()` |
+| `app.ts` | Thin boot entry: wires modules, owns the document-level Alt+key shortcut dispatch |
+| `control-ws.ts` | Control WebSocket client: connection, reconnect, request/response |
+| `reconnect-backoff.ts` | Pure `nextReconnectDelayMs(attempt, random)`: the ONE retry delay for both WS clients (500ms doubling to a 30s cap, jittered to 50-100%) |
+| `dialogs.ts` | Add Session and investigation-report dialog factories |
+| `settings-map.ts` / `settings-view-core.ts` / `settings-panel.ts` | Declarative settings source, pure search/hash/project/dirty rules, primary-view DOM shell |
+| `settings-link.ts` | `createSettingsLink`, the one anchor builder for `#settings/` deep links from other views |
+| `render-scheduler.ts` | Global xterm WRITE scheduler: callback-gated round-robin with per-frame budget |
+| `notifications.ts` | Native Web Notifications (browser routes to Windows Action Center); replaces the server-side toast path |
+| `notify-dedupe-core.ts` | Pure cross-tab claim (short-TTL localStorage) so exactly one open tab raises each notification |
+| `alert-sound.ts` | Notification sounds: audio files from `audio/` + synth-beep fallback |
+| `health-monitor.ts` | Footer panel rendering server memory/leak telemetry from `health-snapshot` messages |
+| `usage-panel.ts` | Usage tab DOM shell fed by `usage-sessions` pushes and `request-usage-report` replies |
+| `hooks-panel.ts` / `hooks-view-core.ts` | Hooks tab: operator Claude Code hooks (`request-hooks-report`, `save-hook`, `delete-hook`) over a pure core owning every string and draft rule |
+| `usage-view-core.ts` | Pure Usage tab formatting, sorting, caveat text, warning text, and per-card chip text |
+| `theme.ts` | Theme definitions applied as CSS custom properties; terminal theme derived at runtime |
+| `ui-prefs.ts` / `local-store.ts` | THE localStorage home for UI state (sound, theme, active view, rail and sidebar widths), over quota-safe wrappers. Each key is declared once in `ui-prefs.ts`'s `PREFS` table with its default and normalizer; the accessors are one line each. The review sidebar's width keeps its own storage key so an existing install's saved width survives |
+| `shortcuts.ts` | Pure display catalog of keyboard shortcuts for the Settings view; handlers live in `app.ts` and `session-card/terminal.js`, keep in sync |
+| `form-factor-core.ts` | Pure `decideLayout({ coarse, narrowWidth })` -> `'phone' \| 'desktop'`: the one predicate choosing between the two first-class layouts |
+| `form-factor.ts` | Its IO shell: evaluates the two media queries, stamps `<html data-layout>`, notifies subscribers on a live flip |
+| `card-host.ts` | THE session-card re-parenting seam (`borrowCard` / `releaseCard`), single borrower GLOBALLY; shared by the Focus center and the phone Terminal screen |
+| `project-registry.ts` | Project grouping registry shared by the desktop roster and phone Board |
+| `session-actions.ts` | Shared session action entry points for dashboard surfaces |
+| `dom-helpers.ts` | `el()` / `escapeHtml()` DOM utilities, `adoptElement()` / `releaseElement()` (move a live element and put it back), and the chrome the tab panels share: `buildPanelSection()` / `buildStatChip()` (class prefix parameterized, so the per-panel CSS is unchanged), `projectsOf()` and `isPanelHidden()` |
 | `style.css` | Component styles, `[data-state]` rules, animations, `::before` pseudo-elements |
 | `tailwind.css` | Tailwind v4 entry: `@theme` block mapping colors, fonts, radii |
-| `perf.html` / `perf-harness.js` / `perf-corpus.mjs` | Dev-only manual perf harness (K xterm terminals under dense ANSI load); never bundled into production |
+| `perf.html` / `perf-harness.ts` / `perf-corpus.ts` | Dev-only manual perf harness (K xterm terminals under dense ANSI load); never bundled into production |
 
 ## Subdirectories
 
@@ -52,20 +52,20 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 ## For AI Agents
 
 ### Working In This Directory
-- ESM only (this is the Vite side; the server is CJS). `.mjs` files are PURE modules (no DOM) shared with node:test; keep them dependency-free.
+- ESM only (this is the Vite side; the server is CJS). Files at this level are `.ts`; the subdirectories are mid-migration and still `.js` / `.mjs`. A `*-core` module is PURE (no DOM) and shared with node:test, so it runs under Node type stripping: keep it dependency-free and give every relative import an explicit extension.
 - CSS convention: Tailwind utilities in `index.html`; semantic classes in `style.css` for JS-created DOM; state-driven styles via `[data-state]`; keyframes and pseudo-elements in `style.css`; theme tokens in `tailwind.css`.
-- TWO first-class layouts, chosen by `form-factor-core.mjs` and stamped on `<html data-layout>`. Phone styling keys off `[data-layout="phone"]`, never a `max-width` override of a desktop selector; a bare `max-width` block is only for content that must wrap in a narrow DESKTOP window. Neither layout duplicates the other's DOM: elements owning live state are re-parented (`adoptElement` / `card-host.js`).
-- All terminal writes go through `render-scheduler.mjs`; never call `term.write` with unbounded data outside it.
+- TWO first-class layouts, chosen by `form-factor-core.ts` and stamped on `<html data-layout>`. Phone styling keys off `[data-layout="phone"]`, never a `max-width` override of a desktop selector; a bare `max-width` block is only for content that must wrap in a narrow DESKTOP window. Neither layout duplicates the other's DOM: elements owning live state are re-parented (`adoptElement` / `card-host.ts`).
+- All terminal writes go through `render-scheduler.ts`; never call `term.write` with unbounded data outside it.
 - Use `id` (stable UUID) for any session keying; `name` is display only.
-- New persistent UI state goes through `ui-prefs.js`, not raw localStorage: add a key to its `PREFS` table and a one-line accessor pair, never a second load/mutate/save copy.
+- New persistent UI state goes through `ui-prefs.ts`, not raw localStorage: add a key to its `PREFS` table and a one-line accessor pair, never a second load/mutate/save copy.
 - A confirm prompt comes from `session-card/modal.js` `openConfirmDialog`, never a hand-rolled overlay.
-- Section heads, stat chips, `projectsOf` and `isPanelHidden` come from `dom-helpers.js`; a new tab panel passes its class prefix rather than copying the builders.
+- Section heads, stat chips, `projectsOf` and `isPanelHidden` come from `dom-helpers.ts`; a new tab panel passes its class prefix rather than copying the builders.
 
 ### Testing Requirements
-- Pure `.mjs` cores have node:test coverage (`tests/frontend-*.test.js`, `shortcuts-core`, `render-scheduler`, `roster-groups-core`, `focus-shortcuts-core`, `board-groups-core`); DOM modules are verified manually via `npm run dev`.
+- Pure cores have node:test coverage (`tests/frontend-*.test.js`, `shortcuts-core`, `render-scheduler`, `roster-groups-core`, `focus-shortcuts-core`, `board-groups-core`); DOM modules are verified manually via `npm run dev`.
 
 ### Common Patterns
-- Pure-core (`*.mjs`) + DOM-wrapper (`*.js`) pairs, mirroring the server's seam pattern.
+- Pure-core (`*-core`) + DOM-wrapper pairs, mirroring the server's seam pattern.
 - Control messages via `sendControlMsg` / `sendControlRequest`; state pushed from the server as snapshots and events.
 
 ## Dependencies
@@ -96,4 +96,4 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 - Tailwind utility classes for static markup in `index.html`; semantic classes in `style.css` for JS-created DOM.
 - State-driven styles via `[data-state]` selectors; layout branches via `[data-layout]`.
-- Animations and pseudo-elements live in `style.css`; theme tokens in `public/tailwind.css` via `@theme`, applied by `public/theme.js`.
+- Animations and pseudo-elements live in `style.css`; theme tokens in `public/tailwind.css` via `@theme`, applied by `public/theme.ts`.

@@ -7,8 +7,8 @@
 // modal scaffold) so it adds no edge to the card-dom.js <-> dialogs.js boundary. Shares its overlay
 // and focus-trap mechanics with the shared confirm prompt in modal.js rather than duplicating them.
 
-import { sendControlMsg, sendControlRequest } from '../control-ws.js';
-import { el, escapeHtml } from '../dom-helpers.js';
+import { sendControlMsg, sendControlRequest } from '../control-ws.ts';
+import { el, escapeHtml } from '../dom-helpers.ts';
 import { buildDialogShell } from './modal.js';
 import { showErrorToast } from './toast.js';
 

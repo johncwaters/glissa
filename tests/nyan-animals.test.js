@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // nyan-animals is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/nyan-animals.mjs');
+const importCore = () => import('../public/nyan-animals.ts');
 
 test('ANIMALS: 18 entries, all sprite/trail classes unique', async () => {
   const { ANIMALS } = await importCore();

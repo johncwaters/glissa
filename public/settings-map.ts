@@ -1,0 +1,607 @@
+export interface SettingsOption {
+  value: string;
+  label: string;
+}
+
+export interface SettingsSetting {
+  id: string;
+  path: string;
+  title: string;
+  description?: string;
+  control?: string;
+  options?: SettingsOption[] | string[];
+  optionsFrom?: string;
+  keywords?: string[];
+  defaultValue?: unknown;
+  integer?: boolean;
+  nullable?: boolean;
+  zeroIsNull?: boolean;
+  step?: number;
+  range?: string;
+  valueKind?: string;
+  warning?: string;
+  danger?: boolean;
+  dangerConfirmation?: string;
+  advanced?: boolean;
+  fileOnly?: boolean;
+  status?: string;
+  projectId?: string;
+  value?: unknown;
+}
+
+export interface SettingsSectionLink {
+  settingId: string;
+  title: string;
+}
+
+export interface SettingsSection {
+  id: string;
+  level: string;
+  title: string;
+  description?: string;
+  caption?: string;
+  unattendedLinks?: SettingsSectionLink[];
+  project?: unknown;
+  settings: SettingsSetting[];
+}
+
+export const SETTINGS_SECTION_ALIASES = Object.freeze({
+  general: 'machine-general',
+  terminal: 'machine-terminal',
+  repos: 'machine-repositories',
+  repositories: 'machine-repositories',
+  advanced: 'machine-detection-sessions',
+  detection: 'machine-detection-sessions',
+  telegram: 'machine-telegram',
+  notifications: 'machine-telegram',
+  'pr-review': 'lanes-pr-review',
+  prreview: 'lanes-pr-review',
+  visions: 'lanes-visions',
+  mill: 'lanes-mill',
+  posthog: 'lanes-posthog',
+  usage: 'machine-usage',
+  shortcuts: 'browser-shortcuts',
+  unattended: 'lanes-unattended',
+});
+
+export const SETTINGS_MAP = Object.freeze([
+  {
+    id: 'browser-appearance',
+    level: 'browser',
+    title: 'Appearance and alerts',
+    description: 'Preferences stored only in this browser.',
+    settings: [
+      {
+        id: 'theme',
+        path: 'pref:themeId',
+        title: 'Theme',
+        description: 'Color scheme for the dashboard.',
+        control: 'select',
+        optionsFrom: 'themes',
+        keywords: ['color', 'palette'],
+        defaultValue: 'phyrexian',
+      },
+      {
+        id: 'alert-sound',
+        path: 'pref:soundId',
+        title: 'Alert sound',
+        description: 'Sound played when a session needs attention.',
+        control: 'select',
+        optionsFrom: 'sounds',
+        keywords: ['audio', 'notification'],
+        defaultValue: 'coins',
+      },
+      {
+        id: 'desktop-notifications',
+        path: 'pref:notificationsEnabled',
+        title: 'Desktop notifications',
+        description: 'Raise a browser notification when a session needs attention while this dashboard is in the background.',
+        control: 'toggle',
+        keywords: ['browser', 'attention'],
+        defaultValue: true,
+      },
+    ],
+  },
+  {
+    id: 'browser-shortcuts',
+    level: 'browser',
+    title: 'Shortcuts and about',
+    description: 'Keyboard reference and build information.',
+    settings: [],
+  },
+  {
+    id: 'machine-general',
+    level: 'machine',
+    title: 'General',
+    description: 'Machine-wide session startup and diagnostics.',
+    settings: [
+      {
+        id: 'auto-resume', path: 'autoResume', title: 'Auto-resume sessions on startup',
+        description: 'Resume conversations that were live when Glissa last shut down or crashed.',
+        control: 'toggle', keywords: ['startup', 'conversation'], defaultValue: true,
+      },
+      {
+        id: 'debug-mode', path: 'debugMode', title: 'Debug mode',
+        description: 'Show session-card diagnostics for state, transitions and detection signals.',
+        control: 'toggle', keywords: ['diagnostics', 'state'], defaultValue: false,
+      },
+    ],
+    unattendedLinks: [{ settingId: 'rtk-compression', title: 'rtk output compression' }],
+  },
+  {
+    id: 'machine-terminal',
+    level: 'machine',
+    title: 'Terminal',
+    description: 'Terminal behavior shared by dashboard clients.',
+    settings: [
+      {
+        id: 'replay-buffer', path: 'replayBufferKB', title: 'Replay buffer (KB)',
+        description: 'PTY output retained for clients that reconnect or join late.',
+        control: 'number', range: 'REPLAY_BUFFER_KB_RANGE', keywords: ['history', 'backfill'], defaultValue: 512,
+      },
+      {
+        id: 'cursor-blink', path: 'cursorBlink', title: 'Cursor blink',
+        description: 'Blink the cursor in every terminal.',
+        control: 'toggle', keywords: ['caret', 'terminal'], defaultValue: false,
+      },
+      {
+        id: 'check-updates', path: 'checkForUpdates', title: 'Check for updates on startup',
+        description: 'Check GitHub at launch and show the update command when a newer Glissa is available.',
+        control: 'toggle', keywords: ['release', 'github'], defaultValue: true,
+      },
+    ],
+  },
+  {
+    id: 'machine-detection-sessions',
+    level: 'machine',
+    title: 'Detection and sessions',
+    description: 'Config-file-only detection, timing, worktree and process settings.',
+    settings: [
+      { id: 'file-detect-background-agents', path: 'detectBackgroundAgents', title: 'Detect background agents', description: 'Hold completion while tracked background work is active.', control: 'readonly', keywords: ['subagents', 'completion'], fileOnly: true },
+      { id: 'file-record-signals', path: 'recordSignals', title: 'Record structural signals', description: 'Keep forensic status and hook recordings.', control: 'readonly', keywords: ['recordings', 'diagnostics'], fileOnly: true },
+      { id: 'file-anti-slop-prompt', path: 'antiSlopPrompt', title: 'Anti-slop prompt', description: 'Append the configured quality prompt to session instructions.', control: 'readonly', keywords: ['quality', 'instructions'], fileOnly: true },
+      { id: 'file-detect-scheduled-wakeups', path: 'detectScheduledWakeups', title: 'Detect scheduled wakeups', description: 'Surface advisory wakeup timing for scheduled sessions.', control: 'readonly', keywords: ['schedule', 'sleep'], fileOnly: true },
+      { id: 'file-worktree-auto-rebase', path: 'worktreeAutoRebase', title: 'Worktree auto-rebase', description: 'Rebase eligible session worktrees when the integration branch moves.', control: 'readonly', keywords: ['git', 'branch'], fileOnly: true },
+      { id: 'file-worktree-rerere', path: 'worktreeRerere', title: 'Worktree rerere', description: 'Reuse recorded Git conflict resolutions.', control: 'readonly', keywords: ['git', 'conflicts'], fileOnly: true },
+      { id: 'file-integration-branch', path: 'integrationBranch', title: 'Integration branch', description: "Base branch for session worktrees. Empty = each repo's default branch.", control: 'readonly', keywords: ['git', 'merge'], fileOnly: true },
+      { id: 'file-worktree-root', path: 'worktreeRoot', title: 'Worktree root', description: 'Directory that contains session worktrees.', control: 'readonly', keywords: ['git', 'directory'], fileOnly: true },
+      { id: 'file-worktree-share', path: 'worktreeShare', title: 'Shared worktree paths', description: 'Local paths copied or linked into worktrees.', control: 'readonly', keywords: ['files', 'context'], fileOnly: true },
+      { id: 'file-port', path: 'port', title: 'Local port', description: 'Port used by the local dashboard listener.', control: 'readonly', keywords: ['server', 'listener'], fileOnly: true },
+      { id: 'file-auto-recover-seconds', path: 'autoRecoverSeconds', title: 'Auto-recovery delay', description: 'Delay before an interrupted state can recover.', control: 'readonly', keywords: ['timer', 'recovery'], fileOnly: true },
+      { id: 'file-input-grace-seconds', path: 'inputGraceSeconds', title: 'Input grace period', description: 'Grace window around operator input.', control: 'readonly', keywords: ['timer', 'prompt'], fileOnly: true },
+      { id: 'file-prompt-detection-ms', path: 'promptDetectionMs', title: 'Prompt detection delay', description: 'Timing threshold used by prompt detection.', control: 'readonly', keywords: ['timer', 'detection'], fileOnly: true },
+      { id: 'file-notify-debounce-ms', path: 'notifyDebounceMs', title: 'Notification debounce', description: 'Delay used to coalesce notification state changes.', control: 'readonly', keywords: ['timer', 'alerts'], fileOnly: true },
+      { id: 'file-phone-escalation-ms', path: 'phoneEscalationMs', title: 'Phone escalation delay', description: 'Delay before off-dashboard escalation.', control: 'readonly', keywords: ['timer', 'telegram'], fileOnly: true },
+      { id: 'file-post-turn-checks', path: 'postTurnChecks', title: 'Post-turn checks', description: 'Deterministic checks applied after eligible turns.', control: 'readonly', keywords: ['quality', 'fixes'], fileOnly: true },
+      { id: 'file-branch-gc-enabled', path: 'branchGc.enabled', title: 'Branch cleanup', description: 'Enable cleanup of eligible session branches.', control: 'readonly', keywords: ['git', 'cleanup'], fileOnly: true },
+      { id: 'file-branch-gc-stale-days', path: 'branchGc.staleDays', title: 'Branch stale days', description: 'Age threshold for orphan branch cleanup.', control: 'readonly', keywords: ['git', 'retention'], fileOnly: true },
+      { id: 'file-branch-gc-interval-ms', path: 'branchGc.intervalMs', title: 'Branch cleanup interval', description: 'Delay between branch cleanup passes.', control: 'readonly', keywords: ['git', 'schedule'], fileOnly: true },
+    ],
+  },
+  {
+    id: 'machine-repositories',
+    level: 'machine',
+    title: 'Repositories',
+    description: 'Project discovery roots for new sessions.',
+    settings: [
+      {
+        id: 'repository-roots', path: 'repoRoots', title: 'Repository roots',
+        description: 'Directories scanned for projects when adding sessions.',
+        control: 'list', keywords: ['folders', 'project discovery'], defaultValue: [],
+      },
+    ],
+  },
+  {
+    id: 'machine-telegram',
+    level: 'machine',
+    title: 'Telegram',
+    description: 'One bot shared by session, PR review and PostHog notifications.',
+    settings: [
+      {
+        id: 'telegram-bot-token', path: 'telegram.botToken', title: 'Bot token',
+        description: 'Credential used by the shared Telegram bot.',
+        control: 'password', keywords: ['credential', 'api'], defaultValue: '',
+      },
+      {
+        id: 'telegram-chat-id', path: 'telegram.chatId', title: 'Chat id',
+        description: 'Destination chat for enabled Telegram lanes.',
+        control: 'text', keywords: ['destination', 'channel'], defaultValue: '',
+      },
+      {
+        id: 'telegram-session-notifications', path: 'telegramNotifications', title: 'Send session notifications',
+        description: 'Ping when a session completes, needs input or fails and no dashboard is open.',
+        control: 'toggle', keywords: ['phone', 'off dashboard'], defaultValue: false,
+      },
+    ],
+  },
+  {
+    id: 'machine-usage',
+    level: 'machine',
+    title: 'Usage',
+    description: 'Local transcript accounting and estimated-cost budgets.',
+    settings: [
+      {
+        id: 'usage-enabled', path: 'usage.enabled', title: 'Track token usage',
+        description: 'Read local CLI transcripts and roll them into the Usage view and session chips.',
+        control: 'toggle', keywords: ['tokens', 'cost'], defaultValue: true, status: 'usage-last-report',
+      },
+      {
+        id: 'usage-codex', path: 'usage.vendors.codex', title: 'Track Codex usage',
+        description: 'Include local Codex CLI transcripts in usage reports.',
+        control: 'toggle', keywords: ['openai', 'vendor'], defaultValue: true,
+      },
+      {
+        id: 'usage-grok', path: 'usage.vendors.grok', title: 'Track Grok usage',
+        description: 'Include local Grok CLI transcripts in usage reports.',
+        control: 'toggle', keywords: ['xai', 'vendor'], defaultValue: true,
+      },
+      {
+        id: 'usage-fetch-pricing', path: 'usage.fetchPricing', title: 'Fetch current model prices',
+        description: 'Refresh the public price table daily instead of relying only on the bundled snapshot.',
+        control: 'toggle', keywords: ['rates', 'models'], defaultValue: true,
+      },
+      {
+        id: 'usage-scan-interval', path: 'usage.scanIntervalMinutes', title: 'Scan interval (minutes)',
+        description: 'Delay between completed transcript scans.',
+        control: 'number', range: 'USAGE_SCAN_INTERVAL_RANGE', keywords: ['poll', 'refresh'], defaultValue: 5,
+      },
+      {
+        id: 'usage-retain-days', path: 'usage.retainDays', title: 'Retain transcript detail (days)',
+        description: 'How long live transcript detail stays available.',
+        control: 'number', range: 'USAGE_RETAIN_DAYS_RANGE', keywords: ['history', 'retention'], defaultValue: 90,
+      },
+      {
+        id: 'usage-cost-mode', path: 'usage.costMode', title: 'Cost mode',
+        description: 'Choose whether recorded costs, calculated costs or both can appear.',
+        control: 'select',
+        options: [
+          { value: 'auto', label: 'Auto' },
+          { value: 'calculate', label: 'Calculate' },
+          { value: 'display', label: 'Display' },
+        ],
+        keywords: ['pricing', 'estimate'], defaultValue: 'auto',
+      },
+      {
+        id: 'usage-daily-budget', path: 'usage.budget.dailyUsd', title: 'Daily budget (USD)',
+        description: 'Estimated daily spend ceiling. Zero or below means no ceiling.',
+        control: 'number', range: 'USAGE_BUDGET_RANGE', keywords: ['spend', 'alert'], defaultValue: null,
+        integer: false, nullable: true, zeroIsNull: true, step: 0.01,
+      },
+      {
+        id: 'usage-monthly-budget', path: 'usage.budget.monthlyUsd', title: 'Monthly budget (USD)',
+        description: 'Estimated monthly spend ceiling. Zero or below means no ceiling.',
+        control: 'number', range: 'USAGE_BUDGET_RANGE', keywords: ['spend', 'alert'], defaultValue: null,
+        integer: false, nullable: true, zeroIsNull: true, step: 0.01,
+      },
+    ],
+  },
+  {
+    id: 'lanes-pr-review',
+    level: 'lanes',
+    title: 'PR review',
+    description: 'Review and merge eligible GitHub pull requests behind hard gates.',
+    settings: [
+      {
+        id: 'pr-review-projects', path: 'prReview.projects', title: 'Projects to watch',
+        description: 'Configured projects eligible for PR review.',
+        control: 'projects', keywords: ['repositories', 'watch list'], defaultValue: [],
+      },
+      {
+        id: 'pr-review-interval', path: 'prReview.intervalMinutes', title: 'Poll interval (minutes)',
+        description: 'Delay between GitHub polling passes.',
+        control: 'number', range: 'PR_REVIEW_INTERVAL_RANGE', keywords: ['refresh', 'schedule'], defaultValue: 15,
+      },
+      {
+        id: 'pr-review-max-concurrent', path: 'prReview.maxConcurrentReviews', title: 'Max concurrent reviews',
+        description: 'Maximum review sessions running together.',
+        control: 'number', range: 'PR_REVIEW_MAX_CONCURRENT_RANGE', keywords: ['parallel', 'workers'], defaultValue: 3,
+      },
+      {
+        id: 'pr-review-timeout', path: 'prReview.reviewTimeoutSeconds', title: 'Review timeout (seconds)',
+        description: 'Maximum time allowed for one review session.',
+        control: 'number', range: 'PR_REVIEW_TIMEOUT_RANGE', keywords: ['deadline', 'session'], defaultValue: 900,
+      },
+    ],
+    unattendedLinks: [
+      { settingId: 'pr-review-enabled', title: 'Enable PR auto-review' },
+      { settingId: 'pr-review-merge-method', title: 'Merge method' },
+    ],
+  },
+  {
+    id: 'lanes-visions',
+    level: 'lanes',
+    title: 'Visions',
+    description: 'Editor-buffer findings and bounded model comments.',
+    settings: [
+      {
+        id: 'visions-enabled', path: 'visions.enabled', title: 'Enable Visions',
+        description: 'Wires every editor on this machine, then shows their buffers findings in the Visions view.',
+        control: 'toggle', keywords: ['editor', 'findings', 'lsp'], defaultValue: false,
+      },
+      {
+        id: 'visions-dispatch-enabled', path: 'visions.dispatch.enabled', title: 'Enable model comments',
+        description: 'Start bounded review sessions for local editor buffers.',
+        control: 'toggle', keywords: ['review', 'dispatch'], defaultValue: false,
+      },
+      {
+        id: 'visions-quiet-delay', path: 'visions.dispatch.quietMs', title: 'Quiet delay (ms)',
+        description: 'Required editor quiet time before dispatch.',
+        control: 'number', range: 'VISIONS_QUIET_MS_RANGE', keywords: ['debounce', 'idle'], defaultValue: 30000,
+      },
+      {
+        id: 'visions-cooldown', path: 'visions.dispatch.cooldownMs', title: 'Cooldown (ms)',
+        description: 'Minimum delay between review dispatches.',
+        control: 'number', range: 'VISIONS_COOLDOWN_MS_RANGE', keywords: ['rate limit', 'delay'], defaultValue: 300000,
+      },
+      {
+        id: 'visions-max-per-hour', path: 'visions.dispatch.maxPerHour', title: 'Max per hour',
+        description: 'Maximum review sessions dispatched per hour.',
+        control: 'number', range: 'VISIONS_MAX_PER_HOUR_RANGE', keywords: ['rate limit', 'reviews'], defaultValue: 6,
+      },
+      {
+        id: 'visions-activity-max-per-hour', path: 'visions.dispatch.activityMaxPerHour', title: 'Activity max per hour',
+        description: 'Maximum activity-driven reviews dispatched per hour.',
+        control: 'number', range: 'VISIONS_ACTIVITY_MAX_PER_HOUR_RANGE', keywords: ['rate limit', 'events'], defaultValue: 2,
+      },
+      {
+        id: 'visions-dispatch-timeout', path: 'visions.dispatch.dispatchTimeoutSeconds', title: 'Dispatch timeout (seconds)',
+        description: 'Maximum time allowed for one review session.',
+        control: 'number', range: 'VISIONS_DISPATCH_TIMEOUT_RANGE', keywords: ['deadline', 'review'], defaultValue: 180,
+      },
+      {
+        id: 'visions-intent-thread-ttl', path: 'visions.intent.threadTtlMs', title: 'Intent thread lifetime (ms)',
+        description: 'How long an intent thread nobody advanced stays live before it retires.',
+        control: 'number', range: 'VISIONS_INTENT_THREAD_TTL_MS_RANGE', keywords: ['intent', 'decay', 'thread'], defaultValue: 259200000,
+      },
+      {
+        id: 'visions-model', path: 'visions.dispatch.model', title: 'Model override',
+        description: 'Leave blank to use the configured Claude Code default.',
+        control: 'text', keywords: ['claude', 'override'], defaultValue: '',
+      },
+      {
+        id: 'visions-projects', path: 'visions.projects', title: 'Projects',
+        description: 'Leave every project clear to accept buffers from any project.',
+        control: 'projects', keywords: ['repositories', 'filter'], defaultValue: [],
+      },
+    ],
+    unattendedLinks: [{ settingId: 'visions-auto-fix', title: 'Apply tier 1 fixes' }],
+  },
+  {
+    id: 'lanes-mill',
+    level: 'lanes',
+    title: 'Mill',
+    description: 'Context packs, long-term memory and machine-context ingest.',
+    settings: [
+      {
+        id: 'packs-auto-rebuild', path: 'packsAutoRebuild', title: 'Rebuild packs automatically',
+        description: 'Watch pack sources and run the fallback sweep.',
+        control: 'toggle', keywords: ['context', 'watcher'], defaultValue: true,
+      },
+      {
+        id: 'pack-distiller-enabled', path: 'packDistiller.enabled', title: 'Enable the pack distiller',
+        description: 'Run bounded sessions that refresh derived pack sources.',
+        control: 'toggle', keywords: ['derived', 'context'], defaultValue: false,
+      },
+      {
+        id: 'pack-distiller-interval', path: 'packDistiller.intervalHours', title: 'Distill interval (hours)',
+        description: 'Delay between scheduled pack distill checks.',
+        control: 'number', range: 'PACK_DISTILLER_INTERVAL_RANGE', keywords: ['schedule', 'refresh'], defaultValue: 24,
+      },
+      {
+        id: 'pack-distiller-timeout', path: 'packDistiller.timeoutSeconds', title: 'Distill timeout (seconds)',
+        description: 'Maximum time allowed for one pack distill session.',
+        control: 'number', range: 'PACK_DISTILLER_TIMEOUT_RANGE', keywords: ['deadline', 'session'], defaultValue: 900,
+      },
+      {
+        id: 'memory-enabled', path: 'memory.enabled', title: 'Enable long-term memory',
+        description: 'Record session knowledge locally and project it into the memory pack.',
+        control: 'toggle', keywords: ['knowledge', 'store'], defaultValue: false,
+      },
+      {
+        id: 'memory-retain-days', path: 'memory.retainDays', title: 'Retain memory (days)',
+        description: 'Retention window for long-term memory records.',
+        control: 'number', range: 'MEMORY_RETAIN_DAY_RANGE', keywords: ['history', 'expiry'], defaultValue: 365,
+      },
+      {
+        id: 'memory-max-record-chars', path: 'memory.maxRecordChars', title: 'Max record characters',
+        description: 'Maximum character count for one memory record.',
+        control: 'number', range: 'MAX_RECORD_CHARS_RANGE', keywords: ['size', 'limit'], defaultValue: 2000,
+      },
+      {
+        id: 'memory-max-records-per-kind', path: 'memory.maxRecordsPerKind', title: 'Max records per kind',
+        description: 'Maximum retained records in each memory category.',
+        control: 'number', range: 'MAX_RECORDS_PER_KIND_RANGE', keywords: ['capacity', 'limit'], defaultValue: 2000,
+      },
+      {
+        id: 'memory-distill-enabled', path: 'memory.distill.enabled', title: 'Distill memory',
+        description: 'Turn raw memory records into a compact canon.',
+        control: 'toggle', keywords: ['canon', 'summarize'], defaultValue: true,
+      },
+      {
+        id: 'memory-distill-interval', path: 'memory.distill.intervalMinutes', title: 'Memory distill interval (minutes)',
+        description: 'Delay between eligible memory distill runs.',
+        control: 'number', range: 'INTERVAL_MINUTES_RANGE', keywords: ['schedule', 'canon'], defaultValue: 1440,
+      },
+      {
+        id: 'memory-distill-timeout', path: 'memory.distill.timeoutSeconds', title: 'Memory distill timeout (seconds)',
+        description: 'Maximum time allowed for one memory distill session.',
+        control: 'number', range: 'TIMEOUT_SECONDS_RANGE', keywords: ['deadline', 'canon'], defaultValue: 900,
+      },
+      {
+        id: 'memory-distill-max-claims', path: 'memory.distill.maxNewClaims', title: 'Max new claims per run',
+        description: 'Maximum net-new canon claims accepted from one run.',
+        control: 'number', range: 'MAX_NEW_CLAIMS_RANGE', keywords: ['facts', 'limit'], defaultValue: 20,
+      },
+      {
+        id: 'memory-distill-quiet', path: 'memory.distill.quietMs', title: 'Append-quiet window (ms)',
+        description: 'Required quiet time after the latest memory append.',
+        control: 'number', range: 'QUIET_MS_RANGE', keywords: ['idle', 'debounce'], defaultValue: 60000,
+      },
+      {
+        id: 'memory-distill-horizon', path: 'memory.distill.staleHorizonDays', title: 'Stale record horizon (days)',
+        description: 'Records older than this are stepped over instead of distilled.',
+        control: 'number', range: 'STALE_HORIZON_DAYS_RANGE', keywords: ['age', 'skip'], defaultValue: 7,
+      },
+      {
+        id: 'ingest-enabled', path: 'ingest.enabled', title: 'Enable machine context ingest',
+        description: 'Enable the local activity feed behind memory and Visions. Turning Visions on turns this on for you.',
+        control: 'toggle', keywords: ['events', 'activity'], defaultValue: false,
+      },
+      {
+        id: 'ingest-terminal', path: 'ingest.sources.terminal.enabled', title: 'Terminal output source',
+        description: 'Include terminal output in the ingest feed.',
+        control: 'toggle', keywords: ['pty', 'source'], defaultValue: false,
+      },
+      {
+        id: 'ingest-agent-logs', path: 'ingest.sources.agentLogs.enabled', title: 'Agent logs source',
+        description: 'Include local agent logs in the ingest feed.',
+        control: 'toggle', keywords: ['transcript', 'source'], defaultValue: false,
+      },
+      {
+        id: 'ingest-git', path: 'ingest.sources.git.enabled', title: 'Git activity source',
+        description: 'Include local Git activity in the ingest feed.',
+        control: 'toggle', keywords: ['commits', 'source'], defaultValue: false,
+      },
+      {
+        id: 'ingest-fs', path: 'ingest.sources.fs.enabled', title: 'File changes source',
+        description: 'Include watched file changes in the ingest feed.',
+        control: 'toggle', keywords: ['filesystem', 'source'], defaultValue: false,
+      },
+      {
+        id: 'ingest-shell-history', path: 'ingest.sources.shellHistory.enabled', title: 'Shell history source',
+        description: 'Include local shell history in the ingest feed.',
+        control: 'toggle', keywords: ['commands', 'source'], defaultValue: false,
+      },
+      {
+        id: 'ingest-editor', path: 'ingest.sources.editor.enabled', title: 'Editor events source',
+        description: 'Include local editor events in the ingest feed.',
+        control: 'toggle', keywords: ['buffers', 'source'], defaultValue: false,
+      },
+    ],
+  },
+  {
+    id: 'lanes-posthog',
+    level: 'lanes',
+    title: 'PostHog',
+    description: 'Error monitoring, investigations and traffic-spike alerts.',
+    settings: [
+      {
+        id: 'posthog-enabled', path: 'posthog.enabled', title: 'Enable PostHog monitoring',
+        description: 'Poll PostHog error tracking and investigate issues that move.',
+        control: 'toggle', keywords: ['errors', 'monitoring'], defaultValue: false,
+      },
+      {
+        id: 'posthog-host', path: 'posthog.host', title: 'Host',
+        description: 'PostHog cloud or self-hosted HTTP URL.',
+        control: 'text', keywords: ['url', 'server'], defaultValue: 'https://us.posthog.com',
+      },
+      {
+        id: 'posthog-api-key', path: 'posthog.apiKey', title: 'Personal API key',
+        description: 'Credential with read access to PostHog projects.',
+        control: 'password', keywords: ['credential', 'token'], defaultValue: '',
+      },
+      {
+        id: 'posthog-projects', path: 'posthog.projects', title: 'Projects',
+        description: 'Use all or a comma-separated list of numeric PostHog project ids.',
+        control: 'text', keywords: ['project ids', 'filter'], defaultValue: 'all', valueKind: 'posthog-projects',
+      },
+      {
+        id: 'posthog-interval', path: 'posthog.intervalMinutes', title: 'Poll interval (minutes)',
+        description: 'Delay between PostHog polling passes.',
+        control: 'number', range: 'POSTHOG_INTERVAL_RANGE', keywords: ['refresh', 'schedule'], defaultValue: 15,
+      },
+      {
+        id: 'posthog-max-investigations', path: 'posthog.maxConcurrentInvestigations', title: 'Max concurrent investigations',
+        description: 'Maximum investigation sessions running together.',
+        control: 'number', range: 'POSTHOG_MAX_CONCURRENT_RANGE', keywords: ['parallel', 'workers'], defaultValue: 2,
+      },
+      {
+        id: 'posthog-investigation-timeout', path: 'posthog.investigationTimeoutSeconds', title: 'Investigation timeout (seconds)',
+        description: 'Maximum time allowed for one investigation.',
+        control: 'number', range: 'POSTHOG_INVESTIGATION_TIMEOUT_RANGE', keywords: ['deadline', 'session'], defaultValue: 900,
+      },
+      {
+        id: 'posthog-min-users', path: 'posthog.minUsersToInvestigate', title: 'Min users to investigate',
+        description: 'Minimum affected users before an issue is investigated.',
+        control: 'number', range: 'POSTHOG_MIN_USERS_RANGE', keywords: ['threshold', 'affected'], defaultValue: 1,
+      },
+      {
+        id: 'posthog-escalation', path: 'posthog.userEscalationThreshold', title: 'Escalation threshold (users)',
+        description: 'Affected-user count that escalates an issue.',
+        control: 'number', range: 'POSTHOG_ESCALATION_RANGE', keywords: ['threshold', 'severity'], defaultValue: 25,
+      },
+      {
+        id: 'posthog-fix-timeout', path: 'posthog.fixTimeoutSeconds', title: 'Fix timeout (seconds)',
+        description: 'Maximum time allowed for one fix session.',
+        control: 'number', range: 'POSTHOG_FIX_TIMEOUT_RANGE', keywords: ['deadline', 'repair'], defaultValue: 1800,
+      },
+      {
+        id: 'posthog-traffic-enabled', path: 'posthog.trafficSpikeEnabled', title: 'Traffic spike alerts',
+        description: 'Ping when recent unique users exceed a project baseline.',
+        control: 'toggle', keywords: ['analytics', 'alert'], defaultValue: true,
+      },
+      {
+        id: 'posthog-traffic-multiplier', path: 'posthog.trafficSpikeMultiplier', title: 'Spike multiplier',
+        description: 'Baseline multiplier required to classify a traffic spike.',
+        control: 'number', range: 'POSTHOG_TRAFFIC_MULTIPLIER_RANGE', keywords: ['baseline', 'ratio'], defaultValue: 3,
+      },
+      {
+        id: 'posthog-traffic-min-users', path: 'posthog.trafficSpikeMinUsers', title: 'Min users to alert',
+        description: 'Minimum recent unique users required for a traffic alert.',
+        control: 'number', range: 'POSTHOG_TRAFFIC_MIN_USERS_RANGE', keywords: ['threshold', 'analytics'], defaultValue: 10,
+      },
+      {
+        id: 'posthog-traffic-cooldown', path: 'posthog.trafficSpikeCooldownMinutes', title: 'Spike cooldown (minutes)',
+        description: 'Minimum delay between traffic alerts. Zero disables muting.',
+        control: 'number', range: 'POSTHOG_TRAFFIC_COOLDOWN_RANGE', keywords: ['silence', 'delay'], defaultValue: 360,
+      },
+      {
+        id: 'posthog-traffic-baseline', path: 'posthog.trafficSpikeBaselineDays', title: 'Baseline window (days)',
+        description: 'Historical window used to calculate normal hourly traffic.',
+        control: 'number', range: 'POSTHOG_TRAFFIC_BASELINE_RANGE', keywords: ['history', 'analytics'], defaultValue: 7,
+      },
+    ],
+    unattendedLinks: [{ settingId: 'posthog-auto-fix', title: 'Attempt fixes for major issues' }],
+  },
+  {
+    id: 'lanes-unattended',
+    level: 'lanes',
+    title: 'Unattended actions',
+    description: 'Controls that let automated work change repositories or install executable tooling.',
+    settings: [
+      {
+        id: 'pr-review-enabled', path: 'prReview.enabled', title: 'Enable PR auto-review',
+        description: 'Review and merge eligible pull requests after every configured gate passes.',
+        control: 'toggle', keywords: ['github', 'pull request'], danger: true, dangerConfirmation: 'pr-review',
+        warning: 'Enabling this lane can merge eligible pull requests without a carbon unit present.', defaultValue: false,
+      },
+      {
+        id: 'pr-review-merge-method', path: 'prReview.mergeMethod', title: 'Merge method',
+        description: 'GitHub merge strategy used after every gate passes.',
+        control: 'select', options: [{ value: 'rebase', label: 'Rebase' }, { value: 'squash', label: 'Squash' }, { value: 'merge', label: 'Merge' }],
+        keywords: ['github', 'strategy'], danger: true,
+        warning: 'This method is applied automatically when PR review reaches its merge gate.', defaultValue: 'rebase',
+      },
+      {
+        id: 'visions-auto-fix', path: 'visions.autoFix', title: 'Apply tier 1 fixes',
+        description: 'Allow Visions to edit the active buffer without asking.',
+        control: 'toggle', keywords: ['automatic', 'edits'], danger: true, dangerConfirmation: 'visions',
+        warning: 'Enabling this control lets Visions edit eligible buffers without a carbon unit present.', defaultValue: false,
+      },
+      {
+        id: 'posthog-auto-fix', path: 'posthog.autoFix', title: 'Attempt fixes for major issues',
+        description: 'Allow an isolated agent to fix an issue, push a branch and open a pull request.',
+        control: 'toggle', keywords: ['automatic', 'pull request'], danger: true, dangerConfirmation: 'posthog',
+        warning: 'Enabling this control lets PostHog fixes commit, push and open pull requests automatically.', defaultValue: false,
+      },
+      {
+        id: 'rtk-compression', path: 'rtk', title: 'rtk output compression',
+        description: 'Compress Bash output for newly spawned or restarted sessions.',
+        control: 'toggle', keywords: ['bash', 'tokens'], danger: true, dangerConfirmation: 'rtk', status: 'rtk-install',
+        warning: 'Enabling this control permits Glissa to install the pinned rtk executable automatically.', defaultValue: false,
+      },
+    ],
+  },
+]);
+
+export default SETTINGS_MAP;

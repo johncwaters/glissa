@@ -1,13 +1,13 @@
 'use strict';
 
-// Tests for the pure cross-tab notification claim (public/notify-dedupe-core.mjs).
+// Tests for the pure cross-tab notification claim (public/notify-dedupe-core.ts).
 // Two open dashboard tabs both receive every `notify` broadcast; the localStorage
 // claim lets exactly one construct the (re-alerting) Notification.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const importCore = () => import('../public/notify-dedupe-core.mjs');
+const importCore = () => import('../public/notify-dedupe-core.ts');
 
 function memoryStore() {
   const m = new Map();

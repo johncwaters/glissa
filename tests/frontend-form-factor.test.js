@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // form-factor-core is ESM (.mjs); dynamic-import it from this CJS test file.
-const importCore = () => import('../public/form-factor-core.mjs');
+const importCore = () => import('../public/form-factor-core.ts');
 
 test('decideLayout: a coarse pointer on a narrow viewport is the phone layout', async () => {
   const { decideLayout } = await importCore();
