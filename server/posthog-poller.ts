@@ -1,3 +1,4 @@
+import type { InvestigationTrail } from './core/investigation-trail-core.ts';
 import * as core from './core/posthog-core.ts';
 import type { InvestigationRecord, PosthogIssue, PosthogIssueChange, PosthogStateEntry } from './core/posthog-core.ts';
 import * as recurrence from './core/posthog-recurrence.ts';
@@ -30,6 +31,7 @@ const TRAFFIC_PING_KIND: Record<string, string | undefined> = {
 };
 
 const META_KEY = '_meta';
+const ACTIVITY_COALESCE_MS = 400;
 
 type PosthogState = Record<string, unknown>;
 
@@ -63,6 +65,52 @@ interface SpawnInvestigationArgs {
   mode: string;
   timeoutMs: number;
   signal?: AbortSignal | null;
+  onActivity?: (trail: InvestigationTrail) => void;
+}
+
+interface InvestigationProgressFrame {
+  type: 'posthog-investigation-activity';
+  projectId: string | number;
+  issueId: string;
+  inFlight: true;
+  startedAt: number | null;
+  trail: InvestigationTrail['steps'];
+}
+
+interface InvestigationFinishedFrame {
+  type: 'posthog-investigation-finished';
+  projectId: string | number;
+  issueId: string;
+  verdict: string;
+  summaryLine: string | null;
+  startedAt: number | null;
+  trail: InvestigationTrail['steps'];
+}
+
+type InvestigationActivity = InvestigationProgressFrame | InvestigationFinishedFrame;
+
+interface IssueSummary {
+  issueId: PosthogIssue['issueId'];
+  title: PosthogIssue['title'];
+  change: string;
+  occurrences: PosthogIssue['occurrences'];
+  users: PosthogIssue['users'];
+  verdict: string | null;
+  summaryLine: string | null;
+  history: unknown[];
+  inFlight: boolean;
+  startedAt: number | null;
+  trail: InvestigationTrail['steps'];
+  url: string;
+}
+
+interface ProjectSummary {
+  projectId: string | number;
+  name: string;
+  host: string;
+  lastTickAt: number;
+  issues: IssueSummary[];
+  error?: string;
 }
 
 interface PollerProject {
@@ -84,6 +132,7 @@ interface PosthogPollerDependencies {
   clearTimeoutFn?: (handle: NodeJS.Timeout) => void;
   log?: Pick<Console, 'warn'>;
   onTickComplete?: (status: Record<string, unknown>) => void;
+  onInvestigationActivity?: (activity: InvestigationActivity) => void;
   now?: () => number;
   intervalMinutes?: number;
   maxConcurrentInvestigations?: number;
@@ -143,6 +192,7 @@ function createPosthogPoller(deps: PosthogPollerDependencies): PosthogPoller {
     clearTimeoutFn = clearTimeout,
     log = console,
     onTickComplete = () => {},
+    onInvestigationActivity = () => {},
     now = () => Date.now(),
   } = deps;
 
@@ -166,6 +216,10 @@ function createPosthogPoller(deps: PosthogPollerDependencies): PosthogPoller {
   const trafficSpikeBaselineDays = deps.trafficSpikeBaselineDays ?? traffic.DEFAULT_TRAFFIC_BASELINE_DAYS;
 
   let state: PosthogState = {};
+  const trails = new Map<string, InvestigationTrail>();
+  const pendingActivityTimers = new Map<string, NodeJS.Timeout>();
+  const activeRunIds = new Map<string, number>();
+  let lastRunId = 0;
 
   const loop = createTickLoop({
     tag: 'posthog-poller',
@@ -295,7 +349,59 @@ function createPosthogPoller(deps: PosthogPollerDependencies): PosthogPoller {
       mode,
       prUrl: isFix ? result?.prUrl : null,
     }));
+    activeRunIds.delete(change.key);
+    cancelPendingActivity(change.key);
+    const trail = trails.get(change.key);
+    onInvestigationActivity({
+      type: 'posthog-investigation-finished',
+      projectId: change.projectId,
+      issueId: String(change.issue.issueId),
+      verdict,
+      summaryLine,
+      startedAt: trail?.startedAt ?? null,
+      trail: trail?.steps ?? [],
+    });
     return persist();
+  }
+
+  function cancelPendingActivity(key: string): void {
+    const timer = pendingActivityTimers.get(key);
+    if (timer) clearTimeoutFn(timer);
+    pendingActivityTimers.delete(key);
+  }
+
+  function clearTrail(key: string): void {
+    trails.delete(key);
+    activeRunIds.delete(key);
+    cancelPendingActivity(key);
+  }
+
+  function isCurrentRun(key: string, runId: number): boolean {
+    return activeRunIds.get(key) === runId;
+  }
+
+  function publishTrail(change: IssueChange, runId: number): void {
+    if (!isCurrentRun(change.key, runId)) return;
+    const trail = trails.get(change.key);
+    if (!trail) return;
+    onInvestigationActivity({
+      type: 'posthog-investigation-activity',
+      projectId: change.projectId,
+      issueId: String(change.issue.issueId),
+      inFlight: true,
+      startedAt: trail.startedAt,
+      trail: trail.steps,
+    });
+  }
+
+  function noteTrail(change: IssueChange, trail: InvestigationTrail, runId: number): void {
+    if (!isCurrentRun(change.key, runId)) return;
+    trails.set(change.key, trail);
+    if (pendingActivityTimers.has(change.key)) return;
+    pendingActivityTimers.set(change.key, setTimeoutFn(() => {
+      pendingActivityTimers.delete(change.key);
+      publishTrail(change, runId);
+    }, ACTIVITY_COALESCE_MS));
   }
 
   function currentInvestigations(): InvestigationRecord[] {
@@ -330,7 +436,7 @@ function createPosthogPoller(deps: PosthogPollerDependencies): PosthogPoller {
     return { ok: true, investigations: currentInvestigations() };
   }
 
-  async function runInvestigation(change: IssueChange, mode: string): Promise<void> {
+  async function runInvestigation(change: IssueChange, mode: string, runId: number): Promise<void> {
     const isFix = mode === core.JOB_MODES.fix;
     try {
       const res = await spawnWithTimeout({
@@ -342,6 +448,7 @@ function createPosthogPoller(deps: PosthogPollerDependencies): PosthogPoller {
         url: change.url,
         mode,
         timeoutMs: (isFix ? fixTimeoutSeconds : investigationTimeoutSeconds) * 1000,
+        onActivity: (trail) => noteTrail(change, trail, runId),
       });
       await finishInvestigation(change, res, mode);
     } catch (e) {
@@ -351,12 +458,16 @@ function createPosthogPoller(deps: PosthogPollerDependencies): PosthogPoller {
 
   function startInvestigation(change: IssueChange, decision: RecurrenceDecision | null = null): void {
     const mode = core.decideJobMode(change, { autoFix });
+    clearTrail(change.key);
+    lastRunId += 1;
+    const runId = lastRunId;
+    activeRunIds.set(change.key, runId);
     const entry = issueEntryOf(state, change.key);
     if (entry) {
       entry.inFlight = true;
       if (decision?.matchKey) entry.recurrenceOf = decision.matchKey;
     }
-    loop.track(runInvestigation(change, mode).catch((e: unknown) => {
+    loop.track(runInvestigation(change, mode, runId).catch((e: unknown) => {
       log.warn(`[posthog-poller] investigation crashed for ${change.key}: ${errorMessage(e)}`);
     }));
   }
@@ -398,6 +509,7 @@ function createPosthogPoller(deps: PosthogPollerDependencies): PosthogPoller {
       if (decision === 'keep') continue;
       if (decision === 'prune') {
         delete state[key];
+        clearTrail(key);
         continue;
       }
       const entry = issueEntryOf(state, key);
@@ -458,7 +570,20 @@ function createPosthogPoller(deps: PosthogPollerDependencies): PosthogPoller {
     }
   }
 
-  async function tickProject(project: PollerProject) {
+  function issueStateFields(projectId: string | number, issueId: PosthogIssue['issueId']) {
+    const key = core.issueKey(host, projectId, issueId);
+    const entry = issueEntryOf(state, key);
+    const trail = trails.get(key);
+    return {
+      verdict: entry?.verdict || null,
+      summaryLine: entry?.summaryLine || null,
+      inFlight: !!entry?.inFlight,
+      startedAt: trail?.startedAt ?? null,
+      trail: trail?.steps ?? [],
+    };
+  }
+
+  async function tickProject(project: PollerProject): Promise<{ dirty: boolean; summary: ProjectSummary }> {
     const { projectId } = project;
     const projectName = project.name || String(projectId);
     const tickStartedAt = now();
@@ -555,11 +680,9 @@ function createPosthogPoller(deps: PosthogPollerDependencies): PosthogPoller {
             change: change.change,
             occurrences: change.issue.occurrences,
             users: change.issue.users,
-            verdict: entry?.verdict || null,
-            summaryLine: entry?.summaryLine || null,
             history: Array.isArray(entry?.history) ? entry.history : [],
-            inFlight: !!entry?.inFlight,
             url: change.url,
+            ...issueStateFields(projectId, change.issue.issueId),
           };
         }),
       },
@@ -572,7 +695,7 @@ function createPosthogPoller(deps: PosthogPollerDependencies): PosthogPoller {
       return [];
     });
     let dirty = false;
-    const summaries: Record<string, unknown>[] = [];
+    const summaries: ProjectSummary[] = [];
     for (const project of projects) {
       const res = await tickProject(project).catch((e: unknown) => {
         log.warn(`[posthog-poller] tick failed for ${project?.projectId}: ${errorMessage(e)}`);
@@ -585,6 +708,12 @@ function createPosthogPoller(deps: PosthogPollerDependencies): PosthogPoller {
     if (pruneInvestigationLog()) dirty = true;
     if (pruneSignatureRegistry()) dirty = true;
     if (dirty) await persist();
+    for (const summary of summaries) {
+      summary.issues = summary.issues.map((issue) => ({
+        ...issue,
+        ...issueStateFields(summary.projectId, issue.issueId),
+      }));
+    }
     onTickComplete({
       type: 'posthog-status',
       ts: now(),
@@ -608,12 +737,28 @@ function createPosthogPoller(deps: PosthogPollerDependencies): PosthogPoller {
     });
   }
 
+  async function stop(): Promise<void> {
+    await loop.stop();
+    for (const key of [...trails.keys(), ...pendingActivityTimers.keys()]) clearTrail(key);
+  }
+
   return {
-    start, stop: loop.stop, tick: loop.tick, archiveInvestigation,
+    start, stop, tick: loop.tick, archiveInvestigation,
     investigations: currentInvestigations,
     _state: () => state,
   };
 }
 
 export { createPosthogPoller };
-export type { IssueChange, PosthogPoller, PosthogPollerDependencies, PosthogState, SpawnInvestigationArgs };
+export type {
+  InvestigationActivity,
+  InvestigationFinishedFrame,
+  InvestigationProgressFrame,
+  IssueChange,
+  IssueSummary,
+  PosthogPoller,
+  PosthogPollerDependencies,
+  PosthogState,
+  ProjectSummary,
+  SpawnInvestigationArgs,
+};

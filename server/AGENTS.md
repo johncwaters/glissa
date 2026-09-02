@@ -78,6 +78,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - The server REFUSES the handoff when the diff touches `.github/workflows/`, making "never touches CI" structural; the PR url comes from `gh` stdout, never the agent.
 - Nothing here merges. With `prReview.enabled` also on, unattended code can reach the base branch with no carbon unit in the loop; the operator opts into that knowingly.
 - The branch name carries a random discriminator: a deterministic one collides with a previous fix's pushed branch, burning the timeout on a regression after a fix.
+- The live investigation view is the hook-derived tool trail, never the PTY: `claude -p` writes nothing to its terminal until the final answer, so a terminal viewer would show a blank screen for the whole run.
 
 ### Usage Tracking
 

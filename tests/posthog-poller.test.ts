@@ -208,6 +208,7 @@ function harness(over: HarnessOverrides = {}) {
     clearTimeoutFn: () => {},
     log: { warn() {} },
     onTickComplete: (status) => { summaries.push(status); },
+    onInvestigationActivity: over.onInvestigationActivity,
     now: over.now || (() => 1000),
     intervalMinutes: 15,
     maxConcurrentInvestigations: over.maxConcurrentInvestigations || 2,
@@ -555,12 +556,116 @@ test('onTickComplete emits the dashboard broadcast payload', async () => {
     change: 'new',
     occurrences: 120,
     users: 8,
-    verdict: null,
+    verdict: 'NEEDS_HUMAN',
     summaryLine: null,
     history: [{ ts: 1000, occurrences: 120 }],
-    inFlight: true,
+    inFlight: false,
+    startedAt: null,
+    trail: [],
     url: 'https://ph.test/project/1/error_tracking/iss-1',
-  }], 'the snapshot describes the tick, so the verdict is still null while the session runs');
+  }], 'the snapshot describes state at broadcast time, so an investigation that finished during the tick is already reported');
+});
+
+test('an in-flight trail rides the snapshot and coalesces into one live activity frame per window', async () => {
+  const activity: Record<string, unknown>[] = [];
+  const timers: { fn: () => void; ms: number }[] = [];
+  const gate: { release: (() => void) | null } = { release: null };
+  const { poller, summaries } = harness({
+    setTimeoutFn: (fn, ms) => { timers.push({ fn, ms }); return heldTimer(); },
+    onInvestigationActivity: (frame) => { activity.push({ ...frame }); },
+    spawnInvestigation: async (args) => {
+      args.onActivity?.({ startedAt: 900, steps: [] });
+      args.onActivity?.({ startedAt: 900, steps: [{ at: 950, tool: 'Read', detail: 'a.ts' }] });
+      await new Promise<void>((resolve) => { gate.release = resolve; });
+      return { verdict: 'ROOT_CAUSE', summary: 'the retry path double-fires' };
+    },
+  });
+  await poller.start();
+  await flush();
+  const [issue] = tickProject(summaries).issues as { startedAt?: unknown; trail?: unknown }[];
+  assert.ok(issue);
+  assert.equal(issue.startedAt, 900);
+  assert.deepEqual(issue.trail, [{ at: 950, tool: 'Read', detail: 'a.ts' }]);
+  assert.equal(activity.length, 0, 'steps are coalesced behind one timer, never broadcast per hook');
+  const coalescers = timers.filter((timer) => timer.ms < 1000);
+  assert.equal(coalescers.length, 1, 'two steps arm one coalescing timer, the job timeout aside');
+  coalescers[0]?.fn();
+  assert.equal(activity.length, 1);
+  assert.equal(activity[0].type, 'posthog-investigation-activity');
+  assert.equal(activity[0].inFlight, true);
+  assert.deepEqual(activity[0].trail, [{ at: 950, tool: 'Read', detail: 'a.ts' }]);
+  gate.release?.();
+  await flush();
+  const done = activity.at(-1);
+  assert.equal(done?.type, 'posthog-investigation-finished', 'the terminal frame is its own type, since a dropped refreshable frame is never resent');
+  assert.equal(done?.verdict, 'ROOT_CAUSE');
+  assert.equal(done?.summaryLine, 'the retry path double-fires');
+  assert.equal(done?.issueId, 'iss-1');
+  assert.equal(done?.startedAt, 900, 'the finished frame carries the start so the dialog can still offset its steps');
+  assert.deepEqual(done?.trail, [{ at: 950, tool: 'Read', detail: 'a.ts' }], 'the steps captured since the last publish ride the finished frame');
+  await poller.tick();
+  const [after] = tickProject(summaries).issues as { inFlight?: unknown; trail?: unknown }[];
+  assert.equal(after?.inFlight, false);
+  assert.deepEqual(after?.trail, [{ at: 950, tool: 'Read', detail: 'a.ts' }], 'the finished trail stays on the snapshot while the issue is still listed');
+});
+
+test('a hook that lands after the run finished publishes nothing, so a dead investigation cannot flip the dashboard back to in flight', async () => {
+  const activity: Record<string, unknown>[] = [];
+  const timers: { fn: () => void; ms: number }[] = [];
+  const hook: { emit: SpawnArgs['onActivity'] } = { emit: undefined };
+  const { poller, summaries } = harness({
+    setTimeoutFn: (fn, ms) => { timers.push({ fn, ms }); return heldTimer(); },
+    onInvestigationActivity: (frame) => { activity.push({ ...frame }); },
+    spawnInvestigation: async (args) => {
+      hook.emit = args.onActivity;
+      args.onActivity?.({ startedAt: 900, steps: [{ at: 950, tool: 'Read', detail: 'a.ts' }] });
+      return { verdict: 'ROOT_CAUSE', summary: 'the retry path double-fires' };
+    },
+  });
+  await poller.start();
+  await flush();
+  const framesAtFinish = activity.length;
+  assert.equal(activity.at(-1)?.type, 'posthog-investigation-finished');
+
+  hook.emit?.({ startedAt: 900, steps: [{ at: 950, tool: 'Read', detail: 'a.ts' }, { at: 1200, tool: 'Bash', detail: 'npm test' }] });
+  const coalescers = timers.filter((timer) => timer.ms < 1000);
+  assert.equal(coalescers.length, 1, 'the late hook arms no second coalescing window');
+  for (const coalescer of coalescers) coalescer.fn();
+  await flush();
+  assert.equal(activity.length, framesAtFinish, 'no frame follows the finished one');
+
+  await poller.tick();
+  const [issue] = tickProject(summaries).issues as { inFlight?: unknown; trail?: unknown }[];
+  assert.equal(issue?.inFlight, false, 'the snapshot never shows the finished issue investigating again');
+  assert.deepEqual(issue?.trail, [{ at: 950, tool: 'Read', detail: 'a.ts' }], 'the late step never joins the trail the finished run left behind');
+});
+
+test('the tick snapshot carries each issue state at broadcast time, not at the moment its project was polled', async () => {
+  const gate: { release: (() => void) | null } = { release: null };
+  const polled: (string | number)[] = [];
+  const { poller, summaries } = harness({
+    resolveProjects: async () => [{ projectId: 1, name: 'web' }, { projectId: 2, name: 'api' }],
+    api: {
+      queryIssues: async (projectId) => {
+        polled.push(projectId);
+        if (String(projectId) !== '2') return apiOk({ results: [issueRow()] });
+        gate.release?.();
+        await flush();
+        return apiOk({ results: [] });
+      },
+    },
+    spawnInvestigation: async () => {
+      await new Promise<void>((resolve) => { gate.release = resolve; });
+      return { verdict: 'ROOT_CAUSE', summary: 'the retry path double-fires' };
+    },
+  });
+  await poller.start();
+  await flush();
+  assert.deepEqual(polled, [1, 2]);
+  const [issue] = tickProject(summaries, 0).issues as { inFlight?: unknown; verdict?: unknown; summaryLine?: unknown }[];
+  assert.equal(issue?.inFlight, false, 'the investigation finished during the second project poll');
+  assert.equal(issue?.verdict, 'ROOT_CAUSE');
+  assert.equal(issue?.summaryLine, 'the retry path double-fires');
 });
 
 test('onTickComplete reports a project whose issue query failed instead of dropping it', async () => {

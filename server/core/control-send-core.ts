@@ -16,6 +16,7 @@ const REFRESHABLE_TYPES = new Set([
   'ingest-snapshot',
   'pr-status',
   'posthog-status',
+  'posthog-investigation-activity',
 ]);
 
 const DEFAULT_HIGH_WATER_MARK = 1 * 1024 * 1024;

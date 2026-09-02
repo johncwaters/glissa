@@ -21,7 +21,7 @@ import { noteKnownProjectPath } from './project-registry.ts';
 import { acknowledgePrAttention, applyPrStatus, mountPrView, setPrActivityCallback } from './pr-panel.ts';
 
 import { updateBannerText } from './radar-core.ts';
-import { acknowledgeRadarAttention, applyHealthSnapshot as applyRadarHealth, applyPosthogStatus, applyPrStatus as applyRadarPrStatus, applyUpdateAvailable as applyRadarUpdate, mountRadarView, setRadarActivityCallback, setRadarNavigateToPrs } from './radar-panel.ts';
+import { acknowledgeRadarAttention, applyHealthSnapshot as applyRadarHealth, applyInvestigationActivity, applyInvestigationFinished, applyPosthogStatus, applyPrStatus as applyRadarPrStatus, applyUpdateAvailable as applyRadarUpdate, mountRadarView, setRadarActivityCallback, setRadarNavigateToPrs } from './radar-panel.ts';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.ts';
 import { sessionUIs } from './session-card/card-registry.ts';
 import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, notePackVersion, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setLatestPackVersions, setSessionAgent, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPacks, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionUsage, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.ts';
@@ -325,6 +325,8 @@ const messageHandlers = {
   'settings-updated':   (msg) => { if (msg.settings) { applyTerminalSettings(msg.settings); applySettingsBroadcast(msg.settings); applyVisionsSettings(msg.settings); } },
   'health-snapshot':    (msg) => { if (msg.stats) { applyHealthSnapshot(msg.stats as HealthSnapshot); applyRadarHealth(msg.stats as HealthSnapshot); } },
   'posthog-status':     (msg) => applyPosthogStatus(msg),
+  'posthog-investigation-activity': (msg) => applyInvestigationActivity(msg),
+  'posthog-investigation-finished': (msg) => applyInvestigationFinished(msg),
   'pr-status':          (msg) => { applyPrStatus(msg); applyRadarPrStatus(msg); },
   'usage-sessions':     (msg) => { applyUsageSessionChips(msg.sessions); applyUsageSessions(msg); requestUsageReportIfVisible(); },
   'usage-report':       (msg) => { applyUsageReport(msg); refreshSettingsStatus(); },

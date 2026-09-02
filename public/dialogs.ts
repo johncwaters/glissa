@@ -4,6 +4,10 @@ import { el, query, queryTag } from './dom-helpers.ts';
 import { applyDialogAria, buildDialogShell, createModalOverlay } from './session-card/modal.ts';
 import { DEFAULT_AGENT_ID, decideAgentPicker } from './session-card/agent-core.ts';
 import { countSessionsByName, suggestSessionName } from './session-card/naming.ts';
+import { onSessionTick } from './session-card/session-tick.ts';
+import { formatAgo } from './poll-ago.ts';
+import { formatTrailOffset, trailContentKey, trailStatusText } from './radar-core.ts';
+import type { InvestigationView } from './radar-core.ts';
 
 interface OptionSettings {
   value?: string;
@@ -169,4 +173,88 @@ export function createPosthogReportDialog({
   dialog.append(metaEl, bodyEl, actions);
   btnClose.addEventListener('click', close);
   requestAnimationFrame(() => btnClose.focus());
+}
+
+export interface InvestigationDialog {
+  update: (view: InvestigationView) => void;
+  isOpen: () => boolean;
+  close: () => void;
+}
+
+export function createInvestigationDialog({ issueTitle, projectLabel, onOpenReport }: {
+  issueTitle: string;
+  projectLabel: string;
+  onOpenReport: () => void;
+}): InvestigationDialog {
+  const { dialog, close, actions, btnCancel: btnClose } = buildDialogShell({
+    title: 'Investigation',
+    dialogClass: 'dialog dialog-report',
+    cancelLabel: 'Close',
+  });
+  const metaEl = el('div', 'dialog-report-meta', projectLabel ? `${projectLabel}: ${issueTitle}` : issueTitle);
+  const statusEl = el('p', 'dialog-trail-status');
+  const summaryEl = el('p', 'dialog-trail-summary');
+  const listEl = el('ol', 'dialog-trail-steps');
+  const emptyEl = el('p', 'dialog-trail-empty', 'No tool calls yet; the session is reading the issue.');
+  const btnReport = el('button', 'btn-dialog btn-dialog-cancel', 'Open report');
+  btnReport.type = 'button';
+  btnReport.hidden = true;
+  btnReport.addEventListener('click', () => { close(); onOpenReport(); });
+  actions.prepend(btnReport);
+  dialog.append(metaEl, statusEl, summaryEl, listEl, emptyEl, actions);
+  btnClose.addEventListener('click', close);
+  requestAnimationFrame(() => btnClose.focus());
+
+  let current: InvestigationView | null = null;
+  let renderedKey = '';
+
+  function renderSteps(view: InvestigationView) {
+    const wasAtBottom = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 24;
+    const key = trailContentKey(view);
+    if (renderedKey !== key) {
+      listEl.textContent = '';
+      for (const step of view.steps) {
+        const item = el('li', 'dialog-trail-step');
+        item.append(
+          el('span', 'dialog-trail-at', formatTrailOffset(view.startedAt, step.at)),
+          el('span', 'dialog-trail-tool', step.tool),
+          el('span', 'dialog-trail-detail', step.detail),
+        );
+        listEl.append(item);
+      }
+      renderedKey = key;
+    }
+    emptyEl.hidden = view.steps.length > 0 || !view.inFlight;
+    listEl.hidden = view.steps.length === 0;
+    if (wasAtBottom) listEl.scrollTop = listEl.scrollHeight;
+  }
+
+  function paintStatus(view: InvestigationView) {
+    statusEl.textContent = trailStatusText(view, formatAgo(view.startedAt));
+  }
+
+  function paint() {
+    if (!current) return;
+    paintStatus(current);
+    statusEl.dataset.tone = current.inFlight ? 'live' : 'done';
+    summaryEl.textContent = current.summaryLine;
+    summaryEl.hidden = !current.summaryLine;
+    btnReport.hidden = current.inFlight || !current.verdict;
+    renderSteps(current);
+  }
+
+  const stopTicking = onSessionTick(() => {
+    if (!dialog.isConnected) { stopTicking(); return; }
+    if (!current?.inFlight) return;
+    paintStatus(current);
+  });
+
+  return {
+    update(view) {
+      current = view;
+      paint();
+    },
+    isOpen: () => dialog.isConnected,
+    close: () => { stopTicking(); close(); },
+  };
 }

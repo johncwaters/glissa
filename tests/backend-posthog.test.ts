@@ -21,6 +21,12 @@ import {
 } from '../server/posthog-wiring.ts';
 import type { PosthogGitWorkspace, PosthogWiringConfig, PosthogWorkspace } from '../server/posthog-wiring.ts';
 import { createSpawnGate } from '../server/spawn-gate.ts';
+import { HookRouter } from '../detection/hook-source.ts';
+import { Session } from '../session/sessions.ts';
+import type { SessionOptions } from '../session/sessions.ts';
+import type { InvestigationTrail } from '../server/core/investigation-trail-core.ts';
+import { safePathSegment } from '../shared/paths.ts';
+import { fakePty } from './helpers/fake-pty.ts';
 import { recordingSessionFactory } from './helpers/fake-session.ts';
 
 const ENABLED = { enabled: true, host: 'https://ph.test', apiKey: 'phx_secret' };
@@ -195,6 +201,51 @@ test('PostHog lane passes configured packs into Session options', () => {
     assert.deepEqual(constructed[0].packs, ['crew-rules', 'house-rules']);
   } finally {
     for (const session of created) session.destroy();
+  }
+});
+
+test('an investigation session reports its tool trail from routed hooks, pretooluse only, newest last', async () => {
+  const hooksBaseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-ph-hooks-'));
+  const hookRouter = new HookRouter();
+  const created: Session[] = [];
+  const makeSession = (options: SessionOptions): Session => {
+    const session = new Session({ ...options, hooksBaseDir, ptySpawn: () => fakePty() });
+    created.push(session);
+    return session;
+  };
+  const trails: InvestigationTrail[] = [];
+  const wiring = createPosthogWiring({
+    config: { posthog: { ...ENABLED }, replayBufferKB: 256 },
+    ...inertWiringDeps(),
+    hookRouter,
+    getHookPort: () => 4321,
+    makeSession,
+  });
+  try {
+    const session = wiring._makeInvestigationSession({
+      id: 'posthog:1#iss-9',
+      name: 'PostHog web #iss-9',
+      path: process.cwd(),
+      initialPrompt: 'prompt',
+      onActivity: (trail) => trails.push(trail),
+    });
+    assert.equal(trails.length, 1, 'the empty trail is reported at spawn so the dashboard learns the start time');
+    assert.equal(trails[0]?.steps.length, 0);
+    await session.start();
+    const settings = JSON.parse(fs.readFileSync(path.join(hooksBaseDir, safePathSegment('posthog:1#iss-9'), 'settings.json'), 'utf8'));
+    assert.match(String(settings.hooks.PreToolUse[0].hooks[0].url), /\/hook\/posthog%3A1%23iss-9\/pretooluse\?t=/, 'the trail only exists because the session subscribes to PreToolUse');
+    const token = session._hooks.token();
+    const post = (event: string, payload: Record<string, unknown>) => hookRouter.handle({ glissaId: 'posthog:1#iss-9', event, token, payload });
+    post('pretooluse', { tool_name: 'Grep', tool_input: { pattern: 'TypeError' } });
+    post('posttooluse', { tool_name: 'Grep', tool_input: { pattern: 'TypeError' } });
+    post('pretooluse', { tool_name: 'Bash', tool_input: { command: 'npm test' } });
+    const latest = trails.at(-1);
+    assert.deepEqual(latest?.steps.map((step) => [step.tool, step.detail]), [['Grep', 'TypeError'], ['Bash', 'npm test']]);
+    assert.equal(trails.length, 3, 'one report per pretooluse; posttooluse adds nothing');
+    assert.equal(latest?.startedAt, trails[0]?.startedAt);
+  } finally {
+    for (const session of created) session.destroy();
+    fs.rmSync(hooksBaseDir, { recursive: true, force: true });
   }
 });
 

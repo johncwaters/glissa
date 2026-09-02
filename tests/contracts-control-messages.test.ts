@@ -107,6 +107,8 @@ const REAL_SERVER_PAYLOADS: ServerPayload[] = [
   { type: 'resume-conversation-ack', id: 'session-1', resumeSessionId: 'conversation-1', ok: true },
   { type: 'health-snapshot', stats: { process: {}, sessions: {}, websockets: {} } },
   { type: 'posthog-status', ts: NOW, intervalMinutes: 15, projects: [], investigations: [] },
+  { type: 'posthog-investigation-activity', projectId: 7, issueId: 'issue-1', inFlight: true, startedAt: NOW, trail: [{ at: NOW, tool: 'Read', detail: 'server/a.ts' }] },
+  { type: 'posthog-investigation-finished', projectId: 7, issueId: 'issue-1', verdict: 'NEEDS_HUMAN', summaryLine: 'the retry path double-fires', startedAt: NOW, trail: [{ at: NOW, tool: 'Read', detail: 'server/a.ts' }] },
   { type: 'posthog-report', requestId: 'posthog-1', ok: true, found: true, issueId: 'issue-1', format: 'markdown', content: 'report' },
   { type: 'posthog-open-session-result', requestId: 'posthog-2', ok: true, error: null, sessionId: 'session-1' },
   { type: 'posthog-issue-action-result', requestId: 'posthog-3', ok: true, error: null, status: 'resolved' },

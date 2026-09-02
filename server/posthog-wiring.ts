@@ -9,6 +9,8 @@ import type { SessionOptions } from '../session/sessions.ts';
 import { execFileAsync } from './child-process-safe.ts';
 import { glissaHomeDir } from './config-store.ts';
 import { normalizePackNames } from './core/pack-core.ts';
+import { appendTrailStep, createInvestigationTrail, trailStepFromHook } from './core/investigation-trail-core.ts';
+import type { InvestigationTrail } from './core/investigation-trail-core.ts';
 import * as core from './core/posthog-core.ts';
 import type { PosthogIssue } from './core/posthog-core.ts';
 import {
@@ -480,13 +482,14 @@ function createPosthogWiring({
   }
 
   function makeInvestigationSession(
-    { id, name, path: cwd, initialPrompt, spawnEnv, permissions = POSTHOG_DENY }: {
+    { id, name, path: cwd, initialPrompt, spawnEnv, permissions = POSTHOG_DENY, onActivity = null }: {
       id: string;
       name: string;
       path: string;
       initialPrompt: string;
       spawnEnv?: Record<string, string>;
       permissions?: { deny: string[] };
+      onActivity?: ((trail: InvestigationTrail) => void) | null;
     },
   ): Session {
     const sess = makeSession({
@@ -497,6 +500,7 @@ function createPosthogWiring({
       extraClaudeArgs: ['-p'],
       initialPrompt,
       ephemeral: true,
+      observeToolCalls: true,
       settingsPermissions: permissions,
       packs: posthogPackNames(config),
       spawnEnv,
@@ -507,7 +511,19 @@ function createPosthogWiring({
     registerEphemeralSession({
       map: investigationSessions, id, sess, closeSessionDataClients, logPrefix: 'posthog', name, recordLane,
     });
+    if (onActivity) observeTrail(sess, onActivity);
     return sess;
+  }
+
+  function observeTrail(sess: Session, onActivity: (trail: InvestigationTrail) => void): void {
+    let trail = createInvestigationTrail(Date.now());
+    onActivity(trail);
+    sess.on('hook-event', ({ event, payload }: { event: string; payload: Record<string, unknown> }) => {
+      const step = trailStepFromHook(event, payload);
+      if (!step) return;
+      trail = appendTrailStep(trail, { at: Date.now(), ...step });
+      onActivity(trail);
+    });
   }
 
   function resolveRepoPath(projectId: string | number): string | null {
@@ -541,12 +557,13 @@ function createPosthogWiring({
   const waitForExit = (sess: Session, signal: AbortSignal | null | undefined) => awaitSessionExit(sess, { signal, spawnGate });
 
   async function posthogFixSpawn(
-    { issue, projectId, projectName, url, signal }: {
+    { issue, projectId, projectName, url, signal, onActivity = null }: {
       issue: PosthogIssue;
       projectId: string | number;
       projectName: string;
       url: string;
       signal?: AbortSignal | null;
+      onActivity?: ((trail: InvestigationTrail) => void) | null;
     },
   ) {
     const posthogConfig = activePosthogConfig();
@@ -585,6 +602,7 @@ function createPosthogWiring({
         }),
         spawnEnv: { POSTHOG_API_KEY: posthogConfig.apiKey, POSTHOG_HOST: posthogConfig.host },
         permissions: FIX_DENY,
+        onActivity,
       });
       await waitForExit(sess, signal);
       const result = readFixResult(resultFile.path);
@@ -629,11 +647,11 @@ function createPosthogWiring({
   }
 
   async function posthogInvestigationSpawn(
-    { issue, projectId, projectName, url, mode, signal }: SpawnInvestigationArgs,
+    { issue, projectId, projectName, url, mode, signal, onActivity }: SpawnInvestigationArgs,
   ) {
     const posthogConfig = activePosthogConfig();
     if (core.normalizeJobMode(mode) === core.JOB_MODES.fix) {
-      const fixed = await posthogFixSpawn({ issue, projectId, projectName, url, signal });
+      const fixed = await posthogFixSpawn({ issue, projectId, projectName, url, signal, onActivity });
       if (fixed) return fixed;
     }
     const issueId = safeIssueId(issue.issueId);
@@ -657,6 +675,7 @@ function createPosthogWiring({
         path: cwd,
         initialPrompt: prompt,
         spawnEnv: { POSTHOG_API_KEY: posthogConfig.apiKey, POSTHOG_HOST: posthogConfig.host },
+        onActivity,
       });
       await waitForExit(sess, signal);
       const result = readInvestigationResult(resultFile.path);
@@ -740,6 +759,7 @@ function createPosthogWiring({
         trafficSpikeCooldownMinutes: posthogConfig.trafficSpikeCooldownMinutes,
         trafficSpikeBaselineDays: posthogConfig.trafficSpikeBaselineDays,
         onTickComplete,
+        onInvestigationActivity: (activity) => broadcast({ ...activity }),
       });
     },
   });

@@ -15,9 +15,42 @@ export interface RadarIssue {
   history?: unknown;
   summaryLine?: unknown;
   inFlight?: unknown;
+  startedAt?: unknown;
+  trail?: unknown;
   url?: unknown;
   lastSeen?: unknown;
   status?: unknown;
+}
+
+export interface TrailStepRow {
+  at: number;
+  tool: string;
+  detail: string;
+}
+
+export interface InvestigationActivityFrame {
+  projectId?: unknown;
+  issueId?: unknown;
+  inFlight?: unknown;
+  startedAt?: unknown;
+  trail?: unknown;
+}
+
+export interface InvestigationFinishedFrame {
+  projectId?: unknown;
+  issueId?: unknown;
+  startedAt?: unknown;
+  trail?: unknown;
+  verdict?: unknown;
+  summaryLine?: unknown;
+}
+
+export interface InvestigationView {
+  inFlight: boolean;
+  startedAt: number | null;
+  steps: TrailStepRow[];
+  verdict: string;
+  summaryLine: string;
 }
 
 export interface RadarProject {
@@ -98,9 +131,126 @@ const VERDICT_LABEL: Record<string, string> = {
   ERROR: 'error',
 };
 
+export function trailStepRows(trail: unknown): TrailStepRow[] {
+  if (!Array.isArray(trail)) return [];
+  return (trail as unknown[]).flatMap((entry) => {
+    const record = entry as { at?: unknown; tool?: unknown; detail?: unknown } | null | undefined;
+    const tool = textOr(record?.tool, '');
+    if (!tool) return [];
+    return [{ at: numberOr(record?.at, 0), tool, detail: textOr(record?.detail, '') }];
+  });
+}
+
+function trailStepLabel(step: TrailStepRow) {
+  if (!step.detail) return step.tool;
+  return `${step.tool} ${step.detail}`;
+}
+
+export function latestTrailLabel(issue: RadarIssue | null | undefined) {
+  const steps = trailStepRows(issue?.trail);
+  const last = steps.at(-1);
+  if (!last) return '';
+  return trailStepLabel(last);
+}
+
+export function issueSummaryText(issue: RadarIssue | null | undefined) {
+  const summaryLine = textOr(issue?.summaryLine, '');
+  if (issue?.inFlight === true) return latestTrailLabel(issue) || summaryLine;
+  return summaryLine;
+}
+
+export function investigationViewOf(issue: RadarIssue | null | undefined): InvestigationView {
+  return {
+    inFlight: issue?.inFlight === true,
+    startedAt: numberOr(issue?.startedAt, null),
+    steps: trailStepRows(issue?.trail),
+    verdict: textOr(issue?.verdict, ''),
+    summaryLine: textOr(issue?.summaryLine, ''),
+  };
+}
+
+export function findIssueInSnapshot(
+  snapshot: RadarSnapshot | null | undefined,
+  projectId: unknown,
+  issueId: unknown,
+): RadarIssue | null {
+  const wantedProject = String(projectId ?? '');
+  const wantedIssue = String(issueId ?? '');
+  if (!wantedProject || !wantedIssue) return null;
+  for (const project of Array.isArray(snapshot?.projects) ? snapshot.projects : []) {
+    if (String(project?.projectId ?? '') !== wantedProject) continue;
+    for (const issue of Array.isArray(project.issues) ? project.issues : []) {
+      if (String(issue?.issueId ?? '') === wantedIssue) return issue;
+    }
+  }
+  return null;
+}
+
+export function applyInvestigationActivity(snapshot: RadarSnapshot | null | undefined, frame: InvestigationActivityFrame | null | undefined) {
+  const issue = findIssueInSnapshot(snapshot, frame?.projectId, frame?.issueId);
+  if (!issue) return false;
+  issue.inFlight = true;
+  issue.startedAt = numberOr(frame?.startedAt, null);
+  issue.trail = trailStepRows(frame?.trail);
+  return true;
+}
+
+export function finishedViewOf(frame: InvestigationFinishedFrame | null | undefined): InvestigationView {
+  return {
+    inFlight: false,
+    startedAt: numberOr(frame?.startedAt, null),
+    steps: trailStepRows(frame?.trail),
+    verdict: textOr(frame?.verdict, ''),
+    summaryLine: textOr(frame?.summaryLine, ''),
+  };
+}
+
+export function isOpenInvestigationFrame(
+  open: { projectId: string; issueId: string } | null | undefined,
+  frame: { projectId?: unknown; issueId?: unknown } | null | undefined,
+) {
+  if (!open || !frame) return false;
+  return String(frame.projectId ?? '') === open.projectId && String(frame.issueId ?? '') === open.issueId;
+}
+
+export function applyInvestigationFinished(snapshot: RadarSnapshot | null | undefined, frame: InvestigationFinishedFrame | null | undefined) {
+  const issue = findIssueInSnapshot(snapshot, frame?.projectId, frame?.issueId);
+  if (!issue) return false;
+  const view = finishedViewOf(frame);
+  issue.inFlight = false;
+  issue.startedAt = view.startedAt;
+  issue.trail = view.steps;
+  issue.verdict = view.verdict;
+  issue.summaryLine = view.summaryLine;
+  return true;
+}
+
 export function verdictLabel(verdict: unknown) {
   const key = typeof verdict === 'string' ? verdict.toUpperCase() : '';
   return VERDICT_LABEL[key] || String(verdict ?? '').toLowerCase();
+}
+
+export function formatTrailOffset(startedAt: number | null, at: number) {
+  if (startedAt == null) return '';
+  const totalSeconds = Math.max(0, Math.round((at - startedAt) / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = String(totalSeconds % 60).padStart(2, '0');
+  return `+${minutes}:${seconds}`;
+}
+
+export function trailContentKey(view: InvestigationView) {
+  const last = view.steps.at(-1);
+  return [view.steps.length, last?.at ?? 0, last?.tool ?? ''].join('::');
+}
+
+export function trailStatusText(view: InvestigationView, startedAgoText: string) {
+  if (view.inFlight) {
+    const stepsText = `${view.steps.length} ${view.steps.length === 1 ? 'step' : 'steps'}`;
+    const startedText = view.startedAt ? `started ${startedAgoText}` : 'starting';
+    return `investigating, ${startedText}, ${stepsText}`;
+  }
+  if (!view.verdict) return 'finished';
+  return `finished: ${verdictLabel(view.verdict)}`;
 }
 
 export function radarPlaceholder(status: RadarSnapshot | null | undefined) {

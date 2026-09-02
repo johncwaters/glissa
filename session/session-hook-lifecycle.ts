@@ -40,6 +40,7 @@ interface SessionHookOptions {
   settingsPermissions: Record<string, unknown> | null;
   detectScheduledWakeups: boolean;
   detectPackReads: (() => boolean) | null;
+  observeToolCalls: boolean;
   enableProjectMcp: boolean;
   rtkPath: string | null;
   planLimits: boolean;
@@ -221,6 +222,7 @@ function createSessionHookLifecycle(options: SessionHookOptions): SessionHookLif
         permissions: options.settingsPermissions,
         detectScheduledWakeups: options.detectScheduledWakeups,
         detectPackReads: typeof options.detectPackReads === "function" ? options.detectPackReads() : false,
+        observeToolCalls: options.observeToolCalls,
         enableProjectMcp: options.enableProjectMcp,
         rtkPath: options.rtkPath,
         planLimits: options.planLimits,

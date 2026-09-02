@@ -47,6 +47,7 @@ export interface BuildHookSettingsOptions {
   permissions?: SessionPermissions | null;
   detectScheduledWakeups?: boolean;
   detectPackReads?: boolean;
+  observeToolCalls?: boolean;
   enableProjectMcp?: boolean;
   rtkPath?: string | null;
   planLimits?: boolean;
@@ -116,25 +117,30 @@ function buildStatuslineCommand(
   return `node ${shellQuote(toForwardSlashes(relayPath))} ${shellQuote(postUrl)} ${shellQuote(encoded)}`;
 }
 
-function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, detectPackReads = false, enableProjectMcp = false, rtkPath = null, planLimits = false, userSettingsPath = null, relayPath = RELAY_PATH, userHooks = [] }: BuildHookSettingsOptions): HookSettings {
+function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, detectPackReads = false, observeToolCalls = false, enableProjectMcp = false, rtkPath = null, planLimits = false, userSettingsPath = null, relayPath = RELAY_PATH, userHooks = [] }: BuildHookSettingsOptions): HookSettings {
   if (!port || !glissaId || !token) {
     throw new Error('buildHookSettings requires port, glissaId, token');
   }
   const base = `http://127.0.0.1:${port}/hook/${encodeURIComponent(glissaId)}`;
+  const hookUrl = (event: string) => `${base}/${event.toLowerCase()}?t=${encodeURIComponent(token)}`;
   const hooks: Record<string, SettingsHookEntry[]> = {};
   for (const event of HOOK_EVENTS) {
-    const url = `${base}/${event.toLowerCase()}?t=${encodeURIComponent(token)}`;
-    hooks[event] = [{ hooks: [{ type: 'http', url, timeout: timeoutSec }] }];
+    hooks[event] = [{ hooks: [{ type: 'http', url: hookUrl(event), timeout: timeoutSec }] }];
   }
   const postToolUse: string[] = [];
   if (detectScheduledWakeups) postToolUse.push(WAKEUP_TOOL_MATCHER);
   if (detectPackReads) postToolUse.push(PACK_READ_TOOL_MATCHER);
   if (postToolUse.length > 0) {
-    const url = `${base}/posttooluse?t=${encodeURIComponent(token)}`;
+    const url = hookUrl('PostToolUse');
     hooks.PostToolUse = postToolUse.map((matcher) => ({ matcher, hooks: [{ type: 'http', url, timeout: timeoutSec }] }));
   }
-  if (rtkPath) {
-    hooks.PreToolUse = [buildRtkHookEntry(rtkPath)];
+  const preToolUse: SettingsHookEntry[] = [];
+  if (observeToolCalls) {
+    preToolUse.push({ hooks: [{ type: 'http', url: hookUrl('PreToolUse'), timeout: timeoutSec }] });
+  }
+  if (rtkPath) preToolUse.push(buildRtkHookEntry(rtkPath));
+  if (preToolUse.length > 0) {
+    hooks.PreToolUse = preToolUse;
   }
   appendUserHooks(hooks, Array.isArray(userHooks) ? userHooks : []);
   const settings: HookSettings = { hooks };
@@ -163,12 +169,13 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
 }
 
 function describeBuiltinHooks(
-  { detectScheduledWakeups = true, detectPackReads = false, rtkPath = null }:
-    { detectScheduledWakeups?: boolean; detectPackReads?: boolean; rtkPath?: string | null } = {},
+  { detectScheduledWakeups = true, detectPackReads = false, observeToolCalls = false, rtkPath = null }:
+    { detectScheduledWakeups?: boolean; detectPackReads?: boolean; observeToolCalls?: boolean; rtkPath?: string | null } = {},
 ): { event: string; matcher: string | null; purpose: string }[] {
   const rows = HOOK_EVENTS.map((event) => ({ event, matcher: null as string | null, purpose: 'Status detection: POST to the Glissa hook router' }));
   if (detectScheduledWakeups) rows.push({ event: 'PostToolUse', matcher: WAKEUP_TOOL_MATCHER, purpose: 'Scheduled wakeup tracking' });
   if (detectPackReads) rows.push({ event: 'PostToolUse', matcher: PACK_READ_TOOL_MATCHER, purpose: 'Pack read tracking' });
+  if (observeToolCalls) rows.push({ event: 'PreToolUse', matcher: null, purpose: 'Investigation trail: POST every tool call to the Glissa hook router' });
   if (rtkPath) rows.push({ event: 'PreToolUse', matcher: buildRtkHookEntry(rtkPath).matcher, purpose: 'rtk command rewriting' });
   return rows;
 }

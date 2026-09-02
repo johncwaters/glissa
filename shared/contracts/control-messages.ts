@@ -11,6 +11,7 @@ const optionalTimestamp = timestamp.optional();
 const optionalError = nullableString.optional();
 const opaqueObject = openObject();
 const opaqueArray = z.array(z.unknown());
+const trailSteps = z.array(openObject({ at: timestamp, tool: z.string(), detail: z.string() }));
 
 export const CLIENT_MESSAGE_TYPES = Object.freeze([
   'add-session',
@@ -139,6 +140,8 @@ export const SERVER_MESSAGE_TYPES = Object.freeze([
   'resume-conversation-ack',
   'health-snapshot',
   'posthog-status',
+  'posthog-investigation-activity',
+  'posthog-investigation-finished',
   'posthog-report',
   'posthog-open-session-result',
   'posthog-issue-action-result',
@@ -369,6 +372,21 @@ const serverVariants = [
     intervalMinutes: z.number(),
     projects: z.array(opaqueObject),
     investigations: z.array(opaqueObject),
+  }),
+  loose('posthog-investigation-activity', {
+    projectId: z.union([z.string(), z.number()]),
+    issueId: z.string(),
+    inFlight: z.literal(true),
+    startedAt: timestamp.nullable(),
+    trail: trailSteps,
+  }),
+  loose('posthog-investigation-finished', {
+    projectId: z.union([z.string(), z.number()]),
+    issueId: z.string(),
+    verdict: z.string(),
+    summaryLine: nullableString,
+    startedAt: timestamp.nullable(),
+    trail: trailSteps,
   }),
   loose('posthog-report', {
     requestId,

@@ -117,6 +117,7 @@ interface SessionOptions {
   teammateTaskTtlMs?: number;
   gateReleaseSettleMs?: number;
   detectScheduledWakeups?: boolean;
+  observeToolCalls?: boolean;
   agent?: string;
   adapter?: AgentAdapter | null;
   bypassHookTrust?: boolean;
@@ -232,6 +233,8 @@ class Session extends EventEmitter {
     gateReleaseSettleMs = DEFAULT_GATE_RELEASE_SETTLE_MS,
 
     detectScheduledWakeups = true,
+
+    observeToolCalls = false,
 
     agent = DEFAULT_AGENT_ID,
 
@@ -400,6 +403,7 @@ class Session extends EventEmitter {
       detectPackReads: () => millMetricsPort != null
         && this._can("packReads")
         && this._packDelivery.deliveredWithDirs().length > 0,
+      observeToolCalls: observeToolCalls === true,
       enableProjectMcp: !!enableProjectMcp,
       rtkPath: this._rtkPath,
       planLimits: this._planLimits,
@@ -407,7 +411,10 @@ class Session extends EventEmitter {
       bypassHookTrust: this.bypassHookTrust,
       effectiveCwd: () => this.effectiveCwd(),
       ingestSignal: (raw) => this.ingestHookSignal(raw),
-      observeHook: (event, payload) => millMetricsPort?.onHookEvent(this.id, event, payload),
+      observeHook: (event, payload) => {
+        millMetricsPort?.onHookEvent(this.id, event, payload);
+        this.emit("hook-event", { event, payload });
+      },
       recordDecision: (entry) => this._recordDecision(entry),
     });
     this._ptySpawn = ptySpawn || ((file, args, opts) => pty.spawn(file, args, opts));

@@ -29,6 +29,22 @@ test('a user PreToolUse hook does not displace the rtk entry', () => {
   assert.equal(settings.hooks.PreToolUse[1].matcher, 'Edit');
 });
 
+test('observeToolCalls posts every tool call to the relay and is off for an ordinary session', () => {
+  assert.equal('PreToolUse' in buildHookSettings(base).hooks, false);
+  const settings = buildHookSettings({ ...base, observeToolCalls: true });
+  assert.equal(settings.hooks.PreToolUse.length, 1);
+  assert.equal(Object.hasOwn(settings.hooks.PreToolUse[0], 'matcher'), false, 'the trail needs every tool call, not a matched subset');
+  const [handler] = settings.hooks.PreToolUse[0].hooks;
+  assert.equal(handler.type, 'http');
+  assert.match(String(handler.url), /\/hook\/g1\/pretooluse\?t=tok$/);
+});
+
+test('the trail hook and the rtk entry coexist, the trail first', () => {
+  const settings = buildHookSettings({ ...base, observeToolCalls: true, rtkPath: '/usr/bin/rtk' });
+  assert.deepEqual(settings.hooks.PreToolUse.map((entry) => entry.hooks[0].type), ['http', 'command']);
+  assert.equal(settings.hooks.PreToolUse[1].matcher, 'Bash');
+});
+
 test('a user hook on an event Glissa does not subscribe to creates that key', () => {
   const settings = buildHookSettings({ ...base, userHooks: [
     { id: 'a', name: 'a', event: 'PreCompact', matcher: 'auto', type: 'http', url: 'http://127.0.0.1:1/x', timeout: 9, enabled: true },
@@ -43,6 +59,8 @@ test('describeBuiltinHooks rows are exactly the entries buildHookSettings writes
     { detectPackReads: true },
     { detectScheduledWakeups: false, detectPackReads: true },
     { rtkPath: '/usr/bin/rtk' },
+    { observeToolCalls: true },
+    { observeToolCalls: true, rtkPath: '/usr/bin/rtk' },
     { detectScheduledWakeups: false, detectPackReads: true, rtkPath: '/usr/bin/rtk' },
   ]) {
     const settings = buildHookSettings({ ...base, ...options });

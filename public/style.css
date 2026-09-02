@@ -1235,6 +1235,76 @@ body {
   color: var(--state-failed);
 }
 
+.dialog-trail-status {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.dialog-trail-status[data-tone="live"] {
+  color: var(--accent);
+}
+
+.dialog-trail-status[data-tone="done"] {
+  color: var(--state-complete);
+}
+
+.dialog-trail-summary {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.dialog-trail-steps {
+  list-style: none;
+  margin: 0;
+  padding: 8px 12px;
+  max-height: min(56dvh, 520px);
+  overflow-y: auto;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.dialog-trail-step {
+  display: grid;
+  grid-template-columns: 5ch 10ch minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 0;
+}
+
+.dialog-trail-at {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.dialog-trail-tool {
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dialog-trail-detail {
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.dialog-trail-empty {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .shortcut-groups {
   columns: 2;
   column-gap: 28px;

@@ -3,7 +3,16 @@ import assert from 'node:assert/strict';
 
 import {
   DEFAULT_STALE_MS,
+  applyInvestigationActivity,
+  applyInvestigationFinished,
+  findIssueInSnapshot,
+  formatTrailOffset,
   healthAnomalyRows,
+  finishedViewOf,
+  investigationViewOf,
+  isOpenInvestigationFrame,
+  issueSummaryText,
+  latestTrailLabel,
   hostsDiffer,
   investigationRows,
   needsActionPrRows,
@@ -20,6 +29,9 @@ import {
   sortIssuesByAttention,
   sparklinePoints,
   summarizeIssues,
+  trailContentKey,
+  trailStatusText,
+  trailStepRows,
   updateAvailableRow,
   updateBannerText,
   verdictLabel,
@@ -584,4 +596,139 @@ test('investigationRows: an unarchived record never moves the attention count', 
   const posthog = { projects: [], investigations: [investigationRecord()] };
   assert.equal(investigationRows(posthog).length, 1);
   assert.equal(radarAttentionCount({ posthog }), 0, 'the inbox is quiet review material');
+});
+
+test('trailStepRows keeps only steps that name a tool and coerces the rest', () => {
+  assert.deepEqual(trailStepRows([
+    { at: 10, tool: 'Read', detail: 'a.ts' },
+    { at: 'x', tool: 'Bash' },
+    { at: 12, tool: '', detail: 'dropped' },
+    null,
+  ]), [
+    { at: 10, tool: 'Read', detail: 'a.ts' },
+    { at: 0, tool: 'Bash', detail: '' },
+  ]);
+  assert.deepEqual(trailStepRows(undefined), []);
+});
+
+test('latestTrailLabel names the newest step, tool first, and is empty without a trail', () => {
+  assert.equal(latestTrailLabel({ trail: [{ at: 1, tool: 'Grep', detail: 'TypeError' }, { at: 2, tool: 'Read', detail: 'a.ts' }] }), 'Read a.ts');
+  assert.equal(latestTrailLabel({ trail: [{ at: 1, tool: 'Task', detail: '' }] }), 'Task');
+  assert.equal(latestTrailLabel({}), '');
+});
+
+test('applyInvestigationActivity patches the matching issue in place and reports whether anything matched', () => {
+  const snapshot = { projects: [
+    { projectId: 7, issues: [{ issueId: 'a', inFlight: true }, { issueId: 'b', inFlight: false, verdict: 'ROOT_CAUSE' }] },
+    { projectId: 8, issues: [{ issueId: 'a', inFlight: false }] },
+  ] };
+  assert.equal(applyInvestigationActivity(snapshot, { projectId: '7', issueId: 'a', inFlight: true, startedAt: 500, trail: [{ at: 600, tool: 'Read', detail: 'x' }] }), true);
+  assert.deepEqual(snapshot.projects[0].issues[0], { issueId: 'a', inFlight: true, startedAt: 500, trail: [{ at: 600, tool: 'Read', detail: 'x' }] });
+  assert.deepEqual(snapshot.projects[1].issues[0], { issueId: 'a', inFlight: false }, 'the same issue id under another project is untouched');
+  assert.equal(applyInvestigationActivity(snapshot, { projectId: 9, issueId: 'a', inFlight: true }), false);
+  assert.equal(applyInvestigationActivity(null, { projectId: 7, issueId: 'a', inFlight: true }), false);
+});
+
+test('a finished frame flips the issue to its verdict and keeps the trail the frame carried', () => {
+  const issue = { issueId: 'a', inFlight: true, startedAt: 500, trail: [{ at: 600, tool: 'Read', detail: 'x' }] };
+  const snapshot = { projects: [{ projectId: 7, issues: [issue] }] };
+  const trail = [{ at: 600, tool: 'Read', detail: 'x' }, { at: 700, tool: 'Bash', detail: 'npm test' }];
+  assert.equal(applyInvestigationFinished(snapshot, { projectId: 7, issueId: 'a', startedAt: 500, trail, verdict: 'NEEDS_HUMAN', summaryLine: 'race in retry' }), true);
+  assert.deepEqual(issue, { issueId: 'a', inFlight: false, startedAt: 500, trail, verdict: 'NEEDS_HUMAN', summaryLine: 'race in retry' });
+  assert.equal(applyInvestigationFinished(snapshot, { projectId: 9, issueId: 'a', verdict: 'ERROR' }), false);
+});
+
+test('a finished frame without a summary clears the previous run summary instead of pairing it with the new verdict', () => {
+  const issue = { issueId: 'a', inFlight: true, startedAt: 500, verdict: 'NEEDS_HUMAN', summaryLine: 'race in retry' };
+  const snapshot = { projects: [{ projectId: 7, issues: [issue] }] };
+  assert.equal(applyInvestigationFinished(snapshot, { projectId: 7, issueId: 'a', startedAt: 900, trail: [], verdict: 'TRANSIENT', summaryLine: null }), true);
+  assert.deepEqual(issue, { issueId: 'a', inFlight: false, startedAt: 900, trail: [], verdict: 'TRANSIENT', summaryLine: '' });
+});
+
+test('a finished frame without a verdict clears the previous one, since the frame is the whole truth of the run', () => {
+  const issue = { issueId: 'a', inFlight: true, startedAt: 500, verdict: 'ROOT_CAUSE', summaryLine: 'race in retry' };
+  const snapshot = { projects: [{ projectId: 7, issues: [issue] }] };
+  assert.equal(applyInvestigationFinished(snapshot, { projectId: 7, issueId: 'a', startedAt: 900, trail: [] }), true);
+  assert.deepEqual(issue, { issueId: 'a', inFlight: false, startedAt: 900, trail: [], verdict: '', summaryLine: '' });
+});
+
+test('formatTrailOffset counts from the start in +m:ss and is empty without a start', () => {
+  assert.equal(formatTrailOffset(1000, 1000), '+0:00');
+  assert.equal(formatTrailOffset(1000, 6000), '+0:05');
+  assert.equal(formatTrailOffset(1000, 61000), '+1:00');
+  assert.equal(formatTrailOffset(1000, 130000), '+2:09');
+  assert.equal(formatTrailOffset(1000, 725000), '+12:04');
+  assert.equal(formatTrailOffset(1000, 500), '+0:00', 'a step stamped before the start never reads negative');
+  assert.equal(formatTrailOffset(null, 6000), '');
+});
+
+test('trailContentKey changes when the last step changes and holds steady otherwise', () => {
+  const view = { inFlight: true, startedAt: 500, steps: [{ at: 600, tool: 'Read', detail: 'a.ts' }], verdict: '', summaryLine: '' };
+  const same = { ...view, steps: [{ at: 600, tool: 'Read', detail: 'b.ts' }] };
+  const appended = { ...view, steps: [{ at: 600, tool: 'Read', detail: 'a.ts' }, { at: 700, tool: 'Bash', detail: 'npm test' }] };
+  const retooled = { ...view, steps: [{ at: 600, tool: 'Grep', detail: 'a.ts' }] };
+  assert.equal(trailContentKey(view), trailContentKey(same), 'only the count, stamp and tool of the last step address the rendered list');
+  assert.notEqual(trailContentKey(view), trailContentKey(appended));
+  assert.notEqual(trailContentKey(view), trailContentKey(retooled));
+  assert.equal(trailContentKey({ ...view, steps: [] }), '0::0::');
+});
+
+test('trailStatusText counts steps in the singular while running and names the verdict once finished', () => {
+  const running = { inFlight: true, startedAt: 500, steps: [{ at: 600, tool: 'Read', detail: 'a.ts' }], verdict: '', summaryLine: '' };
+  assert.equal(trailStatusText(running, '2m ago'), 'investigating, started 2m ago, 1 step');
+  assert.equal(trailStatusText({ ...running, steps: [...running.steps, { at: 700, tool: 'Bash', detail: 'npm test' }] }, '2m ago'), 'investigating, started 2m ago, 2 steps');
+  assert.equal(trailStatusText({ ...running, startedAt: null, steps: [] }, 'never'), 'investigating, starting, 0 steps');
+  assert.equal(trailStatusText({ ...running, inFlight: false, verdict: 'NEEDS_HUMAN' }, '2m ago'), 'finished: needs you');
+  assert.equal(trailStatusText({ ...running, inFlight: false }, '2m ago'), 'finished');
+});
+
+test('findIssueInSnapshot walks project then issue and refuses a partial address', () => {
+  const wanted = { issueId: 'a', inFlight: true };
+  const snapshot = { projects: [
+    { projectId: 7, issues: [{ issueId: 'b' }, wanted] },
+    { projectId: 8, issues: [{ issueId: 'a' }] },
+  ] };
+  assert.equal(findIssueInSnapshot(snapshot, '7', 'a'), wanted);
+  assert.equal(findIssueInSnapshot(snapshot, 7, 'a'), wanted);
+  assert.equal(findIssueInSnapshot(snapshot, 7, 'zz'), null);
+  assert.equal(findIssueInSnapshot(snapshot, 7, ''), null);
+  assert.equal(findIssueInSnapshot(null, 7, 'a'), null);
+});
+
+test('issueSummaryText prefers the running trail label and falls back to the summary line', () => {
+  const trail = [{ at: 1, tool: 'Read', detail: 'a.ts' }];
+  assert.equal(issueSummaryText({ inFlight: true, trail, summaryLine: 'old verdict' }), 'Read a.ts');
+  assert.equal(issueSummaryText({ inFlight: true, trail: [], summaryLine: 'old verdict' }), 'old verdict');
+  assert.equal(issueSummaryText({ inFlight: false, trail, summaryLine: 'race in retry' }), 'race in retry');
+  assert.equal(issueSummaryText(null), '');
+});
+
+test('investigationViewOf reads the dialog view off the issue and coerces every field', () => {
+  assert.deepEqual(investigationViewOf({ inFlight: true, startedAt: 500, trail: [{ at: 600, tool: 'Read', detail: 'a.ts' }], verdict: 'NEEDS_HUMAN', summaryLine: '  race  ' }), {
+    inFlight: true,
+    startedAt: 500,
+    steps: [{ at: 600, tool: 'Read', detail: 'a.ts' }],
+    verdict: 'NEEDS_HUMAN',
+    summaryLine: 'race',
+  });
+  assert.deepEqual(investigationViewOf(undefined), { inFlight: false, startedAt: null, steps: [], verdict: '', summaryLine: '' });
+});
+
+test('finishedViewOf builds the dialog view from a finished frame alone, so a vanished issue still closes out', () => {
+  assert.deepEqual(finishedViewOf({ startedAt: 500, trail: [{ at: 600, tool: 'Read', detail: 'a.ts' }], verdict: 'ROOT_CAUSE', summaryLine: ' hydration race ' }), {
+    inFlight: false,
+    startedAt: 500,
+    steps: [{ at: 600, tool: 'Read', detail: 'a.ts' }],
+    verdict: 'ROOT_CAUSE',
+    summaryLine: 'hydration race',
+  });
+  assert.deepEqual(finishedViewOf(null), { inFlight: false, startedAt: null, steps: [], verdict: '', summaryLine: '' });
+});
+
+test('isOpenInvestigationFrame matches a frame to the open dialog by project and issue id, coercing numbers', () => {
+  const open = { projectId: '7', issueId: 'iss-1' };
+  assert.equal(isOpenInvestigationFrame(open, { projectId: 7, issueId: 'iss-1' }), true);
+  assert.equal(isOpenInvestigationFrame(open, { projectId: 8, issueId: 'iss-1' }), false);
+  assert.equal(isOpenInvestigationFrame(open, { projectId: 7, issueId: 'iss-2' }), false);
+  assert.equal(isOpenInvestigationFrame(null, { projectId: 7, issueId: 'iss-1' }), false);
 });
