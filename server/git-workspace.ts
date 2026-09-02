@@ -13,6 +13,8 @@ import {
   firstGitErrorLine,
 } from './core/branch-sync-core.ts';
 import { decideIntegrationSync, classifyRefusedIntegrationSync } from './core/integration-sync-core.ts';
+import { DEFAULT_BRANCH_FALLBACKS, decideMarkerBase, defaultBranchFromRemoteHead, markerProbeCommands } from './core/integration-branch-core.ts';
+import type { MarkerProbes } from './core/integration-branch-core.ts';
 import type { IntegrationSyncOutcome } from './core/integration-sync-core.ts';
 
 const fsp = fs.promises;
@@ -43,6 +45,7 @@ type WorktreeArgs = {
   workspace?: WorkspaceHandle | null;
   targetBranch?: string | null;
   integrationBranch?: string | null;
+  configuredIntegrationBranch?: string | null;
   cwd?: string | null;
   branch?: string | null;
   wtDir?: string;
@@ -153,11 +156,18 @@ function findWorktreeForBranch(porcelain: string, branch: string): string | null
 
 const isDirtyResult = (dirty: GitResult) => dirty.ok && dirty.out !== '';
 function hasWorkFrom(dirty: GitResult, ahead: GitResult | null): boolean {
+  if (!dirty.ok) return true;
   if (isDirtyResult(dirty)) return true;
-  return !!(ahead?.ok && ahead.out && ahead.out !== '0');
+  if (!ahead || !ahead.ok) return true;
+  return !!(ahead.out && ahead.out !== '0');
 }
 
 const markerFrom = (result: GitResult) => (result.ok && result.out ? result.out : null);
+const markerKey = (branch: string) => `branch.${branch}.glissa-integration`;
+
+const UNPROBED_MARKER: MarkerProbes = { detectedDefaultBranch: null, resolvedMarkerRef: null, isMarkerRefResolvable: null, isMarkerAbsorbedByDefault: null };
+
+type ResolvedMarkerBase = { base: string | null; measureRef: string | null };
 
 function createGitWorkspace(opts: {
   git?: GitRunner;
@@ -212,12 +222,38 @@ function createGitWorkspace(opts: {
 
   async function detectDefaultBranch({ projectPath }: { projectPath: string }): Promise<string | null> {
     const remoteHead = await run(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], projectPath);
-    if (remoteHead.ok && remoteHead.out.startsWith('origin/')) return remoteHead.out.slice('origin/'.length) || null;
-    for (const branch of ['main', 'master']) {
+    const fromRemoteHead = remoteHead.ok ? defaultBranchFromRemoteHead(remoteHead.out) : null;
+    if (fromRemoteHead) return fromRemoteHead;
+    for (const branch of DEFAULT_BRANCH_FALLBACKS) {
       const localBranch = await run(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], projectPath);
       if (localBranch.ok) return branch;
     }
     return null;
+  }
+
+  async function probeMarkerAgainstDefault(projectPath: string, marker: string): Promise<MarkerProbes> {
+    const detectedDefaultBranch = await detectDefaultBranch({ projectPath });
+    const plan = markerProbeCommands({ marker, detectedDefaultBranch });
+    if (!plan) return { ...UNPROBED_MARKER, detectedDefaultBranch };
+    for (const candidate of plan.markerRefCandidates) {
+      const markerRef = await run(candidate.argv, projectPath);
+      if (!markerRef.ok) continue;
+      const absorbed = await run(plan.absorbedByDefault(candidate.ref), projectPath);
+      return { detectedDefaultBranch, resolvedMarkerRef: candidate.ref, isMarkerRefResolvable: true, isMarkerAbsorbedByDefault: absorbed.ok };
+    }
+    return { ...UNPROBED_MARKER, detectedDefaultBranch, isMarkerRefResolvable: false };
+  }
+
+  async function migrateMarkerBase(projectPath: string, branch: string, fallbackBase: string | null | undefined, configuredIntegrationBranch: string | null | undefined): Promise<ResolvedMarkerBase> {
+    const marker = markerFrom(await run(['config', '--get', markerKey(branch)], projectPath));
+    const probes = marker && !configuredIntegrationBranch
+      ? await probeMarkerAgainstDefault(projectPath, marker)
+      : UNPROBED_MARKER;
+    const decision = decideMarkerBase({ marker, fallbackBase, configuredIntegrationBranch, ...probes });
+    if (!decision.migrateTo) return { base: decision.base, measureRef: decision.measureRef };
+    const written = await run(['config', markerKey(branch), decision.migrateTo], projectPath);
+    if (!written.ok) return { base: marker, measureRef: null };
+    return { base: decision.base, measureRef: null };
   }
 
   async function classifyBaseAgainstOrigin(projectPath: string, branch: string): Promise<BaseClassification> {
@@ -316,6 +352,7 @@ function createGitWorkspace(opts: {
     teamId,
     label,
     baseBranch = null,
+    configuredIntegrationBranch = null,
     forkFromHead = false,
     worktreeBase,
     shareList,
@@ -335,14 +372,13 @@ function createGitWorkspace(opts: {
     if (listed.ok) {
       const conflictPath = findWorktreeForBranch(listed.out, branch);
       if (conflictPath) {
-        const marker = await run(['config', '--get', `branch.${branch}.glissa-integration`], projectPath);
         return {
           cwd: projectPath,
           isGit: false,
           reason: 'branch-in-use',
           conflictPath,
           branch,
-          base: markerFrom(marker) || baseBranch || null,
+          base: (await migrateMarkerBase(projectPath, branch, baseBranch, configuredIntegrationBranch)).base,
         };
       }
     }
@@ -371,7 +407,7 @@ function createGitWorkspace(opts: {
       return { cwd: projectPath, isGit: false, error: add.err };
     }
 
-    await run(['config', `branch.${branch}.glissa-integration`, base], projectPath);
+    await run(['config', markerKey(branch), base], projectPath);
 
     await populateShare({ projectPath, wtDir, shareList });
     return { cwd: wtDir, isGit: true, branch, base, baseSha };
@@ -627,28 +663,27 @@ function createGitWorkspace(opts: {
     await run(['worktree', 'prune'], projectPath);
   }
 
-  async function probeWorktreeWork({ projectPath, cwd, branch, integrationBranch }: {
+  async function probeWorktreeWork({ projectPath, cwd, branch, integrationBranch, configuredIntegrationBranch }: {
     projectPath: string;
     cwd: string;
     branch: string;
     integrationBranch?: string | null;
+    configuredIntegrationBranch?: string | null;
   }): Promise<{ dirty: GitResult; ahead: GitResult | null; integrationBranch: string | null }> {
-
-    const marker = await run(['config', '--get', `branch.${branch}.glissa-integration`], projectPath);
-    const resolvedIntegrationBranch = markerFrom(marker) || integrationBranch;
-
+    const { base: resolvedIntegrationBranch, measureRef } = await migrateMarkerBase(projectPath, branch, integrationBranch, configuredIntegrationBranch);
     const dirty = await run(['status', '--porcelain'], cwd);
     const ahead = !isDirtyResult(dirty) && resolvedIntegrationBranch
-      ? await run(['rev-list', '--count', `${resolvedIntegrationBranch}..${branch}`], projectPath)
+      ? await run(['rev-list', '--count', `${measureRef || resolvedIntegrationBranch}..${branch}`], projectPath)
       : null;
     return { dirty, ahead, integrationBranch: resolvedIntegrationBranch ?? null };
   }
 
-  async function hasUnmergedWork({ projectPath, workspace, integrationBranch }: WorktreeArgs): Promise<boolean> {
+  async function hasUnmergedWorkBody({ projectPath, workspace, integrationBranch, configuredIntegrationBranch }: WorktreeArgs): Promise<boolean> {
     if (!workspace || !workspace.isGit || !workspace.cwd || !workspace.branch) return true;
     const { dirty, ahead } = await probeWorktreeWork({
       projectPath, cwd: workspace.cwd, branch: workspace.branch,
       integrationBranch: integrationBranch || workspace.base,
+      configuredIntegrationBranch,
     });
     if (!dirty.ok) return true;
     if (isDirtyResult(dirty)) return true;
@@ -656,7 +691,7 @@ function createGitWorkspace(opts: {
     return hasWorkFrom(dirty, ahead);
   }
 
-  async function listSessionWorktrees({ projectPath, integrationBranch }: WorktreeArgs): Promise<SessionWorktree[]> {
+  async function listSessionWorktreesBody({ projectPath, integrationBranch, configuredIntegrationBranch }: WorktreeArgs): Promise<SessionWorktree[]> {
     const out: SessionWorktree[] = [];
     const inside = await run(['rev-parse', '--is-inside-work-tree'], projectPath);
     if (!inside.ok || inside.out !== 'true') return out;
@@ -665,7 +700,7 @@ function createGitWorkspace(opts: {
     for (const { cwd: wt, branch: name } of parseWorktreeBranches(listed.out)) {
       const id = sessionIdFromBranch(name);
       if (id === null) continue;
-      const probe = await probeWorktreeWork({ projectPath, cwd: wt, branch: name, integrationBranch });
+      const probe = await probeWorktreeWork({ projectPath, cwd: wt, branch: name, integrationBranch, configuredIntegrationBranch });
       out.push({
         cwd: wt, branch: name, id,
         hasWork: hasWorkFrom(probe.dirty, probe.ahead),
@@ -839,7 +874,9 @@ function createGitWorkspace(opts: {
     fetchOrigin: serialized(fetchOriginBody),
     syncIntegrationBranch: serialized(syncIntegrationBranchBody),
     deleteRemoteBranch: serialized(deleteRemoteBranchBody),
-    listSessionWorktrees, listWorktreeBranches, hasUnmergedWork, detectDefaultBranch,
+    listSessionWorktrees: serialized(listSessionWorktreesBody),
+    hasUnmergedWork: serialized(hasUnmergedWorkBody),
+    listWorktreeBranches, detectDefaultBranch,
     listRemoteSessionBranches, listIntegrationTips, isAncestor, resolveProjectPath,
   };
 }
@@ -875,7 +912,40 @@ function createGitWorkspaceSync(opts: { git?: (args: string[], cwd: string) => s
     return null;
   }
 
-  function listSessionWorktrees({ projectPath, integrationBranch }: WorktreeArgs): SessionWorktree[] {
+  function detectDefaultBranch(projectPath: string): string | null {
+    const remoteHead = run(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], projectPath);
+    const fromRemoteHead = remoteHead.ok ? defaultBranchFromRemoteHead(remoteHead.out) : null;
+    if (fromRemoteHead) return fromRemoteHead;
+    for (const branch of DEFAULT_BRANCH_FALLBACKS) {
+      if (run(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], projectPath).ok) return branch;
+    }
+    return null;
+  }
+
+  function probeMarkerAgainstDefault(projectPath: string, marker: string): MarkerProbes {
+    const detectedDefaultBranch = detectDefaultBranch(projectPath);
+    const plan = markerProbeCommands({ marker, detectedDefaultBranch });
+    if (!plan) return { ...UNPROBED_MARKER, detectedDefaultBranch };
+    for (const candidate of plan.markerRefCandidates) {
+      if (!run(candidate.argv, projectPath).ok) continue;
+      const absorbed = run(plan.absorbedByDefault(candidate.ref), projectPath);
+      return { detectedDefaultBranch, resolvedMarkerRef: candidate.ref, isMarkerRefResolvable: true, isMarkerAbsorbedByDefault: absorbed.ok };
+    }
+    return { ...UNPROBED_MARKER, detectedDefaultBranch, isMarkerRefResolvable: false };
+  }
+
+  function migrateMarkerBase(projectPath: string, branch: string, fallbackBase: string | null | undefined, configuredIntegrationBranch: string | null | undefined): ResolvedMarkerBase {
+    const marker = markerFrom(run(['config', '--get', markerKey(branch)], projectPath));
+    const probes = marker && !configuredIntegrationBranch
+      ? probeMarkerAgainstDefault(projectPath, marker)
+      : UNPROBED_MARKER;
+    const decision = decideMarkerBase({ marker, fallbackBase, configuredIntegrationBranch, ...probes });
+    if (!decision.migrateTo) return { base: decision.base, measureRef: decision.measureRef };
+    if (!run(['config', markerKey(branch), decision.migrateTo], projectPath).ok) return { base: marker, measureRef: null };
+    return { base: decision.base, measureRef: null };
+  }
+
+  function listSessionWorktrees({ projectPath, integrationBranch, configuredIntegrationBranch }: WorktreeArgs): SessionWorktree[] {
     const out: SessionWorktree[] = [];
     const inside = run(['rev-parse', '--is-inside-work-tree'], projectPath);
     if (!inside.ok || inside.out !== 'true') return out;
@@ -884,11 +954,10 @@ function createGitWorkspaceSync(opts: { git?: (args: string[], cwd: string) => s
     for (const { cwd: wt, branch: name } of parseWorktreeBranches(listed.out)) {
       const id = sessionIdFromBranch(name);
       if (id === null) continue;
-      const marker = run(['config', '--get', `branch.${name}.glissa-integration`], projectPath);
-      const resolvedIntegrationBranch = markerFrom(marker) || integrationBranch;
+      const { base: resolvedIntegrationBranch, measureRef } = migrateMarkerBase(projectPath, name, integrationBranch, configuredIntegrationBranch);
       const dirty = run(['status', '--porcelain'], wt);
       const ahead = !isDirtyResult(dirty) && resolvedIntegrationBranch
-        ? run(['rev-list', '--count', `${resolvedIntegrationBranch}..${name}`], projectPath)
+        ? run(['rev-list', '--count', `${measureRef || resolvedIntegrationBranch}..${name}`], projectPath)
         : null;
       out.push({
         cwd: wt, branch: name, id,

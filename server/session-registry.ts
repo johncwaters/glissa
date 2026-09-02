@@ -138,6 +138,7 @@ function reconcileSessionWorktrees({
     for (const worktree of gitWorkspaceSync.listSessionWorktrees({
       projectPath: project.path,
       integrationBranch,
+      configuredIntegrationBranch: integrationBranch,
     })) {
       const session = sessions.get(worktree.id);
       if (session && isSameDirectoryPath(session.path, project.path) && worktreeDirExists(worktree.cwd)) {

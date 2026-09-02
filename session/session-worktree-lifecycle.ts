@@ -471,6 +471,7 @@ function createSessionWorktreeLifecycle({
         teamId: "session",
         label: id,
         baseBranch,
+        configuredIntegrationBranch: integrationBranch,
         worktreeBase: worktreeRoot,
         shareList: worktreeShare,
       });
@@ -541,6 +542,7 @@ function createSessionWorktreeLifecycle({
         projectPath: currentProjectPath(),
         workspace: lifecycleState.workspace,
         integrationBranch: effectiveIntegrationBranch(),
+        configuredIntegrationBranch: integrationBranch,
       });
     } catch {
       return true;

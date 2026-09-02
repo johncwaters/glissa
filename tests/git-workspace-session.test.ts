@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-import { createGitWorkspace } from '../server/git-workspace.ts';
+import { createGitWorkspace, createGitWorkspaceSync } from '../server/git-workspace.ts';
 import type { WorkspaceHandle } from '../server/git-workspace.ts';
 import { isSameDirectoryPath } from '../shared/paths.ts';
 import { hasGit, git } from './helpers/git-fixture.ts';
@@ -499,14 +499,14 @@ test('hasUnmergedWork (real git): a committed but CLEAN worktree reports work (t
   try {
     const gw = createGitWorkspace();
     const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'ahead', baseBranch: 'develop' });
-    assert.equal(await gw.hasUnmergedWork({ projectPath: repo, workspace: ws, integrationBranch: 'develop' }), false,
+    assert.equal(await gw.hasUnmergedWork({ projectPath: repo, workspace: ws, integrationBranch: 'develop', configuredIntegrationBranch: 'develop' }), false,
       'a fresh worktree holds nothing: discardable');
 
     fs.writeFileSync(path.join(ws.cwd, 'feature.js'), 'module.exports = 1;\n', 'utf8');
     git(['add', '-A'], ws.cwd); git(['commit', '-m', 'session work'], ws.cwd);
     assert.equal(git(['status', '--porcelain'], ws.cwd).trim(), '', 'committing leaves the tree clean');
 
-    assert.equal(await gw.hasUnmergedWork({ projectPath: repo, workspace: ws, integrationBranch: 'develop' }), true,
+    assert.equal(await gw.hasUnmergedWork({ projectPath: repo, workspace: ws, integrationBranch: 'develop', configuredIntegrationBranch: 'develop' }), true,
       'a commit the integration branch lacks IS work');
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
@@ -519,14 +519,14 @@ test('hasUnmergedWork (real git): uncommitted changes report work; a merged-away
     const gw = createGitWorkspace();
     const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'dirty', baseBranch: 'develop' });
     fs.writeFileSync(path.join(ws.cwd, 'scratch.txt'), 'wip\n', 'utf8');
-    assert.equal(await gw.hasUnmergedWork({ projectPath: repo, workspace: ws, integrationBranch: 'develop' }), true,
+    assert.equal(await gw.hasUnmergedWork({ projectPath: repo, workspace: ws, integrationBranch: 'develop', configuredIntegrationBranch: 'develop' }), true,
       'an untracked new file counts: it is usually the whole deliverable');
 
     fs.rmSync(path.join(ws.cwd, 'scratch.txt'));
     fs.writeFileSync(path.join(ws.cwd, 'landed.js'), 'module.exports = 2;\n', 'utf8');
     git(['add', '-A'], ws.cwd); git(['commit', '-m', 'work'], ws.cwd);
     git(['merge', '--ff-only', branchOf(ws)], repo);
-    assert.equal(await gw.hasUnmergedWork({ projectPath: repo, workspace: ws, integrationBranch: 'develop' }), false,
+    assert.equal(await gw.hasUnmergedWork({ projectPath: repo, workspace: ws, integrationBranch: 'develop', configuredIntegrationBranch: 'develop' }), false,
       'work already on the integration branch is not work: the empty worktree may be discarded');
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
@@ -540,7 +540,7 @@ test('hasUnmergedWork (real git): an unresolvable integration branch reports wor
     const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'safe', baseBranch: 'develop' });
 
     git(['config', `branch.${ws.branch}.glissa-integration`, 'no-such-branch'], repo);
-    assert.equal(await gw.hasUnmergedWork({ projectPath: repo, workspace: ws, integrationBranch: 'develop' }), true,
+    assert.equal(await gw.hasUnmergedWork({ projectPath: repo, workspace: ws, integrationBranch: 'develop', configuredIntegrationBranch: 'develop' }), true,
       'a failed rev-list keeps the worktree');
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
@@ -954,4 +954,174 @@ test('listSessionWorktrees flags a parked (committed-ahead) worktree as work eve
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
   }
+});
+
+function initRepoWithAbsorbedDevelop(): string {
+  const dir = initRepoOnMain('glissa-stale-marker-');
+  git(['branch', 'develop'], dir);
+  fs.writeFileSync(path.join(dir, 'landed.txt'), 'landed\n', 'utf8');
+  git(['add', '-A'], dir);
+  git(['commit', '-m', 'landed on main after develop was abandoned'], dir);
+  return dir;
+}
+
+test('listSessionWorktrees (real git): an unconfigured base migrates a marker whose branch main already absorbed', { skip: !GIT }, async () => {
+  const dir = initRepoWithAbsorbedDevelop();
+  try {
+    const gw = createGitWorkspace();
+    const ws = await gw.create({ projectPath: dir, teamId: 'session', label: 'stale', baseBranch: 'develop' });
+    assert.equal(git(['config', '--get', `branch.${ws.branch}.glissa-integration`], dir).trim(), 'develop');
+
+    const [entry] = await gw.listSessionWorktrees({ projectPath: dir, integrationBranch: null });
+    assert.equal(entry.integrationBranch, 'main', 'develop is an ancestor of main, so the base follows the default');
+    assert.equal(entry.hasWork, false, 'hasWork computed against main, not the abandoned develop');
+    assert.equal(git(['config', '--get', `branch.${ws.branch}.glissa-integration`], dir).trim(), 'main', 'marker rewritten');
+    await gw.discard({ projectPath: dir, workspace: ws });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('listSessionWorktrees (real git, sync): the startup reconcile path migrates the stale marker too', { skip: !GIT }, async () => {
+  const dir = initRepoWithAbsorbedDevelop();
+  try {
+    const gw = createGitWorkspace();
+    const ws = await gw.create({ projectPath: dir, teamId: 'session', label: 'stalesync', baseBranch: 'develop' });
+    const [entry] = createGitWorkspaceSync().listSessionWorktrees({ projectPath: dir, integrationBranch: null });
+    assert.equal(entry.integrationBranch, 'main');
+    assert.equal(git(['config', '--get', `branch.${ws.branch}.glissa-integration`], dir).trim(), 'main');
+    await gw.discard({ projectPath: dir, workspace: ws });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('listSessionWorktrees (real git): a marker whose branch holds commits main lacks is kept even when unconfigured', { skip: !GIT }, async () => {
+  const { dir } = initRepoMainWithDevelop();
+  try {
+    const gw = createGitWorkspace();
+    const ws = await gw.create({ projectPath: dir, teamId: 'session', label: 'keepmarker', baseBranch: 'develop' });
+    const [entry] = await gw.listSessionWorktrees({ projectPath: dir, integrationBranch: null });
+    assert.equal(entry.integrationBranch, 'develop', 'develop is not an ancestor of main, so retargeting would show its commits as session work');
+    assert.equal(git(['config', '--get', `branch.${ws.branch}.glissa-integration`], dir).trim(), 'develop');
+    await gw.discard({ projectPath: dir, workspace: ws });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('create (real git): a branch-in-use adoption with no configured base reports the migrated marker', { skip: !GIT }, async () => {
+  const dir = initRepoWithAbsorbedDevelop();
+  try {
+    const gw = createGitWorkspace();
+    const ws = await gw.create({ projectPath: dir, teamId: 'session', label: 'inuse', baseBranch: 'develop' });
+    const adopted = await gw.create({ projectPath: dir, teamId: 'session', label: 'inuse', baseBranch: 'main', configuredIntegrationBranch: null });
+    assert.equal(adopted.reason, 'branch-in-use');
+    assert.equal(adopted.base, 'main');
+    await gw.discard({ projectPath: dir, workspace: ws });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('hasUnmergedWork (real git): an already-resolved base argument does not block the migration of a stale marker', { skip: !GIT }, async () => {
+  const dir = initRepoWithAbsorbedDevelop();
+  try {
+    const gw = createGitWorkspace();
+    const ws = await gw.create({ projectPath: dir, teamId: 'session', label: 'unmerged', baseBranch: 'develop' });
+    assert.equal(
+      await gw.hasUnmergedWork({ projectPath: dir, workspace: ws, integrationBranch: 'develop', configuredIntegrationBranch: null }),
+      false,
+      'the worktree holds nothing main lacks',
+    );
+    assert.equal(
+      git(['config', '--get', `branch.${ws.branch}.glissa-integration`], dir).trim(),
+      'main',
+      'the resolved base argument is a fallback, never a configured branch that pins the marker',
+    );
+    await gw.discard({ projectPath: dir, workspace: ws });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('listSessionWorktrees (real git): a marker whose branch was deleted migrates to the detected default', { skip: !GIT }, async () => {
+  const { dir } = initRepoMainWithDevelop();
+  try {
+    const gw = createGitWorkspace();
+    const ws = await gw.create({ projectPath: dir, teamId: 'session', label: 'gonebase', baseBranch: 'develop' });
+    git(['branch', '-D', 'develop'], dir);
+    fs.writeFileSync(path.join(ws.cwd, 'session.txt'), 'work\n', 'utf8');
+    git(['add', '-A'], ws.cwd);
+    git(['commit', '-m', 'session work'], ws.cwd);
+
+    const [entry] = await gw.listSessionWorktrees({ projectPath: dir, integrationBranch: null });
+    assert.equal(entry.integrationBranch, 'main', 'a marker that no longer resolves cannot measure anything');
+    assert.equal(entry.hasWork, true, 'the commit counts against the default branch');
+    assert.equal(git(['config', '--get', `branch.${ws.branch}.glissa-integration`], dir).trim(), 'main');
+    await gw.discard({ projectPath: dir, workspace: ws });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function initCloneWithOriginOnlyDevelop(): { rootDir: string; repoDir: string } {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-origin-marker-'));
+  const seedDir = initRepoMainWithDevelop().dir;
+  const remoteDir = path.join(rootDir, 'origin.git');
+  const repoDir = path.join(rootDir, 'repository');
+  git(['clone', '--bare', seedDir, remoteDir], rootDir);
+  git(['symbolic-ref', 'HEAD', 'refs/heads/main'], remoteDir);
+  git(['clone', remoteDir, repoDir], rootDir);
+  git(['config', 'user.email', 'test@example.com'], repoDir);
+  git(['config', 'user.name', 'Glissa Test'], repoDir);
+  git(['config', 'commit.gpgsign', 'false'], repoDir);
+  git(['branch', 'develop', 'origin/develop'], repoDir);
+  fs.rmSync(seedDir, { recursive: true, force: true });
+  return { rootDir, repoDir };
+}
+
+test('listSessionWorktrees (real git): a marker branch alive only on origin keeps the marker', { skip: !GIT }, async () => {
+  const { rootDir, repoDir } = initCloneWithOriginOnlyDevelop();
+  try {
+    const gw = createGitWorkspace();
+    const ws = await gw.create({ projectPath: repoDir, teamId: 'session', label: 'originbase', baseBranch: 'develop' });
+    git(['branch', '-D', 'develop'], repoDir);
+    fs.writeFileSync(path.join(ws.cwd, 'session.txt'), 'work\n', 'utf8');
+    git(['add', '-A'], ws.cwd);
+    git(['commit', '-m', 'session work'], ws.cwd);
+
+    const [entry] = await gw.listSessionWorktrees({ projectPath: repoDir, integrationBranch: null });
+    assert.equal(entry.integrationBranch, 'develop', 'the base stays a plain branch name that a later create can fork from');
+    assert.equal(entry.hasWork, true, 'the session commit is measured against the remote-tracking ref that resolved');
+    assert.equal(git(['config', '--get', `branch.${ws.branch}.glissa-integration`], repoDir).trim(), 'develop', 'marker left alone');
+    assert.throws(
+      () => git(['rev-parse', '--verify', '--quiet', 'refs/heads/origin/develop'], repoDir),
+      Error,
+      'no local branch was fabricated under the remote-tracking short name',
+    );
+    await gw.discard({ projectPath: repoDir, workspace: ws });
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('listSessionWorktrees (injected git): a failing status keeps the worktree even when rev-list counts zero', async () => {
+  const failingStatusGit = (args: string[]): string => {
+    if (args[0] === 'rev-parse' && args.includes('--is-inside-work-tree')) return 'true';
+    if (args[0] === 'worktree' && args[1] === 'list') {
+      return 'worktree /repo\nbranch refs/heads/main\n\nworktree /wt/corrupt\nbranch refs/heads/glissa/session/corrupt\n\n';
+    }
+    if (args[0] === 'config') return 'main';
+    if (args[0] === 'status') {
+      const failure: Error & { status?: number } = new Error('fatal: unable to read index file');
+      failure.status = 128;
+      throw failure;
+    }
+    if (args[0] === 'rev-list') return '0';
+    return '';
+  };
+  const gw = createGitWorkspace({ git: failingStatusGit });
+  const [entry] = await gw.listSessionWorktrees({ projectPath: '/repo', integrationBranch: 'main', configuredIntegrationBranch: 'main' });
+  assert.equal(entry.hasWork, true, 'a status that never ran cannot prove the worktree is empty, so it is never discarded');
 });
