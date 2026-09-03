@@ -124,6 +124,53 @@ test('base fetch is bounded and non-interactive', async () => {
   });
 });
 
+test('a caller may raise the fetch budget above the interactive default', async () => {
+  let fetchCall: { args: string[]; cwd: string; extra?: unknown } | null = null;
+  const gitWorkspace = createGitWorkspace({
+    git: (args, cwd, extra) => {
+      fetchCall = { args, cwd, extra };
+      return '';
+    },
+  });
+  await gitWorkspace.fetchOrigin({ projectPath: '/repo', timeoutMs: 60000 });
+  assert.deepEqual(fetchCall, {
+    args: ['fetch', '--prune', 'origin'],
+    cwd: '/repo',
+    extra: { timeout: 60000, env: { GIT_TERMINAL_PROMPT: '0' } },
+  });
+});
+
+test('a fetch killed by its timeout is reported as a timeout, not a bare command failure', async () => {
+  const gitWorkspace = createGitWorkspace({
+    git: () => {
+      throw Object.assign(new Error('Command failed: git fetch --prune origin'), {
+        killed: true,
+        signal: 'SIGTERM',
+        stderr: '',
+        stdout: '',
+      });
+    },
+  });
+  const fetched = await gitWorkspace.fetchOrigin({ projectPath: '/repo' });
+  assert.deepEqual(fetched, {
+    ok: false,
+    out: '',
+    err: 'timed out (killed): Command failed: git fetch --prune origin',
+  });
+});
+
+test('a git refusal keeps its stderr unmarked', async () => {
+  const gitWorkspace = createGitWorkspace({
+    git: () => {
+      throw Object.assign(new Error('Command failed: git fetch --prune origin'), {
+        stderr: 'fatal: could not read Username\n',
+      });
+    },
+  });
+  const fetched = await gitWorkspace.fetchOrigin({ projectPath: '/repo' });
+  assert.deepEqual(fetched, { ok: false, out: '', err: 'fatal: could not read Username\n' });
+});
+
 test('mergeBack (injected): committed-only rebase + ff-only merge when target is checked out, then junction-safe teardown', async () => {
   const cmds: string[] = [];
   const gw = createGitWorkspace({ git: fakeSessionGit(cmds, { ahead: '1', dirty: '', head: 'develop' }) });

@@ -48,6 +48,7 @@ type WorktreeArgs = {
   configuredIntegrationBranch?: string | null;
   cwd?: string | null;
   branch?: string | null;
+  timeoutMs?: number;
   wtDir?: string;
   shareList?: string[] | null;
   teamId?: string;
@@ -106,8 +107,14 @@ function okResult(out: unknown): GitResult {
   return { ok: true, out: String(out || '').trim() };
 }
 function errResult(err: unknown): GitResult {
-  const failure = (err ?? {}) as { stdout?: unknown; stderr?: unknown; message?: unknown };
-  return { ok: false, out: String(failure.stdout || '').trim(), err: String(failure.stderr || failure.message || '') };
+  const failure = (err ?? {}) as { stdout?: unknown; stderr?: unknown; message?: unknown; killed?: unknown; signal?: unknown };
+  const detail = String(failure.stderr || failure.message || '');
+  const wasKilledByTimeout = failure.killed === true && Boolean(failure.signal);
+  return {
+    ok: false,
+    out: String(failure.stdout || '').trim(),
+    err: wasKilledByTimeout ? `timed out (killed): ${detail}` : detail,
+  };
 }
 
 function normalizedDirectoryPath(value: unknown): string {
@@ -727,9 +734,9 @@ function createGitWorkspace(opts: {
     return parseWorktreeBranches(listed.out);
   }
 
-  async function fetchOriginBody({ projectPath, branch = null }: WorktreeArgs): Promise<GitResult> {
+  async function fetchOriginBody({ projectPath, branch = null, timeoutMs = GIT_FETCH_TIMEOUT_MS }: WorktreeArgs): Promise<GitResult> {
     const fetchOptions: GitExtraOptions = {
-      timeout: GIT_FETCH_TIMEOUT_MS,
+      timeout: timeoutMs,
       env: { GIT_TERMINAL_PROMPT: '0' },
     };
     if (branch) {

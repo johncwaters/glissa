@@ -6,6 +6,7 @@ import type { TickOutcome } from './lane-runner.ts';
 
 const DEFAULT_STALE_DAYS = 14;
 const DEFAULT_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const BRANCH_GC_FETCH_TIMEOUT_MS = 60000;
 
 interface GitCallResult {
   ok: boolean;
@@ -24,7 +25,7 @@ type ListTipsResult = GitCallResult & { integrationTips?: IntegrationTip[] };
 type AncestorResult = GitCallResult & { isAncestor?: boolean };
 
 interface BranchGcGitWorkspace {
-  fetchOrigin(args: { projectPath: string }): Promise<GitCallResult>;
+  fetchOrigin(args: { projectPath: string; timeoutMs?: number }): Promise<GitCallResult>;
   listRemoteSessionBranches(args: { projectPath: string }): Promise<ListBranchesResult>;
   listIntegrationTips(args: { projectPath: string; integrationBranch: string | null }): Promise<ListTipsResult>;
   isAncestor(args: { projectPath: string; ancestorSha: string; descendantSha: string }): Promise<AncestorResult>;
@@ -136,7 +137,10 @@ function createBranchGcPoller(deps: BranchGcPollerDeps): BranchGcPoller {
 
   async function tickProject(projectPath: string, config: BranchGcConfig): Promise<BranchGcProjectSummary> {
     const summary: BranchGcProjectSummary = { projectPath, deletions: [], kept: [], errors: 0 };
-    const fetched = await callGit(gitWorkspace.fetchOrigin, { projectPath });
+    const fetched = await callGit(gitWorkspace.fetchOrigin, {
+      projectPath,
+      timeoutMs: BRANCH_GC_FETCH_TIMEOUT_MS,
+    });
     if (!fetched.ok) {
       noteGitError({ projectPath, operation: 'fetch', gitResult: fetched });
       summary.errors += 1;
@@ -241,5 +245,5 @@ function createBranchGcPoller(deps: BranchGcPollerDeps): BranchGcPoller {
   return { start: loop.start, stop: loop.stop, tick: loop.tick };
 }
 
-export { DEFAULT_INTERVAL_MS, DEFAULT_STALE_DAYS, createBranchGcPoller };
+export { BRANCH_GC_FETCH_TIMEOUT_MS, DEFAULT_INTERVAL_MS, DEFAULT_STALE_DAYS, createBranchGcPoller };
 export type { BranchGcGitWorkspace, BranchGcPoller, BranchGcPollerDeps, BranchGcProjectSummary };

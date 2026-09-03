@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createBranchGcPoller } from '../server/branch-gc-poller.ts';
+import { BRANCH_GC_FETCH_TIMEOUT_MS, createBranchGcPoller } from '../server/branch-gc-poller.ts';
 import type { BranchGcGitWorkspace } from '../server/branch-gc-poller.ts';
 import { createBranchGcWiring } from '../server/branch-gc-wiring.ts';
 import { DAY_MS } from '../server/core/branch-gc-core.ts';
@@ -33,12 +33,12 @@ function unreachableGitWorkspace(): BranchGcGitWorkspace {
 }
 
 test('fetches before listing, deletes separately, continues after failure, and protects live sessions', async () => {
-  const calls: (string | null)[][] = [];
+  const calls: (string | number | null | undefined)[][] = [];
   const traces: Record<string, unknown>[] = [];
   const mergedShas = new Set(['merged-sha', 'failed-delete-sha', 'live-sha']);
   const gitWorkspace: BranchGcGitWorkspace = {
-    async fetchOrigin({ projectPath }) {
-      calls.push(['fetch', projectPath]);
+    async fetchOrigin({ projectPath, timeoutMs }) {
+      calls.push(['fetch', projectPath, timeoutMs]);
       return { ok: true };
     },
     async listRemoteSessionBranches({ projectPath }) {
@@ -83,7 +83,7 @@ test('fetches before listing, deletes separately, continues after failure, and p
 
   await poller.tick();
 
-  assert.deepEqual(calls.slice(0, 2), [['fetch', '/repo'], ['list', '/repo']]);
+  assert.deepEqual(calls.slice(0, 2), [['fetch', '/repo', BRANCH_GC_FETCH_TIMEOUT_MS], ['list', '/repo']]);
   assert.deepEqual(
     calls.filter(([operation]) => operation === 'delete'),
     [
