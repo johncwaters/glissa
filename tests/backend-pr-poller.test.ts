@@ -175,6 +175,21 @@ test('PR review lane passes configured packs into Session options', () => {
   }
 });
 
+test('with the mill off the PR review lane spawns with no pack at all', () => {
+  const { makeSession, constructed, created } = recordingSessionFactory();
+  const wiring = createPrReviewWiring({
+    config: { millEnabled: false, prReview: { packs: ['crew-rules', 'house-rules'] }, replayBufferKB: 256 },
+    ...inertWiringDeps(),
+    makeSession,
+  });
+  try {
+    wiring._makeReviewSession({ id: 'pr:1', name: 'PR', path: process.cwd(), initialPrompt: 'prompt' });
+    assert.deepEqual(constructed[0].packs, []);
+  } finally {
+    for (const session of created) session.destroy();
+  }
+});
+
 function withBackend(fn: (t: TestContext, dash: DashboardClient) => Promise<void>) {
   return async (t: TestContext) => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-prrestart-'));

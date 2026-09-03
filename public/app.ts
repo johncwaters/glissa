@@ -287,10 +287,6 @@ const messageHandlers = {
     if (shouldResolve) activateSettingsHash();
   },
 
-  'project-packs-updated': () => requestMillReportSoon(),
-
-  'set-project-packs-result': (msg) => { if (!msg.ok) { showErrorToast(msg.error || 'Could not change pack delivery', { persist: true }); requestMillReport(); } },
-
   'hooks-report':       (msg) => applyHooksReport(msg),
   'save-hook-result':   (msg) => applySaveHookResult(msg),
   'delete-hook-result': (msg) => applyDeleteHookResult(msg),

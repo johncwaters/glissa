@@ -6,7 +6,7 @@ import type { HookRouter } from '../detection/hook-source.ts';
 import { Session } from '../session/sessions.ts';
 import type { SessionOptions } from '../session/sessions.ts';
 import { glissaHomeDir } from './config-store.ts';
-import { normalizePackNames } from './core/pack-core.ts';
+import { millPackNames } from './core/pack-core.ts';
 import {
   awaitSessionExit, createJobResultFile, readResultFile, registerEphemeralSession,
 } from './ephemeral-session.ts';
@@ -36,6 +36,7 @@ const PR_REVIEW_DENY = {
 interface PrReviewWiringConfig {
   replayBufferKB?: number;
   worktreeRoot?: string;
+  millEnabled?: unknown;
   prReview?: {
     enabled?: boolean;
     packs?: unknown;
@@ -135,7 +136,7 @@ function prReviewCfgKey(cfg: PrReviewWiringConfig): string {
 }
 
 function prReviewPackNames(cfg: PrReviewWiringConfig): string[] {
-  return normalizePackNames(cfg.prReview ? cfg.prReview.packs : null).names;
+  return millPackNames(cfg, cfg.prReview ? cfg.prReview.packs : null);
 }
 
 function createPrReviewWiring({

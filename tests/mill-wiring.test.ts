@@ -235,23 +235,13 @@ test('the cached report carries no requestId, so a connect replay answers nobody
   assert.equal(cached?.totals.packCount, 1);
 });
 
-test('listPackNames reports every spec on disk, including one that has never been built', async (t: TestContext) => {
-  const fixture = writeFixture();
-  t.after(() => fs.rmSync(fixture.tmpDir, { recursive: true, force: true }));
-  writeSpec(fixture.specsDir, 'unbuilt', JSON.stringify({
-    name: 'unbuilt', sources: [{ path: 'sources/good' }], budgetTokens: 8000,
-  }));
 
-  const { wiring } = makeWiring(fixture);
-  assert.deepEqual((await wiring.listPackNames()).sort(), ['good', 'unbuilt']);
-});
-
-test('the report carries the project ids the assignment control addresses', async (t: TestContext) => {
+test('the report lists every project as a consumer of every spec', async (t: TestContext) => {
   const fixture = writeFixture();
   t.after(() => fs.rmSync(fixture.tmpDir, { recursive: true, force: true }));
 
   const { wiring } = makeWiring(fixture, {
-    config: { projects: [{ id: 'p1', name: 'glissa', packs: ['good'] }, { id: 'p2', name: 'other' }] },
+    config: { projects: [{ id: 'p1', name: 'glissa' }, { id: 'p2', name: 'other' }] },
   });
   const { replies, done } = pull(wiring, 'r1');
   await done;
@@ -259,7 +249,7 @@ test('the report carries the project ids the assignment control addresses', asyn
   const report = reportOf(replies[0]);
   assert.deepEqual(report.projects, [
     { id: 'p1', name: 'glissa', packs: ['good'] },
-    { id: 'p2', name: 'other', packs: [] },
+    { id: 'p2', name: 'other', packs: ['good'] },
   ]);
   assert.equal(report.packs[0].hasConsumers, true);
 });
@@ -327,11 +317,34 @@ test('a dormant card with an assigned pack reports a pending delivery, not silen
   assert.ok(!JSON.stringify(replies[0]).includes(fixture.tmpDir), 'no server path reaches the wire');
 });
 
-test('a spec no project and no lane names is reported as having no consumers', async (t: TestContext) => {
+test('with the mill switched off the report claims no consumer and no pending delivery', async (t: TestContext) => {
   const fixture = writeFixture();
   t.after(() => fs.rmSync(fixture.tmpDir, { recursive: true, force: true }));
 
-  const { wiring } = makeWiring(fixture, { config: { projects: [{ id: 'p1', name: 'glissa' }] } });
+  const projectPath = path.join(fixture.tmpDir, 'checkout');
+  const { wiring } = makeWiring(fixture, {
+    config: {
+      millEnabled: false,
+      projects: [{ id: 'p1', name: 'glissa', path: projectPath }],
+      prReview: { packs: ['good'] },
+    },
+    listSessions: () => [{ id: 's1', name: 'glissa', path: projectPath, state: 'DORMANT', packs: [] }],
+  });
+  const { replies, done } = pull(wiring, 'r1');
+  await done;
+
+  const report = reportOf(replies[0]);
+  const good = packRow(report, 'good');
+  assert.equal(good.hasConsumers, false, 'a disabled mill delivers to nobody, so it must promise nobody');
+  assert.deepEqual(good.deliveredTo, []);
+  assert.deepEqual(report.projects, [{ id: 'p1', name: 'glissa', packs: [] }]);
+});
+
+test('with no project configured and no lane naming it, a spec is reported as having no consumers', async (t: TestContext) => {
+  const fixture = writeFixture();
+  t.after(() => fs.rmSync(fixture.tmpDir, { recursive: true, force: true }));
+
+  const { wiring } = makeWiring(fixture, { config: { projects: [] } });
   const { replies, done } = pull(wiring, 'r1');
   await done;
 
@@ -395,30 +408,4 @@ test('a group with no consuming project reports only its base row', async () => 
   }
 });
 
-test('a group name is what a project may be assigned; a variant name is not offered', async () => {
-  const fixture = writeVariantFixture();
-  try {
-    const { wiring } = makeWiring(fixture, { config: variantConfig() });
-    assert.deepEqual(await wiring.listPackNames(), ['good', 'memory']);
-  } finally {
-    fs.rmSync(fixture.tmpDir, { recursive: true, force: true });
-  }
-});
 
-test('resolvePackSourceRoots answers from the SPEC, so an unbuilt pack is still judged', async (t: TestContext) => {
-  const fixture = writeFixture();
-  t.after(() => fs.rmSync(fixture.tmpDir, { recursive: true, force: true }));
-  writeSpec(fixture.specsDir, 'mirror', JSON.stringify({
-    name: 'mirror',
-    description: 'never built',
-    sources: [{ path: 'sources/good' }],
-    distill: [{ output: 'sources/good/derived/brief.md', sources: [{ path: '../AGENTS.md' }], instructions: 'summarize' }],
-    budgetTokens: 8000,
-  }));
-
-  const { wiring } = makeWiring(fixture);
-  const roots = await wiring.resolvePackSourceRoots('mirror');
-  const relative = roots.map((root) => path.relative(fixture.packsDir, root).replace(/\\/g, '/')).sort();
-  assert.deepEqual(relative, ['../AGENTS.md', 'sources/good']);
-  assert.deepEqual(await wiring.resolvePackSourceRoots('no-such-pack'), []);
-});

@@ -14,7 +14,6 @@ import type { ControlSocket } from './backend-websockets.ts';
 import type { ConfigStore, GlissaConfig, ProjectEntry } from './config-store.ts';
 import type { ControlMessageRecord, ReplayLog } from './control-replay-core.ts';
 import { normalizeClientTrust } from './core/request-trust.ts';
-import { PACK_NAME_RE, applyPackDelta, isSelfReferentialPack, sameProjectRecords } from './core/pack-core.ts';
 import {
   INGEST_SPEC, MEMORY_SPEC, MILL_METRICS_SPEC, PACK_DISTILLER_SPEC, mergeMillBlock, validateMillBlock,
 } from './core/settings-mill-core.ts';
@@ -120,9 +119,6 @@ interface ControlHandlerDeps {
   requestUsageReport?: ((args: { days?: number; force?: boolean; requestId?: string | null }) => Promise<unknown>) | null;
   getPlanLimits?: (() => unknown) | null;
   millReport?: MillControl | null;
-  listPackNames?: (() => Promise<string[]>) | null;
-  resolvePackSourceRoots?: ((name: string) => Promise<string[]>) | null;
-  ensurePacksBuilt?: ((names: string[], savedConfig: GlissaConfig) => Promise<unknown>) | null;
   controlReplayLog?: ReplayLog | null;
   getRtkInstallStatus?: () => Record<string, unknown> | null;
   resolveRtkPath?: () => string | null;
@@ -290,7 +286,6 @@ function requestValidationErrorReply(msg: Record<string, unknown> | null | undef
     'posthog-archive-investigation': () => ({ type: 'posthog-archive-investigation-result', requestId, ok: false, error: message }),
     'request-usage-report': () => ({ type: 'usage-report', requestId, error: message }),
     'request-mill-report': () => ({ type: 'mill-report', requestId, error: message }),
-    'set-project-packs': () => ({ type: 'set-project-packs-result', requestId, ok: false, error: message }),
     'request-hooks-report': () => ({ type: 'hooks-report', requestId, error: message }),
     'save-hook': () => ({ type: 'save-hook-result', requestId, ok: false, error: message }),
     'delete-hook': () => ({ type: 'delete-hook-result', requestId, ok: false, error: message }),
@@ -353,11 +348,6 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     getPlanLimits = null,
 
     millReport = null,
-
-    listPackNames = null,
-    resolvePackSourceRoots = null,
-
-    ensurePacksBuilt = null,
 
     controlReplayLog = null,
 
@@ -826,68 +816,6 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     ws.send(JSON.stringify(report));
   }
 
-  async function handleSetProjectPacks(msg: ControlRequest, ws: ControlSocket): Promise<void> {
-    const reply = (payload: Record<string, unknown>) => replyTo(ws, msg, 'set-project-packs-result', { ok: false, error: null, ...payload });
-    const projectId = typeof msg.projectId === 'string' ? msg.projectId.trim() : '';
-    const project = (config.projects || []).find((p) => p.id === projectId);
-    if (!project) { reply({ error: 'Unknown project' }); return; }
-    const pack = typeof msg.pack === 'string' ? msg.pack.trim() : '';
-    if (!PACK_NAME_RE.test(pack)) { reply({ error: 'pack must be a pack name' }); return; }
-    if (typeof msg.deliver !== 'boolean') { reply({ error: 'deliver must be a boolean' }); return; }
-
-    if (msg.deliver) {
-      if (!listPackNames) { reply({ error: 'The context mill is not running' }); return; }
-      const known = new Set(await listPackNames());
-      if (!known.has(pack)) { reply({ error: `No pack spec named "${pack}"` }); return; }
-
-      const sourceRoots = resolvePackSourceRoots ? await resolvePackSourceRoots(pack) : [];
-      if (isSelfReferentialPack(sourceRoots, project.path)) {
-        reply({ error: `Pack "${pack}" is built from files inside this project, which its sessions already load` });
-        return;
-      }
-    }
-
-    const outcome: { value: { error: string } | { packs: string[] } | null } = { value: null };
-    const freshConfig = configStore.save((cfg) => {
-      const records = Array.isArray(cfg.projects) ? cfg.projects : [];
-      const record = records.find((p) => p.id === projectId);
-      if (!record) { outcome.value = { error: 'Unknown project' }; return; }
-
-      const planned: { member: ProjectEntry; packs: string[] }[] = [];
-      for (const member of sameProjectRecords(records, record)) {
-        const next = applyPackDelta(member.packs, pack, msg.deliver);
-        if (!next.ok) { outcome.value = { error: next.error || 'Could not update project packs' }; return; }
-        planned.push({ member, packs: next.packs });
-      }
-      outcome.value = { packs: planned.find((entry) => entry.member === record)?.packs ?? [] };
-      for (const { member, packs } of planned) {
-
-        if (packs.length === 0) delete member.packs;
-        if (packs.length > 0) member.packs = packs;
-      }
-    });
-    if (!freshConfig) { reply({ error: 'Could not write config.json' }); return; }
-
-    const savedOutcome = outcome.value;
-    if (!savedOutcome) { reply({ error: 'Could not update project packs' }); return; }
-    if ('error' in savedOutcome) { reply({ error: savedOutcome.error }); return; }
-
-    reply({ ok: true, projectId, pack, deliver: msg.deliver, packs: savedOutcome.packs });
-
-    broadcastControl({ type: 'project-packs-updated', projectId, packs: savedOutcome.packs });
-    console.log(`[control] set-project-packs: ${project.name} ${msg.deliver ? '+' : '-'}${pack}`);
-
-    if (msg.deliver && ensurePacksBuilt) {
-      try {
-
-        await ensurePacksBuilt([pack], freshConfig);
-      } catch (err) {
-        console.warn(`[control] set-project-packs: build of "${pack}" failed: ${errorMessage(err)}`);
-      }
-    }
-    applyConfigReload(freshConfig);
-  }
-
   function handleRequestMillReport(msg: ControlRequest, ws: ControlSocket) {
     if (!millReport) {
       ws.send(JSON.stringify({ type: 'mill-report', requestId: typeof msg.requestId === 'string' ? msg.requestId : null, error: 'The context mill is not running' }));
@@ -1005,7 +933,6 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     'posthog-archive-investigation': handlePosthogArchiveInvestigation,
     'request-usage-report': handleRequestUsageReport,
     'request-mill-report': handleRequestMillReport,
-    'set-project-packs': handleSetProjectPacks,
     'request-hooks-report': handleRequestHooksReport,
     'save-hook': handleSaveHook,
     'delete-hook': handleDeleteHook,

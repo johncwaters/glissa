@@ -42,7 +42,7 @@ const DEFAULT_CONFIG = {
 
   autoResume: true,
 
-  packsAutoRebuild: true,
+  millEnabled: true,
 
   packDistiller: {
     enabled: false,
@@ -173,6 +173,7 @@ function validateConfig(candidate: unknown): ConfigValidation {
 function normalizeConfigFile(candidate: unknown): GlissaConfig {
   if (!isPlainObject(candidate)) throw new Error('config must be a plain object');
   const draft: Record<string, unknown> = candidate;
+  if (draft.millEnabled === undefined && draft.packsAutoRebuild === false) draft.millEnabled = false;
   for (const [key, fallback] of Object.entries(DEFAULT_CONFIG_BY_KEY)) {
     if (fallback === null || typeof fallback === 'object') continue;
     if (!Object.hasOwn(draft, key)) continue;
@@ -386,7 +387,7 @@ function createConfigStore({ settingsDefaults }: { settingsDefaults?: Partial<De
       checkForUpdates: config.checkForUpdates ?? effectiveDefaults.checkForUpdates,
       autoResume: config.autoResume ?? effectiveDefaults.autoResume,
       telegramNotifications: config.telegramNotifications ?? effectiveDefaults.telegramNotifications,
-      packsAutoRebuild: config.packsAutoRebuild ?? effectiveDefaults.packsAutoRebuild,
+      millEnabled: config.millEnabled ?? effectiveDefaults.millEnabled,
       integrationBranch: config.integrationBranch === undefined ? effectiveDefaults.integrationBranch : config.integrationBranch,
       worktreeRoot: config.worktreeRoot ?? effectiveDefaults.worktreeRoot,
       worktreeShare: config.worktreeShare ?? effectiveDefaults.worktreeShare,

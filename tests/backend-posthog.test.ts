@@ -204,6 +204,27 @@ test('PostHog lane passes configured packs into Session options', () => {
   }
 });
 
+test('with the mill off the PostHog lane spawns with no pack at all', () => {
+  const { makeSession, constructed, created } = recordingSessionFactory();
+  const wiring = createPosthogWiring({
+    config: { millEnabled: false, posthog: { ...ENABLED, packs: ['crew-rules', 'house-rules'] }, replayBufferKB: 256 },
+    ...inertWiringDeps(),
+    makeSession,
+  });
+  try {
+    wiring._makeInvestigationSession({
+      id: 'posthog:1',
+      name: 'PostHog',
+      path: process.cwd(),
+      initialPrompt: 'prompt',
+      spawnEnv: { POSTHOG_API_KEY: 'x', POSTHOG_HOST: 'https://ph.test' },
+    });
+    assert.deepEqual(constructed[0].packs, []);
+  } finally {
+    for (const session of created) session.destroy();
+  }
+});
+
 test('an investigation session reports its tool trail from routed hooks, pretooluse only, newest last', async () => {
   const hooksBaseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-ph-hooks-'));
   const hookRouter = new HookRouter();

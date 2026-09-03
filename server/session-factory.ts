@@ -9,18 +9,20 @@ import { DEFAULT_CONFIG } from './config-store.ts';
 import type { GlissaConfig, ProjectEntry } from './config-store.ts';
 import { configuredIntegrationBranch } from './core/integration-branch-core.ts';
 import type { MillMetricsPort } from './mill-metrics-wiring.ts';
-import { projectVariantSlug } from './core/pack-core.ts';
+import { isMillEnabled, projectVariantSlug } from './core/pack-core.ts';
 import { projectSkipsPermissions } from './core/session-registry-core.ts';
 import { resolveUsageConfig } from './usage-wiring.ts';
 
 interface SessionFactoryDependencies {
   configStore: { configPath: string };
+  getConfig: () => GlissaConfig;
   hookRouter: Pick<HookRouter, 'register' | 'unregister'> | null;
   getHookPort: () => number | null;
   getGitWorkspace: () => GitWorkspace | null;
   getMillMetricsPort: () => MillMetricsPort | null;
   rtkPathForConfig: (config: GlissaConfig) => string | null;
   getUserHooks: (projectId: string) => UserHook[];
+  listPackNames: () => string[];
 }
 
 function createSessionFactory(dependencies: SessionFactoryDependencies) {
@@ -52,7 +54,7 @@ function createSessionFactory(dependencies: SessionFactoryDependencies) {
       antiSlopPrompt: config.antiSlopPrompt,
       rtkPath: dependencies.rtkPathForConfig(config),
       resumeSessionId: (project.resumeSessionId as string | null | undefined) || null,
-      packs: project.packs,
+      packs: () => (isMillEnabled(dependencies.getConfig()) ? dependencies.listPackNames() : []),
       packVariantSlug: projectVariantSlug(project.path),
       millMetricsPort: dependencies.getMillMetricsPort(),
       planLimits: planLimitsEnabled(config),

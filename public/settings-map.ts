@@ -373,9 +373,9 @@ export const SETTINGS_MAP = Object.freeze([
     description: 'Context packs, long-term memory and machine-context ingest.',
     settings: [
       {
-        id: 'packs-auto-rebuild', path: 'packsAutoRebuild', title: 'Rebuild packs automatically',
-        description: 'Watch pack sources and run the fallback sweep.',
-        control: 'toggle', keywords: ['context', 'watcher'], defaultValue: true,
+        id: 'mill-enabled', path: 'millEnabled', title: 'Enable the context mill',
+        description: 'Build every pack and deliver them to every project session (up to 4 per session).',
+        control: 'toggle', keywords: ['context', 'packs', 'delivery'], defaultValue: true,
       },
       {
         id: 'pack-distiller-enabled', path: 'packDistiller.enabled', title: 'Enable the pack distiller',

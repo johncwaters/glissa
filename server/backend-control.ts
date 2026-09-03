@@ -5,7 +5,6 @@ import type { ConfigStore, GlissaConfig, ProjectEntry } from './config-store.ts'
 import { registerControlHandlers } from './control-handlers.ts';
 import type { MillControl } from './control-handlers.ts';
 import type { ReplayLog } from './control-replay-core.ts';
-import { packVariantProjects } from './core/pack-core.ts';
 
 interface SnapshotLane {
   snapshotMessage: () => Record<string, unknown>;
@@ -28,7 +27,6 @@ interface PrReviewControl {
 
 interface PackControl {
   getVersions: () => Record<string, string | null>;
-  ensureBuilt: (names: string[], options?: { projects?: Record<string, unknown>[] | null }) => Promise<unknown>;
 }
 
 interface UsageControl {
@@ -36,11 +34,6 @@ interface UsageControl {
   getCachedReport: () => Record<string, unknown> | null;
   requestReport: (args: { days?: number; force?: boolean; requestId?: string | null }) => Promise<Record<string, unknown>>;
   getPlanLimitsMessage: () => Record<string, unknown> | null;
-}
-
-interface BackendControlMill extends MillControl {
-  listPackNames: () => Promise<string[]>;
-  resolvePackSourceRoots: (name: string) => Promise<string[]>;
 }
 
 interface BackendControlDependencies {
@@ -66,8 +59,7 @@ interface BackendControlDependencies {
   prReview: PrReviewControl;
   packService: PackControl;
   usage: UsageControl;
-  mill: BackendControlMill;
-  packsAutoRebuildEnabled: boolean;
+  mill: MillControl;
   serverBuild: () => string;
   logger: Pick<Console, 'warn'>;
 }
@@ -86,7 +78,6 @@ function createBackendControl(dependencies: BackendControlDependencies): void {
     packService,
     usage,
     mill,
-    packsAutoRebuildEnabled,
     logger,
   } = dependencies;
 
@@ -118,12 +109,6 @@ function createBackendControl(dependencies: BackendControlDependencies): void {
     requestUsageReport: (args) => usage.requestReport(args),
     getPlanLimits: () => usage.getPlanLimitsMessage(),
     millReport: mill,
-    listPackNames: () => mill.listPackNames(),
-    resolvePackSourceRoots: (name) => mill.resolvePackSourceRoots(name),
-    ensurePacksBuilt: (names, savedConfig) => {
-      if (!packsAutoRebuildEnabled) return Promise.resolve();
-      return packService.ensureBuilt(names, { projects: packVariantProjects(savedConfig || config) });
-    },
   });
 
   const sendLaneSnapshotOnConnect = (

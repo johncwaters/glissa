@@ -465,7 +465,17 @@ function normalizePackNames(
   return { names, warnings };
 }
 
+function isMillEnabled(config: { millEnabled?: unknown } | null | undefined): boolean {
+  return config?.millEnabled !== false;
+}
+
+function millPackNames(config: { millEnabled?: unknown } | null | undefined, value: unknown): string[] {
+  if (!isMillEnabled(config)) return [];
+  return normalizePackNames(value).names;
+}
+
 interface PackConsumerConfig {
+  millEnabled?: unknown;
   projects?: unknown;
   prReview?: { packs?: unknown } | null;
   posthog?: { packs?: unknown } | null;
@@ -481,13 +491,7 @@ function projectPathKey(project: unknown): string | null {
   return typeof record?.path === 'string' && record.path ? record.path : null;
 }
 
-function sameProjectRecords<T>(records: readonly T[] | null | undefined, record: T): T[] {
-  const key = projectPathKey(record);
-  if (key === null) return [record];
-  return (Array.isArray(records) ? records : []).filter((entry) => projectPathKey(entry) === key);
-}
-
-function packConsumerSources(config: PackConsumerConfig | null | undefined): PackConsumerSource[] {
+function packConsumerSources(config: PackConsumerConfig | null | undefined, packNames: readonly string[]): PackConsumerSource[] {
   const sources: PackConsumerSource[] = [];
   for (const project of Array.isArray(config?.projects) ? config.projects : []) {
     sources.push({
@@ -495,35 +499,26 @@ function packConsumerSources(config: PackConsumerConfig | null | undefined): Pac
       id: typeof project?.id === 'string' ? project.id : null,
       label: typeof project?.name === 'string' && project.name ? project.name : 'project',
       path: projectPathKey(project),
-      packs: project?.packs,
+      packs: [...packNames],
     });
   }
+  const laneMillEnabled = isMillEnabled(config);
   for (const lane of PACK_CONSUMER_LANES) {
-    sources.push({ kind: lane.kind, id: null, label: lane.label, path: null, packs: lane.read(config) });
+    sources.push({ kind: lane.kind, id: null, label: lane.label, path: null, packs: laneMillEnabled ? lane.read(config) : [] });
   }
   return sources;
 }
 
-function mergePackEntries(current: unknown, extra: unknown): unknown[] {
-  const merged: unknown[] = Array.isArray(current) ? [...current] : [];
-  for (const entry of Array.isArray(extra) ? extra : []) {
-    if (typeof entry === 'string' && merged.includes(entry)) continue;
-    merged.push(entry);
-  }
-  return merged;
-}
-
-function packConsumerGroups(config: PackConsumerConfig | null | undefined): PackConsumerSource[] {
+function packConsumerGroups(config: PackConsumerConfig | null | undefined, packNames: readonly string[]): PackConsumerSource[] {
   const rows: PackConsumerSource[] = [];
   const groupByPath = new Map<string, PackConsumerSource>();
-  for (const source of packConsumerSources(config)) {
+  for (const source of packConsumerSources(config, packNames)) {
     if (source.kind !== 'project') {
       rows.push(source);
       continue;
     }
     const existing = source.path === null ? undefined : groupByPath.get(source.path);
     if (existing) {
-      existing.packs = mergePackEntries(existing.packs, source.packs);
       if (source.id !== null) existing.recordIds?.push(source.id);
       continue;
     }
@@ -539,29 +534,6 @@ function packConsumerGroups(config: PackConsumerConfig | null | undefined): Pack
     if (source.path !== null) groupByPath.set(source.path, group);
   }
   return rows;
-}
-
-function consumedPackNames(config: PackConsumerConfig | null | undefined): string[] {
-  const names = new Set<string>();
-  for (const source of packConsumerSources(config)) {
-    for (const name of normalizePackNames(source.packs).names) names.add(name);
-  }
-  return [...names].sort();
-}
-
-function applyPackDelta(
-  currentPacks: unknown,
-  packName: string,
-  deliver: unknown,
-  { maxPacks = MAX_PACKS_PER_SESSION }: { maxPacks?: number } = {},
-): { ok: false; error: string } | { ok: true; packs: string[] } {
-  const { names } = normalizePackNames(currentPacks, { maxPacks: Number.POSITIVE_INFINITY });
-  if (deliver !== true) return { ok: true, packs: names.filter((name) => name !== packName) };
-  if (names.includes(packName)) return { ok: true, packs: names };
-  if (names.length >= maxPacks) {
-    return { ok: false, error: `a project may deliver at most ${maxPacks} packs` };
-  }
-  return { ok: true, packs: [...names, packName] };
 }
 
 
@@ -659,15 +631,13 @@ function packVariantProjects(config: PackConsumerConfig | null | undefined): {
   id: string | null;
   name: string;
   path: string | null;
-  packs: string[];
 }[] {
-  const projects: { id: string | null; name: string; path: string | null; packs: string[] }[] = [];
+  const projects: { id: string | null; name: string; path: string | null }[] = [];
   for (const project of Array.isArray(config?.projects) ? config.projects : []) {
     projects.push({
       id: typeof project?.id === 'string' ? project.id : null,
       name: typeof project?.name === 'string' && project.name ? project.name : 'project',
       path: typeof project?.path === 'string' ? project.path : null,
-      packs: normalizePackNames(project?.packs).names,
     });
   }
   return projects;
@@ -711,7 +681,6 @@ function planPackVariants(spec: unknown, projects: unknown = []): {
   const consumers: { name: string; projectId: string | null; projectSlug: string | null }[] = [];
   const seen = new Set<string>();
   for (const project of Array.isArray(projects) ? projects : []) {
-    if (!normalizePackNames(project?.packs).names.includes(group)) continue;
     const label = typeof project?.name === 'string' && project.name ? project.name : 'project';
     const slug = projectVariantSlug(project?.path);
     const name = variantPackName(group, slug);
@@ -1184,12 +1153,12 @@ export {
   MAX_INDEX_TOKENS,
   MAX_PACKS_PER_SESSION,
   PACK_NAME_RE,
-  applyPackDelta,
-  consumedPackNames,
   decidePackDelivery,
   estimateTokens,
   isSelfReferentialPack,
   isDataSource,
+  isMillEnabled,
+  millPackNames,
   isPackRelativePath,
   packConsumerGroups,
   packConsumerSources,
@@ -1201,7 +1170,6 @@ export {
   planPackBuild,
   planPackVariants,
   projectVariantSlug,
-  sameProjectRecords,
   sha256,
   shouldReclaimPackArtifact,
   sourcePattern,

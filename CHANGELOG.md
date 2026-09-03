@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Context mill is one switch**: `millEnabled` (default on) replaces `packsAutoRebuild` and the per-project pack lists. Every configured project receives every pack spec on disk at spawn, alphabetically, up to the unchanged four pack per session cap; a spec over the cap is skipped with the existing over-cap warning. The "Deliver to" checkboxes on the Mill tab and the per-project "Context packs" toggles in Settings are gone; off means no pack builds and no delivery to any session, project or lane. A stale `projects[].packs` key in `config.json` is ignored, and a `packsAutoRebuild: false` left in `config.json` carries over to `millEnabled: false`.
+
 - **The whole project is TypeScript**: every module is strict ESM `.ts`, Vite bundles the server, CLI, relays, and editor extension alongside the dashboard, and the published package ships `dist/` only. The Node floor rises to 22.18. After upgrading, re-run `glissa agent setup grok`: the managed hook entry in `~/.grok/hooks.json` points at the old relay path.
 - Provisioned servers that start Glissa with `node server.js` must switch to `node dist/server/index.js` (a source checkout uses `node server/main.ts`); the systemd unit lives in the dotfiles repo.
 

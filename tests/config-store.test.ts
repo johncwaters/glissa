@@ -453,6 +453,25 @@ test('a partial branchGc config merges over the defaults', () => {
   });
 });
 
+test('a retired packsAutoRebuild:false carries over to millEnabled for the runtime and the settings', () => {
+  withStore({ projects: [], packsAutoRebuild: false }, (store) => {
+    assert.equal(store.config.millEnabled, false, 'the live config the lanes read is migrated, not just the projection');
+    assert.equal(store.getSettings().millEnabled, false);
+  });
+});
+
+test('a retired packsAutoRebuild:true leaves the mill on its default', () => {
+  withStore({ projects: [], packsAutoRebuild: true }, (store) => {
+    assert.equal(store.getSettings().millEnabled, DEFAULT_CONFIG.millEnabled);
+  });
+});
+
+test('an explicit millEnabled beats the retired key', () => {
+  withStore({ projects: [], packsAutoRebuild: false, millEnabled: true }, (store) => {
+    assert.equal(store.getSettings().millEnabled, true);
+  });
+});
+
 const WATCH_DEADLINE_MS = 15000;
 
 function sleep(ms: number): Promise<void> {

@@ -39,7 +39,7 @@ test.before(async () => {
     projects: [{ id: SESSION_ID, name: 'hook route', path: projectDir }],
     teams: [],
     repoRoots: [],
-    packsAutoRebuild: false,
+    millEnabled: false,
     autoResume: false,
   }, null, 2), 'utf8');
   const prevEnv = process.env.GLISSA_CONFIG;

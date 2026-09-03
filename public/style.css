@@ -2592,49 +2592,6 @@ a.pr-title:hover {
   overscroll-behavior: contain;
 }
 
-.mill-deliver {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.mill-deliver-title {
-  margin: 0;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-}
-
-.mill-deliver-target {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 2px;
-  font-size: 11px;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.mill-deliver-target:has(.mill-deliver-box:disabled) {
-  color: var(--text-muted);
-  cursor: default;
-}
-
-.mill-deliver-box {
-  width: 13px;
-  height: 13px;
-  margin: 0;
-  accent-color: var(--accent);
-  cursor: inherit;
-}
-
-.mill-deliver-note {
-  margin-left: auto;
-  font-size: 10px;
-  color: var(--text-muted);
-}
-
 .hooks-view {
   flex: 1;
   min-height: 0;
@@ -6253,8 +6210,6 @@ html[data-layout="phone"] .mill-delivery-tag {
   letter-spacing: 0.04em;
 }
 
-html[data-layout="phone"] .mill-deliver-target { padding: 8px 2px; font-size: 13px; }
-html[data-layout="phone"] .mill-deliver-box { width: 18px; height: 18px; }
 
 html[data-layout="phone"] .usage-select,
 html[data-layout="phone"] .usage-refresh { min-height: 34px; padding: 4px 12px; font-size: 12px; }

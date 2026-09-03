@@ -15,7 +15,6 @@ type ProjectRecord = Record<string, unknown>;
 type VariantProject = {
   id?: unknown;
   path?: unknown;
-  packs?: unknown;
 };
 
 interface PackServiceDependencies {
@@ -28,7 +27,6 @@ interface PackServiceDependencies {
     projects?: ProjectRecord[] | null;
   }) => Promise<BuildReport | null>;
   createWatcher?: typeof createPackWatcher;
-  consumedPackNames?: (() => unknown) | null;
   variantProjects?: () => VariantProject[];
   setIntervalFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
   clearIntervalFn?: (handle: NodeJS.Timeout) => void;
@@ -39,9 +37,10 @@ interface PackServiceDependencies {
 
 interface PackServiceApi {
   start(): Promise<void>;
+  pause(): Promise<void>;
+  resume(): Promise<void>;
   stop(): Promise<void>;
   restartIfConsumersChanged(): Promise<void>;
-  ensureBuilt(names: string[], options?: { projects?: ProjectRecord[] | null }): Promise<void>;
   sweep(): Promise<void>;
   getVersions(): Record<string, string | null>;
   _watcherCount(): number;
@@ -60,7 +59,6 @@ function createPackService(deps: PackServiceDependencies = {}): PackService {
     watchRootsForSpec = (spec: unknown) => packWatchRoots(spec),
     build = ({ specPath, projects }: { specPath: string; projects?: ProjectRecord[] | null }) => buildPack({ specPath, projects: projects ?? [] }),
     createWatcher = createPackWatcher,
-    consumedPackNames = null,
     variantProjects = () => [],
     setIntervalFn = (fn: () => void, ms: number) => setInterval(fn, ms),
     clearIntervalFn = clearInterval,
@@ -74,31 +72,17 @@ function createPackService(deps: PackServiceDependencies = {}): PackService {
   const versionsByName = new Map<string, string | null>();
   let sweepTimer: NodeJS.Timeout | null = null;
   let sweepRunning = false;
-  let stopped = false;
+  let stopped = true;
   let torndown = false;
   let buildChain: Promise<BuildReport | null> = Promise.resolve(null);
   let restartChain: Promise<void> = Promise.resolve();
-  let lastConsumerKey: string | null = null;
+  let lastConsumerKey = '';
 
-  function consumedNames(): string[] {
-    const names = consumedPackNames ? consumedPackNames() : null;
-    return Array.isArray(names) ? [...names].sort() : [];
-  }
-
-  function consumerKey(): string | null {
-    if (!consumedPackNames) return null;
-    const projects = variantProjects().map((project) => [project?.id ?? null, project?.path ?? null, project?.packs ?? null]);
-    return JSON.stringify([consumedNames(), projects]);
-  }
-
-  function consumedSet(): Set<string> | null {
-    if (!consumedPackNames) return null;
-    return new Set(consumedNames());
-  }
-
-  function consumedSpecs(specs: SpecListing[], consumed: Set<string> | null): SpecListing[] {
-    if (!consumed) return specs;
-    return specs.filter((spec) => consumed.has(spec.name));
+  function consumerKeyFor(specs: SpecListing[]): string {
+    return JSON.stringify([
+      specs.map((spec) => spec.name),
+      variantProjects().map((project) => [project?.id ?? null, project?.path ?? null]),
+    ]);
   }
 
   function notePublished(report: BuildReport | null | undefined): void {
@@ -113,13 +97,9 @@ function createPackService(deps: PackServiceDependencies = {}): PackService {
     service.emit('pack-updated', { name: report.name, version: report.version });
   }
 
-  async function runBuild(
-    name: string,
-    specPath: string,
-    projects: ProjectRecord[] | null | undefined,
-  ): Promise<BuildReport | null> {
+  async function runBuild(name: string, specPath: string): Promise<BuildReport | null> {
     if (stopped) return null;
-    const report = await build({ specPath, name, projects: projects || variantProjects() });
+    const report = await build({ specPath, name, projects: variantProjects() });
     if (!report) {
       log.warn(`[packs] ${name} rebuild failed: no report`);
       return null;
@@ -130,12 +110,8 @@ function createPackService(deps: PackServiceDependencies = {}): PackService {
     return report;
   }
 
-  function queueBuild(
-    name: string,
-    specPath: string,
-    projects: ProjectRecord[] | null = null,
-  ): Promise<BuildReport | null> {
-    buildChain = buildChain.then(() => runBuild(name, specPath, projects)).catch((err: unknown) => {
+  function queueBuild(name: string, specPath: string): Promise<BuildReport | null> {
+    buildChain = buildChain.then(() => runBuild(name, specPath)).catch((err: unknown) => {
       log.warn(`[packs] ${name} rebuild crashed: ${errorMessage(err)}`);
       return null;
     });
@@ -170,8 +146,7 @@ function createPackService(deps: PackServiceDependencies = {}): PackService {
     if (sweepRunning || stopped) return;
     sweepRunning = true;
     try {
-      const consumed = consumedSet();
-      for (const spec of consumedSpecs(await listSpecs(), consumed)) {
+      for (const spec of await listSpecs()) {
         if (stopped) return;
         await queueBuild(spec.name, spec.specPath);
       }
@@ -183,9 +158,9 @@ function createPackService(deps: PackServiceDependencies = {}): PackService {
   async function startNow(): Promise<void> {
     if (torndown) return;
     stopped = false;
-    lastConsumerKey = consumerKey();
-    const specs = consumedSpecs(await listSpecs(), consumedSet());
-    if (stopped || torndown || specs.length === 0) return;
+    const specs = await listSpecs();
+    lastConsumerKey = consumerKeyFor(specs);
+    if (stopped || torndown) return;
     armSweepTimer();
     for (const spec of specs) await installWatchers(spec);
     await sweep();
@@ -211,6 +186,20 @@ function createPackService(deps: PackServiceDependencies = {}): PackService {
     await buildChain.catch(() => {});
   }
 
+  function pause(): Promise<void> {
+    return runOnChain(async () => {
+      if (torndown) return;
+      await teardown();
+    });
+  }
+
+  function resume(): Promise<void> {
+    return runOnChain(async () => {
+      if (torndown || !stopped) return;
+      await startNow();
+    });
+  }
+
   async function stop(): Promise<void> {
     torndown = true;
     stopped = true;
@@ -219,33 +208,21 @@ function createPackService(deps: PackServiceDependencies = {}): PackService {
   }
 
   function restartIfConsumersChanged(): Promise<void> {
-    const key = consumerKey();
-    if (key === lastConsumerKey) return restartChain;
-    lastConsumerKey = key;
     return runOnChain(async () => {
       if (torndown) return;
+      const key = consumerKeyFor(await listSpecs());
+      if (key === lastConsumerKey) return;
       await teardown();
       await startNow();
     });
   }
 
-  async function ensureBuilt(
-    names: string[],
-    { projects = null }: { projects?: ProjectRecord[] | null } = {},
-  ): Promise<void> {
-    if (torndown || stopped) return;
-    const wanted = new Set(Array.isArray(names) ? names : []);
-    if (wanted.size === 0) return;
-    for (const spec of (await listSpecs()).filter((entry) => wanted.has(entry.name))) {
-      await queueBuild(spec.name, spec.specPath, projects);
-    }
-  }
-
   return Object.assign(service, {
     start,
+    pause,
+    resume,
     stop,
     restartIfConsumersChanged,
-    ensureBuilt,
     sweep,
     getVersions: () => Object.fromEntries(versionsByName),
     _watcherCount: () => watchers.length,

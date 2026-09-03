@@ -503,7 +503,7 @@ test('a pack update between lookups still arms a notice before the delivered lis
     { name: 'beta', version: 'v1', dir: '/packs/beta/current' },
   ];
   const packDelivery = createSessionPackDelivery({
-    configuredPacks: ['alpha', 'beta'],
+    configuredPacks: () => ['alpha', 'beta'],
     builtRoot: '/packs',
     variantSlug: null,
     projectPath: process.cwd(),
@@ -531,6 +531,37 @@ test('a pack update between lookups still arms a notice before the delivered lis
   const delivery = await packDelivery.resolve();
   assert.deepEqual(delivery.packs.map((pack) => pack.name), ['alpha', 'beta']);
   assert.match(String(packDelivery.takeNotice()), /"alpha" \(version v1 is now v2\)/);
+});
+
+test('a pack list read from a thunk is re-read on every resolve, so no session needs recreating', async () => {
+  let configuredOnDisk: string[] = ['alpha'];
+  const packDelivery = createSessionPackDelivery({
+    configuredPacks: () => [...configuredOnDisk],
+    builtRoot: '/packs',
+    variantSlug: null,
+    projectPath: process.cwd(),
+    sessionName: 'lazy-packs',
+    agentId: 'codex',
+    canDeliver: () => true,
+    canNotify: () => true,
+    renderArgs: () => [],
+    recordDecision: () => {},
+    resolvePack: async (name) => ({ name, version: 'v1', dir: `/packs/${name}/current` }),
+  });
+  assert.deepEqual(packDelivery.names(), ['alpha']);
+
+  configuredOnDisk = ['beta', 'gamma'];
+  const second = await packDelivery.resolve();
+
+  assert.deepEqual(second.packs.map((pack) => pack.name), ['beta', 'gamma']);
+  assert.deepEqual(packDelivery.names(), ['beta', 'gamma']);
+
+  configuredOnDisk = [];
+  const third = await packDelivery.resolve();
+
+  assert.deepEqual(third.packs, []);
+  assert.deepEqual(packDelivery.names(), []);
+  assert.deepEqual(packDelivery.delivered(), []);
 });
 
 test('a pack built out of the project\'s own files is skipped as self-referential', async () => {

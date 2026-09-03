@@ -10,10 +10,10 @@ import {
   MANIFEST_FILE,
   MAX_INDEX_TOKENS,
   MAX_PACKS_PER_SESSION,
-  applyPackDelta,
-  consumedPackNames,
   decidePackDelivery,
   estimateTokens,
+  isMillEnabled,
+  millPackNames,
   isPackRelativePath,
   matchesGlob,
   normalizePackNames,
@@ -24,7 +24,6 @@ import {
   planPackBuild,
   planPackVariants,
   projectVariantSlug,
-  sameProjectRecords,
   shouldReclaimPackArtifact,
   sourceSlug,
   validatePackSpec,
@@ -529,75 +528,70 @@ test('isPackRelativePath accepts a plain relative path and nothing that escapes'
   }
 });
 
-test('consumedPackNames unions the projects and both ephemeral lanes, deduped and sorted', () => {
-  assert.deepEqual(consumedPackNames({
-    projects: [{ packs: ['zeta', 'alpha'] }, { packs: ['alpha'] }, {}],
-    prReview: { packs: ['beta'] },
-    posthog: { packs: ['alpha'] },
-  }), ['alpha', 'beta', 'zeta']);
-});
 
-test('consumedPackNames drops what a spawn would drop, so the gate matches delivery', () => {
-  assert.deepEqual(consumedPackNames({
-    projects: [{ packs: ['../escape', 'good', 'good'] }, { packs: 'not-an-array' }],
-  }), ['good']);
-  assert.deepEqual(consumedPackNames({ projects: [{ packs: ['a', 'b', 'c', 'd', 'e'] }] }).length,
-    MAX_PACKS_PER_SESSION, 'a list over the per-session cap contributes only what would be delivered');
-});
 
-test('a config naming no packs at all consumes nothing', () => {
-  for (const config of [null, undefined, {}, { projects: [] }, { projects: [{ packs: [] }] }]) {
-    assert.deepEqual(consumedPackNames(config), []);
-  }
-});
 
-test('packConsumerSources lists one row per project plus one per lane', () => {
+test('packConsumerSources lists one row per project plus one per lane, and every project names every spec', () => {
   const sources = packConsumerSources({
-    projects: [{ id: 'p1', name: 'glissa', packs: ['a'] }, { path: 'C:/x' }],
+    projects: [{ id: 'p1', name: 'glissa' }, { path: 'C:/x' }],
     prReview: { packs: ['b'] },
     posthog: { packs: ['c'] },
-  });
+  }, ['a', 'd']);
   assert.deepEqual(sources.map((s) => [s.kind, s.id, s.label]), [
     ['project', 'p1', 'glissa'],
     ['project', null, 'project'],
     ['prReview', null, 'prReview.packs'],
     ['posthog', null, 'posthog.packs'],
   ]);
+  assert.deepEqual(sources.filter((s) => s.kind === 'project').map((s) => s.packs), [['a', 'd'], ['a', 'd']]);
+  assert.deepEqual(sources.filter((s) => s.kind !== 'project').map((s) => s.packs), [['b'], ['c']]);
 });
 
-test('consumedPackNames is derived from that one enumeration', () => {
-  const config = { projects: [{ packs: ['zeta'] }], prReview: { packs: ['alpha'] }, posthog: { packs: ['zeta'] } };
-  const union = new Set();
-  for (const source of packConsumerSources(config)) {
-    for (const name of normalizePackNames(source.packs).names) union.add(name);
-  }
-  assert.deepEqual(consumedPackNames(config), [...union].sort());
+test('with the mill off the lane rows carry no pack, so an ephemeral lane gets nothing either', () => {
+  const config = { projects: [{ id: 'p1', name: 'glissa' }], prReview: { packs: ['b'] }, posthog: { packs: ['c'] } };
+  const off = packConsumerSources({ ...config, millEnabled: false }, []);
+  assert.deepEqual(off.filter((s) => s.kind !== 'project').map((s) => s.packs), [[], []]);
+  const on = packConsumerSources({ ...config, millEnabled: true }, ['a']);
+  assert.deepEqual(on.filter((s) => s.kind !== 'project').map((s) => s.packs), [['b'], ['c']]);
 });
+
+test('millPackNames returns the normalized list when the mill is on and nothing when it is off', () => {
+  assert.deepEqual(millPackNames({ millEnabled: false }, ['a', 'b']), []);
+  assert.deepEqual(millPackNames({ millEnabled: true }, ['a', 'b']), ['a', 'b']);
+  assert.deepEqual(millPackNames({}, ['a', 'a', 7]), ['a']);
+  assert.deepEqual(millPackNames(null, null), []);
+});
+
+test('with no spec on disk a project consumes nothing', () => {
+  const sources = packConsumerSources({ projects: [{ id: 'p1', name: 'glissa' }] }, []);
+  assert.deepEqual(sources.filter((s) => s.kind === 'project').map((s) => s.packs), [[]]);
+});
+
 
 function projectRows(config: Record<string, unknown>) {
-  return packConsumerGroups(config).filter((row) => row.kind === 'project');
+  return packConsumerGroups(config, ['a', 'b']).filter((row) => row.kind === 'project');
 }
 
-test('two records on one path are ONE group: first id, first label, union of their packs', () => {
+test('two records on one path are ONE group: first id, first label, every spec', () => {
   const groups = projectRows({
     projects: [
-      { id: 'p1', name: 'glissa', path: 'C:/repo', packs: ['a'] },
-      { id: 'p2', name: 'glissa (2)', path: 'C:/repo', packs: ['b', 'a'] },
+      { id: 'p1', name: 'glissa', path: 'C:/repo' },
+      { id: 'p2', name: 'glissa (2)', path: 'C:/repo' },
     ],
   });
   assert.equal(groups.length, 1);
   assert.equal(groups[0].id, 'p1', 'the primary id is the first record in config order');
   assert.equal(groups[0].label, 'glissa');
   assert.equal(groups[0].path, 'C:/repo');
-  assert.deepEqual(groups[0].recordIds, ['p1', 'p2'], 'the write path fans a delta over every member');
+  assert.deepEqual(groups[0].recordIds, ['p1', 'p2'], 'the report counts sessions per checkout, not per card');
   assert.deepEqual(groups[0].packs, ['a', 'b']);
 });
 
 test('distinct paths stay distinct, even sharing a basename', () => {
   const groups = projectRows({
     projects: [
-      { id: 'p1', name: 'glissa', path: 'C:/work/glissa', packs: ['a'] },
-      { id: 'p2', name: 'glissa fork', path: 'C:/forks/glissa', packs: ['b'] },
+      { id: 'p1', name: 'glissa', path: 'C:/work/glissa' },
+      { id: 'p2', name: 'glissa fork', path: 'C:/forks/glissa' },
     ],
   });
   assert.deepEqual(groups.map((group) => group.id), ['p1', 'p2'], 'a basename is not an identity');
@@ -610,58 +604,20 @@ test('a record with no usable path is its own group: nothing marks it as a sibli
   assert.deepEqual(groups.map((group) => group.path), [null, null]);
 });
 
-test('a lone member keeps its raw packs value, so a malformed one still warns downstream', () => {
-  const groups = projectRows({ projects: [{ id: 'p1', name: 'a', path: 'C:/repo', packs: 'not-an-array' }] });
-  assert.equal(groups[0].packs, 'not-an-array');
-});
 
 test('the lane rows pass through the grouping untouched', () => {
-  const rows = packConsumerGroups({ projects: [], prReview: { packs: ['b'] }, posthog: { packs: ['c'] } });
+  const rows = packConsumerGroups({ projects: [], prReview: { packs: ['b'] }, posthog: { packs: ['c'] } }, ['a']);
   assert.deepEqual(rows.map((row) => [row.kind, row.label]), [
     ['prReview', 'prReview.packs'],
     ['posthog', 'posthog.packs'],
   ]);
 });
 
-test('sameProjectRecords names every card on one checkout, and only itself without a path', () => {
-  const records = [
-    { id: 'p1', path: 'C:/repo' },
-    { id: 'p2', path: 'C:/repo' },
-    { id: 'p3', path: 'C:/other' },
-    { id: 'p4' },
-  ];
-  assert.deepEqual(sameProjectRecords(records, records[0]).map((r) => r.id), ['p1', 'p2']);
-  assert.deepEqual(sameProjectRecords(records, records[2]).map((r) => r.id), ['p3']);
-  assert.deepEqual(sameProjectRecords(records, records[3]).map((r) => r.id), ['p4']);
-});
 
-test('a delta adds and removes against the list it is given', () => {
-  assert.deepEqual(applyPackDelta(['a'], 'b', true), { ok: true, packs: ['a', 'b'] });
-  assert.deepEqual(applyPackDelta(['a', 'b'], 'b', false), { ok: true, packs: ['a'] });
-  assert.deepEqual(applyPackDelta(null, 'b', true), { ok: true, packs: ['b'] });
-  assert.deepEqual(applyPackDelta(['a'], 'b', false), { ok: true, packs: ['a'] }, 'removing an absent pack is a no-op');
-});
 
-test('delivering a pack already on the list is idempotent, not a duplicate', () => {
-  assert.deepEqual(applyPackDelta(['a', 'b'], 'b', true), { ok: true, packs: ['a', 'b'] });
-});
 
-test('a delta past the cap is REFUSED, never silently dropped', () => {
-  const full = ['a', 'b', 'c', 'd'];
-  const result = applyPackDelta(full, 'e', true);
-  assert.equal(result.ok, false);
-  assert.match(result.error as string, /at most 4 packs/);
 
-  assert.deepEqual(applyPackDelta(full, 'a', false), { ok: true, packs: ['b', 'c', 'd'] });
-});
 
-test('a delta keeps an over-cap hand-edited list intact when removing from it', () => {
-  assert.deepEqual(applyPackDelta(['a', 'b', 'c', 'd', 'e'], 'a', false), { ok: true, packs: ['b', 'c', 'd', 'e'] });
-});
-
-test('a delta drops only what is genuinely unusable from the current list', () => {
-  assert.deepEqual(applyPackDelta(['a', '../escape', 'a', 'b'], 'c', true), { ok: true, packs: ['a', 'b', 'c'] });
-});
 
 test('an oversized list is judged entry by entry and capped at the per-session limit', () => {
   const oversized = Array.from({ length: 12 }, (_unused, i) => `p${i}`);
@@ -796,8 +752,8 @@ function variantSpec(overrides = {}) {
   });
 }
 
-function project(id: string, projectPath: string, packs: string[]) {
-  return { id, name: id, path: projectPath, packs };
+function project(id: string, projectPath: string) {
+  return { id, name: id, path: projectPath };
 }
 
 test('the shipped memory spec declares per-project variants and a project-scoped source', () => {
@@ -868,18 +824,17 @@ test('the variant slug IS the memory projection slug, so a variant resolves its 
 });
 
 test('a plain spec plans exactly one build of itself', () => {
-  const plan = planPackVariants(validSpec(), [project('p1', '/repos/a', ['demo'])]);
+  const plan = planPackVariants(validSpec(), [project('p1', '/repos/a')]);
   assert.equal(plan.isGroup, false);
   assert.equal(plan.builds.length, 1);
   assert.equal(plan.builds[0].name, 'demo');
   assert.equal(plan.builds[0].variant, null);
 });
 
-test('a group plans its base plus one flattened pack per CONSUMING project', () => {
+test('a group plans its base plus one flattened pack per project', () => {
   const projects = [
-    project('p1', '/repos/a/glissa', ['demo']),
-    project('p2', '/repos/b/other', ['demo']),
-    project('p3', '/repos/c/nope', ['something-else']),
+    project('p1', '/repos/a/glissa'),
+    project('p2', '/repos/b/other'),
   ];
   const plan = planPackVariants(variantSpec(), projects);
   const slugA = projectVariantSlug('/repos/a/glissa');
@@ -899,7 +854,7 @@ test('a group plans its base plus one flattened pack per CONSUMING project', () 
 });
 
 test('a consuming project with no usable path is warned about and delivered the base pack', () => {
-  const plan = planPackVariants(variantSpec(), [project('p1', '', ['demo'])]);
+  const plan = planPackVariants(variantSpec(), [project('p1', '')]);
   assert.deepEqual(plan.builds.map((build) => build.name), ['demo']);
   assert.equal(plan.warnings.length, 1);
   assert.equal(plan.warnings[0].includes('base "demo" pack'), true);
@@ -907,17 +862,17 @@ test('a consuming project with no usable path is warned about and delivered the 
 
 test('two projects on one path derive one variant, not two racing builds of the same name', () => {
   const plan = planPackVariants(variantSpec(), [
-    project('p1', '/repos/a/glissa', ['demo']),
-    project('p2', '/repos/a/glissa', ['demo']),
+    project('p1', '/repos/a/glissa'),
+    project('p2', '/repos/a/glissa'),
   ]);
   assert.equal(plan.builds.length, 2);
 });
 
-test('packVariantProjects normalizes each project pack list the way a spawn would', () => {
+test('packVariantProjects carries id, name and path only: a stale packs key is ignored', () => {
   const projects = packVariantProjects({
-    projects: [{ id: 'p1', name: 'glissa', path: '/repos/a', packs: ['demo', 'demo', 7] }],
+    projects: [{ id: 'p1', name: 'glissa', path: '/repos/a', packs: ['demo'] }],
   });
-  assert.deepEqual(projects, [{ id: 'p1', name: 'glissa', path: '/repos/a', packs: ['demo'] }]);
+  assert.deepEqual(projects, [{ id: 'p1', name: 'glissa', path: '/repos/a' }]);
 });
 
 test('a variant carrying another project layer fails the build, publishing nothing', () => {
@@ -943,7 +898,7 @@ test('a project-scoped source rejects an unknown project layer', () => {
     rules: undefined,
     sources: [{ glob: 'projects/*.md', exclude: [`projects/{{projectSlug}}.md`], data: true }],
   });
-  const variants = planPackVariants(spec, [project('p1', '/repos/a/glissa', ['demo'])]);
+  const variants = planPackVariants(spec, [project('p1', '/repos/a/glissa')]);
   const variantBuild = variants.builds.find((build) => build.projectSlug === slug);
   const retiredSlug = 'retired-12345678';
   const files = [{ relPath: `${retiredSlug}.md`, sourcePath: `projects/${retiredSlug}.md`, content: 'retired\n', sourceIndex: 0 }];
@@ -1048,6 +1003,15 @@ test('a source that matched nothing is empty, but any rule, skill or file is con
   assert.equal(decidePackDelivery({ manifest: { ...empty, rules: ['one'] } }).deliver, true);
   assert.equal(decidePackDelivery({ manifest: { ...empty, skills: [{ name: 's' }] } }).deliver, true);
   assert.equal(decidePackDelivery({ manifest: { ...empty, sources: [{ pattern: 'x', files: [{ relPath: 'a.md' }] }] } }).deliver, true);
+});
+
+test('the mill is on unless millEnabled is exactly false, so an absent key never dark-starts it', () => {
+  assert.equal(isMillEnabled({ millEnabled: false }), false);
+  assert.equal(isMillEnabled({ millEnabled: true }), true);
+  assert.equal(isMillEnabled({}), true);
+  assert.equal(isMillEnabled({ millEnabled: undefined }), true);
+  assert.equal(isMillEnabled(null), true);
+  assert.equal(isMillEnabled(undefined), true);
 });
 
 test('a manifest that recorded no sources array at all is unknown, not empty', () => {

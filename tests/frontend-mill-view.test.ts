@@ -146,7 +146,7 @@ test('auto rebuild reports watcher coverage, because on with zero watchers is a 
   const { autoRebuildLine } = await importCore();
   assert.equal(autoRebuildLine({ autoRebuild: true, watcherCount: 4 }), 'auto rebuild on, 4 watched roots');
   assert.equal(autoRebuildLine({ autoRebuild: true, watcherCount: null }), 'auto rebuild on');
-  assert.equal(autoRebuildLine({ autoRebuild: false }), 'auto rebuild off, glissa pack build only');
+  assert.equal(autoRebuildLine({ autoRebuild: false }), 'mill off: no builds, no packs delivered');
 });
 
 test('shouldApplyMillReport drops a superseded reply and keeps an unsolicited one', async () => {
@@ -196,38 +196,8 @@ test('a zero-consumer pack is never an attention part', async () => {
   assert.equal(millAttentionSignature(quiet), millAttentionSignature({ packs: [], configWarnings: [] }));
 });
 
-test('deliveryTargets marks the projects this pack is delivered to, and who is at the cap', async () => {
-  const { deliveryTargets } = await importCore();
-  const report = {
-    maxPacksPerProject: 4,
-    projects: [
-      { id: 'p1', name: 'glissa', packs: ['house-rules'] },
-      { id: 'p2', name: 'other', packs: [] },
-      { id: 'p3', name: 'full', packs: ['a', 'b', 'c', 'd'] },
-      { id: 'p4', name: 'full-with-it', packs: ['house-rules', 'b', 'c', 'd'] },
-    ],
-  };
-  const targets = deliveryTargets(report, pack());
-  assert.deepEqual(targets.map((t) => [t.id, t.checked, t.disabled]), [
-    ['p1', true, false],
-    ['p2', false, false],
-    ['p3', false, true],
-    ['p4', true, false],
-  ], 'a project at the cap can still DROP the pack it already delivers');
-});
 
-test('a project with no id is not an assignment target: nothing could address it', async () => {
-  const { deliveryTargets } = await importCore();
-  const targets = deliveryTargets({ maxPacksPerProject: 4, projects: [{ name: 'idless', packs: [] }] }, pack());
-  assert.deepEqual(targets, []);
-});
 
-test('the checkbox list is one row per project the server ships, so sibling cards appear once', async () => {
-  const { deliveryTargets } = await importCore();
-
-  const report = { maxPacksPerProject: 4, projects: [{ id: 'p1', name: 'glissa', packs: ['house-rules'] }] };
-  assert.deepEqual(deliveryTargets(report, pack()).map((target) => [target.id, target.name]), [['p1', 'glissa']]);
-});
 
 test('a delivery row names one project and its cards', async () => {
   const { deliveryDetail, deliveryLabel, deliveryStaleText, deliveryTone } = await importCore();
@@ -253,13 +223,6 @@ test('a delivery row names one project and its cards', async () => {
   assert.equal(deliveryTone(pending), 'ok');
 });
 
-test('a toggle sends a delta, not a list, so two dashboards cannot clobber each other', async () => {
-  const { packDeltaFor } = await importCore();
-  assert.deepEqual(packDeltaFor({ id: 'p1', checked: false }, 'house-rules'),
-    { projectId: 'p1', pack: 'house-rules', deliver: true });
-  assert.deepEqual(packDeltaFor({ id: 'p1', checked: true }, 'house-rules'),
-    { projectId: 'p1', pack: 'house-rules', deliver: false });
-});
 
 test('an unknown lane kind renders as its config label rather than vanishing', async () => {
   const { consumerLine } = await importCore();
@@ -276,11 +239,6 @@ test('zero watchers reads as the nothing-consumed steady state, not as a health 
   assert.equal(autoRebuildLine(stuck), 'auto rebuild on, 0 watched roots, fallback sweep only');
 });
 
-test('the assignment hint quotes the cap the server shipped, and says nothing without one', async () => {
-  const { deliverToCapHint } = await importCore();
-  assert.equal(deliverToCapHint({ maxPacksPerProject: 4 }), '4 packs max per project. Next spawn applies.');
-  assert.equal(deliverToCapHint({}), '');
-});
 
 test('a pack keeps its variants beside it, and the family is ranked by its worst row', async () => {
   const { sortPackRows } = await importCore();
@@ -304,12 +262,6 @@ test('a variant row says what it is; an ordinary pack says nothing extra', async
   assert.equal(variantNote(pack()), '');
 });
 
-test('a variant is never assignable: the project assigns the group and the mill derives the rest', async () => {
-  const { deliveryTargets } = await importCore();
-  const report = { maxPacksPerProject: 4, projects: [{ id: 'p1', name: 'glissa', packs: ['memory'] }] };
-  assert.deepEqual(deliveryTargets(report, pack({ name: 'memory-glissa-12345678', group: 'memory' })), []);
-  assert.equal(deliveryTargets(report, pack({ name: 'memory' })).length, 1);
-});
 
 test('an empty build says so on its built line and in place of its deliveries', async () => {
   const { builtLine, deliveryEmptyText } = await importCore();

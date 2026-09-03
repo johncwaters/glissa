@@ -102,7 +102,7 @@ function writeProbeConfig(configPath: string, projectDirectory: string): void {
     }],
     teams: [],
     repoRoots: [],
-    packsAutoRebuild: false,
+    millEnabled: false,
     autoResume: false,
     worktreeAutoRebase: false,
     capture: { enabled: true },

@@ -27,7 +27,7 @@ interface PackResolution {
 }
 
 interface SessionPackDeliveryOptions {
-  configuredPacks: unknown;
+  configuredPacks: () => unknown;
   builtRoot: string | null | (() => string | null);
   variantSlug: string | null;
   projectPath: string;
@@ -58,9 +58,13 @@ interface SessionPackDelivery {
 }
 
 function createSessionPackDelivery(options: SessionPackDeliveryOptions): SessionPackDelivery {
-  const normalized = normalizePackNames(options.configuredPacks);
-  for (const warning of normalized.warnings) console.warn(`[session:${options.sessionName}] ${warning}`);
-  const names = normalized.names;
+  function readConfiguredNames(): string[] {
+    const normalized = normalizePackNames(options.configuredPacks());
+    for (const warning of normalized.warnings) console.warn(`[session:${options.sessionName}] ${warning}`);
+    return normalized.names;
+  }
+
+  let configuredNames = readConfiguredNames();
   const latestVersions = new Map<string, string>();
   const resolvePack = options.resolvePack || resolveBuiltPack;
   let delivered: DeliveredPack[] = [];
@@ -115,6 +119,8 @@ function createSessionPackDelivery(options: SessionPackDeliveryOptions): Session
 
   async function resolve(): Promise<PackDeliveryResult> {
     clearNotice();
+    const names = readConfiguredNames();
+    configuredNames = names;
     if (names.length === 0) {
       delivered = [];
       return { args: [], packs: [] };
@@ -174,7 +180,7 @@ function createSessionPackDelivery(options: SessionPackDeliveryOptions): Session
   }
 
   return {
-    names: () => [...names],
+    names: () => [...configuredNames],
     delivered: () => delivered.map(({ name, version }) => ({ name, version })),
     deliveredWithDirs: () => delivered.flatMap(({ name, version, dir, tokenEstimate }) => (
       dir ? [{ name, version, dir, tokenEstimate: tokenEstimate ?? null }] : []

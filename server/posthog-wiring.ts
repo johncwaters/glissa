@@ -8,7 +8,7 @@ import { Session } from '../session/sessions.ts';
 import type { SessionOptions } from '../session/sessions.ts';
 import { execFileAsync } from './child-process-safe.ts';
 import { glissaHomeDir } from './config-store.ts';
-import { normalizePackNames } from './core/pack-core.ts';
+import { millPackNames } from './core/pack-core.ts';
 import { appendTrailStep, createInvestigationTrail, trailStepFromHook } from './core/investigation-trail-core.ts';
 import type { InvestigationTrail } from './core/investigation-trail-core.ts';
 import * as core from './core/posthog-core.ts';
@@ -90,6 +90,7 @@ interface PosthogLaneConfig {
 interface PosthogWiringConfig {
   replayBufferKB?: number;
   worktreeRoot?: string;
+  millEnabled?: unknown;
   integrationBranch?: string | null;
   posthog?: PosthogLaneConfig | null;
   telegram?: { botToken?: string; chatId?: string } | null;
@@ -433,7 +434,7 @@ function posthogCfgKey(cfg: PosthogWiringConfig): string {
 }
 
 function posthogPackNames(cfg: PosthogWiringConfig): string[] {
-  return normalizePackNames(cfg.posthog ? cfg.posthog.packs : null).names;
+  return millPackNames(cfg, cfg.posthog ? cfg.posthog.packs : null);
 }
 
 function makeResolveProjects(api: PosthogApi, config: PosthogWiringConfig): () => Promise<ResolvedProject[]> {

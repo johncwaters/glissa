@@ -62,8 +62,6 @@ const REAL_SERVER_PAYLOADS: ServerPayload[] = [
   { type: 'snapshot', sessions: [SESSION], packVersions: { rules: 'abc123' }, serverBuild: 'build-1' },
   { type: 'pack-updated', name: 'rules', version: 'def456' },
   { type: 'mill-report', requestId: 'mill-1', ts: NOW, autoRebuild: true, distillerEnabled: false, watcherCount: 2, projects: [], maxPacksPerProject: 4, packs: [], configWarnings: [], totals: {}, error: null },
-  { type: 'project-packs-updated', projectId: 'project-1', packs: ['rules'] },
-  { type: 'set-project-packs-result', requestId: 'packs-1', ok: true, error: null, projectId: 'project-1', pack: 'rules', deliver: true, packs: ['rules'] },
   { type: 'session-packs', id: 'session-1', packs: [{ name: 'rules', version: 'abc123' }] },
   { type: 'state-change', id: 'session-1', session: 'glissa', from: STATES.IDLE, to: STATES.RUNNING, event: 'user_input', timestamp: NOW },
   { type: 'session-added', id: 'session-1', session: 'glissa', path: '/repo/glissa', state: STATES.DORMANT, stateSince: NOW, skipPerms: true, worktree: false, resumeSessionId: null },
@@ -185,17 +183,13 @@ test('a malformed request receives its typed error reply with the Zod message', 
   const connection = connectControl<ServerPayload>(server);
   connection.sent.length = 0;
   connection.send({
-    type: 'set-project-packs',
-    requestId: 'packs-1',
-    projectId: 'project-1',
-    pack: 'rules',
-    deliver: 'yes',
+    type: 'request-mill-report',
+    requestId: 7,
   });
 
   assert.equal(connection.sent.length, 1);
   const reply = connection.sent[0];
-  assert.equal(reply.type, 'set-project-packs-result');
-  assert.equal(reply.ok, false);
-  assert.match(String(reply.error), /boolean/);
+  assert.equal(reply.type, 'mill-report');
+  assert.match(String(reply.error), /string/);
   assert.equal(ServerMessage.safeParse(reply).success, true);
 });

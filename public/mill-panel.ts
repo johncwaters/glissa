@@ -3,9 +3,6 @@ import { buildPanelSection, buildStatChip, el, isPanelHidden } from './dom-helpe
 import { getMillAttentionAck, setMillAttentionAck } from './ui-prefs.ts';
 import { createSettingsLink } from './settings-link.ts';
 import {
-  DELIVER_TO_CAP_NOTE,
-  DELIVER_TO_EMPTY_TEXT,
-  DELIVER_TO_TITLE,
   MILL_EMPTY_TEXT,
   MILL_HINT,
   MILL_LOADING_TEXT,
@@ -18,12 +15,10 @@ import {
   configWarningsOf,
   consumerLine,
   contentLine,
-  deliverToCapHint,
   deliveryDetail,
   deliveryEmptyText,
   deliveryLabel,
   deliveryStaleText,
-  deliveryTargets,
   variantNote,
   deliveryTone,
   distillText,
@@ -38,7 +33,6 @@ import {
   moreOutputsLine,
   outcomeSplitLines,
   outputTokenLine,
-  packDeltaFor,
   shouldApplyMillReport,
   sortPackRows,
   specErrorLine,
@@ -96,7 +90,7 @@ function buildTotalsSection() {
   }
   section.append(chips);
   const autoRebuild = buildLine('mill-meta', autoRebuildLine(_report));
-  const autoRebuildLink = createSettingsLink('lanes-mill', 'packs-auto-rebuild', 'Settings');
+  const autoRebuildLink = createSettingsLink('lanes-mill', 'mill-enabled', 'Settings');
   autoRebuild.append(document.createTextNode(' '), autoRebuildLink);
   section.append(autoRebuild);
   section.append(buildLine('mill-meta', distillerLine(_report)));
@@ -144,35 +138,6 @@ function buildMeasurementBlock(pack: MillPack) {
   for (const line of [...measurementLines(pack), ...outcomeSplitLines(pack.measurement)]) {
     wrap.append(buildLine('mill-meta', `${line.label}: ${line.value}`, line.tone));
   }
-  return wrap;
-}
-
-function buildDeliverToBlock(pack: MillPack) {
-  const wrap = el('div', 'mill-deliver');
-  wrap.append(el('p', 'mill-deliver-title', DELIVER_TO_TITLE));
-  const targets = deliveryTargets(_report, pack);
-  if (targets.length === 0) {
-    wrap.append(buildLine('mill-empty', DELIVER_TO_EMPTY_TEXT));
-    return wrap;
-  }
-  for (const target of targets) {
-    const row = el('label', 'mill-deliver-target');
-    const box = document.createElement('input');
-    box.type = 'checkbox';
-    box.className = 'mill-deliver-box';
-    box.checked = target.checked;
-    box.disabled = target.disabled;
-    box.addEventListener('change', () => {
-      box.disabled = true;
-      sendPackDelta(packDeltaFor(target, pack.name));
-    });
-    row.append(box);
-    row.append(el('span', 'mill-deliver-name', target.name));
-    if (target.disabled) row.append(el('span', 'mill-deliver-note', DELIVER_TO_CAP_NOTE));
-    wrap.append(row);
-  }
-  const hint = deliverToCapHint(_report);
-  if (hint) wrap.append(buildLine('mill-meta', hint));
   return wrap;
 }
 
@@ -224,7 +189,6 @@ function buildPackSection(pack: MillPack) {
   const outputs = buildOutputsBlock(pack.built);
   if (outputs) section.append(outputs);
   section.append(buildLine('mill-meta', consumerLine(pack)));
-  if (!variant) section.append(buildDeliverToBlock(pack));
   return section;
 }
 
@@ -288,12 +252,6 @@ export function requestMillReport() {
   _requestSeq += 1;
   _latestRequestId = `mill-${_requestSeq}`;
   _sendRequest({ type: 'request-mill-report', requestId: _latestRequestId });
-}
-
-function sendPackDelta(delta: Record<string, unknown>) {
-  if (!_sendRequest) return;
-  _requestSeq += 1;
-  _sendRequest({ type: 'set-project-packs', requestId: `mill-set-${_requestSeq}`, ...delta });
 }
 
 export function mountMillView(parent: HTMLElement) {

@@ -155,7 +155,7 @@ const BROWSER_CONFIG_SHAPE = {
   checkForUpdates: optionalBoolean('checkForUpdates'),
   autoResume: optionalBoolean('autoResume'),
   telegramNotifications: optionalBoolean('telegramNotifications'),
-  packsAutoRebuild: optionalBoolean('packsAutoRebuild'),
+  millEnabled: optionalBoolean('millEnabled'),
   integrationBranch: optionalString('integrationBranch').nullable(),
   worktreeRoot: optionalString('worktreeRoot'),
   worktreeShare: z.array(z.string()).optional(),

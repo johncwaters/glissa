@@ -1,5 +1,6 @@
 
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import type { Dirent, Stats } from 'node:fs';
 import path from 'node:path';
@@ -665,13 +666,7 @@ async function loadPackSpec(specPath: string): Promise<unknown> {
   return JSON.parse(raw);
 }
 
-async function listPackSpecs({ specsDir = defaultSpecsDir() }: { specsDir?: string } = {}): Promise<SpecListing[]> {
-  let entries: Dirent[];
-  try {
-    entries = await fsp.readdir(specsDir, { withFileTypes: true });
-  } catch {
-    return [];
-  }
+function specListingsFrom(entries: Dirent[], specsDir: string): SpecListing[] {
   const specs = entries
     .filter((entry) => entry.isFile() && entry.name.endsWith(SPEC_SUFFIX))
     .map((entry) => ({
@@ -680,6 +675,22 @@ async function listPackSpecs({ specsDir = defaultSpecsDir() }: { specsDir?: stri
     }));
   specs.sort((a, b) => (a.name === b.name ? 0 : a.name < b.name ? -1 : 1));
   return specs;
+}
+
+async function listPackSpecs({ specsDir = defaultSpecsDir() }: { specsDir?: string } = {}): Promise<SpecListing[]> {
+  try {
+    return specListingsFrom(await fsp.readdir(specsDir, { withFileTypes: true }), specsDir);
+  } catch {
+    return [];
+  }
+}
+
+function listPackSpecNamesSync({ specsDir = defaultSpecsDir() }: { specsDir?: string } = {}): string[] {
+  try {
+    return specListingsFrom(fs.readdirSync(specsDir, { withFileTypes: true }), specsDir).map((spec) => spec.name);
+  } catch {
+    return [];
+  }
 }
 
 function buildReport(name: string, specPath: string, overrides: Partial<BuildReport>): BuildReport {
@@ -938,6 +949,7 @@ export {
   describePackSpec,
   distillOutputPath,
   distillSourceHashes,
+  listPackSpecNamesSync,
   listPackSpecs,
   loadPackSpec,
   packSourceRoots,

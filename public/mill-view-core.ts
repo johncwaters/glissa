@@ -94,12 +94,6 @@ export interface MillPack {
   measurement?: MillMeasurement | null;
 }
 
-export interface MillProject {
-  id?: unknown;
-  name?: unknown;
-  packs?: string[];
-}
-
 export interface MillTotals {
   packCount?: unknown;
   builtCount?: unknown;
@@ -109,12 +103,7 @@ export interface MillTotals {
   staleDistills?: unknown;
 }
 
-export interface MillAssignmentReport {
-  projects?: MillProject[];
-  maxPacksPerProject?: unknown;
-}
-
-export interface MillReport extends MillAssignmentReport {
+export interface MillReport {
   packs?: MillPack[];
   totals?: MillTotals | null;
   autoRebuild?: unknown;
@@ -122,14 +111,6 @@ export interface MillReport extends MillAssignmentReport {
   distillerEnabled?: unknown;
   error?: unknown;
   configWarnings?: unknown;
-}
-
-export interface MillDeliveryTarget {
-  id: string;
-  name: string;
-  checked: boolean;
-  disabled: boolean;
-  packs: string[];
 }
 
 export const MILL_EMPTY_TEXT = 'No pack specs found.';
@@ -385,53 +366,6 @@ export function outcomeSplitLines(measurement: MillMeasurement | null | undefine
   ];
 }
 
-export const DELIVER_TO_TITLE = 'Deliver to';
-export const DELIVER_TO_EMPTY_TEXT = 'No projects.';
-export const DELIVER_TO_CAP_NOTE = 'at cap';
-
-function assignableProjects(report: MillAssignmentReport | null | undefined): MillProject[] {
-  return Array.isArray(report?.projects) ? report.projects : [];
-}
-
-function packCap(report: MillAssignmentReport | null | undefined) {
-  const max = Number(report?.maxPacksPerProject);
-  if (!Number.isFinite(max) || max <= 0) return Number.POSITIVE_INFINITY;
-  return max;
-}
-
-export function deliveryTargets(report: MillAssignmentReport | null | undefined, pack: { name?: unknown; group?: unknown } | null | undefined): MillDeliveryTarget[] {
-
-  if (typeof pack?.group === 'string' && pack.group) return [];
-  const name = typeof pack?.name === 'string' ? pack.name : '';
-  const cap = packCap(report);
-  const targets: MillDeliveryTarget[] = [];
-  for (const project of assignableProjects(report)) {
-    const id = typeof project?.id === 'string' ? project.id : '';
-    if (id === '') continue;
-    const packs: string[] = Array.isArray(project?.packs) ? project.packs : [];
-    const checked = packs.includes(name);
-    targets.push({
-      id,
-      name: typeof project?.name === 'string' ? project.name : id,
-      checked,
-
-      disabled: !checked && packs.length >= cap,
-      packs,
-    });
-  }
-  return targets;
-}
-
-export function packDeltaFor(target: Pick<MillDeliveryTarget, 'id' | 'checked'> | null | undefined, packName: string) {
-  return { projectId: target?.id, pack: packName, deliver: target?.checked !== true };
-}
-
-export function deliverToCapHint(report: MillAssignmentReport | null | undefined) {
-  const cap = packCap(report);
-  if (!Number.isFinite(cap)) return '';
-  return `${cap} packs max per project. Next spawn applies.`;
-}
-
 export function outputTokenLine(output: MillOutput | null | undefined) {
   return `${formatTokens(output?.tokenEstimate)} tokens`;
 }
@@ -457,7 +391,7 @@ export function totalsChips(report: MillReport | null | undefined): { label: str
 
 export function autoRebuildLine(report: MillReport | null | undefined) {
   if (!report) return '';
-  if (report.autoRebuild !== true) return 'auto rebuild off, glissa pack build only';
+  if (report.autoRebuild !== true) return 'mill off: no builds, no packs delivered';
   const watchers = report.watcherCount;
   if (typeof watchers !== 'number' || !Number.isFinite(watchers)) return 'auto rebuild on';
   if (watchers > 0) return `auto rebuild on, ${formatCount(watchers)} watched roots`;

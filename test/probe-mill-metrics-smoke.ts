@@ -76,7 +76,7 @@ function writeProbeConfig(configPath: string, projectDirectory: string, port: nu
     }],
     teams: [],
     repoRoots: [],
-    packsAutoRebuild: false,
+    millEnabled: false,
     autoResume: false,
     worktreeAutoRebase: false,
     branchGc: { enabled: false },

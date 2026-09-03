@@ -4,7 +4,7 @@ import path from 'node:path';
 import { needsDistill } from './core/distill-core.ts';
 import { buildMillReport } from './core/mill-core.ts';
 import type { MillReport } from './core/mill-core.ts';
-import { packConsumerGroups, packVariantProjects, planPackVariants } from './core/pack-core.ts';
+import { isMillEnabled, packConsumerGroups, packVariantProjects, planPackVariants } from './core/pack-core.ts';
 import type { PackManifest } from './core/pack-core.ts';
 import { isPlainObject } from './core/usage-number-core.ts';
 import {
@@ -15,7 +15,6 @@ import {
   distillSourceHashes,
   listPackSpecs,
   loadPackSpec,
-  packSourceRoots,
   readBuiltManifest,
   resolveBuiltPack,
 } from './pack-builder.ts';
@@ -25,7 +24,7 @@ interface MillConfig {
   projects?: unknown;
   prReview?: { packs?: unknown } | null;
   posthog?: { packs?: unknown } | null;
-  packsAutoRebuild?: boolean;
+  millEnabled?: boolean;
   packDistiller?: { enabled?: boolean } | null;
 }
 
@@ -78,8 +77,6 @@ type MillReportPayload = MillReport | MillReportFailure;
 
 interface MillWiring {
   requestReport(msg: { requestId?: unknown } | null | undefined, send: (payload: MillReportPayload) => void): Promise<void>;
-  listPackNames(): Promise<string[]>;
-  resolvePackSourceRoots(name: string): Promise<string[]>;
   getCachedReport(): MillReport | null;
 }
 
@@ -218,14 +215,15 @@ function createMillWiring(deps: MillWiringDependencies = {}): MillWiring {
 
   async function buildReport(): Promise<MillReport> {
     const specs: MillSpecEntry[] = [];
-    for (const spec of await listPackSpecs({ specsDir: resolvedSpecsDir() })) {
+    const listings = await listPackSpecs({ specsDir: resolvedSpecsDir() });
+    for (const spec of listings) {
       const entry = await readSpecEntry(spec);
       specs.push(entry, ...(await variantEntries(entry)));
     }
     return buildMillReport({
       ts: now(),
       requestId: null,
-      autoRebuild: config.packsAutoRebuild !== false,
+      autoRebuild: isMillEnabled(config),
       distillerEnabled: config.packDistiller?.enabled === true,
       watcherCount: getWatcherCount(),
       specs,
@@ -233,7 +231,7 @@ function createMillWiring(deps: MillWiringDependencies = {}): MillWiring {
       measurementByPack: measurement(),
       packsDir: baseDir,
 
-      consumerSources: packConsumerGroups(config),
+      consumerSources: packConsumerGroups(config, isMillEnabled(config) ? listings.map((spec) => spec.name) : []),
     });
   }
 
@@ -264,27 +262,8 @@ function createMillWiring(deps: MillWiringDependencies = {}): MillWiring {
     }
   }
 
-  async function listPackNames(): Promise<string[]> {
-    const specs = await listPackSpecs({ specsDir: resolvedSpecsDir() });
-    return specs.map((spec) => spec.name);
-  }
-
-  async function resolvePackSourceRoots(name: string): Promise<string[]> {
-    const specs = await listPackSpecs({ specsDir: resolvedSpecsDir() });
-    const found = specs.find((spec) => spec.name === name);
-    if (!found) return [];
-    try {
-      return packSourceRoots(await loadPackSpec(found.specPath), { baseDir });
-    } catch (error) {
-      log.warn(`[mill] could not resolve source roots for "${name}": ${errorMessage(error)}`);
-      return [];
-    }
-  }
-
   return {
     requestReport,
-    listPackNames,
-    resolvePackSourceRoots,
     getCachedReport: () => lastReport,
   };
 }

@@ -16,7 +16,6 @@ export interface SettingsProject {
   name?: string;
   agent?: string;
   permissionMode?: string;
-  packs?: string[];
   recordNames?: string[];
 }
 
@@ -73,7 +72,7 @@ function settingsOf(map: readonly SettingsSection[]): SettingsSetting[] {
 }
 
 function isReadOnlySetting(setting: SettingsSetting) {
-  return setting.fileOnly || setting.control === 'readonly' || setting.control === 'pack-toggles';
+  return setting.fileOnly || setting.control === 'readonly';
 }
 
 function searchTokens(value: unknown) {
@@ -362,10 +361,7 @@ function projectSectionTitle(project: SettingsProject): string {
     || project?.id;
 }
 
-export function buildProjectSections(projects: SettingsProject[] = [], packs: { group?: unknown; name?: unknown }[] = []): SettingsSection[] {
-  const packNames = packs
-    .filter((pack) => !pack?.group && typeof pack?.name === 'string' && pack.name)
-    .map((pack) => pack.name as string);
+export function buildProjectSections(projects: SettingsProject[] = []): SettingsSection[] {
   return projects
     .filter((project) => typeof project?.id === 'string' && project.id)
     .map((project) => ({
@@ -376,15 +372,6 @@ export function buildProjectSections(projects: SettingsProject[] = [], packs: { 
       caption: (project.recordNames?.length ?? 0) > 1 ? `Cards: ${project.recordNames?.join(', ')}` : '',
       project,
       settings: [
-        projectSetting(project.id, 'packs', {
-          path: `project:${project.id}:packs`,
-          title: 'Context packs',
-          description: 'Packs delivered on the next session spawn.',
-          control: 'pack-toggles',
-          keywords: ['context', 'delivery'],
-          options: packNames,
-          value: Array.isArray(project.packs) ? project.packs : [],
-        }),
         projectSetting(project.id, 'agent', {
           path: `project:${project.id}:agent`,
           title: 'Agent',

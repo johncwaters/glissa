@@ -285,7 +285,7 @@ function writeAblationConfig(configPath: string, pairs: AblationPair[], port: nu
     projects,
     teams: [],
     repoRoots: [],
-    packsAutoRebuild: false,
+    millEnabled: false,
     autoResume: false,
     worktreeAutoRebase: false,
     worktreeSyncOnStart: false,

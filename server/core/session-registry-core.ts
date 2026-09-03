@@ -1,7 +1,6 @@
 import type { ProjectConfig } from '../../shared/contracts/config.ts';
 import type { SessionState } from '../../shared/states.ts';
 import { STATES } from '../../shared/states.ts';
-import { normalizePackNames } from './pack-core.ts';
 
 export type AgentId = ProjectConfig['agent'];
 
@@ -20,7 +19,6 @@ export interface RegistrySession {
   ephemeral?: boolean;
   name?: string;
   path?: string;
-  packNames?: string[];
   agentId?: string;
   dangerouslySkipPermissions?: boolean;
   bypassHookTrust?: boolean;
@@ -68,10 +66,9 @@ function diffProjects(
     if (!project) continue;
     const pathChanged = project.path !== session.path;
     const permissionsChanged = projectSkipsPermissions(project) !== session.dangerouslySkipPermissions;
-    const packsChanged = JSON.stringify(normalizePackNames(project.packs).names) !== JSON.stringify(session.packNames);
     const agentChanged = dependencies.resolveAgentId(project.agent) !== session.agentId;
     const hookTrustChanged = (project.codexBypassHookTrust === true) !== session.bypassHookTrust;
-    if (pathChanged || permissionsChanged || packsChanged || agentChanged || hookTrustChanged) {
+    if (pathChanged || permissionsChanged || agentChanged || hookTrustChanged) {
       modified.push(project);
       continue;
     }

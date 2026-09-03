@@ -378,7 +378,7 @@ class Session extends EventEmitter {
     this._spawnEnv = spawnEnv;
     this._rtkPath = (this._can("rtk") && rtkPath) || null;
     this._packDelivery = createSessionPackDelivery({
-      configuredPacks: packs,
+      configuredPacks: typeof packs === "function" ? (packs as () => unknown) : () => packs,
       builtRoot: () => this._packsBuiltRoot,
       variantSlug: typeof packVariantSlug === "string" && packVariantSlug ? packVariantSlug : null,
       projectPath: this.path,

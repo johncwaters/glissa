@@ -36,8 +36,7 @@ interface PackUpdate {
 interface HarnessOptions {
   specs?: SpecListing[];
   reportFor?: ReportFor;
-  consumedPackNames?: (() => unknown) | null;
-  variantProjects?: () => { id?: unknown; path?: unknown; packs?: unknown }[];
+  variantProjects?: () => { id?: unknown; path?: unknown }[];
   rootsForSpec?: (spec: SpecListing) => string[];
 }
 
@@ -65,7 +64,6 @@ function okReport(name: string, overrides: Partial<BuildReport> = {}): BuildRepo
 function harness({
   specs = SPECS,
   reportFor = (name) => okReport(name),
-  consumedPackNames = null,
   variantProjects,
   rootsForSpec = (spec) => ROOTS[spec.specPath] || [],
 }: HarnessOptions = {}): Harness {
@@ -78,7 +76,6 @@ function harness({
   };
 
   const dependencies: PackServiceDependencies = {
-    consumedPackNames,
     ...(variantProjects ? { variantProjects } : {}),
     listSpecs: async () => specs,
     loadSpec: async (specPath: string) => ({ name: specPath, sources: [], skills: [], specPath }),
@@ -305,158 +302,135 @@ test('a rebuild queued after stop() does not run', async () => {
   assert.deepEqual(h.updates, []);
 });
 
-test('an install with no specs is fully inert: no watcher, no timer, no build', async () => {
+test('an install with no specs watches and builds nothing, but still arms the sweep', async () => {
   const h = harness({ specs: [] });
   await h.service.start();
 
   assert.deepEqual(h.watchers, []);
   assert.deepEqual(h.builds, []);
-  assert.equal(h.hasInterval(), false);
+  assert.equal(h.hasInterval(), true, 'an empty specs dir at boot must not leave the sweep disarmed forever');
   await h.service.stop();
 });
 
-test('a spec with no consumers gets no watcher and is skipped by the sweep', async () => {
-  const h = harness({ consumedPackNames: () => ['beta'] });
+test('a spec added after start is watched and built on the next consumer check', async () => {
+  const specs: SpecListing[] = [];
+  const h = harness({ specs });
   await h.service.start();
 
-  assert.deepEqual(h.watchers.map((w) => w.dir), ['/packs/sources/beta'], 'alpha is not watched');
-  assert.deepEqual(h.builds, ['beta'], 'the boot sweep built only the consumed pack');
-
-  h.builds.length = 0;
-  h.tickInterval();
-  await settle();
-  assert.deepEqual(h.builds, ['beta'], 'the interval sweep skips it too');
-  await h.service.stop();
-});
-
-test('with nothing consumed at all the service is as inert as an install with no specs', async () => {
-  const h = harness({ consumedPackNames: () => [] });
-  await h.service.start();
-
-  assert.deepEqual(h.watchers, []);
-  assert.deepEqual(h.builds, []);
-  assert.equal(h.hasInterval(), false, 'no timer either: there is nothing for a sweep to do');
-  await h.service.stop();
-});
-
-test('the first consumer of a pack starts watching it and builds it, with no server restart', async () => {
-  let consumed: string[] = [];
-  const h = harness({ consumedPackNames: () => consumed });
-  await h.service.start();
-  assert.deepEqual(h.builds, []);
-
-  consumed = ['alpha'];
+  specs.push(SPECS[0]);
   await h.service.restartIfConsumersChanged();
 
-  assert.deepEqual(h.builds, ['alpha'], 'the next spawn finds a current build');
-  assert.deepEqual(h.watchers.filter((w) => !w.stopped).map((w) => w.dir),
-    ['/packs/sources/alpha', '/packs/skills/alpha-skill']);
-  assert.equal(h.hasInterval(), true, 'the fallback sweep is installed now that there is something to sweep');
-
-  h.builds.length = 0;
-  h.fireWatch('/packs/sources/alpha');
-  await settle();
-  assert.deepEqual(h.builds, ['alpha'], 'the fresh watcher rebuilds its own pack');
+  assert.deepEqual(h.watchers.filter((w) => !w.stopped).map((w) => w.dir), ['/packs/sources/alpha', '/packs/skills/alpha-skill']);
+  assert.deepEqual(h.builds, ['alpha']);
   await h.service.stop();
 });
 
-test('losing the last consumer stops that pack watchers', async () => {
-  let consumed = ['alpha', 'beta'];
-  const h = harness({ consumedPackNames: () => consumed });
+test('pause stops every watcher and clears the sweep timer', async () => {
+  const h = harness();
   await h.service.start();
-  assert.equal(h.watchers.length, 3);
 
-  consumed = ['beta'];
-  await h.service.restartIfConsumersChanged();
+  await h.service.pause();
 
-  assert.deepEqual(h.watchers.filter((w) => !w.stopped).map((w) => w.dir), ['/packs/sources/beta']);
+  assert.equal(h.watchers.every((w) => w.stopped), true);
+  assert.equal(h.intervalCleared, 1);
   await h.service.stop();
 });
 
-test('an unchanged consumer set never restarts the loops', async () => {
-  const h = harness({ consumedPackNames: () => ['alpha'] });
+test('resume starts a paused service again, with nothing changed', async () => {
+  const h = harness();
   await h.service.start();
-  const watcherCount = h.watchers.length;
+  await h.service.pause();
   h.builds.length = 0;
 
-  await h.service.restartIfConsumersChanged();
-  await h.service.restartIfConsumersChanged();
+  await h.service.resume();
 
-  assert.deepEqual(h.builds, [], 'an unrelated settings save must not rebuild anything');
-  assert.equal(h.watchers.length, watcherCount, 'nor churn the watchers');
+  assert.deepEqual(h.builds, ['alpha', 'beta']);
+  assert.equal(h.watchers.filter((w) => !w.stopped).length, 3);
   await h.service.stop();
 });
 
-test('a consumer change queued after stop() cannot bring the loops back', async () => {
-  let consumed: string[] = [];
-  const h = harness({ consumedPackNames: () => consumed });
-  await h.service.start();
+test('a service that booted with the mill off comes up on resume alone', async () => {
+  const h = harness();
+
+  await h.service.resume();
+
+  assert.deepEqual(h.builds, ['alpha', 'beta']);
+  assert.equal(h.watchers.filter((w) => !w.stopped).length, 3);
+  assert.equal(h.hasInterval(), true);
   await h.service.stop();
-
-  consumed = ['alpha'];
-  await h.service.restartIfConsumersChanged();
-
-  assert.deepEqual(h.builds, []);
-  assert.deepEqual(h.watchers, []);
 });
 
-test('an unfiltered service is unaffected by the consumer gate', async () => {
+test('resume on a running service rebuilds nothing and installs no second watcher set', async () => {
   const h = harness();
   await h.service.start();
   h.builds.length = 0;
 
-  await h.service.restartIfConsumersChanged();
-
-  assert.deepEqual(h.builds, [], 'no consumer source means nothing to compare, so nothing restarts');
-  assert.equal(h.watchers.length, 3, 'and every spec is still watched');
-  await h.service.stop();
-});
-
-test('ensureBuilt builds a pack the consumer filter would still skip', async () => {
-  const h = harness({ consumedPackNames: () => [] });
-  await h.service.start();
-  assert.deepEqual(h.builds, []);
-
-  await h.service.ensureBuilt(['alpha']);
-
-  assert.deepEqual(h.builds, ['alpha']);
-  assert.equal(h.service.getVersions().alpha, 'v-alpha-1', 'the next spawn resolves a built pack');
-  await h.service.stop();
-});
-
-test('ensureBuilt ignores a name no spec defines, and an empty request costs nothing', async () => {
-  const h = harness({ consumedPackNames: () => [] });
-  await h.service.start();
-
-  await h.service.ensureBuilt(['ghost']);
-  await h.service.ensureBuilt([]);
-  await h.service.ensureBuilt([]);
+  await h.service.resume();
 
   assert.deepEqual(h.builds, []);
+  assert.equal(h.watchers.filter((w) => !w.stopped).length, 3);
   await h.service.stop();
 });
 
-test('ensureBuilt after stop() builds nothing', async () => {
-  const h = harness({ consumedPackNames: () => ['alpha'] });
+test('resume after stop stays torn down', async () => {
+  const h = harness();
   await h.service.start();
   await h.service.stop();
   h.builds.length = 0;
 
-  await h.service.ensureBuilt(['alpha']);
+  await h.service.resume();
 
   assert.deepEqual(h.builds, []);
+  assert.equal(h.watchers.every((w) => w.stopped), true);
 });
 
-test('a consumer change racing the boot sweep queues behind it rather than orphaning its timer', async () => {
-  let consumed = ['alpha'];
+test('a watch fire after pause does not rebuild', async () => {
+  const h = harness();
+  await h.service.start();
+  await h.service.pause();
+  h.builds.length = 0;
+
+  h.fireWatch('/packs/sources/alpha');
+  await settle();
+
+  assert.deepEqual(h.builds, []);
+  await h.service.stop();
+});
+
+test('stop stays permanent: a later restartIfConsumersChanged installs nothing', async () => {
+  let projects: ProjectRecord[] = [];
+  const h = harness({ variantProjects: () => projects });
+  await h.service.start();
+  await h.service.stop();
+  h.builds.length = 0;
+
+  projects = [{ id: 'p1', name: 'glissa', path: '/repos/a/glissa' }];
+  await h.service.restartIfConsumersChanged();
+
+  assert.deepEqual(h.builds, []);
+  assert.equal(h.watchers.every((w) => w.stopped), true);
+});
+
+
+
+
+
+
+
+
+
+
+
+test('a project change racing the boot sweep queues behind it rather than orphaning its timer', async () => {
+  let projects: ProjectRecord[] = [];
   const h = harness({
-    consumedPackNames: () => consumed,
+    variantProjects: () => projects,
     reportFor: async (name) => { await new Promise((resolve) => setTimeout(resolve, 5)); return okReport(name); },
   });
 
   const started = h.service.start();
   await flush();
-  consumed = ['alpha', 'beta'];
+  projects = [{ id: 'p1', name: 'glissa', path: '/repos/a/glissa' }];
   const restarted = h.service.restartIfConsumersChanged();
   await started;
   await restarted;
@@ -468,11 +442,10 @@ test('a consumer change racing the boot sweep queues behind it rather than orpha
 });
 
 test('a restart racing stop() installs no watcher into the emptied array', async () => {
-  let consumed = ['alpha'];
-  const h = harness({ consumedPackNames: () => consumed });
+  let projects: ProjectRecord[] = [];
+  const h = harness({ variantProjects: () => projects });
   await h.service.start();
-
-  consumed = ['alpha', 'beta'];
+  projects = [{ id: 'p1', name: 'glissa', path: '/repos/a/glissa' }];
   const restarted = h.service.restartIfConsumersChanged();
   const stopping = h.service.stop();
   await Promise.all([restarted, stopping]);
@@ -491,7 +464,7 @@ function groupReport(name: string, overrides: Partial<BuildReport> = {}): BuildR
 }
 
 test('a derived pack gets its own version and its own pack-updated, like any other pack', async () => {
-  const h = harness({ consumedPackNames: () => ['alpha'], reportFor: (name) => groupReport(name) });
+  const h = harness({ specs: [SPECS[0]], reportFor: (name) => groupReport(name) });
   await h.service.start();
 
   assert.deepEqual(h.service.getVersions(), {
@@ -507,7 +480,7 @@ test('a derived pack gets its own version and its own pack-updated, like any oth
 test('a failed variant is warned about and leaves its group build reported as ok', async () => {
   const warnings: string[] = [];
   const h = harness({
-    consumedPackNames: () => ['alpha'],
+    specs: [SPECS[0]],
     reportFor: (name) => groupReport(name, {
       variants: [{ ...okReport(`${name}-glissa-12345678`), ok: false, errors: ['budget'] }],
     }),
@@ -521,8 +494,8 @@ test('a failed variant is warned about and leaves its group build reported as ok
 });
 
 test('the projects a build derives variants from are read live, per build', async () => {
-  let projects: ProjectRecord[] = [{ id: 'p1', name: 'glissa', path: '/repos/a/glissa', packs: ['alpha'] }];
-  const h = harness({ consumedPackNames: () => ['alpha'], variantProjects: () => projects });
+  let projects: ProjectRecord[] = [{ id: 'p1', name: 'glissa', path: '/repos/a/glissa' }];
+  const h = harness({ variantProjects: () => projects });
   await h.service.start();
   assert.deepEqual(h.buildCalls[0].projects, projects);
 
@@ -534,28 +507,17 @@ test('the projects a build derives variants from are read live, per build', asyn
 });
 
 test('a project moving path restarts the loops: the derived pack set moved even though the names did not', async () => {
-  let projects: ProjectRecord[] = [{ id: 'p1', name: 'glissa', path: '/repos/a/glissa', packs: ['alpha'] }];
-  const h = harness({ consumedPackNames: () => ['alpha'], variantProjects: () => projects });
+  let projects: ProjectRecord[] = [{ id: 'p1', name: 'glissa', path: '/repos/a/glissa' }];
+  const h = harness({ variantProjects: () => projects });
   await h.service.start();
   h.builds.length = 0;
 
   await h.service.restartIfConsumersChanged();
   assert.deepEqual(h.builds, [], 'nothing moved, so nothing was rebuilt');
 
-  projects = [{ id: 'p1', name: 'glissa', path: '/repos/moved/glissa', packs: ['alpha'] }];
+  projects = [{ id: 'p1', name: 'glissa', path: '/repos/moved/glissa' }];
   await h.service.restartIfConsumersChanged();
-  assert.deepEqual(h.builds, ['alpha'], 'the variant for the new path is built without a server restart');
+  assert.deepEqual(h.builds, ['alpha', 'beta'], 'the variants for the new path are built without a server restart');
   await h.service.stop();
 });
 
-test('ensureBuilt derives variants from the SAVED config, which the in-memory one does not know yet', async () => {
-  const saved: ProjectRecord[] = [{ id: 'p1', name: 'glissa', path: '/repos/a/glissa', packs: ['alpha'] }];
-  const h = harness({ consumedPackNames: () => [], variantProjects: () => [] });
-  await h.service.start();
-
-  await h.service.ensureBuilt(['alpha'], { projects: saved });
-
-  assert.deepEqual(h.buildCalls.map((call) => call.name), ['alpha']);
-  assert.deepEqual(h.buildCalls[0].projects, saved);
-  await h.service.stop();
-});

@@ -178,7 +178,6 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     mill,
     packDistiller,
     packService,
-    packsAutoRebuildEnabled,
     posthog,
     prReview,
     recordLane,
@@ -322,7 +321,6 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     packService,
     usage,
     mill,
-    packsAutoRebuildEnabled,
     serverBuild: () => serverBuild,
     logger: console,
   });

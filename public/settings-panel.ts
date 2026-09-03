@@ -3,7 +3,6 @@ import { SETTINGS_RANGES } from '#shared/settings-ranges.ts';
 import { playAlertSound, SOUND_OPTIONS } from './alert-sound.ts';
 import { sendControlRequest } from './control-ws.ts';
 import { el } from './dom-helpers.ts';
-import { DELIVER_TO_CAP_NOTE, deliverToCapHint, deliveryTargets, packDeltaFor } from './mill-view-core.ts';
 import { ensureNotificationPermission, notificationPermission, notificationsSupported } from './notifications.ts';
 import type { SettingsSection, SettingsSetting, SettingsOption } from './settings-map.ts';
 import { SETTINGS_MAP, SETTINGS_SECTION_ALIASES } from './settings-map.ts';
@@ -82,11 +81,7 @@ let phoneSearchResultsEl: HTMLElement | null = null;
 let contentEl: HTMLDivElement | null = null;
 let selectedSection: SettingsSection = SETTINGS_VIEW_MAP[0];
 let settingsPayload: SettingsPayload = {};
-let projectReport: {
-  projects: SettingsProject[];
-  packs: { group?: unknown; name?: unknown }[];
-  maxPacksPerProject: unknown;
-} = { projects: [], packs: [], maxPacksPerProject: null };
+let projectReport: { projects: SettingsProject[] } = { projects: [] };
 const projectDetailsById = new Map<string, SettingsProject>();
 let originalValues: SettingsValues | null = null;
 let editedValues: SettingsValues | null = null;
@@ -112,7 +107,7 @@ function hydrate(payload: SettingsPayload) {
 }
 
 function settingValue(setting: SettingsSetting): unknown {
-  if (setting.control === 'readonly' || setting.control === 'pack-toggles') return setting.value;
+  if (setting.control === 'readonly') return setting.value;
   return editedValues?.[setting.path] ?? setting.defaultValue;
 }
 
@@ -144,7 +139,7 @@ function flashSetting(settingId: string) {
 
 function rebuildSettingsMap() {
   const previousSectionId = selectedSection?.id;
-  const projectSections = buildProjectSections(projectReport.projects, projectReport.packs);
+  const projectSections = buildProjectSections(projectReport.projects);
   SETTINGS_VIEW_MAP = orderSections([...STATIC_SETTINGS_VIEW_MAP, ...projectSections]);
   selectedSection = resolveEntry(SETTINGS_VIEW_MAP, selectedSection?.id) ?? selectedSection;
   if (previousSectionId === selectedSection?.id) return;
@@ -417,50 +412,9 @@ function renderReadonly(setting: SettingsSetting) {
   return el('div', 'settings-readonly', String(setting.value || 'Not configured'));
 }
 
-function renderPackToggles(setting: SettingsSetting) {
-  const wrapper = el('div', 'settings-view-projects');
-  const packNames = setting.options as string[];
-  if (packNames.length === 0) wrapper.appendChild(el('div', 'settings-empty', 'No packs are available.'));
-  for (const packName of packNames) {
-    const target = deliveryTargets(projectReport, { name: packName })
-      .find((candidate) => candidate.id === setting.projectId);
-    if (!target) continue;
-    const label = el('label', 'settings-view-project-choice');
-    const input = el('input', 'settings-view-checkbox');
-    input.type = 'checkbox';
-    input.checked = target.checked;
-    input.disabled = target.disabled;
-    input.addEventListener('change', async () => {
-      input.disabled = true;
-      try {
-        const message = await sendControlRequest('set-project-packs', {
-          ...packDeltaFor(target, packName),
-        });
-        if (message.ok === true) return;
-        input.checked = target.checked;
-        input.disabled = target.disabled;
-        serverError = String(message.error || 'Could not change pack delivery.');
-        renderContent();
-      } catch (error) {
-        input.checked = target.checked;
-        input.disabled = target.disabled;
-        serverError = (error as Error)?.message || 'Could not change pack delivery.';
-        renderContent();
-      }
-    });
-    label.append(input, document.createTextNode(packName));
-    if (target.disabled) label.appendChild(el('span', 'mill-deliver-note', DELIVER_TO_CAP_NOTE));
-    wrapper.appendChild(label);
-  }
-  const capHint = deliverToCapHint(projectReport);
-  if (capHint) wrapper.appendChild(el('div', 'settings-readonly', capHint));
-  return wrapper;
-}
-
 function renderControl(setting: SettingsSetting) {
   if (setting.fileOnly) return renderFileOnly(setting);
   if (setting.control === 'readonly') return renderReadonly(setting);
-  if (setting.control === 'pack-toggles') return renderPackToggles(setting);
   if (setting.control === 'toggle') return renderToggle(setting);
   if (setting.control === 'number') return renderNumber(setting);
   if (setting.control === 'select') return renderSelect(setting);
@@ -918,15 +872,13 @@ export function refreshSettingsStatus() {
 }
 
 export function applySettingsProjectReport(msg: unknown) {
-  const report = msg as { error?: unknown; projects?: unknown; packs?: unknown; maxPacksPerProject?: unknown } | null | undefined;
+  const report = msg as { error?: unknown; projects?: unknown } | null | undefined;
   if (typeof report?.error === 'string' && report.error) return;
   projectReport = {
     projects: enrichProjectsById(
       Array.isArray(report?.projects) ? report.projects : [],
       [...projectDetailsById.values()],
     ),
-    packs: Array.isArray(report?.packs) ? report.packs : [],
-    maxPacksPerProject: report?.maxPacksPerProject,
   };
   rebuildSettingsMap();
   if (!rootEl) return;

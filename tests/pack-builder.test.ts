@@ -954,8 +954,8 @@ function slugFor(projectPath: string): string {
 const SLUG_A = slugFor('/repos/a/glissa');
 const SLUG_B = slugFor('/repos/b/other');
 const VARIANT_PROJECTS: ProjectRecord[] = [
-  { id: 'p1', name: 'glissa', path: '/repos/a/glissa', packs: ['memory'] },
-  { id: 'p2', name: 'other', path: '/repos/b/other', packs: ['memory'] },
+  { id: 'p1', name: 'glissa', path: '/repos/a/glissa' },
+  { id: 'p2', name: 'other', path: '/repos/b/other' },
 ];
 
 function variantMemorySpec(overrides: Record<string, unknown> = {}): SpecFixture {
@@ -1021,15 +1021,6 @@ test('the group base declares perProjectVariants, which is what a spawn resolves
   }, { spec: variantMemorySpec(), seed: () => {} });
 });
 
-test('a project that does not name the group derives no variant at all', async () => {
-  await withFixture(async ({ root, build, builtRoot }) => {
-    const glissaHome = seedGlissaHome(root);
-    const report = await build({ glissaHome, projects: [{ id: 'p3', name: 'nope', path: '/repos/c/nope', packs: [] }] });
-
-    assert.deepEqual(report.variants, []);
-    assert.equal(fs.existsSync(path.join(builtRoot, 'memory', 'current')), true);
-  }, { spec: variantMemorySpec(), seed: () => {} });
-});
 
 test('a rebuild that changes nothing republishes no variant either', async () => {
   await withFixture(async ({ root, build, builtRoot }) => {

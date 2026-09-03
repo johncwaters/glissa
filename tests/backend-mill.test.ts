@@ -44,20 +44,12 @@ type ControlFrame =
     maxPacksPerProject: number;
     configWarnings: string[];
   }
-  | { type: 'set-project-packs-result'; requestId: string | null; ok: boolean; error: string | null }
-  | { type: 'session-modified'; state: string }
   | { type: 'state-change'; to: string }
-  | { type: 'project-packs-updated' }
   | { type: 'snapshot' };
 
 type MillReport = Extract<ControlFrame, { type: 'mill-report' }>;
 
-type PacksResult = Extract<ControlFrame, { type: 'set-project-packs-result' }>;
-type SessionModified = Extract<ControlFrame, { type: 'session-modified' }>;
-
 const isMillReport = (m: ControlFrame): m is MillReport => m.type === 'mill-report';
-const isPacksResult = (m: ControlFrame): m is PacksResult => m.type === 'set-project-packs-result';
-const isSessionModified = (m: ControlFrame): m is SessionModified => m.type === 'session-modified';
 
 function writePackFixture(root: string) {
   const specsDir = path.join(root, 'packs', 'specs');
@@ -96,7 +88,6 @@ function writePackFixture(root: string) {
 const BUILD_LOG: string[] = [];
 
 function fakePackService() {
-  BUILD_LOG.length = 0;
   return {
     listSpecs: async () => [{ name: 'good', specPath: '/specs/good.pack.json' }],
     loadSpec: async () => ({ name: 'good', sources: [], skills: [] }),
@@ -120,21 +111,20 @@ interface MillHarness {
 
 function withBackend(
   fn: (harness: MillHarness) => Promise<void>,
-  { packs = ['good', 'ghost'], packsAutoRebuild = false, packServiceOptions, measurement }: {
-    packs?: string[];
-    packsAutoRebuild?: boolean;
+  { millEnabled = false, packServiceOptions, measurement }: {
+    millEnabled?: boolean;
     packServiceOptions?: ReturnType<typeof fakePackService>;
     measurement?: () => Record<string, unknown>;
   } = {},
 ) {
   return async () => {
+    BUILD_LOG.length = 0;
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-mill-'));
     const projectDir = path.join(tmpDir, 'project');
     fs.mkdirSync(projectDir);
     const fixture = writePackFixture(tmpDir);
 
     const project: Record<string, unknown> = { id: SESSION_ID, name: 'mill probe', path: projectDir };
-    if (packs.length > 0) project.packs = packs;
     const cfgPath = path.join(tmpDir, 'config.json');
     fs.writeFileSync(cfgPath, JSON.stringify({
       projects: [project],
@@ -142,7 +132,7 @@ function withBackend(
       repoRoots: [],
       checkForUpdates: false,
       usage: { enabled: false },
-      packsAutoRebuild,
+      millEnabled,
     }, null, 2), 'utf8');
     const prevEnv = process.env.GLISSA_CONFIG;
     process.env.GLISSA_CONFIG = cfgPath;
@@ -218,14 +208,12 @@ test('request-mill-report replies to the requesting socket only, with both specs
   assert.equal(broken.built, null);
   assert.ok(broken.specErrors[0].startsWith('could not read spec:'));
 
-  assert.ok(report.configWarnings.some((w) => w.includes('"ghost"')));
-
   await settle(200);
   assert.equal(bystander.received.filter(isMillReport).length, 0, 'a pull is not a broadcast');
 
   await closeSocket(asker.ws);
   await closeSocket(bystander.ws);
-}));
+}, { millEnabled: true, packServiceOptions: fakePackService() }));
 
 test('the backend report carries the measurement lane scorecard', withBackend(async ({ dash }) => {
   const asker = await openControl(dash);
@@ -264,60 +252,25 @@ test('a control client with no prior request gets no mill report until it asks',
   await closeSocket(client.ws);
 }));
 
-test('the report carries the assignment targets the Deliver to control renders from', withBackend(async ({ dash }) => {
+test('the report lists every configured project as a consumer of every spec on disk', withBackend(async ({ dash }) => {
   const asker = await openControl(dash);
   asker.ws.send(JSON.stringify({ type: 'request-mill-report', requestId: 'm1' }));
   const report = await waitForMessage(asker.received, isMillReport, 'mill-report');
 
-  assert.deepEqual(report.projects, [{ id: SESSION_ID, name: 'mill probe', packs: ['good', 'ghost'] }]);
-  assert.equal(report.maxPacksPerProject, 4);
-  assert.equal(packNamed(report, 'broken').hasConsumers, false);
+  assert.deepEqual(report.projects, [{ id: SESSION_ID, name: 'mill probe', packs: ['broken', 'good'] }]);
+  assert.equal(packNamed(report, 'broken').hasConsumers, true);
   assert.equal(packNamed(report, 'good').hasConsumers, true);
-  assert.equal(report.totals.unconsumed, 1);
+  assert.equal(report.totals.unconsumed, 0);
 
   await closeSocket(asker.ws);
-}));
+}, { millEnabled: true, packServiceOptions: fakePackService() }));
 
-test('a first delivery builds the pack before the reload recreates the session', withBackend(async ({ dash, cfgPath }) => {
-  const asker = await openControl(dash);
+test('with the mill on, every spec builds at boot without any per-project assignment', withBackend(async () => {
+  await settle(200);
+  assert.ok(BUILD_LOG.includes('good'), `expected a boot build of "good", got ${JSON.stringify(BUILD_LOG)}`);
+}, { millEnabled: true, packServiceOptions: fakePackService() }));
 
-  asker.ws.send(JSON.stringify({ type: 'set-project-packs', requestId: 's1', projectId: SESSION_ID, pack: 'good', deliver: true }));
-  const result = await waitForMessage(asker.received, isPacksResult, 'the ack');
-  assert.equal(result.ok, true, result.error || '');
-
-  await waitForMessage(asker.received, isSessionModified, 'the recreate');
-  assert.ok(BUILD_LOG.includes('good'), `expected a build of "good", got ${JSON.stringify(BUILD_LOG)}`);
-  assert.deepEqual(JSON.parse(fs.readFileSync(cfgPath, 'utf8')).projects[0].packs, ['good']);
-
-  await closeSocket(asker.ws);
-}, { packs: [], packsAutoRebuild: true, packServiceOptions: fakePackService() }));
-
-test('assigning a pack to a DORMANT project recreates its record without starting it', withBackend(async ({ dash }) => {
-  const asker = await openControl(dash);
-
-  asker.ws.send(JSON.stringify({ type: 'set-project-packs', projectId: SESSION_ID, pack: 'good', deliver: true }));
-  const modified = await waitForMessage(asker.received, isSessionModified, 'the recreate');
-  assert.equal(modified.state, 'DORMANT');
-  await settle(300);
-  const launched = asker.received.filter((m) => m.type === 'state-change' && m.to !== 'DORMANT');
-  assert.deepEqual(launched, [], 'no session was started by a checkbox');
-
-  await closeSocket(asker.ws);
-}, { packs: [], packsAutoRebuild: true, packServiceOptions: fakePackService() }));
-
-test('a refused set-project-packs writes nothing and tells the asking socket why', withBackend(async ({ dash }) => {
-  const asker = await openControl(dash);
-
-  asker.ws.send(JSON.stringify({ type: 'set-project-packs', requestId: 's1', projectId: SESSION_ID, pack: 'nosuchspec', deliver: true }));
-  const result = await waitForMessage(asker.received, isPacksResult, 'the refusal');
-  assert.equal(result.ok, false);
-  assert.equal(result.requestId, 's1');
-  assert.match(String(result.error), /No pack spec named "nosuchspec"/);
-
-  asker.ws.send(JSON.stringify({ type: 'request-mill-report', requestId: 'm2' }));
-  const report = await waitForMessage(asker.received, (m): m is MillReport => isMillReport(m) && m.requestId === 'm2', 'mill-report');
-  assert.deepEqual(report.projects[0].packs, ['good', 'ghost']);
-  assert.equal(asker.received.filter((m) => m.type === 'project-packs-updated').length, 0);
-
-  await closeSocket(asker.ws);
-}));
+test('with the mill off, nothing builds at boot', withBackend(async () => {
+  await settle(200);
+  assert.deepEqual(BUILD_LOG, []);
+}, { millEnabled: false, packServiceOptions: fakePackService() }));

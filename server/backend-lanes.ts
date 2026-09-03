@@ -32,7 +32,7 @@ import { createVisionsWiring } from './visions-wiring.ts';
 import { resolveIngestConfig } from './core/ingest-core.ts';
 import { resolveMemoryConfig } from './core/memory-core.ts';
 import { resolveDistillConfig as resolveMemoryDistillConfig } from './core/memory-distill-core.ts';
-import { consumedPackNames, packVariantProjects } from './core/pack-core.ts';
+import { isMillEnabled, packVariantProjects } from './core/pack-core.ts';
 import { resolveVisionsConfig } from './core/visions-dispatch-core.ts';
 import { normalizeShapePath } from './core/visions-scope-core.ts';
 import { isPlainObject, numberOrNull } from './core/usage-number-core.ts';
@@ -360,7 +360,6 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
     onConfigChanged: restartDynamicLanes,
   });
   const packService = createPackService({
-    consumedPackNames: () => consumedPackNames(config),
     variantProjects: () => packVariantProjects(config),
     ...(options.packServiceOptions || {}),
   });
@@ -417,7 +416,7 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
       replayBufferKB: config.replayBufferKB,
     }),
   });
-  const packsAutoRebuildEnabled = config.packsAutoRebuild !== false;
+  const millEnabled = () => isMillEnabled(config);
   const fixedLaneEntries = {
     'branch-gc': branchGc,
     'pr-review': prReview,
@@ -458,7 +457,7 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
       () => prReview.startPoller(),
       () => posthog.startPoller(),
       () => {
-        if (!packsAutoRebuildEnabled) return;
+        if (!millEnabled()) return;
         packService.start().catch((error: unknown) => logger.warn(`[packs] auto-rebuild failed to start: ${errorMessage(error)}`));
       },
       () => packDistiller.start().catch((error: unknown) => logger.warn(`[distill] failed to start: ${errorMessage(error)}`)),
@@ -474,7 +473,12 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
       () => usage.restartIfConfigChanged(),
       () => void millMetrics.restartIfConfigChanged(),
       () => {
-        if (packsAutoRebuildEnabled) packService.restartIfConsumersChanged();
+        if (!millEnabled()) {
+          void packService.pause();
+          return;
+        }
+        void packService.resume();
+        void packService.restartIfConsumersChanged();
       },
     ];
     for (const restart of restartSteps) restart();
@@ -498,7 +502,6 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
     millMetrics,
     packDistiller,
     packService,
-    packsAutoRebuildEnabled,
     posthog,
     prReview,
     recordLane,
