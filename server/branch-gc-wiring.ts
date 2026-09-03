@@ -13,6 +13,7 @@ interface BranchGcWiringConfig {
 interface BranchGcWiringOptions {
   config: BranchGcWiringConfig;
   gitWorkspace: BranchGcGitWorkspace;
+  liveSessionIds: () => Set<string>;
   broadcast?: (message: LaneStatusRecord) => void;
   log?: Console;
   decisionTrace?: (entry: Record<string, unknown>) => void;
@@ -38,6 +39,7 @@ function branchGcCfgKey(config: BranchGcWiringConfig): string {
 function createBranchGcWiring({
   config,
   gitWorkspace,
+  liveSessionIds,
   broadcast = () => {},
   log = console,
   decisionTrace = (entry: Record<string, unknown>) => log.info(`[branch-gc] decision ${JSON.stringify(entry)}`),
@@ -52,6 +54,7 @@ function createBranchGcWiring({
     createPoller: ({ onTickComplete }) => createPoller({
       gitWorkspace,
       getConfig: () => config,
+      liveSessionIds,
       staleDays: config.branchGc?.staleDays ?? DEFAULT_STALE_DAYS,
       intervalMs: config.branchGc?.intervalMs ?? DEFAULT_INTERVAL_MS,
       log,

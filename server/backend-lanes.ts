@@ -156,10 +156,19 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
   });
   void laneLedger.load();
   const recordLane = laneLedger.record;
+  const allLiveSessions = (): Session[] => [
+    ...sessions.values(),
+    ...reviewSessions.values(),
+    ...investigationSessions.values(),
+    ...visionsSessions.values(),
+    ...distillSessions.values(),
+    ...memoryDistillSessions.values(),
+  ];
   const branchGc = createBranchGcWiring({
     config,
     gitWorkspace,
     broadcast: broadcastControl,
+    liveSessionIds: () => new Set(allLiveSessions().map((session) => session.id)),
     ...(options.branchGcWiringOptions || {}),
   });
   const prReview = createPrReviewWiring({
@@ -472,6 +481,7 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
   }
 
   return {
+    allLiveSessions,
     branchGc,
     current,
     currentIngest,

@@ -54,6 +54,7 @@ interface BranchGcProjectSummary {
 interface BranchGcPollerDeps {
   gitWorkspace: BranchGcGitWorkspace;
   getConfig: () => BranchGcConfig;
+  liveSessionIds: () => Set<string>;
   staleDays?: number;
   intervalMs?: number;
   setIntervalFn?: typeof setInterval;
@@ -74,6 +75,7 @@ function createBranchGcPoller(deps: BranchGcPollerDeps): BranchGcPoller {
   const {
     gitWorkspace,
     getConfig,
+    liveSessionIds,
     staleDays = DEFAULT_STALE_DAYS,
     intervalMs = DEFAULT_INTERVAL_MS,
     setIntervalFn = setInterval,
@@ -187,11 +189,11 @@ function createBranchGcPoller(deps: BranchGcPollerDeps): BranchGcPoller {
       checkedBranches.push({ ...remoteBranch, mergedIntoIntegration: mergeResult.mergedIntoIntegration });
     }
 
-    const liveSessionIds = new Set((config.projects || []).map((project) => project.id ?? ''));
+    const configuredProjectIds = (config.projects || []).map((project) => project.id ?? '');
     const plan = planBranchGc({
       remoteBranches: checkedBranches,
       integrationTips,
-      liveSessionIds,
+      liveSessionIds: new Set([...configuredProjectIds, ...liveSessionIds()]),
       nowMs: now(),
       staleDays,
     });

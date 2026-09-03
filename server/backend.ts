@@ -118,14 +118,7 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
   const sessions = new Map<string, Session>();
   const health = createBackendHealth({
     sessions,
-    getAllSessions: () => [
-      ...sessions.values(),
-      ...reviewSessions.values(),
-      ...investigationSessions.values(),
-      ...distillSessions.values(),
-      ...visionsSessions.values(),
-      ...memoryDistillSessions.values(),
-    ],
+    getAllSessions: () => allLiveSessions(),
     sessionDataClients,
     getIngestLane: getCurrentIngestLane,
     controlWss,
@@ -173,6 +166,7 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     logger: console,
   });
   const {
+    allLiveSessions,
     branchGc,
     distillSessions,
     gitWorkspace: assembledGitWorkspace,

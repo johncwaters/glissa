@@ -73,8 +73,9 @@ test('fetches before listing, deletes separately, continues after failure, and p
     gitWorkspace,
     getConfig: () => ({
       integrationBranch: 'develop',
-      projects: [{ id: 'live', path: '/repo' }],
+      projects: [{ id: 'project-uuid', path: '/repo' }],
     }),
+    liveSessionIds: () => new Set(['live']),
     now: () => NOW_MS,
     log: { warn: () => {} },
     decisionTrace: (entry) => traces.push(entry),
@@ -99,6 +100,82 @@ test('fetches before listing, deletes separately, continues after failure, and p
     'glissa/session/merged',
     'glissa/session/stale',
   ]);
+});
+
+async function deletionsAfterTick({ branchIds, configuredProjectIds, injectedLiveSessionIds }: {
+  branchIds: string[];
+  configuredProjectIds: string[];
+  injectedLiveSessionIds: string[];
+}): Promise<string[]> {
+  const deletedBranches: string[] = [];
+  const gitWorkspace: BranchGcGitWorkspace = {
+    async fetchOrigin() {
+      return { ok: true };
+    },
+    async listRemoteSessionBranches() {
+      return {
+        ok: true,
+        branches: branchIds.map((branchId) => ({
+          name: `glissa/session/${branchId}`,
+          tipSha: `${branchId}-sha`,
+          tipCommitTimeMs: NOW_MS - DAY_MS,
+        })),
+      };
+    },
+    async listIntegrationTips() {
+      return { ok: true, integrationTips: [{ branch: 'develop', sha: 'develop-sha' }] };
+    },
+    async isAncestor() {
+      return { ok: true, isAncestor: true };
+    },
+    async deleteRemoteBranch({ name }) {
+      deletedBranches.push(name);
+      return { ok: true };
+    },
+  };
+  const poller = createBranchGcPoller({
+    gitWorkspace,
+    getConfig: () => ({
+      integrationBranch: 'develop',
+      projects: configuredProjectIds.map((projectId) => ({ id: projectId, path: '/repo' })),
+    }),
+    liveSessionIds: () => new Set(injectedLiveSessionIds),
+    now: () => NOW_MS,
+  });
+
+  await poller.tick();
+
+  return deletedBranches;
+}
+
+test('keeps a merged branch whose id is only a configured project id', async () => {
+  const deletedBranches = await deletionsAfterTick({
+    branchIds: ['project-uuid'],
+    configuredProjectIds: ['project-uuid'],
+    injectedLiveSessionIds: [],
+  });
+
+  assert.deepEqual(deletedBranches, []);
+});
+
+test('keeps a merged branch whose id is only in the injected live session ids', async () => {
+  const deletedBranches = await deletionsAfterTick({
+    branchIds: ['injected-session'],
+    configuredProjectIds: ['project-uuid'],
+    injectedLiveSessionIds: ['injected-session'],
+  });
+
+  assert.deepEqual(deletedBranches, []);
+});
+
+test('deletes a merged branch whose id is neither configured nor injected', async () => {
+  const deletedBranches = await deletionsAfterTick({
+    branchIds: ['abandoned-session'],
+    configuredProjectIds: ['project-uuid'],
+    injectedLiveSessionIds: ['injected-session'],
+  });
+
+  assert.deepEqual(deletedBranches, ['glissa/session/abandoned-session']);
 });
 
 test('git helpers normalize remote refs, retain unresolved protected names, and delete one ref', async () => {
@@ -174,6 +251,7 @@ test('default config constructs and starts the lane poller', async () => {
   const wiring = createBranchGcWiring({
     config: { projects: [] },
     gitWorkspace: unreachableGitWorkspace(),
+    liveSessionIds: () => new Set<string>(),
     createPoller: () => {
       createCount += 1;
       return { start: async () => {}, stop: async () => {}, tick: async () => {} };
@@ -193,6 +271,7 @@ test('disabled config never constructs or starts the lane poller', async () => {
   const wiring = createBranchGcWiring({
     config: { branchGc: { enabled: false }, projects: [] },
     gitWorkspace: unreachableGitWorkspace(),
+    liveSessionIds: () => new Set<string>(),
     createPoller: () => {
       createCount += 1;
       return { start: async () => {}, stop: async () => {}, tick: async () => {} };
