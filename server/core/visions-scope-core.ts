@@ -59,10 +59,9 @@ function isWithin(scopePath: string, uriPath: string): boolean {
 }
 
 function isUriInProjects(uri: unknown, normalizedProjectPaths: string[] | null | undefined): boolean {
-  if (!Array.isArray(normalizedProjectPaths) || normalizedProjectPaths.length === 0) return true;
   const uriPath = pathOfFileUri(uri);
   if (!uriPath) return false;
-  return normalizedProjectPaths.some((scopePath) => isWithin(scopePath, uriPath));
+  return (Array.isArray(normalizedProjectPaths) ? normalizedProjectPaths : []).some((scopePath) => isWithin(scopePath, uriPath));
 }
 
 function deepestRootFor(normalizedPath: string, roots: unknown): string | null {
@@ -88,15 +87,37 @@ function projectForUri(uri: unknown, scopeProjects: ScopeProject[] | null | unde
   return owner ? owner.id : null;
 }
 
-function scopePathsOf(scopeProjects: ScopeProject[] | null | undefined): string[] | null {
-  if (!Array.isArray(scopeProjects) || scopeProjects.length === 0) return null;
+function scopePathsOf(scopeProjects: ScopeProject[] | null | undefined): string[] {
   const paths: string[] = [];
-  for (const entry of scopeProjects) {
+  for (const entry of Array.isArray(scopeProjects) ? scopeProjects : []) {
     const scopePath = normalizeShapePath(entry?.path);
     if (!scopePath || paths.includes(scopePath)) continue;
     paths.push(scopePath);
   }
-  return paths.length > 0 ? paths : null;
+  return paths;
 }
 
-export { deepestRootFor, pathOfFileUri, normalizeShapePath, isUriInProjects, projectForUri, scopePathsOf };
+function resolveVisionsScopeProjects({ configuredIds, projects, warn }: {
+  configuredIds: unknown;
+  projects: unknown;
+  warn: (message: string) => void;
+}): { id: string; path: string }[] {
+  const usable: { id: string; path: string }[] = [];
+  const seenPaths = new Set<string>();
+  for (const project of Array.isArray(projects) ? projects : []) {
+    if (!project || typeof project.id !== 'string' || project.id === '') continue;
+    const normalizedPath = normalizeShapePath(project.path);
+    if (!normalizedPath || seenPaths.has(normalizedPath)) continue;
+    seenPaths.add(normalizedPath);
+    usable.push({ id: project.id, path: normalizedPath });
+  }
+  const ids = Array.isArray(configuredIds) ? configuredIds.filter((id): id is string => typeof id === 'string' && id !== '') : [];
+  if (ids.length === 0) return usable;
+  const wanted = new Set(ids);
+  for (const id of ids) {
+    if (!usable.some((project) => project.id === id)) warn(`[visions] configured project id not found or has no usable path: ${id}`);
+  }
+  return usable.filter((project) => wanted.has(project.id));
+}
+
+export { deepestRootFor, pathOfFileUri, normalizeShapePath, isUriInProjects, projectForUri, resolveVisionsScopeProjects, scopePathsOf };

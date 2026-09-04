@@ -35,7 +35,7 @@ import { resolveMemoryConfig } from './core/memory-core.ts';
 import { resolveDistillConfig as resolveMemoryDistillConfig } from './core/memory-distill-core.ts';
 import { isMillEnabled, packVariantProjects } from './core/pack-core.ts';
 import { resolveVisionsConfig } from './core/visions-dispatch-core.ts';
-import { normalizeShapePath } from './core/visions-scope-core.ts';
+import { resolveVisionsScopeProjects } from './core/visions-scope-core.ts';
 import { isPlainObject, numberOrNull } from './core/usage-number-core.ts';
 import { resolveMillMetricsConfig } from './core/mill-metrics-core.ts';
 
@@ -70,34 +70,6 @@ interface BackendLaneDependencies {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function resolveVisionsScopeProjects(
-  projectIds: unknown,
-  projects: unknown,
-  warn: (message: string) => void,
-): { id: string; path: string }[] | null {
-  if (!Array.isArray(projectIds) || projectIds.length === 0) return null;
-  const projectsById = new Map<string, { id: string; path?: unknown }>();
-  for (const project of Array.isArray(projects) ? projects : []) {
-    if (!project || typeof project.id !== 'string') continue;
-    projectsById.set(project.id, project);
-  }
-  const scopeProjects: { id: string; path: string }[] = [];
-  for (const projectId of projectIds) {
-    const project = projectsById.get(projectId);
-    if (!project) {
-      warn(`[visions] configured project id not found: ${projectId}`);
-      continue;
-    }
-    const normalizedPath = normalizeShapePath(project.path);
-    if (!normalizedPath) {
-      warn(`[visions] configured project has no usable path: ${projectId}`);
-      continue;
-    }
-    scopeProjects.push({ id: projectId, path: normalizedPath });
-  }
-  return scopeProjects.length === 0 ? null : scopeProjects;
 }
 
 interface SessionTokenTotals {
@@ -306,7 +278,9 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
         : null,
       contextDigest: (...args: Parameters<NonNullable<typeof ingestLane>['buildDigest']>) => ingestLane?.buildDigest(...args) ?? null,
       contextSeq: () => ingestLane?.latestSeq() ?? null,
-      scopeProjects: resolveVisionsScopeProjects(visionsConfig.projects, config.projects, logger.warn.bind(logger)),
+      scopeProjects: resolveVisionsScopeProjects({
+        configuredIds: visionsConfig.projects, projects: config.projects, warn: logger.warn.bind(logger),
+      }),
       getMemoryStore: () => memoryStore,
       onEditorEvent: (event: { method?: string; uri?: string }) => ingestLane?.noteEditorEvent(event),
       knownProjectIds: (Array.isArray(config.projects) ? config.projects : [])
@@ -525,5 +499,5 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
 
 type BackendLanes = ReturnType<typeof createBackendLanes>;
 
-export { createBackendLanes, resolveVisionsScopeProjects, tokensFromUsage };
+export { createBackendLanes, tokensFromUsage };
 export type { BackendLaneDependencies, BackendLaneOptions, BackendLanes };

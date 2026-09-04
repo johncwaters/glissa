@@ -54,7 +54,7 @@ function withVisionsBackend(fn: (scope: VisionsScope) => Promise<void>) {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-visions-tab-'));
     const cfgPath = path.join(tmpDir, 'config.json');
     fs.writeFileSync(cfgPath, JSON.stringify({
-      projects: [], teams: [], repoRoots: [], visions: { enabled: true },
+      projects: [{ id: 'harness', name: 'harness', path: '/tmp' }], teams: [], repoRoots: [], visions: { enabled: true },
     }, null, 2), 'utf8');
     const prevEnv = process.env.GLISSA_CONFIG;
     process.env.GLISSA_CONFIG = cfgPath;

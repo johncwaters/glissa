@@ -175,7 +175,7 @@ interface VisionsWiringOptions {
   }) => Promise<DispatchOutcome>) | null;
   contextDigest?: ((options: { scopes: null; budgetChars: number; now: number }) => unknown) | null;
   contextSeq?: (() => number | null) | null;
-  scopeProjects?: ScopeProject[] | null;
+  scopeProjects?: ScopeProject[];
   knownProjectIds?: string[] | null;
   getMemoryStore?: (() => VisionsMemoryStore | null) | null;
   onEditorEvent?: ((event: { method: string; uri: string }) => void) | null;
@@ -303,7 +303,7 @@ function createVisionsWiring({
   dispatch = null,
   contextDigest = null,
   contextSeq = null,
-  scopeProjects = null,
+  scopeProjects = [],
   knownProjectIds = null,
   getMemoryStore = null,
   onEditorEvent = null,

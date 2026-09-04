@@ -6,6 +6,7 @@ import {
   normalizeShapePath,
   isUriInProjects,
   projectForUri,
+  resolveVisionsScopeProjects,
   scopePathsOf,
 } from '../server/core/visions-scope-core.ts';
 
@@ -53,10 +54,37 @@ test('isUriInProjects folds slashes and case for Windows and UNC shapes', () => 
   assert.equal(isUriInProjects('file://SERVER/Share/Repo/Doc.md', [normalizeShapePath('\\\\server\\share\\repo')]), true);
 });
 
-test('isUriInProjects treats null and empty lists as unscoped', () => {
-  assert.equal(isUriInProjects('untitled:Untitled-1', null), true);
-  assert.equal(isUriInProjects('file:///any/path.md', []), true);
+test('isUriInProjects refuses everything outside the listed roots, and an empty list admits nothing', () => {
+  assert.equal(isUriInProjects('untitled:Untitled-1', null), false);
+  assert.equal(isUriInProjects('file:///any/path.md', []), false);
+  assert.equal(isUriInProjects('file:///tmp/claude-1000/-home-me-Projects-superday/scratch/report.md', ['/home/me/Projects/superday']), false);
+  assert.equal(isUriInProjects('git:/home/me/Projects/superday/plan.md?%7B%22ref%22%3A%22~%22%7D', ['/home/me/Projects/superday']), false);
   assert.equal(isUriInProjects('untitled:Untitled-1', ['/a/b']), false);
+  assert.equal(isUriInProjects('file:///a/b/plan.md', ['/a/b']), true);
+});
+
+test('resolveVisionsScopeProjects means every configured project when no ids are named, and narrows to the named ones', () => {
+  const warnings: string[] = [];
+  const warn = (message: string) => { warnings.push(message); };
+  const projects = [
+    { id: 'superday', path: '/home/me/Projects/superday' },
+    { id: 'glissa', path: '/home/me/Projects/glissa/' },
+    { id: 'superday-again', path: '/home/me/Projects/superday' },
+    { id: 'pathless' },
+  ];
+  assert.deepEqual(resolveVisionsScopeProjects({ configuredIds: undefined, projects, warn }), [
+    { id: 'superday', path: '/home/me/Projects/superday' },
+    { id: 'glissa', path: '/home/me/Projects/glissa' },
+  ]);
+  assert.deepEqual(resolveVisionsScopeProjects({ configuredIds: [], projects, warn }).map((project) => project.id), ['superday', 'glissa']);
+  assert.deepEqual(resolveVisionsScopeProjects({ configuredIds: ['glissa'], projects, warn }).map((project) => project.id), ['glissa']);
+  assert.deepEqual(warnings, []);
+  assert.deepEqual(resolveVisionsScopeProjects({ configuredIds: ['missing', 'pathless'], projects, warn }), []);
+  assert.deepEqual(warnings, [
+    '[visions] configured project id not found or has no usable path: missing',
+    '[visions] configured project id not found or has no usable path: pathless',
+  ]);
+  assert.deepEqual(resolveVisionsScopeProjects({ configuredIds: null, projects: null, warn }), []);
 });
 
 test('projectForUri names the owning project id', () => {
@@ -94,9 +122,9 @@ test('projectForUri returns null for an unowned uri, an unconfigured lane and a 
   assert.equal(projectForUri('file:///a/b/plan.md', [{ path: '/a/b' }, { id: '', path: '/a/b' }]), null);
 });
 
-test('scopePathsOf drops the ids, dedupes and keeps null for an unscoped lane', () => {
+test('scopePathsOf drops the ids, dedupes, and yields an empty list when nothing is usable', () => {
   assert.deepEqual(scopePathsOf([{ id: 'alpha', path: '/a/b' }, { id: 'beta', path: '/a/b/' }]), ['/a/b']);
-  assert.equal(scopePathsOf([]), null);
-  assert.equal(scopePathsOf(null), null);
-  assert.equal(scopePathsOf([{ id: 'alpha', path: '  ' }]), null);
+  assert.deepEqual(scopePathsOf([]), []);
+  assert.deepEqual(scopePathsOf(null), []);
+  assert.deepEqual(scopePathsOf([{ id: 'alpha', path: '  ' }]), []);
 });

@@ -363,7 +363,7 @@ export const SETTINGS_MAP = Object.freeze([
       },
       {
         id: 'visions-projects', path: 'visions.projects', title: 'Projects',
-        description: 'Leave every project clear to accept buffers from any project.',
+        description: 'Leave every project clear to accept buffers from every configured project.',
         control: 'projects', keywords: ['repositories', 'filter'], defaultValue: [],
       },
     ],
