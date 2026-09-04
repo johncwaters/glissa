@@ -246,10 +246,15 @@ function resetUri(state: TouchState, uri: string | null): TouchState {
   return state;
 }
 
+function touchedLineCount(ranges: unknown): number {
+  return (Array.isArray(ranges) ? ranges : [])
+    .reduce((total: number, range: TouchedRange) => total + (range.end - range.start + 1), 0);
+}
+
 function formatTouchedRanges(ranges: unknown): string {
   return (Array.isArray(ranges) ? ranges : [])
     .map((range: TouchedRange) => (range.start === range.end ? `${range.start}` : `${range.start}-${range.end}`))
     .join(', ');
 }
 
-export { createTouchState, formatTouchedRanges, mergeRanges, recordChanges, resetUri, shiftLines, touchedRangesFor };
+export { createTouchState, formatTouchedRanges, mergeRanges, recordChanges, resetUri, shiftLines, touchedLineCount, touchedRangesFor };

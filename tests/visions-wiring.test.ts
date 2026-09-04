@@ -2854,7 +2854,7 @@ test('a freshly opened buffer orients once: intent and hand land, comments and d
   await wiring.whenDispatchSettled();
   assert.equal(calls.length, 1);
   assert.match(String(callAt(calls, 0).prompt), /orientation pass/);
-  assert.ok(notes.some((line) => line.includes(`dispatching ${MARKDOWN_URI}: orientation`)));
+  assert.ok(notes.some((line) => /dispatching .*: orientation \(prompt=\d+b focus=0l memory=\d+c digest=\d+c\)$/.test(line)));
   const [document] = wiring.documentsSnapshot();
   assert.deepEqual(document.comments, []);
   assert.deepEqual(document.diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word', 'hand']);
@@ -2906,7 +2906,7 @@ test('an edit dispatch is scoped to the edited lines, and comments or diagnostic
 
   assert.equal(calls.length, 1);
   assert.match(String(callAt(calls, 0).prompt), /Lines edited this session: 12\./);
-  assert.ok(notes.some((line) => line.includes(`dispatching ${MARKDOWN_URI}: edited lines 12`)));
+  assert.ok(notes.some((line) => /dispatching .*: edited lines 12 \(prompt=\d+b focus=1l memory=\d+c digest=\d+c\)$/.test(line)));
   const [document] = wiring.documentsSnapshot();
   assert.deepEqual(document.comments.map((comment) => comment.message), ['about the edit']);
   assert.equal(document.hand, 'a structural thought', 'the structure comment folded into the hand');

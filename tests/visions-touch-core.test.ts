@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { applyDidChange, applyDidOpen, createDocStore } from '../server/core/visions-buffer-core.ts';
 import {
-  createTouchState, formatTouchedRanges, mergeRanges, recordChanges, resetUri, shiftLines, touchedRangesFor,
+  createTouchState, formatTouchedRanges, mergeRanges, recordChanges, resetUri, shiftLines, touchedLineCount, touchedRangesFor,
 } from '../server/core/visions-touch-core.ts';
 
 const URI = 'file:///tmp/plan.md';
@@ -101,6 +101,12 @@ test('ranges format as the one line the prompt carries', () => {
   assert.equal(formatTouchedRanges([{ start: 3, end: 5 }, { start: 12, end: 12 }]), '3-5, 12');
   assert.equal(formatTouchedRanges([]), '');
   assert.equal(formatTouchedRanges(null), '');
+});
+
+test('touchedLineCount sums the lines every range covers', () => {
+  assert.equal(touchedLineCount([{ start: 3, end: 5 }, { start: 12, end: 12 }]), 4);
+  assert.equal(touchedLineCount([]), 0);
+  assert.equal(touchedLineCount(null), 0);
 });
 
 function shifted(text: string, contentChanges: unknown[], lines: number[]): number[] {

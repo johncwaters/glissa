@@ -81,7 +81,7 @@ import { sweepMarkdownWithFixes } from './core/visions-rules-core.ts';
 import type { SweepDiagnostic, SweepFix } from './core/visions-rules-core.ts';
 import { isUriInProjects, projectForUri, scopePathsOf } from './core/visions-scope-core.ts';
 import {
-  createTouchState, formatTouchedRanges, recordChanges, resetUri as resetTouchedUri, shiftLines, touchedRangesFor,
+  createTouchState, formatTouchedRanges, recordChanges, resetUri as resetTouchedUri, shiftLines, touchedLineCount, touchedRangesFor,
 } from './core/visions-touch-core.ts';
 import type { TouchedRange } from './core/visions-touch-core.ts';
 import { createJsonStateWriter } from './json-file.ts';
@@ -886,7 +886,9 @@ function createVisionsWiring({
           uri, textHash, now: nowFn(), contextSeq: seq, trigger: decision.trigger, reason: decision.reason,
         });
         if (orientation) orientedUris.add(uri);
-        note(`dispatching ${uri}: ${orientation ? 'orientation' : `edited lines ${formatTouchedRanges(touchedRanges)}`}`);
+        const focusLabel = orientation ? 'orientation' : `edited lines ${formatTouchedRanges(touchedRanges)}`;
+        const sizes = `prompt=${sizeDecision.promptBytes}b focus=${touchedLineCount(touchedRanges)}l memory=${memory?.text.length ?? 0}c digest=${digest.length}c`;
+        note(`dispatching ${uri}: ${focusLabel} (${sizes})`);
         result = await dispatch?.({
           uri,
           text,
