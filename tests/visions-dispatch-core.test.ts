@@ -36,6 +36,8 @@ import {
   resolveVisionsConfig,
   sanitizeComments,
   sanitizeModelDiagnostics,
+  commentsToLsp,
+  relineDiagnostics,
 } from '../server/core/visions-dispatch-core.ts';
 
 const URI = 'file:///tmp/plan-visions.md';
@@ -1357,4 +1359,14 @@ test('visions.intent.threadTtlMs survives resolveVisionsConfig and defaults to 7
   assert.deepEqual(resolveVisionsConfig({ enabled: true, intent: { threadTtlMs: -1 } }).intent, { threadTtlMs: 72 * 3600000 });
   assert.deepEqual(resolveVisionsConfig({ enabled: true, intent: 'soon' }).intent, { threadTtlMs: 72 * 3600000 });
   assert.equal(Object.hasOwn(resolveVisionsConfig({ enabled: true, intent: { junk: 1 } }).intent, 'junk'), false);
+});
+
+test('relineDiagnostics moves each diagnostic to its new line and refits the range to that line', () => {
+  const text = 'Intro\n# Title\n\nA line.\n';
+  const original = commentsToLsp([{ line: 1, message: 'first' }, { line: 3, message: 'third' }], { text: '# Title\n\nA line.\n' });
+  const moved = relineDiagnostics(original, [2, 4], { text });
+  assert.deepEqual(moved.map((entry) => [entry.code, entry.message, entry.range.start.line, entry.range.end.character]), [
+    ['comment', 'first', 1, '# Title'.length],
+    ['comment', 'third', 3, 'A line.'.length],
+  ]);
 });

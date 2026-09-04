@@ -541,6 +541,13 @@ function commentsToLsp(comments: unknown, { text = '' }: { text?: string } = {})
   return diagnostics;
 }
 
+function relineDiagnostics(diagnostics: LineDiagnostic[], lineByIndex: number[], { text = '' }: { text?: string } = {}): LineDiagnostic[] {
+  const lines = lineTextsOf(text);
+  return diagnostics.map((entry, index) => lineDiagnostic({
+    lines, line: lineByIndex[index] ?? entry.range.start.line + 1, severity: entry.severity, code: entry.code, message: entry.message,
+  }));
+}
+
 function handToLsp(hand: unknown, { text = '' }: { text?: string } = {}): LineDiagnostic[] {
   const message = typeof hand === 'string' ? hand.trim() : '';
   if (!message) return [];
@@ -734,4 +741,4 @@ function buildVisionsPrompt({
   return lines.join('\n');
 }
 
-export { DEFAULT_ACTIVITY_MAX_PER_HOUR, ORIENTATION_REASON, TOUCH_MARGIN_LINES, filterComments, formatDroppedComments, isWithinTouchedRanges, DEFAULT_DISPATCH_MODEL, ERROR_BACKOFF_MS, ERROR_BACKOFF_THRESHOLD, ERROR_SOURCE_SESSION, ERROR_SOURCE_TRANSPORT, MAX_HAND_CHARS, DEFAULT_COOLDOWN_MS, DEFAULT_MAX_PER_HOUR, DEFAULT_QUIET_MS, DEFAULT_TIMEOUT_SECONDS, HOUR_MS, MAX_PROMPT_BYTES, VISIONS_RESULT_FILE, activitySection, buildVisionsPrompt, contentMarker, memorySection, countLines, countRecentDispatches, createDispatchState, decideDispatch, decideDocumentSize, decidePromptSize, forgetUri, handToLsp, hashText, commentsToLsp, mergeDiagnostics, modelDiagnosticsToLsp, noteDispatchOutcome, numberBufferLines, recordDispatch, resolveDispatchConfig, resolveVisionsConfig, sanitizeComments, sanitizeCommentsWithDrops, sanitizeModelDiagnostics };
+export { DEFAULT_ACTIVITY_MAX_PER_HOUR, ORIENTATION_REASON, TOUCH_MARGIN_LINES, filterComments, formatDroppedComments, isWithinTouchedRanges, DEFAULT_DISPATCH_MODEL, ERROR_BACKOFF_MS, ERROR_BACKOFF_THRESHOLD, ERROR_SOURCE_SESSION, ERROR_SOURCE_TRANSPORT, MAX_HAND_CHARS, DEFAULT_COOLDOWN_MS, DEFAULT_MAX_PER_HOUR, DEFAULT_QUIET_MS, DEFAULT_TIMEOUT_SECONDS, HOUR_MS, MAX_PROMPT_BYTES, VISIONS_RESULT_FILE, activitySection, buildVisionsPrompt, contentMarker, memorySection, countLines, countRecentDispatches, createDispatchState, decideDispatch, decideDocumentSize, decidePromptSize, forgetUri, handToLsp, hashText, commentsToLsp, mergeDiagnostics, modelDiagnosticsToLsp, noteDispatchOutcome, numberBufferLines, recordDispatch, relineDiagnostics, resolveDispatchConfig, resolveVisionsConfig, sanitizeComments, sanitizeCommentsWithDrops, sanitizeModelDiagnostics };

@@ -12,7 +12,7 @@ import { ACTIVITY_METHOD } from './core/ingest-editor-core.ts';
 import {
   applyDidChange, applyDidClose, applyDidOpen, createDocStore, detectBlankLineBoundary, formatRange, getDoc, listDocs, uriOfParams,
 } from './core/visions-buffer-core.ts';
-import type { StoredDoc } from './core/visions-buffer-core.ts';
+import type { AppliedChange, StoredDoc } from './core/visions-buffer-core.ts';
 import {
   ERROR_BACKOFF_THRESHOLD,
   ORIENTATION_REASON,
@@ -30,6 +30,7 @@ import {
   mergeDiagnostics,
   noteDispatchOutcome,
   recordDispatch,
+  relineDiagnostics,
   resolveDispatchConfig,
   sanitizeModelDiagnostics,
 } from './core/visions-dispatch-core.ts';
@@ -80,7 +81,7 @@ import { sweepMarkdownWithFixes } from './core/visions-rules-core.ts';
 import type { SweepDiagnostic, SweepFix } from './core/visions-rules-core.ts';
 import { isUriInProjects, projectForUri, scopePathsOf } from './core/visions-scope-core.ts';
 import {
-  createTouchState, formatTouchedRanges, recordChanges, resetUri as resetTouchedUri, touchedRangesFor,
+  createTouchState, formatTouchedRanges, recordChanges, resetUri as resetTouchedUri, shiftLines, touchedRangesFor,
 } from './core/visions-touch-core.ts';
 import type { TouchedRange } from './core/visions-touch-core.ts';
 import { createJsonStateWriter } from './json-file.ts';
@@ -507,6 +508,23 @@ function createVisionsWiring({
     modelDiagnosticsByUri.delete(uri);
     commentDiagnosticsByUri.delete(uri);
     handDiagnosticsByUri.delete(uri);
+  }
+
+  function carryDispatchDiagnostics(uri: string, changes: AppliedChange[], text: string): void {
+    const modelDiagnostics = modelDiagnosticsByUri.get(uri) || [];
+    if (modelDiagnostics.length > 0) {
+      const movedLines = shiftLines(modelDiagnostics.map((entry) => entry.range.start.line + 1), changes, text);
+      modelDiagnosticsByUri.set(uri, relineDiagnostics(modelDiagnostics, movedLines, { text }));
+    }
+    const comments = commentsByUri.get(uri) || [];
+    if (comments.length > 0) {
+      const movedLines = shiftLines(comments.map((comment) => comment.line), changes, text);
+      const hasMovedLine = comments.some((comment, index) => comment.line !== movedLines[index]);
+      const moved = comments.map((comment, index) => ({ ...comment, line: movedLines[index] }));
+      if (hasMovedLine) recordComments(uri, moved, { text });
+      if (!hasMovedLine) commentDiagnosticsByUri.set(uri, commentsToLsp(comments, { text }));
+    }
+    if (handsByUri.has(uri)) handDiagnosticsByUri.set(uri, handToLsp(handsByUri.get(uri), { text }));
   }
 
   function broadcastComments(uri: string, comments: VisionsComment[]): void {
@@ -1055,7 +1073,7 @@ function createVisionsWiring({
         const result = applyDidChange(store, params);
         if (!result.applied) return changeFailureReason(uri, version, result);
         const doc = uri ? getDoc(store, uri) : null;
-        dropDispatchDiagnostics(uri);
+        if (uri && doc) carryDispatchDiagnostics(uri, result.changes || [], doc.text);
         if (uri && doc && isMarkdownDoc(doc)) recordChanges(touchState, uri, result.changes || [], doc.text);
         debugNote(() => `didChange ${uri} v${version} (${result.changeCount} changes, ${result.size} chars)`);
         scheduleSweep(uri);

@@ -986,7 +986,7 @@ test('model diagnostics publish and broadcast as a union after rule diagnostics'
   assert.deepEqual(snapshotAt(wiring, 0).diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word', 'model']);
 });
 
-test('a dispatch comment reaches the editor and dies with the next keystroke', async (t) => {
+test('a dispatch comment reaches the editor and survives the next keystroke', async (t) => {
   const { wiring, timers, sent, lsp } = dispatchingConnection({
     respond: () => Promise.resolve({ verdict: 'COMMENTS', comments: [COMMENT], reason: null }),
   });
@@ -1006,7 +1006,7 @@ test('a dispatch comment reaches the editor and dies with the next keystroke', a
   lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, `${REPEATED_WORD_MARKDOWN}\nmore text\n`));
   runSweepThenDispatch(timers);
   const afterEdit = diagnosticsOf(sent.filter((message) => message.type === 'publishDiagnostics').at(-1));
-  assert.equal(afterEdit.some((diagnostic) => diagnostic.code === 'comment'), false);
+  assert.equal(diagnosticNamed(afterEdit, 'comment').range?.start.line, COMMENT.line - 1);
 });
 
 test('lint-domain model diagnostics are dropped with a debug count only', async (t) => {
@@ -1094,21 +1094,48 @@ test('absent model diagnostics clear the standing model diagnostics', async (t) 
   assert.deepEqual(wiring.documentsSnapshot()[0].diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word']);
 });
 
-test('didChange drops model diagnostics before the next rule-only publish', async (t) => {
-  const { wiring, timers, sent, lsp } = dispatchingConnection({
-    respond: () => Promise.resolve({ verdict: 'NONE', comments: [], diagnostics: [MODEL_DIAGNOSTIC], reason: null }),
+test('didChange carries model diagnostics and comments through the edit, shifted with their lines', async (t) => {
+  const { wiring, timers, sent, broadcasts, lsp } = dispatchingConnection({
+    respond: () => Promise.resolve({ verdict: 'COMMENTS', comments: [COMMENT], diagnostics: [MODEL_DIAGNOSTIC], reason: null }),
   });
   t.after(() => wiring.stop());
 
-  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
+  openEdited(lsp, MARKDOWN_URI, CLEAN_MARKDOWN);
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
 
-  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, '# Title\n\nA changed line with with a repeat.\n'));
+  lsp('textDocument/didChange', rangedChangeParams(MARKDOWN_URI, 2, [
+    { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, text: 'Intro line\n' },
+  ]));
   timers.runPending();
 
   const diagnostics = diagnosticsOf(sent.filter((message) => message.type === 'publishDiagnostics').at(-1));
-  assert.deepEqual(diagnostics.map((diagnostic) => diagnostic.code), ['repeated-word']);
+  assert.deepEqual(
+    diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.range?.start.line]),
+    [['model', 1], ['comment', 3]],
+  );
+  const commentFrames = broadcasts.filter((message) => message.type === 'visions-comments');
+  assert.deepEqual(commentFrames.at(-1)?.comments, [{ ...COMMENT, line: 4 }]);
+});
+
+test('didChange keeps a comment on its line when that line is edited in place', async (t) => {
+  const { wiring, timers, sent, lsp } = dispatchingConnection({
+    respond: () => Promise.resolve({ verdict: 'COMMENTS', comments: [COMMENT], diagnostics: [], reason: null }),
+  });
+  t.after(() => wiring.stop());
+
+  openEdited(lsp, MARKDOWN_URI, CLEAN_MARKDOWN);
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+
+  lsp('textDocument/didChange', rangedChangeParams(MARKDOWN_URI, 2, [
+    { range: { start: { line: 2, character: 0 }, end: { line: 2, character: 1 } }, text: 'Another' },
+  ]));
+  timers.runPending();
+
+  const diagnostics = diagnosticsOf(sent.filter((message) => message.type === 'publishDiagnostics').at(-1));
+  assert.deepEqual(diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.range?.start.line]), [['comment', 2]]);
+  assert.equal(diagnostics[0]?.range?.end.character, 'Another line with nothing wrong.'.length);
 });
 
 test('didClose clears standing model diagnostics', async (t) => {

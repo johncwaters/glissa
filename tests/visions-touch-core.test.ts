@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { applyDidChange, applyDidOpen, createDocStore } from '../server/core/visions-buffer-core.ts';
 import {
-  createTouchState, formatTouchedRanges, mergeRanges, recordChanges, resetUri, touchedRangesFor,
+  createTouchState, formatTouchedRanges, mergeRanges, recordChanges, resetUri, shiftLines, touchedRangesFor,
 } from '../server/core/visions-touch-core.ts';
 
 const URI = 'file:///tmp/plan.md';
@@ -101,4 +101,64 @@ test('ranges format as the one line the prompt carries', () => {
   assert.equal(formatTouchedRanges([{ start: 3, end: 5 }, { start: 12, end: 12 }]), '3-5, 12');
   assert.equal(formatTouchedRanges([]), '');
   assert.equal(formatTouchedRanges(null), '');
+});
+
+function shifted(text: string, contentChanges: unknown[], lines: number[]): number[] {
+  const store = createDocStore();
+  applyDidOpen(store, { textDocument: { uri: URI, languageId: 'markdown', version: 1, text } });
+  const result = applyDidChange(store, { textDocument: { uri: URI, version: 2 }, contentChanges });
+  assert.equal(result.applied, true, JSON.stringify(result));
+  return shiftLines(lines, result.changes, store.docsByUri[URI].text);
+}
+
+test('shiftLines moves anchors below an inserted line and leaves those above alone', () => {
+  const text = 'one\ntwo\nthree\nfour\n';
+  assert.deepEqual(shifted(text, [{ range: range(1, 3, 1, 3), text: '\nadded' }], [1, 2, 3, 4]), [1, 2, 4, 5]);
+});
+
+test('shiftLines pushes the anchored line down when whole lines are inserted before it', () => {
+  const text = 'one\ntwo\nthree\n';
+  assert.deepEqual(shifted(text, [{ range: range(0, 0, 0, 0), text: 'intro\n' }], [1, 2]), [2, 3]);
+  assert.deepEqual(shifted(text, [{ range: range(1, 0, 1, 0), text: 'a\nb\n' }], [1, 2, 3]), [1, 4, 5]);
+});
+
+test('shiftLines keeps an anchor on a line edited in place', () => {
+  const text = 'one\ntwo\nthree\n';
+  assert.deepEqual(shifted(text, [{ range: range(1, 0, 1, 3), text: 'TWO' }], [2, 3]), [2, 3]);
+  assert.deepEqual(shifted(text, [{ range: range(1, 1, 1, 1), text: '\n' }], [2, 3]), [2, 4]);
+});
+
+test('shiftLines collapses anchors inside a deleted span onto the surviving line and clamps to the buffer', () => {
+  const text = 'one\ntwo\nthree\nfour\nfive\n';
+  assert.deepEqual(shifted(text, [{ range: range(1, 0, 3, 0), text: '' }], [1, 2, 3, 4, 5]), [1, 2, 2, 2, 3]);
+  assert.deepEqual(shifted(text, [{ text: 'one\n' }], [5]), [1]);
+});
+
+test('shiftLines applies a whole-text change by its common prefix and suffix', () => {
+  const text = 'one\ntwo\nthree\n';
+  assert.deepEqual(shifted(text, [{ text: 'zero\none\ntwo\nthree\n' }], [1, 3]), [2, 4]);
+  assert.deepEqual(shifted(text, [{ text: 'one\nthree\n' }], [1, 2, 3]), [1, 2, 2]);
+});
+
+test('shiftLines pushes an anchor past a whole-text list continuation sharing a prefix with the line below', () => {
+  assert.deepEqual(shifted('# List\n\n- alpha\n- beta\n', [{ text: '# List\n\n- alpha\n- \n- beta\n' }], [4]), [5]);
+});
+
+test('shiftLines pushes an anchor past a whole-text heading inserted above one with the same marker', () => {
+  assert.deepEqual(shifted('# A\n## B\n', [{ text: '# A\n## \n## B\n' }], [2]), [3]);
+});
+
+test('shiftLines clamps an anchor inside a deleted tail to the last content line', () => {
+  assert.deepEqual(shifted('# List\n\n- alpha\n- beta\n', [{ text: '# List\n\n- alpha\n' }], [4]), [3]);
+});
+
+test('shiftLines keeps an anchor on the line below a replacement that ends at column zero', () => {
+  assert.deepEqual(shifted('one\ntwo\nthree\n', [{ range: range(1, 0, 2, 0), text: 'TWO\n' }], [3]), [3]);
+});
+
+test('shiftLines clamps between the changes of a batch so a later change cannot lift an anchor off a deleted tail', () => {
+  const text = 'l1\nl2\nl3\nl4\nl5\nl6\n';
+  const deleteTail = { range: range(3, 0, 6, 0), text: '' };
+  const appendThreeLines = { range: range(3, 0, 3, 0), text: 'n1\nn2\nn3\n' };
+  assert.deepEqual(shifted(text, [deleteTail, appendThreeLines], [5]), [3]);
 });

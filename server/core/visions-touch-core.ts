@@ -15,9 +15,11 @@ export interface TouchState {
 interface ChangeSpan {
   replacedStart: number;
   replacedEnd: number;
+  lastLineLosingText: number;
   producedStart: number;
   producedEnd: number;
   delta: number;
+  insertsWholeLinesBefore: boolean;
 }
 
 function createTouchState(): TouchState {
@@ -32,6 +34,14 @@ function endsWithLineBreak(text: unknown): boolean {
   return typeof text === 'string' && /(?:\r\n|\r|\n)$/.test(text);
 }
 
+function contentLineCount(text: unknown): number {
+  const value = typeof text === 'string' ? text : '';
+  if (!value) return 0;
+  const counted = value.endsWith('\n') ? value.slice(0, -1) : value;
+  if (!counted) return 1;
+  return counted.split('\n').length;
+}
+
 function producedEndOf({ producedEnd, producedStart, insertedText, insertedAtLineStart }: {
   producedEnd: number;
   producedStart: number;
@@ -40,6 +50,35 @@ function producedEndOf({ producedEnd, producedStart, insertedText, insertedAtLin
 }): number {
   if (!endsWithLineBreak(insertedText) || !insertedAtLineStart) return producedEnd;
   return Math.max(producedStart, producedEnd - 1);
+}
+
+function lastLineLosingTextOf({ beforeStarts, replacedStart, replacedEnd, removedLength, removedEndOffset }: {
+  beforeStarts: number[];
+  replacedStart: number;
+  replacedEnd: number;
+  removedLength: number;
+  removedEndOffset: number;
+}): number {
+  if (removedLength <= 0) return replacedEnd;
+  if (!beforeStarts.includes(removedEndOffset)) return replacedEnd;
+  return Math.max(replacedStart, replacedEnd - 1);
+}
+
+function insertionRotatedToLineStart({ textBefore, beforeStarts, offset, insertedText }: {
+  textBefore: string;
+  beforeStarts: number[];
+  offset: number;
+  insertedText: string;
+}): { offset: number; insertedText: string } {
+  let rotatedOffset = offset;
+  let rotatedText = insertedText;
+  while (rotatedOffset > 0 && !beforeStarts.includes(rotatedOffset)) {
+    const lastInsertedChar = rotatedText.at(-1);
+    if (lastInsertedChar === undefined || textBefore[rotatedOffset - 1] !== lastInsertedChar) break;
+    rotatedText = `${lastInsertedChar}${rotatedText.slice(0, -1)}`;
+    rotatedOffset -= 1;
+  }
+  return { offset: rotatedOffset, insertedText: rotatedText };
 }
 
 function mergeRanges(ranges: TouchedRange[]): TouchedRange[] {
@@ -66,18 +105,31 @@ function spanOfChange(change: ContentChange | null | undefined, textBefore: stri
     if (!span) return null;
     const beforeStarts = lineStartOffsets(textBefore);
     const afterStarts = lineStartOffsets(nextText);
-    const start = lineOfOffset(beforeStarts, span.offset);
+    const isPureInsertion = span.removedText.length === 0;
+    const insertion = isPureInsertion
+      ? insertionRotatedToLineStart({
+        textBefore, beforeStarts, offset: span.offset, insertedText: span.insertedText,
+      })
+      : { offset: span.offset, insertedText: span.insertedText };
+    const start = lineOfOffset(beforeStarts, insertion.offset);
+    const removedEndOffset = span.offset + span.removedText.length;
+    const replacedEnd = lineOfOffset(beforeStarts, removedEndOffset);
+    const insertedAtLineStart = beforeStarts.includes(insertion.offset);
     return {
       replacedStart: start,
-      replacedEnd: lineOfOffset(beforeStarts, span.offset + span.removedText.length),
+      replacedEnd,
+      lastLineLosingText: lastLineLosingTextOf({
+        beforeStarts, replacedStart: start, replacedEnd, removedLength: span.removedText.length, removedEndOffset,
+      }),
       producedStart: start,
       producedEnd: producedEndOf({
         producedStart: start,
-        producedEnd: lineOfOffset(afterStarts, span.offset + span.insertedText.length),
-        insertedText: span.insertedText,
-        insertedAtLineStart: beforeStarts.includes(span.offset),
+        producedEnd: lineOfOffset(afterStarts, insertion.offset + insertion.insertedText.length),
+        insertedText: insertion.insertedText,
+        insertedAtLineStart,
       }),
       delta: afterStarts.length - beforeStarts.length,
+      insertsWholeLinesBefore: insertedAtLineStart && isPureInsertion && endsWithLineBreak(insertion.insertedText),
     };
   }
   const { range } = change;
@@ -87,18 +139,54 @@ function spanOfChange(change: ContentChange | null | undefined, textBefore: stri
   const replacedStart = lineOfOffset(beforeStarts, startOffset);
   const replacedEnd = lineOfOffset(beforeStarts, endOffset);
   const insertedBreaks = lineBreakCount(change.text);
+  const insertedAtLineStart = beforeStarts.includes(startOffset);
   return {
     replacedStart,
     replacedEnd,
+    lastLineLosingText: lastLineLosingTextOf({
+      beforeStarts, replacedStart, replacedEnd, removedLength: endOffset - startOffset, removedEndOffset: endOffset,
+    }),
     producedStart: replacedStart,
     producedEnd: producedEndOf({
       producedStart: replacedStart,
       producedEnd: replacedStart + insertedBreaks,
       insertedText: change.text,
-      insertedAtLineStart: beforeStarts.includes(startOffset),
+      insertedAtLineStart,
     }),
     delta: insertedBreaks - (replacedEnd - replacedStart),
+    insertsWholeLinesBefore: insertedAtLineStart && startOffset === endOffset && endsWithLineBreak(change.text),
   };
+}
+
+function shiftLine(line: number, span: ChangeSpan): number {
+  if (line < span.replacedStart) return line;
+  if (line > span.lastLineLosingText) return line + span.delta;
+  if (span.insertsWholeLinesBefore) return line + span.delta;
+  return Math.min(line, span.producedEnd);
+}
+
+function clampLinesToText(lines: number[], text: unknown): number[] {
+  const lineCount = contentLineCount(text);
+  return lines.map((line) => Math.max(1, Math.min(line, lineCount)));
+}
+
+function shiftLines(
+  lines: number[],
+  pairs: Array<{ change?: ContentChange; textBefore?: unknown }> | null | undefined,
+  nextText: unknown,
+): number[] {
+  const changePairs = Array.isArray(pairs) ? pairs : [];
+  let shifted = lines.slice();
+  for (let index = 0; index < changePairs.length; index += 1) {
+    const pair = changePairs[index];
+    const span = spanOfChange(pair?.change, typeof pair?.textBefore === 'string' ? pair.textBefore : '');
+    if (!span) continue;
+    shifted = shifted.map((line) => shiftLine(line, span));
+    const textAfterChange = changePairs[index + 1]?.textBefore;
+    if (typeof textAfterChange !== 'string') continue;
+    shifted = clampLinesToText(shifted, textAfterChange);
+  }
+  return clampLinesToText(shifted, nextText);
 }
 
 function shiftRanges(ranges: TouchedRange[], span: ChangeSpan): TouchedRange[] {
@@ -164,4 +252,4 @@ function formatTouchedRanges(ranges: unknown): string {
     .join(', ');
 }
 
-export { createTouchState, formatTouchedRanges, mergeRanges, recordChanges, resetUri, touchedRangesFor };
+export { createTouchState, formatTouchedRanges, mergeRanges, recordChanges, resetUri, shiftLines, touchedRangesFor };
