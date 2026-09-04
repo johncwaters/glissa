@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 
 import { applyDidChange, applyDidOpen, createDocStore } from '../server/core/visions-buffer-core.ts';
 import {
-  createTouchState, formatTouchedRanges, mergeRanges, recordChanges, resetUri, shiftLines, touchedLineCount, touchedRangesFor,
+  consumeReviewRanges, createTouchState, formatTouchedRanges, mergeRanges, recordChanges, resetUri, restoreReviewRanges, shiftLines,
+  touchedLineCount, touchedRangesFor,
 } from '../server/core/visions-touch-core.ts';
 
 const URI = 'file:///tmp/plan.md';
@@ -167,4 +168,49 @@ test('shiftLines clamps between the changes of a batch so a later change cannot 
   const deleteTail = { range: range(3, 0, 6, 0), text: '' };
   const appendThreeLines = { range: range(3, 0, 3, 0), text: 'n1\nn2\nn3\n' };
   assert.deepEqual(shifted(text, [deleteTail, appendThreeLines], [5]), [3]);
+});
+
+test('the review set covers only the changes since it was last consumed while the session set keeps growing', () => {
+  const doc = editor('one\ntwo\nthree\nfour\nfive\n');
+  doc.change([{ range: range(1, 0, 1, 3), text: 'TWO' }]);
+  assert.deepEqual(touchedRangesFor(doc.touch, URI, 'review'), [{ start: 2, end: 2 }]);
+  consumeReviewRanges(doc.touch, URI);
+  assert.deepEqual(touchedRangesFor(doc.touch, URI, 'review'), []);
+  assert.deepEqual(touchedRangesFor(doc.touch, URI), [{ start: 2, end: 2 }]);
+
+  doc.change([{ range: range(3, 0, 3, 4), text: 'FOUR' }]);
+  assert.deepEqual(touchedRangesFor(doc.touch, URI, 'review'), [{ start: 4, end: 4 }]);
+  assert.deepEqual(touchedRangesFor(doc.touch, URI), [{ start: 2, end: 2 }, { start: 4, end: 4 }]);
+});
+
+test('both sets shift identically through an insertion above them', () => {
+  const doc = editor('one\ntwo\nthree\n');
+  doc.change([{ range: range(2, 0, 2, 5), text: 'THREE' }]);
+  doc.change([{ range: range(0, 0, 0, 0), text: 'intro\n' }]);
+  assert.deepEqual(touchedRangesFor(doc.touch, URI), [{ start: 1, end: 1 }, { start: 4, end: 4 }]);
+  assert.deepEqual(touchedRangesFor(doc.touch, URI, 'review'), [{ start: 1, end: 1 }, { start: 4, end: 4 }]);
+});
+
+test('restoreReviewRanges folds a consumed snapshot through the edits made meanwhile and merges it back', () => {
+  const doc = editor('one\ntwo\nthree\nfour\n');
+  doc.change([{ range: range(2, 0, 2, 5), text: 'THREE' }]);
+  const snapshot = touchedRangesFor(doc.touch, URI, 'review');
+  consumeReviewRanges(doc.touch, URI);
+
+  const store = createDocStore();
+  applyDidOpen(store, { textDocument: { uri: URI, languageId: 'markdown', version: 1, text: doc.text } });
+  const meanwhile = applyDidChange(store, { textDocument: { uri: URI, version: 2 }, contentChanges: [{ range: range(0, 0, 0, 0), text: 'intro\n' }] });
+  doc.change([{ range: range(0, 0, 0, 0), text: 'intro\n' }]);
+  assert.deepEqual(touchedRangesFor(doc.touch, URI, 'review'), [{ start: 1, end: 1 }]);
+
+  const restored = restoreReviewRanges(doc.touch, URI, snapshot, meanwhile.changes, doc.text);
+  assert.deepEqual(restored, [{ start: 1, end: 1 }, { start: 4, end: 4 }]);
+});
+
+test('resetUri clears both sets', () => {
+  const doc = editor('one\ntwo\n');
+  doc.change([{ range: range(0, 0, 0, 3), text: 'ONE' }]);
+  resetUri(doc.touch, URI);
+  assert.deepEqual(touchedRangesFor(doc.touch, URI), []);
+  assert.deepEqual(touchedRangesFor(doc.touch, URI, 'review'), []);
 });

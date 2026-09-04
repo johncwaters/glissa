@@ -738,7 +738,11 @@ function intentLinesOf(intent: unknown, maxIntentChars: number): string[] {
   );
 }
 
-function focusLinesOf({ touchedRanges, orientation }: { touchedRanges: unknown; orientation: boolean }): string[] {
+function focusLinesOf({ touchedRanges, orientation, trigger = null }: {
+  touchedRanges: unknown;
+  orientation: boolean;
+  trigger?: DispatchTrigger | null;
+}): string[] {
   if (orientation) {
     return [
       'This document was just opened and nothing in it has been edited. This is an orientation pass: return "intent" and, rarely, "hand", and NOTHING else. "comments" and "diagnostics" must be empty arrays; any entry in either is discarded unread.',
@@ -747,8 +751,9 @@ function focusLinesOf({ touchedRanges, orientation }: { touchedRanges: unknown; 
   }
   const ranges = formatTouchedRanges(touchedRanges);
   if (!ranges) return [];
+  const focusLabel = trigger === 'edit' ? 'Lines edited since the last review' : 'Lines edited this session';
   return [
-    `Lines edited this session: ${ranges}.`,
+    `${focusLabel}: ${ranges}.`,
     'Comment on those lines, or on how they interact with the rest of the document. The rest of the document is context, not a target.',
     'Every comment carries a "basis": "edit" for a comment on an edited line (it is discarded when it lands more than 3 lines from one), "intent" for drift from the working intent above (discarded when no intent is standing), or "structure" for a whole-document concern (folded into "hand", never shown on a line). A comment with no basis is discarded.',
     '',
@@ -756,7 +761,7 @@ function focusLinesOf({ touchedRanges, orientation }: { touchedRanges: unknown; 
 }
 
 function buildVisionsPrompt({
-  uri, text, findings = [], intent = '', digest = '', memory = null, touchedRanges = null, orientation = false, resultPath = VISIONS_RESULT_FILE,
+  uri, text, findings = [], intent = '', digest = '', memory = null, touchedRanges = null, orientation = false, trigger = null, resultPath = VISIONS_RESULT_FILE,
   maxComments = MAX_COMMENTS, maxMessageChars = MAX_MESSAGE_CHARS, maxIntentChars = MAX_INTENT_CHARS, maxHandChars = MAX_HAND_CHARS,
 }: {
   uri: string;
@@ -767,6 +772,7 @@ function buildVisionsPrompt({
   memory?: unknown;
   touchedRanges?: TouchedLineRange[] | null;
   orientation?: boolean;
+  trigger?: DispatchTrigger | null;
   resultPath?: string;
   maxComments?: number;
   maxMessageChars?: number;
@@ -797,7 +803,7 @@ function buildVisionsPrompt({
     'That prefix is NOT part of the document. Take the `line` value for every comment and diagnostic straight from the prefix on the line you are talking about. Never count lines yourself, and never use a line number you saw anywhere other than that prefix.',
     '',
     ...intentLines,
-    ...focusLinesOf({ touchedRanges, orientation }),
+    ...focusLinesOf({ touchedRanges, orientation, trigger }),
     ...activitySection(digest),
     ...memorySection(memory),
     'Standing tier 2 findings already shown in the editor (do not repeat them):',

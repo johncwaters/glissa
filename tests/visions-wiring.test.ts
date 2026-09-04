@@ -2937,7 +2937,7 @@ test('an edit dispatch is scoped to the edited lines, and comments or diagnostic
   await wiring.whenDispatchSettled();
 
   assert.equal(calls.length, 1);
-  assert.match(String(callAt(calls, 0).prompt), /Lines edited this session: 12\./);
+  assert.match(String(callAt(calls, 0).prompt), /Lines edited since the last review: 12\./);
   assert.ok(notes.some((line) => /dispatching .*: edited lines 12 \(prompt=\d+b focus=1l memory=\d+c digest=\d+c\)$/.test(line)));
   const [document] = wiring.documentsSnapshot();
   assert.deepEqual(document.comments.map((comment) => comment.message), ['about the edit']);
@@ -3052,7 +3052,7 @@ test('an orientation spends no cooldown, so the first edit after an open dispatc
   runSweepThenDispatch(timers);
   await wiring.whenDispatchSettled();
   assert.equal(calls.length, 2, 'the edit is not held by a cooldown the orientation never spent');
-  assert.match(String(callAt(calls, 1).prompt), /Lines edited this session/);
+  assert.match(String(callAt(calls, 1).prompt), /Lines edited since the last review/);
 
   clock.now += 60000;
   lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 3, `${REPEATED_WORD_MARKDOWN}\nA sentence the carbon unit typed.\nAnd another.\n`));
@@ -3145,4 +3145,139 @@ test('two separate edits during dispatch leave the untouched lines between them 
     [4, 6],
   );
   assert.ok(notes.some((line) => line.includes(`carried a dispatch result for ${MARKDOWN_URI} across 0 line(s) of drift`)));
+});
+
+test('an edit round names only the lines edited since the last applied review, while the filter keeps the session set', async (t) => {
+  const longDocument = `# Title\n\n${Array.from({ length: 28 }, (_, index) => `Line ${index + 3} of the document.`).join('\n')}\n`;
+  const { wiring, timers, calls, lsp, clock } = dispatchingConnection({
+    dispatch: { cooldownMs: 1 },
+    respond: (_args, callNumber) => Promise.resolve({
+      verdict: 'COMMENTS',
+      comments: callNumber === 1
+        ? [{ line: 12, message: 'about the first edit', basis: 'edit' }]
+        : [{ line: 12, message: 'still about the first edit', basis: 'edit' }, { line: 25, message: 'about the second edit', basis: 'edit' }],
+      reason: null,
+    }),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', longDocument));
+  lsp('textDocument/didChange', rangedChangeParams(MARKDOWN_URI, 2, [
+    { range: { start: { line: 11, character: 0 }, end: { line: 11, character: 0 } }, text: 'Edited: ' },
+  ]));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.match(String(callAt(calls, 0).prompt), /Lines edited since the last review: 12\./);
+
+  clock.now += 60000;
+  lsp('textDocument/didChange', rangedChangeParams(MARKDOWN_URI, 3, [
+    { range: { start: { line: 24, character: 0 }, end: { line: 24, character: 0 } }, text: 'Edited: ' },
+  ]));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 2);
+  assert.match(String(callAt(calls, 1).prompt), /Lines edited since the last review: 25\./);
+  assert.deepEqual(
+    wiring.documentsSnapshot()[0].comments.map((comment) => comment.line),
+    [12, 25],
+    'the first edit stays inside the filter even though the prompt no longer names it',
+  );
+});
+
+test('an activity round with unchanged text names every line edited this session', async (t) => {
+  let seq = 1;
+  const longDocument = `# Title\n\n${Array.from({ length: 28 }, (_, index) => `Line ${index + 3} of the document.`).join('\n')}\n`;
+  const { wiring, timers, calls, lsp, clock } = dispatchingConnection({
+    dispatch: { cooldownMs: 1 },
+    contextSeq: () => seq,
+    respond: () => Promise.resolve({ verdict: 'NONE', comments: [], reason: null }),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', longDocument));
+  lsp('textDocument/didChange', rangedChangeParams(MARKDOWN_URI, 2, [
+    { range: { start: { line: 11, character: 0 }, end: { line: 11, character: 0 } }, text: 'Edited: ' },
+  ]));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.match(String(callAt(calls, 0).prompt), /Lines edited since the last review: 12\./);
+
+  seq += 1;
+  clock.now += 60000;
+  lsp('textDocument/didSave', { textDocument: { uri: MARKDOWN_URI } });
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 2);
+  assert.match(String(callAt(calls, 1).prompt), /Lines edited this session: 12\./);
+});
+
+test('a result that was not applied gives its review lines back to the next round', async (t) => {
+  const longDocument = `# Title\n\n${Array.from({ length: 28 }, (_, index) => `Line ${index + 3} of the document.`).join('\n')}\n`;
+  const { wiring, timers, calls, lsp, clock } = dispatchingConnection({
+    dispatch: { cooldownMs: 1 },
+    respond: (_args, callNumber) => Promise.resolve(callNumber === 1
+      ? { verdict: 'ERROR', comments: [], reason: 'no readable result file' }
+      : { verdict: 'NONE', comments: [], reason: null }),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', longDocument));
+  lsp('textDocument/didChange', rangedChangeParams(MARKDOWN_URI, 2, [
+    { range: { start: { line: 11, character: 0 }, end: { line: 11, character: 0 } }, text: 'Edited: ' },
+  ]));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.match(String(callAt(calls, 0).prompt), /Lines edited since the last review: 12\./);
+
+  clock.now += 60000;
+  lsp('textDocument/didChange', rangedChangeParams(MARKDOWN_URI, 3, [
+    { range: { start: { line: 24, character: 0 }, end: { line: 24, character: 0 } }, text: 'Edited: ' },
+  ]));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 2);
+  assert.match(String(callAt(calls, 1).prompt), /Lines edited since the last review: 12, 25\./);
+});
+
+test('an edit landing while the memory read is pending is named by the next round', async (t) => {
+  const longDocument = `# Title\n\n${Array.from({ length: 28 }, (_, index) => `Line ${index + 3} of the document.`).join('\n')}\n`;
+  let releaseMemoryRead: () => void = () => {};
+  const memoryReadGate = new Promise<void>((resolve) => { releaseMemoryRead = resolve; });
+  let memoryReads = 0;
+  const { wiring, timers, calls, lsp, clock } = dispatchingConnection({
+    dispatch: { cooldownMs: 1 },
+    getMemoryStore: () => ({
+      append: async () => null,
+      retrieve: () => [{ id: 'memory-1', text: 'Keep the decision trace concise.', rank: 'model' }],
+      readPublishedManifest: async () => {
+        memoryReads += 1;
+        if (memoryReads === 1) await memoryReadGate;
+        return { version: 'projection-1' };
+      },
+    }),
+  });
+  t.after(() => wiring.stop());
+
+  lsp('textDocument/didOpen', didOpenParams(MARKDOWN_URI, 'markdown', longDocument));
+  lsp('textDocument/didChange', rangedChangeParams(MARKDOWN_URI, 2, [
+    { range: { start: { line: 11, character: 0 }, end: { line: 11, character: 0 } }, text: 'Edited: ' },
+  ]));
+  runSweepThenDispatch(timers);
+  assert.equal(calls.length, 0, 'the round is parked on the memory read');
+
+  lsp('textDocument/didChange', rangedChangeParams(MARKDOWN_URI, 3, [
+    { range: { start: { line: 24, character: 0 }, end: { line: 24, character: 0 } }, text: 'Edited: ' },
+  ]));
+  releaseMemoryRead();
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 1);
+  assert.match(String(callAt(calls, 0).prompt), /Lines edited since the last review: 12\./);
+
+  clock.now += 60000;
+  lsp('textDocument/didChange', rangedChangeParams(MARKDOWN_URI, 4, [
+    { range: { start: { line: 4, character: 0 }, end: { line: 4, character: 0 } }, text: 'Edited: ' },
+  ]));
+  runSweepThenDispatch(timers);
+  await wiring.whenDispatchSettled();
+  assert.equal(calls.length, 2);
+  assert.match(String(callAt(calls, 1).prompt), /Lines edited since the last review: 5, 25\./);
 });

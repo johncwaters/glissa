@@ -10,7 +10,10 @@ export interface TouchedRange {
 
 export interface TouchState {
   touchedByUri: Map<string, TouchedRange[]>;
+  reviewByUri: Map<string, TouchedRange[]>;
 }
+
+export type TouchedSet = 'session' | 'review';
 
 interface ChangeSpan {
   replacedStart: number;
@@ -23,7 +26,11 @@ interface ChangeSpan {
 }
 
 function createTouchState(): TouchState {
-  return { touchedByUri: new Map<string, TouchedRange[]>() };
+  return { touchedByUri: new Map<string, TouchedRange[]>(), reviewByUri: new Map<string, TouchedRange[]>() };
+}
+
+function mapForSet(state: TouchState, set: TouchedSet): Map<string, TouchedRange[]> {
+  return set === 'review' ? state.reviewByUri : state.touchedByUri;
 }
 
 function lineBreakCount(text: unknown): number {
@@ -190,6 +197,34 @@ function clampRanges(ranges: TouchedRange[], lineCount: number): TouchedRange[] 
     .filter((range) => range.end >= range.start);
 }
 
+function spansOf(pairs: Array<{ change?: ContentChange; textBefore?: unknown }> | null | undefined): ChangeSpan[] {
+  const spans: ChangeSpan[] = [];
+  for (const pair of Array.isArray(pairs) ? pairs : []) {
+    const span = spanOfChange(pair?.change, typeof pair?.textBefore === 'string' ? pair.textBefore : '');
+    if (span) spans.push(span);
+  }
+  return spans;
+}
+
+function foldRanges(ranges: TouchedRange[], spans: ChangeSpan[], nextText: unknown, { addProduced }: { addProduced: boolean }): TouchedRange[] {
+  let folded = ranges;
+  for (const span of spans) {
+    const shifted = shiftRanges(folded, span);
+    folded = mergeRanges(addProduced ? [...shifted, { start: span.producedStart, end: span.producedEnd }] : shifted);
+  }
+  const lineCount = lineStartOffsets(typeof nextText === 'string' ? nextText : '').length;
+  return mergeRanges(clampRanges(folded, lineCount));
+}
+
+function storeRanges(state: TouchState, set: TouchedSet, uri: string, ranges: TouchedRange[]): void {
+  const byUri = mapForSet(state, set);
+  if (ranges.length === 0) {
+    byUri.delete(uri);
+    return;
+  }
+  byUri.set(uri, ranges);
+}
+
 function recordChanges(
   state: TouchState,
   uri: string,
@@ -197,30 +232,40 @@ function recordChanges(
   nextText: unknown,
 ): TouchedRange[] {
   if (!uri) return [];
-  let ranges = state.touchedByUri.get(uri) || [];
-  for (const pair of Array.isArray(pairs) ? pairs : []) {
-    const span = spanOfChange(pair?.change, typeof pair?.textBefore === 'string' ? pair.textBefore : '');
-    if (!span) continue;
-    ranges = mergeRanges([...shiftRanges(ranges, span), { start: span.producedStart, end: span.producedEnd }]);
+  const spans = spansOf(pairs);
+  for (const set of ['session', 'review'] as const) {
+    const folded = foldRanges(mapForSet(state, set).get(uri) || [], spans, nextText, { addProduced: true });
+    storeRanges(state, set, uri, folded);
   }
-  const lineCount = lineStartOffsets(typeof nextText === 'string' ? nextText : '').length;
-  ranges = mergeRanges(clampRanges(ranges, lineCount));
-  if (ranges.length === 0) {
-    state.touchedByUri.delete(uri);
-    return [];
-  }
-  state.touchedByUri.set(uri, ranges);
+  return touchedRangesFor(state, uri);
+}
+
+function touchedRangesFor(state: TouchState, uri: string, set: TouchedSet = 'session'): TouchedRange[] {
+  const ranges = mapForSet(state, set).get(uri) || [];
   return ranges.map((range) => ({ ...range }));
 }
 
-function touchedRangesFor(state: TouchState, uri: string): TouchedRange[] {
-  const ranges = state.touchedByUri.get(uri) || [];
-  return ranges.map((range) => ({ ...range }));
+function consumeReviewRanges(state: TouchState, uri: string): void {
+  state.reviewByUri.delete(uri);
+}
+
+function restoreReviewRanges(
+  state: TouchState,
+  uri: string,
+  ranges: TouchedRange[],
+  pairs: Array<{ change?: ContentChange; textBefore?: unknown }> | null | undefined,
+  nextText: unknown,
+): TouchedRange[] {
+  if (!uri) return [];
+  const carried = foldRanges(ranges, spansOf(pairs), nextText, { addProduced: false });
+  storeRanges(state, 'review', uri, mergeRanges([...(state.reviewByUri.get(uri) || []), ...carried]));
+  return touchedRangesFor(state, uri, 'review');
 }
 
 function resetUri(state: TouchState, uri: string | null): TouchState {
   if (!uri) return state;
   state.touchedByUri.delete(uri);
+  state.reviewByUri.delete(uri);
   return state;
 }
 
@@ -235,4 +280,4 @@ function formatTouchedRanges(ranges: unknown): string {
     .join(', ');
 }
 
-export { createTouchState, formatTouchedRanges, mergeRanges, recordChanges, resetUri, shiftLines, touchedLineCount, touchedRangesFor };
+export { consumeReviewRanges, createTouchState, formatTouchedRanges, mergeRanges, recordChanges, resetUri, restoreReviewRanges, shiftLines, touchedLineCount, touchedRangesFor };

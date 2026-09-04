@@ -82,7 +82,8 @@ import { sweepMarkdownWithFixes } from './core/visions-rules-core.ts';
 import type { SweepDiagnostic, SweepFix } from './core/visions-rules-core.ts';
 import { isUriInProjects, projectForUri, scopePathsOf } from './core/visions-scope-core.ts';
 import {
-  createTouchState, formatTouchedRanges, recordChanges, resetUri as resetTouchedUri, shiftLines, touchedLineCount, touchedRangesFor,
+  consumeReviewRanges, createTouchState, formatTouchedRanges, recordChanges, resetUri as resetTouchedUri, restoreReviewRanges,
+  shiftLines, touchedLineCount, touchedRangesFor,
 } from './core/visions-touch-core.ts';
 import type { TouchedRange } from './core/visions-touch-core.ts';
 import { createJsonStateWriter } from './json-file.ts';
@@ -863,11 +864,20 @@ function createVisionsWiring({
       const [activeThread = null, ...rest] = liveThreadsFor(currentIntentState(), projectId, uri);
       const otherThreads = rest.filter((thread) => !thread.uris.includes(uri));
       const focus = { touchedRanges, orientation, activeThread };
+      const reviewRanges = touchedRangesFor(touchState, uri, 'review');
+      const focusRanges = decision.trigger === 'edit' ? reviewRanges : touchedRanges;
+      consumeReviewRanges(touchState, uri);
       dispatchInFlight = true;
       changesDuringDispatchByUri.set(uri, []);
       let result: DispatchOutcome | null = null;
       let changesDuringDispatch: AppliedChange[] = [];
-      try {
+      let reviewConsumed = true;
+      const giveBackReview = (): void => {
+        if (!reviewConsumed) return;
+        reviewConsumed = false;
+        restoreReviewRanges(touchState, uri, reviewRanges, changesDuringDispatch, getDoc(store, uri)?.text ?? '');
+      };
+      const buildPromptThenDispatch = async (): Promise<DispatchOutcome | null> => {
         const memory = memoryStoreOf() ? await readMemorySection(uri, text) : null;
         const digest = readContextDigest();
         const prompt = buildPrompt({
@@ -877,23 +887,24 @@ function createVisionsWiring({
           intent: { active: activeThread, others: otherThreads },
           digest,
           memory,
-          touchedRanges,
+          touchedRanges: focusRanges,
           orientation,
+          trigger: decision.trigger,
         });
         const sizeDecision = decidePromptSize(prompt, decision.trigger);
         if (!sizeDecision.dispatch) {
           noteGate(uri, sizeDecision);
-          return;
+          return null;
         }
         lastGateByUri.delete(uri);
         recordDispatch(dispatchState, {
           uri, textHash, now: nowFn(), contextSeq: seq, trigger: decision.trigger, reason: decision.reason,
         });
         if (orientation) orientedUris.add(uri);
-        const focusLabel = orientation ? 'orientation' : `edited lines ${formatTouchedRanges(touchedRanges)}`;
-        const sizes = `prompt=${sizeDecision.promptBytes}b focus=${touchedLineCount(touchedRanges)}l memory=${memory?.text.length ?? 0}c digest=${digest.length}c`;
+        const focusLabel = orientation ? 'orientation' : `edited lines ${formatTouchedRanges(focusRanges)}`;
+        const sizes = `prompt=${sizeDecision.promptBytes}b focus=${touchedLineCount(focusRanges)}l memory=${memory?.text.length ?? 0}c digest=${digest.length}c`;
         note(`dispatching ${uri}: ${focusLabel} (${sizes})`);
-        result = await dispatch?.({
+        const outcome = await dispatch?.({
           uri,
           text,
           findings: standingFindingsFor(uri),
@@ -902,6 +913,10 @@ function createVisionsWiring({
           memory,
           prompt,
         });
+        return outcome ?? null;
+      };
+      try {
+        result = await buildPromptThenDispatch();
       } catch (error) {
         warn(`dispatch for ${uri} threw: ${errorMessage(error)}`);
       } finally {
@@ -909,7 +924,10 @@ function createVisionsWiring({
         changesDuringDispatch = changesDuringDispatchByUri.get(uri) || [];
         changesDuringDispatchByUri.delete(uri);
       }
-      if (!result) return;
+      if (!result) {
+        giveBackReview();
+        return;
+      }
       const outcome = noteDispatchOutcome(dispatchState, {
         verdict: result.verdict, errorSource: result.errorSource, now: nowFn(),
       });
@@ -927,6 +945,7 @@ function createVisionsWiring({
         });
         if (!carried) {
           note(`dropped a dispatch result for ${uri}: the buffer moved`);
+          giveBackReview();
           return;
         }
         note(`carried a dispatch result for ${uri} across ${carried.drift} line(s) of drift`);
@@ -934,7 +953,10 @@ function createVisionsWiring({
       }
       const liveFocus = { ...focus, touchedRanges: touchedRangesFor(touchState, uri) };
       const recorded = applyDispatchResult(uri, result, currentDoc, send, liveFocus);
-      if (!recorded) return;
+      if (!recorded) {
+        giveBackReview();
+        return;
+      }
       const intentMoved = applyModelIntent(result.intent, projectId, uri);
       note(`dispatch for ${uri} applied: ${result.verdict}, ${(commentsByUri.get(uri) || []).length} comments, hand=${handsByUri.has(uri) ? 'yes' : 'no'}, intent-moved=${intentMoved ? 'yes' : 'no'}`);
     }

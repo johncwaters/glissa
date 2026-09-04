@@ -1510,3 +1510,11 @@ test('carryResultAcrossEdit falls back to one synthetic pair when no change pair
   assert.deepEqual(carryResultAcrossEdit(result, { changes: [], textBefore, text }), expected);
   assert.deepEqual(carryResultAcrossEdit(result, { changes: null, textBefore, text }), expected);
 });
+
+test('the focus sentence names the review window on an edit round and the whole session on an activity round', () => {
+  const base = { uri: URI, text: '# Title\n\nSome prose.\n', touchedRanges: [{ start: 3, end: 3 }], resultPath: '/tmp/r.json' };
+  assert.match(buildVisionsPrompt({ ...base, trigger: 'edit' }), /Lines edited since the last review: 3\./);
+  assert.match(buildVisionsPrompt({ ...base, trigger: 'activity' }), /Lines edited this session: 3\./);
+  assert.match(buildVisionsPrompt(base), /Lines edited this session: 3\./);
+  assert.equal(buildVisionsPrompt({ ...base, trigger: 'edit' }).includes('Lines edited this session'), false);
+});
