@@ -36,6 +36,7 @@ import {
   resolveVisionsConfig,
   sanitizeComments,
   sanitizeModelDiagnostics,
+  carryResultAcrossEdit,
   commentsToLsp,
   relineDiagnostics,
 } from '../server/core/visions-dispatch-core.ts';
@@ -1369,4 +1370,143 @@ test('relineDiagnostics moves each diagnostic to its new line and refits the ran
     ['comment', 'first', 1, '# Title'.length],
     ['comment', 'third', 3, 'A line.'.length],
   ]);
+});
+
+test('carryResultAcrossEdit moves comment and diagnostic lines through the edit made during the run', () => {
+  const textBefore = '# Title\n\nA line.\nAnother.\n';
+  const result = {
+    verdict: 'COMMENTS',
+    comments: [{ line: 3, message: 'tighten', basis: 'edit' }, { line: 4, message: 'cut', basis: 'edit' }],
+    diagnostics: [{ line: 1, message: 'vague title' }],
+    hand: 'one concern',
+  };
+  const carried = carryResultAcrossEdit(result, { textBefore, text: `Intro\n${textBefore}` });
+  assert.deepEqual(carried, {
+    result: {
+      ...result,
+      comments: [{ line: 4, message: 'tighten', basis: 'edit' }, { line: 5, message: 'cut', basis: 'edit' }],
+      diagnostics: [{ line: 2, message: 'vague title' }],
+    },
+    drift: 1,
+  });
+  const inPlace = carryResultAcrossEdit(result, { textBefore, text: '# Title\n\nA longer line.\nAnother.\n' });
+  assert.equal(inPlace?.drift, 0);
+  assert.deepEqual(inPlace?.result.comments, result.comments);
+});
+
+test('carryResultAcrossEdit drops an anchor whose paragraph was deleted while the model ran', () => {
+  const textBefore = '# Title\n\nOld paragraph one.\n\nTwo.\n\nThree.\n';
+  const result = {
+    verdict: 'COMMENTS',
+    comments: [{ line: 5, message: 'thin', basis: 'edit' }, { line: 7, message: 'cut', basis: 'edit' }],
+    diagnostics: [{ line: 1, message: 'vague title' }],
+  };
+  assert.deepEqual(carryResultAcrossEdit(result, { textBefore, text: '# Title\n\nOld paragraph one.\n' }), {
+    result: { ...result, comments: [], diagnostics: [{ line: 1, message: 'vague title' }] },
+    drift: 0,
+  });
+});
+
+test('carryResultAcrossEdit refuses a result whose every anchor sat in the replaced span', () => {
+  const textBefore = '# Title\n\nOld paragraph one.\n\nTwo.\n\nThree.\n';
+  const result = {
+    verdict: 'COMMENTS',
+    comments: [{ line: 3, message: 'tighten', basis: 'edit' }, { line: 5, message: 'cut', basis: 'edit' }],
+    diagnostics: [],
+  };
+  assert.equal(carryResultAcrossEdit(result, { textBefore, text: '# Title\n\nBrand new body.\n' }), null);
+  assert.equal(carryResultAcrossEdit(result, { textBefore, text: '\n' }), null);
+  assert.equal(carryResultAcrossEdit(result, { textBefore, text: 'x' }), null);
+  assert.deepEqual(carryResultAcrossEdit(result, { textBefore, text: textBefore })?.drift, 0);
+});
+
+test('carryResultAcrossEdit drops the anchor on a deleted middle paragraph that shares a leading character', () => {
+  const textBefore = '# Title\n\nPara one.\n\nPara two.\n\nPara three.\n';
+  const result = {
+    verdict: 'COMMENTS',
+    comments: [
+      { line: 5, message: 'para two is thin', basis: 'edit' },
+      { line: 7, message: 'para three is thin', basis: 'edit' },
+    ],
+    diagnostics: [],
+  };
+  assert.deepEqual(carryResultAcrossEdit(result, { textBefore, text: '# Title\n\nPara one.\n\nPara three.\n' }), {
+    result: { ...result, comments: [{ line: 5, message: 'para three is thin', basis: 'edit' }], diagnostics: [] },
+    drift: 2,
+  });
+});
+
+test('carryResultAcrossEdit keeps an anchor when the edit stayed inside the anchored line', () => {
+  const textBefore = '# Title\n\nOld paragraph one.\n\nTwo.\n\nThree.\n';
+  const result = { verdict: 'COMMENTS', comments: [{ line: 5, message: 'thin', basis: 'edit' }], diagnostics: [] };
+  const rewrittenInPlace = textBefore.replace('Two.', 'Two, rewritten in place.');
+  assert.deepEqual(carryResultAcrossEdit(result, { textBefore, text: rewrittenInPlace }), { result, drift: 0 });
+});
+
+test('carryResultAcrossEdit carries a result that anchors nothing at zero drift', () => {
+  const textBefore = '# Title\n\nOld paragraph one.\n\nTwo.\n\nThree.\n';
+  const result: { verdict: string; hand: string; intent: string; comments?: unknown; diagnostics?: unknown } = {
+    verdict: 'NONE', hand: 'one nudge', intent: 'ship the draft',
+  };
+  const carried = carryResultAcrossEdit(result, { textBefore, text: '# Title\n\nOld paragraph one.\n' });
+  assert.equal(carried?.drift, 0);
+  assert.equal(carried?.result.hand, 'one nudge');
+  assert.equal(carried?.result.intent, 'ship the draft');
+});
+
+function wholeTextPairs(texts: string[]) {
+  return texts.slice(0, -1).map((textBefore, index) => ({ change: { text: texts[index + 1] }, textBefore }));
+}
+
+test('carryResultAcrossEdit keeps anchors between two separate typo fixes made during the run', () => {
+  const textBefore = '# Title\n\nTeh opening.\n\nThe middle.\n\nA closing line.\n\nTeh ending.\n';
+  const afterFirstFix = textBefore.replace('Teh opening.', 'The opening.');
+  const text = afterFirstFix.replace('Teh ending.', 'The ending.');
+  const result = {
+    verdict: 'COMMENTS',
+    comments: [{ line: 5, message: 'the middle is thin', basis: 'edit' }],
+    diagnostics: [{ line: 7, message: 'the closing repeats the opening' }],
+  };
+  assert.deepEqual(carryResultAcrossEdit(result, {
+    changes: wholeTextPairs([textBefore, afterFirstFix, text]), textBefore, text,
+  }), { result, drift: 0 });
+  assert.equal(carryResultAcrossEdit(result, { textBefore, text }), null, 'one synthetic pair swallows the gap');
+});
+
+test('carryResultAcrossEdit folds a typo fix, a paragraph deletion and an insertion above in order', () => {
+  const textBefore = '# Title\n\nTeh intro.\n\nPara two.\n\nPara three.\n';
+  const afterTypoFix = '# Title\n\nThe intro.\n\nPara two.\n\nPara three.\n';
+  const afterDeletion = '# Title\n\nThe intro.\n\nPara three.\n';
+  const text = `Intro\n${afterDeletion}`;
+  const result = {
+    verdict: 'COMMENTS',
+    comments: [
+      { line: 3, message: 'the intro is vague', basis: 'edit' },
+      { line: 5, message: 'para two is thin', basis: 'edit' },
+      { line: 7, message: 'para three is thin', basis: 'edit' },
+    ],
+    diagnostics: [{ line: 1, message: 'vague title' }],
+  };
+  assert.deepEqual(carryResultAcrossEdit(result, {
+    changes: wholeTextPairs([textBefore, afterTypoFix, afterDeletion, text]), textBefore, text,
+  }), {
+    result: {
+      ...result,
+      comments: [
+        { line: 4, message: 'the intro is vague', basis: 'edit' },
+        { line: 6, message: 'para three is thin', basis: 'edit' },
+      ],
+      diagnostics: [{ line: 2, message: 'vague title' }],
+    },
+    drift: 1,
+  });
+});
+
+test('carryResultAcrossEdit falls back to one synthetic pair when no change pairs were tracked', () => {
+  const textBefore = '# Title\n\nA line.\nAnother.\n';
+  const result = { verdict: 'COMMENTS', comments: [{ line: 3, message: 'tighten', basis: 'edit' }], diagnostics: [] };
+  const text = `Intro\n${textBefore}`;
+  const expected = { result: { ...result, comments: [{ line: 4, message: 'tighten', basis: 'edit' }] }, drift: 1 };
+  assert.deepEqual(carryResultAcrossEdit(result, { changes: [], textBefore, text }), expected);
+  assert.deepEqual(carryResultAcrossEdit(result, { changes: null, textBefore, text }), expected);
 });

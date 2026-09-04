@@ -12,6 +12,7 @@ import {
   lineStartOffsets,
   offsetOfPosition,
   listDocs,
+  replacedSpanOfWholeTextChange,
   uriOfParams,
 } from '../server/core/visions-buffer-core.ts';
 import type { DocStore } from '../server/core/visions-buffer-core.ts';
@@ -349,4 +350,42 @@ test('lineOfOffset names the 1-based line an offset falls on, across every break
 
   const roundTrip = { line: 2, character: 3 };
   assert.equal(lineOfOffset(starts, offsetOfPosition(text, starts, roundTrip)), roundTrip.line + 1);
+});
+
+function spanDescribingTheSameEdit(previousText: string, nextText: string) {
+  const span = replacedSpanOfWholeTextChange(previousText, nextText);
+  assert.ok(span, 'a differing pair of texts always yields a span');
+  const rebuilt = previousText.slice(0, span.offset)
+    + span.insertedText
+    + previousText.slice(span.offset + span.removedText.length);
+  assert.equal(rebuilt, nextText, 'a rotated span still describes the same edit');
+  return span;
+}
+
+test('a pure removal of whole lines is rotated onto the line start it deleted', () => {
+  const previousText = '# Title\n\nPara one.\n\nPara two.\n\nPara three.\n';
+  const span = spanDescribingTheSameEdit(previousText, '# Title\n\nPara one.\n\nPara three.\n');
+  assert.deepEqual(span, { offset: 20, removedText: 'Para two.\n\n', insertedText: '' });
+  assert.ok(lineStartOffsets(previousText).includes(span.offset), 'the removal starts on a line start');
+});
+
+test('a pure insertion of whole lines is rotated onto the line start it created', () => {
+  const previousText = '# Title\n\nPara one.\n';
+  const span = spanDescribingTheSameEdit(previousText, '# Title\n\nPara zero.\n\nPara one.\n');
+  assert.deepEqual(span, { offset: 9, removedText: '', insertedText: 'Para zero.\n\n' });
+  assert.ok(lineStartOffsets(previousText).includes(span.offset), 'the insertion starts on a line start');
+});
+
+test('a mixed replacement keeps the raw common prefix and suffix span', () => {
+  assert.deepEqual(
+    spanDescribingTheSameEdit('abc def\n', 'abc xyz\n'),
+    { offset: 4, removedText: 'def', insertedText: 'xyz' },
+  );
+});
+
+test('a whole-text newline insertion after trailing spaces is still a blank-line boundary', () => {
+  const previousText = '# T\n\n- item  ';
+  assert.equal(boundary(previousText, `${previousText}\n  `, [{ text: `${previousText}\n  ` }]), true);
+  assert.equal(boundary(previousText, `${previousText}\n`, [{ text: `${previousText}\n` }]), true);
+  assert.equal(boundary('- item\t', '- item\t\n\t', [{ text: '- item\t\n\t' }]), true);
 });

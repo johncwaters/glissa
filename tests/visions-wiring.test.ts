@@ -1365,7 +1365,39 @@ test('a result that lands after its buffer closed is dropped rather than resurre
   assert.equal(broadcasts.filter((message) => message.type === 'visions-comments' && broadcastRowCount(message, 'comments') > 0).length, 0);
 });
 
-test('an edit during dispatch drops comments diagnostics hand and intent', async (t) => {
+test('an edit during dispatch carries comments diagnostics hand and intent to their new lines', async (t) => {
+  const held = deferredOutcome();
+  const { wiring, timers, sent, notes, lsp } = dispatchingConnection({ respond: () => held.promise });
+  t.after(() => wiring.stop());
+
+  wiring.applyModelIntent('the standing intent');
+  openEdited(lsp, MARKDOWN_URI, REPEATED_WORD_MARKDOWN);
+  runSweepThenDispatch(timers);
+  const inFlight = wiring.whenDispatchSettled();
+
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, `Intro line\n${REPEATED_WORD_MARKDOWN}`));
+  held.settle({
+    verdict: 'COMMENTS',
+    comments: [COMMENT],
+    diagnostics: [MODEL_DIAGNOSTIC],
+    hand: 'a structural concern',
+    intent: 'a moved intent',
+    reason: null,
+  });
+  await inFlight;
+
+  assert.deepEqual(wiring.documentsSnapshot()[0].comments, [{ ...COMMENT, line: COMMENT.line + 1 }]);
+  assert.equal(wiring.documentsSnapshot()[0].hand, 'a structural concern');
+  assert.equal(wiring.getIntentFor().active.text, 'a moved intent');
+  const published = diagnosticsOf(sent.filter((message) => message.type === 'publishDiagnostics').at(-1));
+  assert.deepEqual(
+    published.filter((diagnostic) => diagnostic.code !== 'repeated-word').map((diagnostic) => [diagnostic.code, diagnostic.range?.start.line]),
+    [['model', MODEL_DIAGNOSTIC.line], ['comment', COMMENT.line], ['hand', 0]],
+  );
+  assert.ok(notes.some((line) => line.includes(`carried a dispatch result for ${MARKDOWN_URI} across 1 line(s) of drift`)));
+});
+
+test('a wholesale replacement during dispatch still drops comments diagnostics hand and intent', async (t) => {
   const held = deferredOutcome();
   const { wiring, timers, broadcasts, sent, notes, lsp } = dispatchingConnection({ respond: () => held.promise });
   t.after(() => wiring.stop());
@@ -1377,7 +1409,7 @@ test('an edit during dispatch drops comments diagnostics hand and intent', async
   const surfaceCount = broadcasts.length;
   const diagnosticFrameCount = sent.length;
 
-  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, CLEAN_MARKDOWN));
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, 'Entirely new body, sharing no line with the old one'));
   held.settle({
     verdict: 'COMMENTS',
     comments: [COMMENT],
@@ -3083,4 +3115,34 @@ test('a stale thread is retired by any read, so a lane with dispatch off never s
   assert.deepEqual(intentBroadcasts(broadcasts).at(-1), {
     type: 'visions-intent', projectId: null, intent: { active: null, threads: [] }, ts: clock.now,
   }, 'the retirement is broadcast once, for the key that shrank');
+});
+
+test('two separate edits during dispatch leave the untouched lines between them anchored', async (t) => {
+  const opened = '# Title\n\nTeh opening.\n\nThe middle.\n\nA closing line.\n\nTeh ending.\n';
+  const afterFirstFix = opened.replace('Teh opening.', 'The opening.');
+  const afterSecondFix = afterFirstFix.replace('Teh ending.', 'The ending.');
+  const comments = [
+    { line: 5, message: 'the middle is thin', basis: 'edit' },
+    { line: 7, message: 'the closing repeats the opening', basis: 'edit' },
+  ];
+  const held = deferredOutcome();
+  const { wiring, timers, sent, notes, lsp } = dispatchingConnection({ respond: () => held.promise });
+  t.after(() => wiring.stop());
+
+  openEdited(lsp, MARKDOWN_URI, opened);
+  runSweepThenDispatch(timers);
+  const inFlight = wiring.whenDispatchSettled();
+
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 2, afterFirstFix));
+  lsp('textDocument/didChange', didChangeParams(MARKDOWN_URI, 3, afterSecondFix));
+  held.settle({ verdict: 'COMMENTS', comments, reason: null });
+  await inFlight;
+
+  assert.deepEqual(wiring.documentsSnapshot()[0].comments, comments);
+  const published = diagnosticsOf(sent.filter((message) => message.type === 'publishDiagnostics').at(-1));
+  assert.deepEqual(
+    published.filter((diagnostic) => diagnostic.code === 'comment').map((diagnostic) => diagnostic.range?.start.line),
+    [4, 6],
+  );
+  assert.ok(notes.some((line) => line.includes(`carried a dispatch result for ${MARKDOWN_URI} across 0 line(s) of drift`)));
 });

@@ -64,23 +64,6 @@ function lastLineLosingTextOf({ beforeStarts, replacedStart, replacedEnd, remove
   return Math.max(replacedStart, replacedEnd - 1);
 }
 
-function insertionRotatedToLineStart({ textBefore, beforeStarts, offset, insertedText }: {
-  textBefore: string;
-  beforeStarts: number[];
-  offset: number;
-  insertedText: string;
-}): { offset: number; insertedText: string } {
-  let rotatedOffset = offset;
-  let rotatedText = insertedText;
-  while (rotatedOffset > 0 && !beforeStarts.includes(rotatedOffset)) {
-    const lastInsertedChar = rotatedText.at(-1);
-    if (lastInsertedChar === undefined || textBefore[rotatedOffset - 1] !== lastInsertedChar) break;
-    rotatedText = `${lastInsertedChar}${rotatedText.slice(0, -1)}`;
-    rotatedOffset -= 1;
-  }
-  return { offset: rotatedOffset, insertedText: rotatedText };
-}
-
 function mergeRanges(ranges: TouchedRange[]): TouchedRange[] {
   const sorted = ranges
     .filter((range) => Number.isInteger(range.start) && Number.isInteger(range.end) && range.start >= 1 && range.end >= range.start)
@@ -106,15 +89,10 @@ function spanOfChange(change: ContentChange | null | undefined, textBefore: stri
     const beforeStarts = lineStartOffsets(textBefore);
     const afterStarts = lineStartOffsets(nextText);
     const isPureInsertion = span.removedText.length === 0;
-    const insertion = isPureInsertion
-      ? insertionRotatedToLineStart({
-        textBefore, beforeStarts, offset: span.offset, insertedText: span.insertedText,
-      })
-      : { offset: span.offset, insertedText: span.insertedText };
-    const start = lineOfOffset(beforeStarts, insertion.offset);
+    const start = lineOfOffset(beforeStarts, span.offset);
     const removedEndOffset = span.offset + span.removedText.length;
     const replacedEnd = lineOfOffset(beforeStarts, removedEndOffset);
-    const insertedAtLineStart = beforeStarts.includes(insertion.offset);
+    const insertedAtLineStart = beforeStarts.includes(span.offset);
     return {
       replacedStart: start,
       replacedEnd,
@@ -124,12 +102,12 @@ function spanOfChange(change: ContentChange | null | undefined, textBefore: stri
       producedStart: start,
       producedEnd: producedEndOf({
         producedStart: start,
-        producedEnd: lineOfOffset(afterStarts, insertion.offset + insertion.insertedText.length),
-        insertedText: insertion.insertedText,
+        producedEnd: lineOfOffset(afterStarts, span.offset + span.insertedText.length),
+        insertedText: span.insertedText,
         insertedAtLineStart,
       }),
       delta: afterStarts.length - beforeStarts.length,
-      insertsWholeLinesBefore: insertedAtLineStart && isPureInsertion && endsWithLineBreak(insertion.insertedText),
+      insertsWholeLinesBefore: insertedAtLineStart && isPureInsertion && endsWithLineBreak(span.insertedText),
     };
   }
   const { range } = change;

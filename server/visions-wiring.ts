@@ -17,6 +17,7 @@ import {
   ERROR_BACKOFF_THRESHOLD,
   ORIENTATION_REASON,
   buildVisionsPrompt,
+  carryResultAcrossEdit,
   commentsToLsp,
   createDispatchState,
   decideDispatch,
@@ -808,6 +809,7 @@ function createVisionsWiring({
     const dispatchTimersByUri = new Map<string, NodeJS.Timeout>();
     const touchState = createTouchState();
     const orientedUris = new Set<string>();
+    const changesDuringDispatchByUri = new Map<string, AppliedChange[]>();
     const pendingApplyEditById = new Map<string, PendingApplyEdit>();
     let closed = false;
 
@@ -862,7 +864,9 @@ function createVisionsWiring({
       const otherThreads = rest.filter((thread) => !thread.uris.includes(uri));
       const focus = { touchedRanges, orientation, activeThread };
       dispatchInFlight = true;
+      changesDuringDispatchByUri.set(uri, []);
       let result: DispatchOutcome | null = null;
+      let changesDuringDispatch: AppliedChange[] = [];
       try {
         const memory = memoryStoreOf() ? await readMemorySection(uri, text) : null;
         const digest = readContextDigest();
@@ -902,6 +906,8 @@ function createVisionsWiring({
         warn(`dispatch for ${uri} threw: ${errorMessage(error)}`);
       } finally {
         dispatchInFlight = false;
+        changesDuringDispatch = changesDuringDispatchByUri.get(uri) || [];
+        changesDuringDispatchByUri.delete(uri);
       }
       if (!result) return;
       const outcome = noteDispatchOutcome(dispatchState, {
@@ -916,10 +922,18 @@ function createVisionsWiring({
         return;
       }
       if (hashFn(currentDoc.text) !== textHash) {
-        note(`dropped a dispatch result for ${uri}: the buffer moved`);
-        return;
+        const carried = carryResultAcrossEdit(result, {
+          changes: changesDuringDispatch, textBefore: text, text: currentDoc.text,
+        });
+        if (!carried) {
+          note(`dropped a dispatch result for ${uri}: the buffer moved`);
+          return;
+        }
+        note(`carried a dispatch result for ${uri} across ${carried.drift} line(s) of drift`);
+        result = carried.result;
       }
-      const recorded = applyDispatchResult(uri, result, currentDoc, send, focus);
+      const liveFocus = { ...focus, touchedRanges: touchedRangesFor(touchState, uri) };
+      const recorded = applyDispatchResult(uri, result, currentDoc, send, liveFocus);
       if (!recorded) return;
       const intentMoved = applyModelIntent(result.intent, projectId, uri);
       note(`dispatch for ${uri} applied: ${result.verdict}, ${(commentsByUri.get(uri) || []).length} comments, hand=${handsByUri.has(uri) ? 'yes' : 'no'}, intent-moved=${intentMoved ? 'yes' : 'no'}`);
@@ -1075,6 +1089,7 @@ function createVisionsWiring({
         const result = applyDidChange(store, params);
         if (!result.applied) return changeFailureReason(uri, version, result);
         const doc = uri ? getDoc(store, uri) : null;
+        if (uri && doc) changesDuringDispatchByUri.get(uri)?.push(...(result.changes || []));
         if (uri && doc) carryDispatchDiagnostics(uri, result.changes || [], doc.text);
         if (uri && doc && isMarkdownDoc(doc)) recordChanges(touchState, uri, result.changes || [], doc.text);
         debugNote(() => `didChange ${uri} v${version} (${result.changeCount} changes, ${result.size} chars)`);
@@ -1121,6 +1136,7 @@ function createVisionsWiring({
         const uri = uriOfParams(params);
         if (uri) cancelSweep(uri);
         if (uri) cancelDispatch(uri);
+        if (uri) changesDuringDispatchByUri.delete(uri);
         const result = applyDidClose(store, params);
         const isLastOwner = releaseUri(uri, connection);
         resetTouchedUri(touchState, uri);

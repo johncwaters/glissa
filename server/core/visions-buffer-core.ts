@@ -214,12 +214,27 @@ function isBoundaryInsertion(
   return isLineBlankAtOffset(nextText, insertionOffset + insertedText.length);
 }
 
-function replacedSpanOfWholeTextChange(
-  previousText: unknown,
-  nextText: unknown,
-): { offset: number; removedText: string; insertedText: string } | null {
-  if (typeof previousText !== 'string' || typeof nextText !== 'string') return null;
-  if (previousText === nextText) return null;
+function movedTextRotatedToLineStart({ previousText, offset, movedText }: {
+  previousText: string;
+  offset: number;
+  movedText: string;
+}): { offset: number; movedText: string } {
+  const lineStarts = lineStartOffsets(previousText);
+  let rotatedOffset = offset;
+  let rotatedText = movedText;
+  while (rotatedOffset > 0 && !lineStarts.includes(rotatedOffset)) {
+    const lastMovedChar = rotatedText.at(-1);
+    if (lastMovedChar === undefined || previousText[rotatedOffset - 1] !== lastMovedChar) break;
+    rotatedText = `${lastMovedChar}${rotatedText.slice(0, -1)}`;
+    rotatedOffset -= 1;
+  }
+  return { offset: rotatedOffset, movedText: rotatedText };
+}
+
+function commonAffixSpan(
+  previousText: string,
+  nextText: string,
+): { offset: number; removedText: string; insertedText: string } {
   let prefixLength = 0;
   while (
     prefixLength < previousText.length
@@ -243,10 +258,23 @@ function replacedSpanOfWholeTextChange(
   };
 }
 
+function replacedSpanOfWholeTextChange(
+  previousText: unknown,
+  nextText: unknown,
+): { offset: number; removedText: string; insertedText: string } | null {
+  if (typeof previousText !== 'string' || typeof nextText !== 'string') return null;
+  if (previousText === nextText) return null;
+  const { offset, removedText, insertedText } = commonAffixSpan(previousText, nextText);
+  if (removedText !== '' && insertedText !== '') return { offset, removedText, insertedText };
+  const rotated = movedTextRotatedToLineStart({ previousText, offset, movedText: removedText || insertedText });
+  if (removedText === '') return { offset: rotated.offset, removedText: '', insertedText: rotated.movedText };
+  return { offset: rotated.offset, removedText: rotated.movedText, insertedText: '' };
+}
+
 function insertionFromWholeTextChange(previousText: string, nextText: string): { offset: number; text: string } | null {
   if (nextText.length <= previousText.length) return null;
-  const span = replacedSpanOfWholeTextChange(previousText, nextText);
-  if (!span || span.removedText !== '') return null;
+  const span = commonAffixSpan(previousText, nextText);
+  if (span.removedText !== '') return null;
   return { offset: span.offset, text: span.insertedText };
 }
 

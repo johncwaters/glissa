@@ -5,7 +5,9 @@ import { positiveInt } from './ingest-number-core.ts';
 import {
   DEFAULT_THREAD_TTL_MS, MAX_INTENT_CHARS, THREAD_ID_RE, sanitizeIntentText,
 } from './visions-intent-core.ts';
-import { formatTouchedRanges } from './visions-touch-core.ts';
+import type { AppliedChange } from './visions-buffer-core.ts';
+import { lineOfOffset, lineStartOffsets, replacedSpanOfWholeTextChange } from './visions-buffer-core.ts';
+import { formatTouchedRanges, shiftLines } from './visions-touch-core.ts';
 
 const DEFAULT_QUIET_MS = 30000;
 const DEFAULT_COOLDOWN_MS = 300000;
@@ -524,6 +526,84 @@ function mergeDiagnostics(...diagnosticLists: unknown[]): LineDiagnostic[] {
   return merged;
 }
 
+interface CarryStep {
+  pair: AppliedChange;
+  textAfter: string;
+  removedLines: Set<number>;
+}
+
+function removedLineNumbers(textBefore: string, text: string): Set<number> {
+  const removed = new Set<number>();
+  const span = replacedSpanOfWholeTextChange(textBefore, text);
+  if (!span || span.removedText.length === 0) return removed;
+  const beforeStarts = lineStartOffsets(textBefore);
+  const removalEnd = span.offset + span.removedText.length;
+  const firstTouchedLine = lineOfOffset(beforeStarts, span.offset);
+  const lastTouchedLine = lineOfOffset(beforeStarts, removalEnd);
+  for (let line = firstTouchedLine; line <= lastTouchedLine; line += 1) {
+    const lineStart = beforeStarts[line - 1];
+    const lineEnd = line < beforeStarts.length ? beforeStarts[line] : textBefore.length;
+    if (lineEnd <= lineStart) continue;
+    if (span.offset <= lineStart && removalEnd >= lineEnd) removed.add(line);
+  }
+  return removed;
+}
+
+function carryStepsOf(pairs: AppliedChange[], text: string): CarryStep[] {
+  return pairs.map((pair, index) => {
+    const textAfter = index + 1 < pairs.length ? pairs[index + 1].textBefore : text;
+    return { pair, textAfter, removedLines: removedLineNumbers(pair.textBefore, textAfter) };
+  });
+}
+
+function relineEntries(
+  entries: unknown,
+  steps: CarryStep[],
+): { entries: unknown[]; anchoredCount: number; drift: number } {
+  const list: unknown[] = Array.isArray(entries) ? entries : [];
+  const anchored = list.filter((entry): entry is { line: number } => (
+    !!entry && typeof entry === 'object' && Number.isInteger((entry as { line?: unknown }).line)
+  ));
+  let survivors = anchored.map((entry) => ({ entry, line: entry.line }));
+  for (const step of steps) {
+    const kept = survivors.filter((survivor) => !step.removedLines.has(survivor.line));
+    const moved = shiftLines(kept.map((survivor) => survivor.line), [step.pair], step.textAfter);
+    survivors = kept.map((survivor, index) => ({ entry: survivor.entry, line: moved[index] }));
+  }
+  let drift = 0;
+  const relined = survivors.map((survivor) => {
+    drift = Math.max(drift, Math.abs(survivor.line - survivor.entry.line));
+    return { ...survivor.entry, line: survivor.line };
+  });
+  return { entries: relined, anchoredCount: anchored.length, drift };
+}
+
+function carryPairsOf(changes: unknown, textBefore: string, text: string): AppliedChange[] {
+  const list: unknown[] = Array.isArray(changes) ? changes : [];
+  const pairs = list.filter((pair): pair is AppliedChange => (
+    !!pair && typeof pair === 'object' && typeof (pair as { textBefore?: unknown }).textBefore === 'string'
+  ));
+  if (pairs.length > 0) return pairs;
+  return [{ change: { text }, textBefore }];
+}
+
+function carryResultAcrossEdit<T extends { comments?: unknown; diagnostics?: unknown }>(
+  result: T,
+  { changes = null, textBefore, text }: { changes?: AppliedChange[] | null; textBefore: string; text: string },
+): { result: T; drift: number } | null {
+  if (text.trim().length === 0) return null;
+  const steps = carryStepsOf(carryPairsOf(changes, textBefore, text), text);
+  const comments = relineEntries(result.comments, steps);
+  const diagnostics = relineEntries(result.diagnostics, steps);
+  const anchoredCount = comments.anchoredCount + diagnostics.anchoredCount;
+  const survivorCount = comments.entries.length + diagnostics.entries.length;
+  if (anchoredCount > 0 && survivorCount === 0) return null;
+  return {
+    result: { ...result, comments: comments.entries, diagnostics: diagnostics.entries },
+    drift: Math.max(comments.drift, diagnostics.drift),
+  };
+}
+
 function commentsToLsp(comments: unknown, { text = '' }: { text?: string } = {}): LineDiagnostic[] {
   const lines = lineTextsOf(text);
   const entries: unknown[] = Array.isArray(comments) ? comments : [];
@@ -741,4 +821,4 @@ function buildVisionsPrompt({
   return lines.join('\n');
 }
 
-export { DEFAULT_ACTIVITY_MAX_PER_HOUR, ORIENTATION_REASON, TOUCH_MARGIN_LINES, filterComments, formatDroppedComments, isWithinTouchedRanges, DEFAULT_DISPATCH_MODEL, ERROR_BACKOFF_MS, ERROR_BACKOFF_THRESHOLD, ERROR_SOURCE_SESSION, ERROR_SOURCE_TRANSPORT, MAX_HAND_CHARS, DEFAULT_COOLDOWN_MS, DEFAULT_MAX_PER_HOUR, DEFAULT_QUIET_MS, DEFAULT_TIMEOUT_SECONDS, HOUR_MS, MAX_PROMPT_BYTES, VISIONS_RESULT_FILE, activitySection, buildVisionsPrompt, contentMarker, memorySection, countLines, countRecentDispatches, createDispatchState, decideDispatch, decideDocumentSize, decidePromptSize, forgetUri, handToLsp, hashText, commentsToLsp, mergeDiagnostics, modelDiagnosticsToLsp, noteDispatchOutcome, numberBufferLines, recordDispatch, relineDiagnostics, resolveDispatchConfig, resolveVisionsConfig, sanitizeComments, sanitizeCommentsWithDrops, sanitizeModelDiagnostics };
+export { DEFAULT_ACTIVITY_MAX_PER_HOUR, ORIENTATION_REASON, TOUCH_MARGIN_LINES, filterComments, formatDroppedComments, isWithinTouchedRanges, DEFAULT_DISPATCH_MODEL, ERROR_BACKOFF_MS, ERROR_BACKOFF_THRESHOLD, ERROR_SOURCE_SESSION, ERROR_SOURCE_TRANSPORT, MAX_HAND_CHARS, DEFAULT_COOLDOWN_MS, DEFAULT_MAX_PER_HOUR, DEFAULT_QUIET_MS, DEFAULT_TIMEOUT_SECONDS, HOUR_MS, MAX_PROMPT_BYTES, VISIONS_RESULT_FILE, activitySection, buildVisionsPrompt, carryResultAcrossEdit, contentMarker, memorySection, countLines, countRecentDispatches, createDispatchState, decideDispatch, decideDocumentSize, decidePromptSize, forgetUri, handToLsp, hashText, commentsToLsp, mergeDiagnostics, modelDiagnosticsToLsp, noteDispatchOutcome, numberBufferLines, recordDispatch, relineDiagnostics, resolveDispatchConfig, resolveVisionsConfig, sanitizeComments, sanitizeCommentsWithDrops, sanitizeModelDiagnostics };
