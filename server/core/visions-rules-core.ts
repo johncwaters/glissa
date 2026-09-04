@@ -117,13 +117,17 @@ function addRepeatedWordDiagnostics(
     }
 
     const normalizedWord = word.toLowerCase();
-    if (previousWord && previousWord.normalizedWord === normalizedWord) {
+    if (previousWord && previousWord.normalizedWord === normalizedWord && isOnlyWhitespace(line, previousWord.end, start)) {
       const repeated = diagnostic(lineIndex, start, lineIndex, end, 'repeated-word', `Repeated word "${word}"`);
       diagnostics.push(repeated);
       fixes.push(repeatedWordFix(repeated, lineIndex, previousWord.end, end));
     }
     previousWord = { normalizedWord, end };
   }
+}
+
+function isOnlyWhitespace(line: string, start: number, end: number): boolean {
+  return line.slice(start, end).trim() === '';
 }
 
 function repeatedWordFix(repeated: SweepDiagnostic, lineIndex: number, previousEnd: number, end: number): SweepFix {

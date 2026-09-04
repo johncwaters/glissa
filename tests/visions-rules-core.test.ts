@@ -27,6 +27,19 @@ test('a word inside a token that starts with a digit is not a word', () => {
   assert.deepEqual(sweepMarkdown('a real a a repeat').map((diagnostic) => diagnostic.message), ['Repeated word "a"']);
 });
 
+test('a word repeated across punctuation is not a repeat', () => {
+  const cases = [
+    'give it. It can also run.',
+    'But wait! It can do more! It can.',
+    '* [posthog.com repo](https://github.com/PostHog/posthog.com)',
+    'see [main](main.md) and https://example.com/docs/docs',
+    'read the [the guide](guide.md)',
+    'the (the) aside',
+  ];
+  for (const line of cases) assert.deepEqual(sweepMarkdown(line).map((diagnostic) => diagnostic.message), [], line);
+  assert.deepEqual(sweepMarkdown('tab\tseparated the\tthe word').map((diagnostic) => diagnostic.message), ['Repeated word "the"']);
+});
+
 test('sweepMarkdown skips repeated words in inline code spans', () => {
   const diagnostics = sweepMarkdown('Keep `the the` code but flag the the prose.');
   const repeated = byCode(diagnostics, 'repeated-word');
