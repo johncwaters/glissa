@@ -2,6 +2,7 @@ import type { WebSocket } from 'ws';
 import type { HookRouter } from '../detection/hook-source.ts';
 import type { Session } from '../session/sessions.ts';
 import type { ControlBroadcast } from './backend-websockets.ts';
+import { comparableDirectoryPath } from '../shared/paths.ts';
 import { createBranchGcWiring } from './branch-gc-wiring.ts';
 import type { ConfigStore, GlissaConfig } from './config-store.ts';
 import { configSiblingPath } from './pairings-store.ts';
@@ -169,6 +170,10 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
     gitWorkspace,
     broadcast: broadcastControl,
     liveSessionIds: () => new Set(allLiveSessions().map((session) => session.id)),
+    liveWorktreePaths: async () => new Set(await Promise.all(allLiveSessions()
+      .flatMap((session) => [session.worktreeDir, session.path])
+      .filter((sessionDirectory): sessionDirectory is string => Boolean(sessionDirectory))
+      .map((sessionDirectory) => comparableDirectoryPath(sessionDirectory)))),
     ...(options.branchGcWiringOptions || {}),
   });
   const prReview = createPrReviewWiring({

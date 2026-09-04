@@ -4,6 +4,7 @@ import path from 'node:path';
 import { execFileAsync, execFileSync } from '../server/child-process-safe.ts';
 import { createSerialQueue } from './spawn-gate.ts';
 import { matchedPrefix, sessionIdFromBranch, usablePrefixes } from './core/branch-gc-core.ts';
+import { comparableDirectoryPath } from '../shared/paths.ts';
 import type { RemoteBranchTip } from './core/branch-gc-core.ts';
 import {
   GIT_FETCH_TIMEOUT_MS,
@@ -31,7 +32,7 @@ type IntegrationSyncResult = {
 };
 type GitExtraOptions = { timeout?: number; maxBuffer?: number; env?: Record<string, string>; replaceEnv?: Record<string, string> };
 type GitRunner = (args: string[], cwd: string, extra?: GitExtraOptions) => Promise<string> | string;
-type WorktreeBranch = { cwd: string; branch: string };
+type WorktreeBranch = { cwd: string; branch: string; locked: boolean; prunable: boolean; headSha: string | null };
 type WorkspaceHandle = {
   cwd: string;
   isGit: boolean;
@@ -66,6 +67,7 @@ type WorktreeArgs = {
   tipSha?: string;
   integrationSha?: string;
   branchSha?: string;
+  prefixes?: string[];
   knownProjects?: unknown;
 };
 
@@ -101,6 +103,16 @@ type SessionWorktree = {
   hasWork: boolean;
   integrationBranch: string | null;
 };
+type ListedWorktree = {
+  cwd: string;
+  branch: string;
+  locked: boolean;
+  prunable: boolean;
+  dirty: boolean | null;
+  tipSha: string;
+  integrationBranch: string | null;
+};
+type WorktreeProbe = { dirty: GitResult; ahead: GitResult | null; integrationBranch: string | null };
 type IntegrationTip = { branch: string; sha: string | null };
 type BaseClassification = { state: string; upstream: string };
 type BaseSyncResult = BaseClassification & { fetched: boolean | null; error?: string };
@@ -142,6 +154,15 @@ function errResult(err: unknown): GitResult {
   };
 }
 
+async function directoryExists(candidatePath: string): Promise<boolean> {
+  try {
+    await fsp.access(candidatePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function normalizedDirectoryPath(value: unknown): string {
   const posix = String(value || '').replace(/\\/g, '/').replace(/\/+$/, '');
   const isWindowsPath = /^[A-Za-z]:\//.test(posix) || posix.startsWith('//');
@@ -168,23 +189,40 @@ function projectPaths(knownProjects: unknown): string[] {
 
 function parseWorktreeBranches(porcelain: string): WorktreeBranch[] {
   const result: WorktreeBranch[] = [];
-  let curWt: string | null = null;
+  let current: { cwd: string; branch: string | null; locked: boolean; prunable: boolean; headSha: string | null } | null = null;
+  const flush = () => {
+    if (current?.branch) result.push({ cwd: current.cwd, branch: current.branch, locked: current.locked, prunable: current.prunable, headSha: current.headSha });
+    current = null;
+  };
   for (const line of porcelain.split(/\r?\n/)) {
-    if (line.startsWith('worktree ')) { curWt = line.slice('worktree '.length).trim(); continue; }
-    if (line === '') { curWt = null; continue; }
-    if (!line.startsWith('branch ')) continue;
-    const branch = line.slice('branch '.length).trim().replace(/^refs\/heads\//, '');
-    const cwd = curWt;
-    curWt = null;
-    if (cwd) result.push({ cwd, branch });
+    if (line.startsWith('worktree ')) {
+      flush();
+      current = { cwd: line.slice('worktree '.length).trim(), branch: null, locked: false, prunable: false, headSha: null };
+      continue;
+    }
+    if (line === '') { flush(); continue; }
+    if (!current) continue;
+    if (line.startsWith('HEAD ')) { current.headSha = line.slice('HEAD '.length).trim() || null; continue; }
+    if (line.startsWith('branch ')) { current.branch = line.slice('branch '.length).trim().replace(/^refs\/heads\//, ''); continue; }
+    if (line.startsWith('prunable')) { current.prunable = true; continue; }
+    if (line.startsWith('locked')) current.locked = true;
   }
+  flush();
   return result;
+}
+
+function mainWorktreePath(porcelain: string): string | null {
+  const firstEntry = porcelain.split(/\r?\n/).find((line) => line.startsWith('worktree '));
+  if (!firstEntry) return null;
+  return firstEntry.slice('worktree '.length).trim() || null;
 }
 
 function findWorktreeForBranch(porcelain: string, branch: string): string | null {
   const hit = parseWorktreeBranches(porcelain).find((w) => w.branch === branch);
   return hit ? hit.cwd : null;
 }
+
+const WORKTREE_STATUS_ARGS = ['status', '--porcelain', '--untracked-files=all', '--ignore-submodules=none'];
 
 const isDirtyResult = (dirty: GitResult) => dirty.ok && dirty.out !== '';
 function hasWorkFrom(dirty: GitResult, ahead: GitResult | null): boolean {
@@ -702,9 +740,9 @@ function createGitWorkspace(opts: {
     branch: string;
     integrationBranch?: string | null;
     configuredIntegrationBranch?: string | null;
-  }): Promise<{ dirty: GitResult; ahead: GitResult | null; integrationBranch: string | null }> {
+  }): Promise<WorktreeProbe> {
     const { base: resolvedIntegrationBranch, measureRef } = await migrateMarkerBase(projectPath, branch, integrationBranch, configuredIntegrationBranch);
-    const dirty = await run(['status', '--porcelain'], cwd);
+    const dirty = await run(WORKTREE_STATUS_ARGS, cwd);
     const ahead = !isDirtyResult(dirty) && resolvedIntegrationBranch
       ? await run(['rev-list', '--count', `${measureRef || resolvedIntegrationBranch}..${branch}`], projectPath)
       : null;
@@ -724,32 +762,86 @@ function createGitWorkspace(opts: {
     return hasWorkFrom(dirty, ahead);
   }
 
-  async function listSessionWorktreesBody({ projectPath, integrationBranch, configuredIntegrationBranch }: WorktreeArgs): Promise<SessionWorktree[]> {
-    const out: SessionWorktree[] = [];
+  async function scanProbedWorktrees<Described>({ projectPath, integrationBranch, configuredIntegrationBranch, describe }: {
+    projectPath: string;
+    integrationBranch?: string | null;
+    configuredIntegrationBranch?: string | null;
+    describe: (entry: WorktreeBranch, probe: () => Promise<WorktreeProbe>, mainWorktree: string | null) => Promise<Described | null>;
+  }): Promise<Described[]> {
+    const described: Described[] = [];
     const inside = await run(['rev-parse', '--is-inside-work-tree'], projectPath);
-    if (!inside.ok || inside.out !== 'true') return out;
+    if (!inside.ok || inside.out !== 'true') return described;
     const listed = await run(['worktree', 'list', '--porcelain'], projectPath);
-    if (!listed.ok) return out;
-    for (const { cwd: wt, branch: name } of parseWorktreeBranches(listed.out)) {
-      const id = sessionIdFromBranch(name);
-      if (id === null) continue;
-      const probe = await probeWorktreeWork({ projectPath, cwd: wt, branch: name, integrationBranch, configuredIntegrationBranch });
-      out.push({
-        cwd: wt, branch: name, id,
-        hasWork: hasWorkFrom(probe.dirty, probe.ahead),
-        integrationBranch: probe.integrationBranch,
-      });
+    if (!listed.ok) return described;
+    const mainWorktree = mainWorktreePath(listed.out);
+    for (const entry of parseWorktreeBranches(listed.out)) {
+      const probe = () => probeWorktreeWork({ projectPath, cwd: entry.cwd, branch: entry.branch, integrationBranch, configuredIntegrationBranch });
+      const record = await describe(entry, probe, mainWorktree);
+      if (record !== null) described.push(record);
     }
-    return out;
+    return described;
   }
 
-  async function removeWorktreeByPathBody({ projectPath, cwd, branch }: WorktreeArgs): Promise<void> {
+  async function listWorktreesBody({ projectPath, prefixes = [], integrationBranch, configuredIntegrationBranch }: WorktreeArgs): Promise<ListedWorktree[]> {
+    return scanProbedWorktrees<ListedWorktree>({
+      projectPath, integrationBranch, configuredIntegrationBranch,
+      describe: async ({ cwd, branch, locked, prunable, headSha }, probe, mainWorktree) => {
+        const canonicalCwd = await comparableDirectoryPath(cwd);
+        if (mainWorktree !== null && canonicalCwd === await comparableDirectoryPath(mainWorktree)) return null;
+        if (matchedPrefix(branch, prefixes) === null) return null;
+        if (!headSha) return null;
+        if (prunable || !(await directoryExists(cwd))) {
+          return { cwd: canonicalCwd, branch, locked, prunable: true, dirty: null, tipSha: headSha, integrationBranch: null };
+        }
+        const probed = await probe();
+        return {
+          cwd: canonicalCwd, branch, locked, prunable: false,
+          dirty: probed.dirty.ok ? isDirtyResult(probed.dirty) : null,
+          tipSha: headSha,
+          integrationBranch: probed.integrationBranch,
+        };
+      },
+    });
+  }
+
+  async function listSessionWorktreesBody({ projectPath, integrationBranch, configuredIntegrationBranch }: WorktreeArgs): Promise<SessionWorktree[]> {
+    return scanProbedWorktrees<SessionWorktree>({
+      projectPath, integrationBranch, configuredIntegrationBranch,
+      describe: async ({ cwd, branch }, probe) => {
+        const id = sessionIdFromBranch(branch);
+        if (id === null) return null;
+        const probed = await probe();
+        return {
+          cwd, branch, id,
+          hasWork: hasWorkFrom(probed.dirty, probed.ahead),
+          integrationBranch: probed.integrationBranch,
+        };
+      },
+    });
+  }
+
+  async function probeWorktreeDirtyBody({ cwd }: WorktreeArgs): Promise<{ ok: boolean; dirty: boolean; headSha: string | null; err?: string }> {
+    if (!cwd) return { ok: false, dirty: true, headSha: null, err: 'a worktree status probe needs a path' };
+    const status = await run(WORKTREE_STATUS_ARGS, cwd);
+    if (!status.ok) return { ok: false, dirty: true, headSha: null, err: status.err };
+    const head = await run(['rev-parse', 'HEAD'], cwd);
+    if (!head.ok || !head.out) return { ok: false, dirty: true, headSha: null, err: head.err || 'a worktree head probe returned no sha' };
+    return { ok: true, dirty: status.out !== '', headSha: head.out };
+  }
+
+  async function removeWorktreeByPathBody({ projectPath, cwd, branch }: WorktreeArgs): Promise<GitResult> {
+    let failure: GitResult | null = null;
     if (cwd) {
       removeWorktreeLinks(cwd);
-      await run(['worktree', 'remove', '--force', cwd], projectPath);
+      const removed = await run(['worktree', 'remove', '--force', cwd], projectPath);
+      if (!removed.ok) failure = removed;
     }
-    if (branch) await run(['branch', '-D', branch], projectPath);
+    if (branch) {
+      const deleted = await run(['branch', '-D', branch], projectPath);
+      if (!deleted.ok && failure === null) failure = deleted;
+    }
     await run(['worktree', 'prune'], projectPath);
+    return failure ?? okResult('');
   }
 
   async function listWorktreeBranches({ projectPath }: WorktreeArgs): Promise<WorktreeBranch[]> {
@@ -951,9 +1043,11 @@ function createGitWorkspace(opts: {
     rebaseOnly: serialized(rebaseOnlyBody),
     populate: serialized(populateShare),
     removeWorktreeByPath: serialized(removeWorktreeByPathBody),
+    probeWorktreeDirty: serialized(probeWorktreeDirtyBody),
     fetchOrigin: serialized(fetchOriginBody),
     syncIntegrationBranch: serialized(syncIntegrationBranchBody),
     deleteRemoteBranch: serialized(deleteRemoteBranchBody),
+    listWorktrees: serialized(listWorktreesBody),
     listSessionWorktrees: serialized(listSessionWorktreesBody),
     hasUnmergedWork: serialized(hasUnmergedWorkBody),
     listWorktreeBranches, detectDefaultBranch,

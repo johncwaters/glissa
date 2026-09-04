@@ -16,6 +16,7 @@ interface BranchGcWiringOptions {
   config: BranchGcWiringConfig;
   gitWorkspace: BranchGcGitWorkspace;
   liveSessionIds: () => Set<string>;
+  liveWorktreePaths: () => Set<string> | Promise<Set<string>>;
   broadcast?: (message: LaneStatusRecord) => void;
   log?: Console;
   decisionTrace?: (entry: Record<string, unknown>) => void;
@@ -42,6 +43,7 @@ function createBranchGcWiring({
   config,
   gitWorkspace,
   liveSessionIds,
+  liveWorktreePaths,
   broadcast = () => {},
   log = console,
   decisionTrace = (entry: Record<string, unknown>) => log.info(`[branch-gc] decision ${JSON.stringify(entry)}`),
@@ -57,8 +59,10 @@ function createBranchGcWiring({
       gitWorkspace,
       getConfig: () => config,
       liveSessionIds,
+      liveWorktreePaths,
       staleDays: config.branchGc?.staleDays ?? DEFAULT_STALE_DAYS,
       prefixes: config.branchGc?.prefixes ?? DEFAULT_BRANCH_GC_PREFIXES,
+      pruneWorktrees: config.branchGc?.worktrees !== false,
       dryRun: config.branchGc?.dryRun ?? false,
       intervalMs: config.branchGc?.intervalMs ?? DEFAULT_INTERVAL_MS,
       log,

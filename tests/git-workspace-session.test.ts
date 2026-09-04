@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 
 import { createGitWorkspace, createGitWorkspaceSync } from '../server/git-workspace.ts';
 import type { WorkspaceHandle } from '../server/git-workspace.ts';
-import { isSameDirectoryPath } from '../shared/paths.ts';
+import { comparableDirectoryPath, isSameDirectoryPath } from '../shared/paths.ts';
 import { hasGit, git } from './helpers/git-fixture.ts';
 
 function makeNodeModulesJunction(projectPath: string, wtDir: string): boolean {
@@ -980,6 +980,130 @@ test('listSessionWorktrees flags uncommitted work; removeWorktreeByPath removes 
 
     await gw.removeWorktreeByPath({ projectPath: repo, cwd: dirty.cwd, branch: dirty.branch });
     assert.ok(!fs.existsSync(dirty.cwd));
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('listWorktrees reports Claude agent worktree locks, dirtiness, tips, and preserves session listing', { skip: !GIT }, async () => {
+  const repo = initRepoOnDevelop();
+  const firstWorktree = path.join(repo, '.claude', 'worktrees', 'agent-one');
+  const secondWorktree = path.join(repo, '.claude', 'worktrees', 'agent-two');
+  try {
+    fs.mkdirSync(path.dirname(firstWorktree), { recursive: true });
+    git(['worktree', 'add', '-b', 'worktree-agent-one', firstWorktree], repo);
+    git(['worktree', 'add', '-b', 'worktree-agent-two', secondWorktree], repo);
+    fs.writeFileSync(path.join(secondWorktree, 'dirty.txt'), 'dirty\n', 'utf8');
+    git(['worktree', 'lock', firstWorktree], repo);
+    const gitWorkspace = createGitWorkspace();
+    const sessionListingBefore = await gitWorkspace.listSessionWorktrees({ projectPath: repo, integrationBranch: 'develop' });
+    const listed = await gitWorkspace.listWorktrees({ projectPath: repo, prefixes: ['worktree-agent-'], integrationBranch: 'develop', configuredIntegrationBranch: 'develop' });
+    const sessionListingAfter = await gitWorkspace.listSessionWorktrees({ projectPath: repo, integrationBranch: 'develop' });
+    assert.deepEqual(sessionListingAfter, sessionListingBefore);
+    assert.deepEqual(listed.map((worktree) => ({ branch: worktree.branch, locked: worktree.locked, dirty: worktree.dirty })), [
+      { branch: 'worktree-agent-one', locked: true, dirty: false },
+      { branch: 'worktree-agent-two', locked: false, dirty: true },
+    ]);
+    assert.equal(listed[0]?.tipSha, git(['rev-parse', 'worktree-agent-one'], repo).trim());
+    assert.deepEqual(await gitWorkspace.listWorktrees({ projectPath: repo, prefixes: ['glissa/session/'], integrationBranch: 'develop', configuredIntegrationBranch: 'develop' }), []);
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('listWorktrees emits a cwd a live session path can be compared against', { skip: !GIT }, async () => {
+  const repo = initRepoOnDevelop();
+  const worktreeParent = path.join(repo, '.claude', 'worktrees');
+  const linkedParent = path.join(repo, 'linked-worktrees');
+  try {
+    fs.mkdirSync(worktreeParent, { recursive: true });
+    fs.symlinkSync(worktreeParent, linkedParent, 'junction');
+    const worktreeThroughLink = path.join(linkedParent, 'agent-linked');
+    git(['worktree', 'add', '-b', 'worktree-agent-linked', worktreeThroughLink], repo);
+    const gitWorkspace = createGitWorkspace();
+    const listed = await gitWorkspace.listWorktrees({ projectPath: repo, prefixes: ['worktree-agent-'], integrationBranch: 'develop', configuredIntegrationBranch: 'develop' });
+    assert.deepEqual(listed.map((worktree) => worktree.cwd), [await comparableDirectoryPath(worktreeThroughLink)]);
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('listWorktrees never offers the main checkout even when it sits on a cleanup prefix', { skip: !GIT }, async () => {
+  const repo = initRepoOnDevelop();
+  const linkedWorktree = path.join(repo, '.claude', 'worktrees', 'agent-one');
+  try {
+    git(['branch', '-m', 'develop', 'worktree-agent-main-checkout'], repo);
+    fs.mkdirSync(path.dirname(linkedWorktree), { recursive: true });
+    git(['worktree', 'add', '-b', 'worktree-agent-one', linkedWorktree], repo);
+    const gitWorkspace = createGitWorkspace();
+    const listed = await gitWorkspace.listWorktrees({ projectPath: repo, prefixes: ['worktree-agent-'], integrationBranch: 'worktree-agent-main-checkout', configuredIntegrationBranch: 'worktree-agent-main-checkout' });
+    assert.deepEqual(listed.map((worktree) => worktree.branch), ['worktree-agent-one']);
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('listWorktrees reports a hand-deleted worktree as prunable and never prunes it', { skip: !GIT }, async () => {
+  const repo = initRepoOnDevelop();
+  const vanishedWorktree = path.join(repo, '.claude', 'worktrees', 'agent-gone');
+  const adminDir = path.join(repo, '.git', 'worktrees');
+  try {
+    fs.mkdirSync(path.dirname(vanishedWorktree), { recursive: true });
+    git(['worktree', 'add', '-b', 'worktree-agent-gone', vanishedWorktree], repo);
+    const adminEntriesBefore = fs.readdirSync(adminDir);
+    fs.rmSync(vanishedWorktree, { recursive: true, force: true });
+    const gitWorkspace = createGitWorkspace();
+    const listed = await gitWorkspace.listWorktrees({ projectPath: repo, prefixes: ['worktree-agent-'], integrationBranch: 'develop', configuredIntegrationBranch: 'develop' });
+    const relisted = await gitWorkspace.listWorktrees({ projectPath: repo, prefixes: ['worktree-agent-'], integrationBranch: 'develop', configuredIntegrationBranch: 'develop' });
+    assert.deepEqual(listed.map((worktree) => ({ branch: worktree.branch, prunable: worktree.prunable, dirty: worktree.dirty })), [
+      { branch: 'worktree-agent-gone', prunable: true, dirty: null },
+    ]);
+    assert.deepEqual(relisted, listed);
+    assert.deepEqual(fs.readdirSync(adminDir), adminEntriesBefore);
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('listWorktrees keeps a worktree whose directory is only temporarily gone', { skip: !GIT }, async () => {
+  const repo = initRepoOnDevelop();
+  const worktreeDir = path.join(repo, '.claude', 'worktrees', 'agent-unmounted');
+  const parkedDir = path.join(repo, '.claude', 'parked');
+  try {
+    fs.mkdirSync(path.dirname(worktreeDir), { recursive: true });
+    git(['worktree', 'add', '-b', 'worktree-agent-unmounted', worktreeDir], repo);
+    fs.renameSync(worktreeDir, parkedDir);
+    const gitWorkspace = createGitWorkspace();
+    await gitWorkspace.listWorktrees({ projectPath: repo, prefixes: ['worktree-agent-'], integrationBranch: 'develop', configuredIntegrationBranch: 'develop' });
+    fs.renameSync(parkedDir, worktreeDir);
+    assert.equal(git(['rev-parse', '--is-inside-work-tree'], worktreeDir).trim(), 'true');
+    const listed = await gitWorkspace.listWorktrees({ projectPath: repo, prefixes: ['worktree-agent-'], integrationBranch: 'develop', configuredIntegrationBranch: 'develop' });
+    assert.deepEqual(listed.map((worktree) => ({ branch: worktree.branch, prunable: worktree.prunable, dirty: worktree.dirty })), [
+      { branch: 'worktree-agent-unmounted', prunable: false, dirty: false },
+    ]);
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('the cleanup listing sees untracked files that status.showUntrackedFiles hides', { skip: !GIT }, async () => {
+  const repo = initRepoOnDevelop();
+  const agentWorktree = path.join(repo, '.claude', 'worktrees', 'agent-untracked');
+  try {
+    fs.mkdirSync(path.dirname(agentWorktree), { recursive: true });
+    git(['worktree', 'add', '-b', 'worktree-agent-untracked', agentWorktree], repo);
+    git(['config', 'status.showUntrackedFiles', 'no'], repo);
+    fs.writeFileSync(path.join(agentWorktree, 'scratch.txt'), 'work in progress\n', 'utf8');
+    const gitWorkspace = createGitWorkspace();
+    const listed = await gitWorkspace.listWorktrees({ projectPath: repo, prefixes: ['worktree-agent-'], integrationBranch: 'develop', configuredIntegrationBranch: 'develop' });
+    assert.deepEqual(listed.map((worktree) => ({ branch: worktree.branch, dirty: worktree.dirty })), [
+      { branch: 'worktree-agent-untracked', dirty: true },
+    ]);
+    assert.deepEqual(await gitWorkspace.probeWorktreeDirty({ projectPath: repo, cwd: agentWorktree, branch: 'worktree-agent-untracked' }), {
+      ok: true,
+      dirty: true,
+      headSha: git(['rev-parse', 'HEAD'], agentWorktree).trim(),
+    });
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
   }

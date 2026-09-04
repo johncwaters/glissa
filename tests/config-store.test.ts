@@ -472,6 +472,12 @@ test('an explicit millEnabled beats the retired key', () => {
   });
 });
 
+test('a persisted branchGc worktrees setting merges over its default', () => {
+  withStore({ branchGc: { worktrees: false }, projects: [] }, (store) => {
+    assert.deepEqual(store.config.branchGc, { ...DEFAULT_CONFIG.branchGc, worktrees: false });
+  });
+});
+
 test('a hand-edited branchGc field of the wrong type falls back to its default and warns', () => {
   const warnings: string[] = [];
   const originalWarn = console.warn;

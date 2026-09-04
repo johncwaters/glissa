@@ -68,6 +68,7 @@ const DEFAULT_CONFIG = {
   worktreeRerere: true,
   branchGc: {
     enabled: true,
+    worktrees: true,
     prefixes: [...DEFAULT_BRANCH_GC_PREFIXES],
     dryRun: false,
     staleDays: 14,

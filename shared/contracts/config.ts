@@ -40,6 +40,7 @@ const PrReviewSettings = optionalObject('prReview', {
 
 const BRANCH_GC_SETTINGS_SHAPE = {
   enabled: optionalBoolean('branchGc.enabled'),
+  worktrees: optionalBoolean('branchGc.worktrees'),
   prefixes: z.array(
     z.string({ error: 'branchGc.prefixes must be an array of strings' })
       .min(1, { error: 'branchGc.prefixes entries must be non-empty strings' }),
@@ -51,7 +52,7 @@ const BRANCH_GC_SETTINGS_SHAPE = {
 };
 export const BranchGcFileSettings = z.object(BRANCH_GC_SETTINGS_SHAPE, { error: 'branchGc must be an object' });
 const BranchGcSettings = optionalObject('branchGc', BRANCH_GC_SETTINGS_SHAPE);
-const BranchGcControlSettings = BranchGcFileSettings.omit({ prefixes: true, dryRun: true }).nullable().optional();
+const BranchGcControlSettings = BranchGcFileSettings.omit({ prefixes: true, dryRun: true, worktrees: true }).nullable().optional();
 export const BRANCH_GC_CONTROL_BOOLEAN_KEYS = Object.freeze(['enabled']);
 export const BRANCH_GC_CONTROL_NUMERIC_KEYS = Object.freeze(['staleDays', 'intervalMs']);
 

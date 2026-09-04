@@ -1,8 +1,8 @@
-import { DEFAULT_BRANCH_GC_PREFIXES, planBranchGc } from './core/branch-gc-core.ts';
+import { DEFAULT_BRANCH_GC_PREFIXES, planBranchGc, planWorktreeGc, worktreeIntegrationTips } from './core/branch-gc-core.ts';
 import { configuredIntegrationBranch } from './core/integration-branch-core.ts';
 import { ancestorProvenProbe, ancestryFromResult, buildTipProbe, proveMergedAcrossTips } from './core/merge-proof-core.ts';
 import type { MergeProbeEnvResult, MergeProofReason, MergeTreeOutcome, TipProbe } from './core/merge-proof-core.ts';
-import type { IntegrationTip, KeptBranch, RemoteBranchTip } from './core/branch-gc-core.ts';
+import type { IntegrationTip, KeptBranch, LocalWorktreeTip, RemoteBranchTip, WorktreeGcDecision } from './core/branch-gc-core.ts';
 import { createTickLoop } from './lane-runner.ts';
 import type { TickOutcome } from './lane-runner.ts';
 
@@ -20,6 +20,7 @@ type ListBranchesResult = GitCallResult & { branches?: RemoteBranchTip[] };
 type ListTipsResult = GitCallResult & { integrationTips?: IntegrationTip[] };
 type AncestorResult = GitCallResult & { isAncestor?: boolean };
 type MergeTreeResult = GitCallResult & { outcome: MergeTreeOutcome };
+type DirtyProbeResult = GitCallResult & { dirty?: boolean; headSha?: string | null };
 
 interface BranchGcGitWorkspace {
   fetchOrigin(args: { projectPath: string; timeoutMs?: number }): Promise<GitCallResult>;
@@ -35,6 +36,9 @@ interface BranchGcGitWorkspace {
   }): Promise<MergeTreeResult>;
   treeOid(args: { projectPath: string; sha: string }): Promise<GitCallResult>;
   deleteRemoteBranch(args: { projectPath: string; name: string; tipSha: string }): Promise<GitCallResult>;
+  listWorktrees(args: { projectPath: string; prefixes: string[]; integrationBranch: string | null; configuredIntegrationBranch: string | null }): Promise<LocalWorktreeTip[]>;
+  probeWorktreeDirty(args: { projectPath: string; cwd: string; branch: string }): Promise<DirtyProbeResult>;
+  removeWorktreeByPath(args: { projectPath: string; cwd: string; branch: string }): Promise<GitCallResult>;
 }
 
 interface BranchGcConfig {
@@ -47,12 +51,15 @@ interface BranchGcTraceEntry {
   name?: string | null;
   decision: string;
   reason?: string;
+  cwd?: string;
 }
 
 interface BranchGcProjectSummary {
   projectPath: string;
   deletions: string[];
   kept: KeptBranch[];
+  worktreeRemovals: { cwd: string; branch: string; reason: string }[];
+  worktreesKept: { cwd: string; branch: string; reason: string }[];
   errors: number;
 }
 
@@ -60,8 +67,10 @@ interface BranchGcPollerDeps {
   gitWorkspace: BranchGcGitWorkspace;
   getConfig: () => BranchGcConfig;
   liveSessionIds: () => Set<string>;
+  liveWorktreePaths: () => Set<string> | Promise<Set<string>>;
   staleDays?: number;
   prefixes?: string[];
+  pruneWorktrees?: boolean;
   dryRun?: boolean;
   intervalMs?: number;
   setIntervalFn?: typeof setInterval;
@@ -83,8 +92,10 @@ function createBranchGcPoller(deps: BranchGcPollerDeps): BranchGcPoller {
     gitWorkspace,
     getConfig,
     liveSessionIds,
+    liveWorktreePaths,
     staleDays = DEFAULT_STALE_DAYS,
     prefixes = DEFAULT_BRANCH_GC_PREFIXES,
+    pruneWorktrees = true,
     dryRun = false,
     intervalMs = DEFAULT_INTERVAL_MS,
     setIntervalFn = setInterval,
@@ -145,8 +156,8 @@ function createBranchGcPoller(deps: BranchGcPollerDeps): BranchGcPoller {
   async function resolveIntegrationTreeOids(
     projectPath: string,
     integrationTips: IntegrationTip[],
+    integrationTreeByTipSha: Map<string, GitCallResult> = new Map<string, GitCallResult>(),
   ): Promise<Map<string, GitCallResult>> {
-    const integrationTreeByTipSha = new Map<string, GitCallResult>();
     for (const integrationTip of integrationTips) {
       const integrationSha = integrationTip.sha ?? '';
       if (integrationTreeByTipSha.has(integrationSha)) continue;
@@ -215,8 +226,125 @@ function createBranchGcPoller(deps: BranchGcPollerDeps): BranchGcPoller {
     return probes;
   }
 
-  async function tickProject(projectPath: string, config: BranchGcConfig): Promise<BranchGcProjectSummary> {
-    const summary: BranchGcProjectSummary = { projectPath, deletions: [], kept: [], errors: 0 };
+  async function resolveOwnIntegrationTips({ projectPath, integrationBranch, tipsByIntegrationBranch }: {
+    projectPath: string;
+    integrationBranch: string | null;
+    tipsByIntegrationBranch: Map<string, ListTipsResult | GitCallResult>;
+  }): Promise<ListTipsResult | GitCallResult> {
+    const cached = tipsByIntegrationBranch.get(integrationBranch ?? '');
+    if (cached) return cached;
+    const resolved = await callGit(gitWorkspace.listIntegrationTips, { projectPath, integrationBranch });
+    tipsByIntegrationBranch.set(integrationBranch ?? '', resolved);
+    return resolved;
+  }
+
+  async function checkWorktreeMerged({ projectPath, worktree, summary, projectTips, integrationTreeByTipSha, mergeProbeEnv, tipsByIntegrationBranch }: {
+    projectPath: string;
+    worktree: LocalWorktreeTip;
+    summary: BranchGcProjectSummary;
+    projectTips: IntegrationTip[];
+    integrationTreeByTipSha: Map<string, GitCallResult>;
+    mergeProbeEnv: MergeProbeEnvResult;
+    tipsByIntegrationBranch: Map<string, ListTipsResult | GitCallResult>;
+  }): Promise<LocalWorktreeTip> {
+    if (worktree.prunable === true) return worktree;
+    const ownTipsResult = await resolveOwnIntegrationTips({ projectPath, integrationBranch: worktree.integrationBranch, tipsByIntegrationBranch });
+    if (!ownTipsResult.ok) {
+      noteGitError({ projectPath, name: worktree.branch, operation: 'worktree-integration-tips', gitResult: ownTipsResult });
+      summary.errors += 1;
+      return { ...worktree, merged: null };
+    }
+    const ownTips = ('integrationTips' in ownTipsResult ? ownTipsResult.integrationTips : undefined) ?? [];
+    const worktreeTips = worktreeIntegrationTips({ projectTips, worktreeOwnTips: ownTips });
+    if (worktreeTips.some((integrationTip) => integrationTip.sha === worktree.tipSha)) return { ...worktree, atIntegrationTip: true };
+    await resolveIntegrationTreeOids(projectPath, worktreeTips, integrationTreeByTipSha);
+    const probes = await probeBranchAgainstTips(projectPath, worktree.branch, worktree.tipSha, worktreeTips, integrationTreeByTipSha, mergeProbeEnv);
+    const proof = proveMergedAcrossTips(probes);
+    if (proof.verdict === 'undecidable') {
+      summary.errors += 1;
+      return { ...worktree, merged: null };
+    }
+    return { ...worktree, merged: proof.verdict === 'merged' };
+  }
+
+  async function removePlannedWorktree({ projectPath, summary, decision, plannedTipSha }: {
+    projectPath: string;
+    summary: BranchGcProjectSummary;
+    decision: WorktreeGcDecision;
+    plannedTipSha: string | null;
+  }): Promise<void> {
+    if (dryRun) {
+      summary.worktreeRemovals.push({ cwd: decision.cwd, branch: decision.branch, reason: decision.reason });
+      trace({ projectPath, name: decision.branch, cwd: decision.cwd, decision: 'would-remove', reason: decision.reason });
+      return;
+    }
+    const recheck = await callGit(gitWorkspace.probeWorktreeDirty, { projectPath, cwd: decision.cwd, branch: decision.branch });
+    if (!recheck.ok) {
+      noteGitError({ projectPath, name: decision.branch, operation: 'worktree-status-recheck', gitResult: recheck });
+      summary.errors += 1;
+      return;
+    }
+    if ('dirty' in recheck && recheck.dirty === true) {
+      summary.worktreesKept.push({ cwd: decision.cwd, branch: decision.branch, reason: 'became-dirty' });
+      trace({ projectPath, name: decision.branch, cwd: decision.cwd, decision: 'kept', reason: 'became-dirty' });
+      return;
+    }
+    const recheckedTipSha = 'headSha' in recheck ? recheck.headSha ?? null : null;
+    if (recheckedTipSha !== plannedTipSha) {
+      summary.worktreesKept.push({ cwd: decision.cwd, branch: decision.branch, reason: 'tip-moved' });
+      trace({ projectPath, name: decision.branch, cwd: decision.cwd, decision: 'kept', reason: 'tip-moved' });
+      return;
+    }
+    const removed = await callGit(gitWorkspace.removeWorktreeByPath, { projectPath, cwd: decision.cwd, branch: decision.branch });
+    if (!removed.ok) {
+      noteGitError({ projectPath, name: decision.branch, operation: 'remove-worktree', gitResult: removed });
+      summary.errors += 1;
+      return;
+    }
+    summary.worktreeRemovals.push({ cwd: decision.cwd, branch: decision.branch, reason: decision.reason });
+    trace({ projectPath, name: decision.branch, cwd: decision.cwd, decision: 'removed', reason: decision.reason });
+  }
+
+  async function pruneLocalWorktrees({ projectPath, summary, integrationBranch, integrationTips, projectTips, integrationTreeByTipSha, mergeProbeEnv, tipsByIntegrationBranch, liveWorktreePathSet }: {
+    projectPath: string;
+    summary: BranchGcProjectSummary;
+    integrationBranch: string | null;
+    integrationTips: IntegrationTip[];
+    projectTips: IntegrationTip[];
+    integrationTreeByTipSha: Map<string, GitCallResult>;
+    mergeProbeEnv: MergeProbeEnvResult;
+    tipsByIntegrationBranch: Map<string, ListTipsResult | GitCallResult>;
+    liveWorktreePathSet: Set<string>;
+  }): Promise<void> {
+    if (!pruneWorktrees) return;
+    let listedWorktrees: LocalWorktreeTip[] = [];
+    try {
+      listedWorktrees = await gitWorkspace.listWorktrees({ projectPath, prefixes, integrationBranch, configuredIntegrationBranch: integrationBranch });
+    } catch (error) {
+      noteGitError({ projectPath, operation: 'list-worktrees', gitResult: { ok: false, err: error instanceof Error ? error.message : String(error) } });
+      summary.errors += 1;
+      return;
+    }
+    const checkedWorktrees: LocalWorktreeTip[] = [];
+    for (const worktree of listedWorktrees) {
+      checkedWorktrees.push(await checkWorktreeMerged({
+        projectPath, worktree, summary, projectTips, integrationTreeByTipSha, mergeProbeEnv, tipsByIntegrationBranch,
+      }));
+    }
+    const plannedTipShaByCwd = new Map(checkedWorktrees.map((worktree) => [worktree.cwd, worktree.tipSha]));
+    const plan = planWorktreeGc({ worktrees: checkedWorktrees, liveWorktreePaths: liveWorktreePathSet, integrationTips, prefixes });
+    for (const decision of plan.kept) {
+      if (decision.reason === 'status-probe-failed') summary.errors += 1;
+      summary.worktreesKept.push({ cwd: decision.cwd, branch: decision.branch, reason: decision.reason });
+      trace({ projectPath, name: decision.branch, cwd: decision.cwd, decision: 'kept', reason: decision.reason });
+    }
+    for (const decision of plan.removals) {
+      await removePlannedWorktree({ projectPath, summary, decision, plannedTipSha: plannedTipShaByCwd.get(decision.cwd) ?? null });
+    }
+  }
+
+  async function tickProject(projectPath: string, config: BranchGcConfig, liveWorktreePathSet: Set<string>): Promise<BranchGcProjectSummary> {
+    const summary: BranchGcProjectSummary = { projectPath, deletions: [], kept: [], worktreeRemovals: [], worktreesKept: [], errors: 0 };
     const fetched = await callGit(gitWorkspace.fetchOrigin, {
       projectPath,
       timeoutMs: BRANCH_GC_FETCH_TIMEOUT_MS,
@@ -231,14 +359,12 @@ function createBranchGcPoller(deps: BranchGcPollerDeps): BranchGcPoller {
     if (!listed.ok) {
       noteGitError({ projectPath, operation: 'list', gitResult: listed });
       summary.errors += 1;
-      return summary;
     }
-    const listedBranches = ('branches' in listed ? listed.branches : undefined) ?? [];
+    const listedBranches = (listed.ok && 'branches' in listed ? listed.branches : undefined) ?? [];
 
-    const tipsResult = await callGit(gitWorkspace.listIntegrationTips, {
-      projectPath,
-      integrationBranch: configuredIntegrationBranch(config),
-    });
+    const integrationBranch = configuredIntegrationBranch(config);
+    const tipsByIntegrationBranch = new Map<string, ListTipsResult | GitCallResult>();
+    const tipsResult = await resolveOwnIntegrationTips({ projectPath, integrationBranch, tipsByIntegrationBranch });
     if (!tipsResult.ok) {
       for (const remoteBranch of listedBranches) {
         noteGitError({
@@ -260,6 +386,18 @@ function createBranchGcPoller(deps: BranchGcPollerDeps): BranchGcPoller {
     const resolvedIntegrationTips = integrationTips.filter((integrationTip) => integrationTip.sha);
     const integrationTreeByTipSha = await resolveIntegrationTreeOids(projectPath, resolvedIntegrationTips);
     const mergeProbeEnv = await resolveMergeProbeEnv(projectPath);
+
+    await pruneLocalWorktrees({
+      projectPath,
+      summary,
+      integrationBranch,
+      integrationTips,
+      projectTips: resolvedIntegrationTips,
+      integrationTreeByTipSha,
+      mergeProbeEnv,
+      tipsByIntegrationBranch,
+      liveWorktreePathSet,
+    });
     for (const remoteBranch of listedBranches) {
       const probes = await probeBranchAgainstTips(projectPath, remoteBranch.name, remoteBranch.tipSha, resolvedIntegrationTips, integrationTreeByTipSha, mergeProbeEnv);
       const proof = proveMergedAcrossTips(probes);
@@ -315,8 +453,9 @@ function createBranchGcPoller(deps: BranchGcPollerDeps): BranchGcPoller {
       .filter((projectPath): projectPath is string => Boolean(projectPath)))];
     const projects: BranchGcProjectSummary[] = [];
     let failures = 0;
+    const liveWorktreePathSet = await liveWorktreePaths();
     for (const projectPath of projectPaths) {
-      const summary = await tickProject(projectPath, config);
+      const summary = await tickProject(projectPath, config, liveWorktreePathSet);
       projects.push(summary);
       failures += summary.errors;
     }

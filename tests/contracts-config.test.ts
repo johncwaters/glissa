@@ -34,6 +34,12 @@ test('branchGc prefixes parse as string arrays and reject non-arrays', () => {
   assert.equal(BranchGcFileSettings.safeParse({ prefixes: 'glissa/session/' }).success, false);
 });
 
+test('branchGc worktrees is file-only and boolean', () => {
+  assert.equal(BranchGcFileSettings.safeParse({ worktrees: false }).success, true);
+  assert.equal(BranchGcFileSettings.safeParse({ worktrees: 'false' }).success, false);
+  assert.deepEqual(ConfigUpdate.parse({ branchGc: { worktrees: false } }).branchGc, {});
+});
+
 test('a branchGc prefix that would select every origin branch fails closed', () => {
   const parsed = BranchGcFileSettings.safeParse({ prefixes: ['glissa/session/', ''] });
   assert.equal(parsed.success, false);
