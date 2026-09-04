@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.2] - 2026-09-04
+
+### Added
+
+- **Branch cleanup proves a merge by content**: a remote session branch landed by rebase or squash is recognised as merged when a three-way merge of it into the integration tip leaves the tip's tree unchanged, so it no longer lingers on origin until the 14-day stale rule. Custom merge drivers, `merge.default`, `merge.renormalize` and the built-in `union` driver are disabled for that proof, and any probe failure keeps the branch.
+- **Branch cleanup scope is a prefix allowlist**: `branchGc.prefixes` (default `glissa/session/` and `worktree-agent-`) decides which remote branches and local worktrees the lane may touch; `branchGc.dryRun` traces every planned deletion as `would-delete` without touching anything. Both keys are file-only and survive dashboard edits to the other branch cleanup settings.
+- **Merged local worktrees are removed**: the lane lists every worktree of a project, keeps anything locked, dirty, unmerged, on a protected branch, or owned by a live session, and removes the rest with their branches, so Claude Code agent worktrees left behind after their commits landed no longer accumulate. `branchGc.worktrees` (default on) gates the pass.
+- Dependabot version updates run weekly for npm and GitHub Actions.
+
 ### Changed
 
 - **Context mill is one switch**: `millEnabled` (default on) replaces `packsAutoRebuild` and the per-project pack lists. Every configured project receives every pack spec on disk at spawn, alphabetically, up to the unchanged four pack per session cap; a spec over the cap is skipped with the existing over-cap warning. The "Deliver to" checkboxes on the Mill tab and the per-project "Context packs" toggles in Settings are gone; off means no pack builds and no delivery to any session, project or lane. A stale `projects[].packs` key in `config.json` is ignored, and a `packsAutoRebuild: false` left in `config.json` carries over to `millEnabled: false`.

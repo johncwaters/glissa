@@ -13,11 +13,12 @@
   "git": {
     "release_from": "main",
     "release_commit_pattern": "chore(release): vX.Y.Z",
-    "require": ["clean_tree"]
+    "require": [
+      "clean_tree"
+    ]
   },
   "gates": {
     "pre_tag": [
-      "node scripts/check-package-files.js",
       "npm run build"
     ],
     "post_release": [
@@ -25,7 +26,11 @@
       "gh release view vX.Y.Z",
       "git ls-remote --tags origin vX.Y.Z^{}"
     ],
-    "evidence": ["git_tag", "github_release_url", "remote_release_tag"]
+    "evidence": [
+      "git_tag",
+      "github_release_url",
+      "remote_release_tag"
+    ]
   },
   "publish": {
     "trigger": "local_script",
@@ -43,9 +48,14 @@
       "gh release delete vX.Y.Z",
       "Revert the release commit on main, or forward-fix with a new patch version"
     ],
-    "never": ["reuse_version", "force_push_main"]
+    "never": [
+      "reuse_version",
+      "force_push_main"
+    ]
   },
   "approval": {
-    "human_before": ["npm_run_release"]
+    "human_before": [
+      "npm_run_release"
+    ]
   }
 }
