@@ -1,5 +1,7 @@
 const SESSION_BRANCH_PREFIX = 'glissa/session/';
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MERGED_DELETION_REASON = 'merged-into-integration';
+const STALE_DELETION_REASON = 'stale-orphan';
 
 export interface IntegrationTip {
   branch: string;
@@ -10,6 +12,7 @@ export interface RemoteBranchTip {
   name: string;
   tipCommitTimeMs: number;
   mergedIntoIntegration?: boolean;
+  mergedReason?: string;
 }
 
 export interface KeptBranch {
@@ -17,8 +20,13 @@ export interface KeptBranch {
   reason: string;
 }
 
+export interface DeletedBranch {
+  name: string;
+  reason: string;
+}
+
 export interface BranchGcPlan {
-  deletions: string[];
+  deletions: DeletedBranch[];
   kept: KeptBranch[];
 }
 
@@ -44,7 +52,7 @@ function planBranchGc({
   nowMs: number;
   staleDays?: number;
 }): BranchGcPlan {
-  const deletions: string[] = [];
+  const deletions: DeletedBranch[] = [];
   const kept: KeptBranch[] = [];
   const protectedNames = protectedBranchNames(integrationTips);
   const staleBeforeMs = nowMs - staleDays * DAY_MS;
@@ -65,11 +73,11 @@ function planBranchGc({
       continue;
     }
     if (remoteBranch.mergedIntoIntegration === true) {
-      deletions.push(name);
+      deletions.push({ name, reason: remoteBranch.mergedReason ?? MERGED_DELETION_REASON });
       continue;
     }
     if (Number.isFinite(remoteBranch.tipCommitTimeMs) && remoteBranch.tipCommitTimeMs < staleBeforeMs) {
-      deletions.push(name);
+      deletions.push({ name, reason: STALE_DELETION_REASON });
       continue;
     }
     kept.push({ name, reason: 'not-merged-and-fresh' });
@@ -78,4 +86,4 @@ function planBranchGc({
   return { deletions, kept };
 }
 
-export { DAY_MS, SESSION_BRANCH_PREFIX, planBranchGc, sessionIdFromBranch };
+export { DAY_MS, MERGED_DELETION_REASON, SESSION_BRANCH_PREFIX, STALE_DELETION_REASON, planBranchGc, sessionIdFromBranch };

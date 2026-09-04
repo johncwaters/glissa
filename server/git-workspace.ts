@@ -15,6 +15,8 @@ import {
 import { decideIntegrationSync, classifyRefusedIntegrationSync } from './core/integration-sync-core.ts';
 import { DEFAULT_BRANCH_FALLBACKS, decideMarkerBase, defaultBranchFromRemoteHead, markerProbeCommands } from './core/integration-branch-core.ts';
 import type { MarkerProbes } from './core/integration-branch-core.ts';
+import { MERGE_DRIVER_KEY_PATTERN, driverEnumerationEnv, mergeProbeEnv, neutralGitConfigEnv } from './core/merge-proof-core.ts';
+import type { MergeProbeEnvResult, MergeTreeOutcome } from './core/merge-proof-core.ts';
 import type { IntegrationSyncOutcome } from './core/integration-sync-core.ts';
 
 const fsp = fs.promises;
@@ -26,7 +28,7 @@ type IntegrationSyncResult = {
   to: string | null;
   error?: string;
 };
-type GitExtraOptions = { timeout?: number; env?: Record<string, string> };
+type GitExtraOptions = { timeout?: number; env?: Record<string, string>; replaceEnv?: Record<string, string> };
 type GitRunner = (args: string[], cwd: string, extra?: GitExtraOptions) => Promise<string> | string;
 type WorktreeBranch = { cwd: string; branch: string };
 type WorkspaceHandle = {
@@ -59,6 +61,9 @@ type WorktreeArgs = {
   name?: string;
   ancestorSha?: string;
   descendantSha?: string;
+  sha?: string;
+  integrationSha?: string;
+  branchSha?: string;
   knownProjects?: unknown;
 };
 
@@ -98,6 +103,23 @@ type RemoteSessionBranch = { name: string; tipSha: string; tipCommitTimeMs: numb
 type IntegrationTip = { branch: string; sha: string | null };
 type BaseClassification = { state: string; upstream: string };
 type BaseSyncResult = BaseClassification & { fetched: boolean | null; error?: string };
+type MergeTreeProbe = GitResult & { outcome: MergeTreeOutcome };
+type MergeProbeEnvArgs = { projectPath: string; timeoutMs?: number };
+type MergeTreeArgs = {
+  projectPath: string;
+  integrationSha: string;
+  branchSha: string;
+  probeEnv: Record<string, string>;
+  timeoutMs?: number;
+};
+
+const MERGE_PROBE_TIMEOUT_MS = 30000;
+
+function gitChildEnv(extra?: GitExtraOptions): { env?: Record<string, string | undefined> } {
+  if (extra?.replaceEnv) return { env: extra.replaceEnv };
+  if (extra?.env) return { env: { ...process.env, ...extra.env } };
+  return {};
+}
 
 function errorExitCode(error: unknown): unknown {
   return (error as { code?: unknown } | null)?.code;
@@ -186,7 +208,7 @@ function createGitWorkspace(opts: {
   const git: GitRunner = opts.git || (async (args, cwd, extra) => {
     const { stdout } = await execFileAsync('git', args, {
       cwd, encoding: 'utf8', timeout: extra?.timeout || 20000,
-      ...(extra?.env ? { env: { ...process.env, ...extra.env } } : {}),
+      ...gitChildEnv(extra),
     });
     return stdout;
   });
@@ -866,6 +888,48 @@ function createGitWorkspace(opts: {
     }
   }
 
+  async function readGitConfigValues(args: string[], projectPath: string, timeoutMs: number, replaceEnv?: Record<string, string>): Promise<GitResult> {
+    try {
+      return okResult(await git(['config', ...args], projectPath, { timeout: timeoutMs, ...(replaceEnv ? { replaceEnv } : {}) }));
+    } catch (err) {
+      if (errorExitCode(err) === 1) return okResult('');
+      return errResult(err);
+    }
+  }
+
+  async function resolveMergeProbeEnv({ projectPath, timeoutMs = MERGE_PROBE_TIMEOUT_MS }: MergeProbeEnvArgs): Promise<MergeProbeEnvResult> {
+    const safeDirectories = await readGitConfigValues(['--get-all', 'safe.directory'], projectPath, timeoutMs);
+    if (!safeDirectories.ok) return { ok: false, err: safeDirectories.err || 'reading safe.directory failed' };
+    const neutralEnv = neutralGitConfigEnv(process.env, os.devNull);
+    const safeDirectoryOutput = safeDirectories.out;
+    const configuredKeys = await readGitConfigValues(
+      ['--name-only', '--get-regexp', MERGE_DRIVER_KEY_PATTERN],
+      projectPath,
+      timeoutMs,
+      driverEnumerationEnv({ neutralEnv, safeDirectoryOutput }),
+    );
+    if (!configuredKeys.ok) return { ok: false, err: configuredKeys.err || 'enumerating merge drivers failed' };
+    return { ok: true, probeEnv: mergeProbeEnv({ neutralEnv, safeDirectoryOutput, configuredKeysOutput: configuredKeys.out }) };
+  }
+
+  async function writeMergedTree({ projectPath, integrationSha, branchSha, probeEnv, timeoutMs = MERGE_PROBE_TIMEOUT_MS }: MergeTreeArgs): Promise<MergeTreeProbe> {
+    try {
+      const out = await git(
+        ['merge-tree', '--write-tree', '--allow-unrelated-histories', integrationSha, branchSha],
+        projectPath,
+        { timeout: timeoutMs, replaceEnv: probeEnv },
+      );
+      return { ...okResult(out), outcome: 'tree' };
+    } catch (err) {
+      if (errorExitCode(err) === 1) return { ...errResult(err), outcome: 'conflicts' };
+      return { ...errResult(err), outcome: 'failed' };
+    }
+  }
+
+  async function treeOid({ projectPath, sha, timeoutMs = MERGE_PROBE_TIMEOUT_MS }: WorktreeArgs): Promise<GitResult> {
+    return run(['rev-parse', `${sha ?? ''}^{tree}`], projectPath, { timeout: timeoutMs });
+  }
+
   async function deleteRemoteBranchBody({ projectPath, name }: WorktreeArgs): Promise<GitResult> {
     return run(['push', 'origin', '--delete', name ?? ''], projectPath);
   }
@@ -884,7 +948,7 @@ function createGitWorkspace(opts: {
     listSessionWorktrees: serialized(listSessionWorktreesBody),
     hasUnmergedWork: serialized(hasUnmergedWorkBody),
     listWorktreeBranches, detectDefaultBranch,
-    listRemoteSessionBranches, listIntegrationTips, isAncestor, resolveProjectPath,
+    listRemoteSessionBranches, listIntegrationTips, isAncestor, resolveMergeProbeEnv, writeMergedTree, treeOid, resolveProjectPath,
   };
 }
 

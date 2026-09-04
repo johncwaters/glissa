@@ -5,6 +5,7 @@ import { BRANCH_GC_FETCH_TIMEOUT_MS, createBranchGcPoller } from '../server/bran
 import type { BranchGcGitWorkspace } from '../server/branch-gc-poller.ts';
 import { createBranchGcWiring } from '../server/branch-gc-wiring.ts';
 import { DAY_MS } from '../server/core/branch-gc-core.ts';
+import type { MergeProbeEnvResult, MergeTreeOutcome } from '../server/core/merge-proof-core.ts';
 import { createGitWorkspace } from '../server/git-workspace.ts';
 
 const NOW_MS = Date.parse('2026-08-25T12:00:00Z');
@@ -28,6 +29,9 @@ function unreachableGitWorkspace(): BranchGcGitWorkspace {
     listRemoteSessionBranches: refuse,
     listIntegrationTips: refuse,
     isAncestor: refuse,
+    resolveMergeProbeEnv: refuse,
+    writeMergedTree: refuse,
+    treeOid: refuse,
     deleteRemoteBranch: refuse,
   };
 }
@@ -61,6 +65,15 @@ test('fetches before listing, deletes separately, continues after failure, and p
     async isAncestor({ ancestorSha, descendantSha }) {
       calls.push(['ancestor', ancestorSha, descendantSha]);
       return { ok: true, isAncestor: mergedShas.has(ancestorSha) };
+    },
+    async resolveMergeProbeEnv() {
+      return { ok: true, probeEnv: {} };
+    },
+    async writeMergedTree() {
+      return { ok: true, out: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', outcome: 'tree' };
+    },
+    async treeOid() {
+      return { ok: true, out: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' };
     },
     async deleteRemoteBranch({ projectPath, name }) {
       calls.push(['delete', projectPath, name]);
@@ -128,6 +141,15 @@ async function deletionsAfterTick({ branchIds, configuredProjectIds, injectedLiv
     async isAncestor() {
       return { ok: true, isAncestor: true };
     },
+    async resolveMergeProbeEnv() {
+      return { ok: true, probeEnv: {} };
+    },
+    async writeMergedTree() {
+      return { ok: true, out: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', outcome: 'tree' };
+    },
+    async treeOid() {
+      return { ok: true, out: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' };
+    },
     async deleteRemoteBranch({ name }) {
       deletedBranches.push(name);
       return { ok: true };
@@ -176,6 +198,270 @@ test('deletes a merged branch whose id is neither configured nor injected', asyn
   });
 
   assert.deepEqual(deletedBranches, ['glissa/session/abandoned-session']);
+});
+
+function branchProofGitWorkspace({ mergeTreeResult, treeResult, tipCommitTimeMs = NOW_MS - DAY_MS, probeEnvResult = { ok: true, probeEnv: {} } }: {
+  mergeTreeResult: { ok: boolean; out?: string; err?: string; outcome: MergeTreeOutcome };
+  treeResult: { ok: boolean; out?: string; err?: string };
+  tipCommitTimeMs?: number;
+  probeEnvResult?: MergeProbeEnvResult;
+}): BranchGcGitWorkspace {
+  return {
+    async fetchOrigin() {
+      return { ok: true };
+    },
+    async listRemoteSessionBranches() {
+      return {
+        ok: true,
+        branches: [{ name: 'glissa/session/abandoned', tipSha: 'branch-sha', tipCommitTimeMs }],
+      };
+    },
+    async listIntegrationTips() {
+      return { ok: true, integrationTips: [{ branch: 'main', sha: 'main-sha' }] };
+    },
+    async isAncestor() {
+      return { ok: true, isAncestor: false };
+    },
+    async resolveMergeProbeEnv() {
+      return probeEnvResult;
+    },
+    async writeMergedTree() {
+      return mergeTreeResult;
+    },
+    async treeOid() {
+      return treeResult;
+    },
+    async deleteRemoteBranch() {
+      return { ok: true };
+    },
+  };
+}
+
+test('tree containment deletes a rebased branch with its proof reason in the trace', async () => {
+  const traces: Record<string, unknown>[] = [];
+  const poller = createBranchGcPoller({
+    gitWorkspace: branchProofGitWorkspace({
+      mergeTreeResult: { ok: true, out: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', outcome: 'tree' },
+      treeResult: { ok: true, out: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+    }),
+    getConfig: () => ({ projects: [{ path: '/repo' }] }),
+    liveSessionIds: () => new Set(),
+    decisionTrace: (entry) => traces.push(entry),
+    now: () => NOW_MS,
+  });
+
+  await poller.tick();
+
+  assert.ok(traces.some((entry) => entry.decision === 'deleted' && entry.reason === 'tree-contained'));
+});
+
+test('a merge-tree conflict keeps the branch without an error', async () => {
+  const statuses: Record<string, unknown>[] = [];
+  const poller = createBranchGcPoller({
+    gitWorkspace: branchProofGitWorkspace({
+      mergeTreeResult: { ok: false, err: 'CONFLICT (content)', outcome: 'conflicts' },
+      treeResult: { ok: true, out: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+    }),
+    getConfig: () => ({ projects: [{ path: '/repo' }] }),
+    liveSessionIds: () => new Set(),
+    onTickComplete: (status) => statuses.push(status),
+    now: () => NOW_MS,
+  });
+
+  await poller.tick();
+
+  assert.deepEqual(deletionsOfFirstProject(statuses[0]), []);
+  assert.equal((statuses[0]?.projects as { errors: number }[])[0]?.errors, 0);
+});
+
+test('a merge-tree operational failure keeps the branch and increments errors', async () => {
+  const statuses: Record<string, unknown>[] = [];
+  const poller = createBranchGcPoller({
+    gitWorkspace: branchProofGitWorkspace({
+      mergeTreeResult: { ok: false, err: 'timed out', outcome: 'failed' },
+      treeResult: { ok: true, out: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+      tipCommitTimeMs: NOW_MS - 20 * DAY_MS,
+    }),
+    getConfig: () => ({ projects: [{ path: '/repo' }] }),
+    liveSessionIds: () => new Set(),
+    log: { warn: () => {} },
+    onTickComplete: (status) => statuses.push(status),
+    now: () => NOW_MS,
+  });
+
+  await poller.tick();
+
+  assert.deepEqual(deletionsOfFirstProject(statuses[0]), []);
+  assert.equal((statuses[0]?.projects as { errors: number }[])[0]?.errors, 1);
+});
+
+test('a stale unmerged branch is deleted with a staleness reason rather than a merge reason', async () => {
+  const traces: Record<string, unknown>[] = [];
+  const poller = createBranchGcPoller({
+    gitWorkspace: branchProofGitWorkspace({
+      mergeTreeResult: { ok: false, err: 'CONFLICT (content)', outcome: 'conflicts' },
+      treeResult: { ok: true, out: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+      tipCommitTimeMs: NOW_MS - 20 * DAY_MS,
+    }),
+    getConfig: () => ({ projects: [{ path: '/repo' }] }),
+    liveSessionIds: () => new Set(),
+    decisionTrace: (entry) => traces.push(entry),
+    now: () => NOW_MS,
+  });
+
+  await poller.tick();
+
+  assert.deepEqual(
+    traces.filter((entry) => entry.decision === 'deleted'),
+    [{ kind: 'branch-gc', ts: NOW_MS, projectPath: '/repo', name: 'glissa/session/abandoned', decision: 'deleted', reason: 'stale-orphan' }],
+  );
+});
+
+test('each integration tip tree and the merge probe env are resolved once per tick rather than once per branch', async () => {
+  const treeShas: string[] = [];
+  const probeEnvProjectPaths: string[] = [];
+  const poller = createBranchGcPoller({
+    gitWorkspace: {
+      async fetchOrigin() {
+        return { ok: true };
+      },
+      async listRemoteSessionBranches() {
+        return {
+          ok: true,
+          branches: [
+            { name: 'glissa/session/one', tipSha: 'one-sha', tipCommitTimeMs: NOW_MS - DAY_MS },
+            { name: 'glissa/session/two', tipSha: 'two-sha', tipCommitTimeMs: NOW_MS - DAY_MS },
+            { name: 'glissa/session/three', tipSha: 'three-sha', tipCommitTimeMs: NOW_MS - DAY_MS },
+          ],
+        };
+      },
+      async listIntegrationTips() {
+        return {
+          ok: true,
+          integrationTips: [
+            { branch: 'develop', sha: 'develop-sha' },
+            { branch: 'main', sha: 'main-sha' },
+            { branch: 'master', sha: null },
+          ],
+        };
+      },
+      async isAncestor() {
+        return { ok: true, isAncestor: false };
+      },
+      async resolveMergeProbeEnv({ projectPath }) {
+        probeEnvProjectPaths.push(projectPath);
+        return { ok: true, probeEnv: {} };
+      },
+      async writeMergedTree() {
+        return { ok: true, out: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', outcome: 'tree' };
+      },
+      async treeOid({ sha }) {
+        treeShas.push(sha);
+        return { ok: true, out: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' };
+      },
+      async deleteRemoteBranch() {
+        return { ok: true };
+      },
+    },
+    getConfig: () => ({ projects: [{ path: '/repo' }] }),
+    liveSessionIds: () => new Set(),
+    now: () => NOW_MS,
+  });
+
+  await poller.tick();
+
+  assert.deepEqual(treeShas, ['develop-sha', 'main-sha']);
+  assert.deepEqual(probeEnvProjectPaths, ['/repo']);
+});
+
+test('a failed ancestry probe leaves the branch undecidable rather than reading it as unmerged', async () => {
+  const statuses: Record<string, unknown>[] = [];
+  const traces: Record<string, unknown>[] = [];
+  const deletedBranches: string[] = [];
+  const poller = createBranchGcPoller({
+    gitWorkspace: {
+      ...branchProofGitWorkspace({
+        mergeTreeResult: { ok: true, out: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', outcome: 'tree' },
+        treeResult: { ok: true, out: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+        tipCommitTimeMs: NOW_MS - 20 * DAY_MS,
+      }),
+      async isAncestor() {
+        return { ok: false, err: 'bad object' };
+      },
+      async deleteRemoteBranch({ name }) {
+        deletedBranches.push(name);
+        return { ok: true };
+      },
+    },
+    getConfig: () => ({ projects: [{ path: '/repo' }] }),
+    liveSessionIds: () => new Set(),
+    log: { warn: () => {} },
+    decisionTrace: (entry) => traces.push(entry),
+    onTickComplete: (status) => statuses.push(status),
+    now: () => NOW_MS,
+  });
+
+  await poller.tick();
+
+  assert.deepEqual(deletedBranches, []);
+  assert.deepEqual(deletionsOfFirstProject(statuses[0]), []);
+  assert.equal((statuses[0]?.projects as { errors: number }[])[0]?.errors, 1);
+  assert.ok(traces.some((entry) => entry.name === 'glissa/session/abandoned' && entry.reason === 'ancestor-check-error'));
+});
+
+test('a tree probe failure keeps the branch, names it in the trace, and increments errors', async () => {
+  const statuses: Record<string, unknown>[] = [];
+  const traces: Record<string, unknown>[] = [];
+  const poller = createBranchGcPoller({
+    gitWorkspace: branchProofGitWorkspace({
+      mergeTreeResult: { ok: true, out: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', outcome: 'tree' },
+      treeResult: { ok: false, err: 'missing tree' },
+    }),
+    getConfig: () => ({ projects: [{ path: '/repo' }] }),
+    liveSessionIds: () => new Set(),
+    log: { warn: () => {} },
+    decisionTrace: (entry) => traces.push(entry),
+    onTickComplete: (status) => statuses.push(status),
+    now: () => NOW_MS,
+  });
+
+  await poller.tick();
+
+  assert.deepEqual(deletionsOfFirstProject(statuses[0]), []);
+  assert.equal((statuses[0]?.projects as { errors: number }[])[0]?.errors, 1);
+  assert.ok(traces.some((entry) => entry.name === 'glissa/session/abandoned' && entry.reason === 'tree-check-error'));
+});
+
+test('a merge probe env that never resolves keeps the branch and increments errors', async () => {
+  const statuses: Record<string, unknown>[] = [];
+  const traces: Record<string, unknown>[] = [];
+  const mergedTreeCalls: string[] = [];
+  const poller = createBranchGcPoller({
+    gitWorkspace: {
+      ...branchProofGitWorkspace({
+        mergeTreeResult: { ok: true, out: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', outcome: 'tree' },
+        treeResult: { ok: true, out: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+        probeEnvResult: { ok: false, err: 'fatal: bad config line' },
+      }),
+      async writeMergedTree({ branchSha }) {
+        mergedTreeCalls.push(branchSha);
+        return { ok: true, out: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', outcome: 'tree' };
+      },
+    },
+    getConfig: () => ({ projects: [{ path: '/repo' }] }),
+    liveSessionIds: () => new Set(),
+    log: { warn: () => {} },
+    decisionTrace: (entry) => traces.push(entry),
+    onTickComplete: (status) => statuses.push(status),
+    now: () => NOW_MS,
+  });
+
+  await poller.tick();
+
+  assert.deepEqual(mergedTreeCalls, []);
+  assert.deepEqual(deletionsOfFirstProject(statuses[0]), []);
+  assert.equal((statuses[0]?.projects as { errors: number }[])[0]?.errors, 1);
+  assert.ok(traces.some((entry) => entry.name === 'glissa/session/abandoned' && entry.reason === 'merge-probe-env-error'));
 });
 
 test('git helpers normalize remote refs, retain unresolved protected names, and delete one ref', async () => {

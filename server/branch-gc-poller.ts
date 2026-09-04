@@ -1,5 +1,7 @@
 import { planBranchGc } from './core/branch-gc-core.ts';
 import { configuredIntegrationBranch } from './core/integration-branch-core.ts';
+import { ancestorProvenProbe, ancestryFromResult, buildTipProbe, proveMergedAcrossTips } from './core/merge-proof-core.ts';
+import type { MergeProbeEnvResult, MergeProofReason, MergeTreeOutcome, TipProbe } from './core/merge-proof-core.ts';
 import type { IntegrationTip, KeptBranch } from './core/branch-gc-core.ts';
 import { createTickLoop } from './lane-runner.ts';
 import type { TickOutcome } from './lane-runner.ts';
@@ -23,12 +25,21 @@ interface RemoteSessionBranch {
 type ListBranchesResult = GitCallResult & { branches?: RemoteSessionBranch[] };
 type ListTipsResult = GitCallResult & { integrationTips?: IntegrationTip[] };
 type AncestorResult = GitCallResult & { isAncestor?: boolean };
+type MergeTreeResult = GitCallResult & { outcome: MergeTreeOutcome };
 
 interface BranchGcGitWorkspace {
   fetchOrigin(args: { projectPath: string; timeoutMs?: number }): Promise<GitCallResult>;
   listRemoteSessionBranches(args: { projectPath: string }): Promise<ListBranchesResult>;
   listIntegrationTips(args: { projectPath: string; integrationBranch: string | null }): Promise<ListTipsResult>;
   isAncestor(args: { projectPath: string; ancestorSha: string; descendantSha: string }): Promise<AncestorResult>;
+  resolveMergeProbeEnv(args: { projectPath: string }): Promise<MergeProbeEnvResult>;
+  writeMergedTree(args: {
+    projectPath: string;
+    integrationSha: string;
+    branchSha: string;
+    probeEnv: Record<string, string>;
+  }): Promise<MergeTreeResult>;
+  treeOid(args: { projectPath: string; sha: string }): Promise<GitCallResult>;
   deleteRemoteBranch(args: { projectPath: string; name: string }): Promise<GitCallResult>;
 }
 
@@ -112,29 +123,98 @@ function createBranchGcPoller(deps: BranchGcPollerDeps): BranchGcPoller {
     trace({ projectPath, name, decision: 'skipped', reason: `${operation}-error` });
   }
 
-  async function branchMergedIntoAnyTip(
+  async function probeAncestryAcrossTips(
     projectPath: string,
-    remoteBranch: RemoteSessionBranch,
+    name: string,
+    tipSha: string,
     integrationTips: IntegrationTip[],
-  ): Promise<{ ok: boolean; mergedIntoIntegration: boolean }> {
+  ): Promise<(boolean | null)[]> {
+    const ancestries: (boolean | null)[] = [];
     for (const integrationTip of integrationTips) {
       const ancestorResult = await callGit(gitWorkspace.isAncestor, {
         projectPath,
-        ancestorSha: remoteBranch.tipSha,
+        ancestorSha: tipSha,
         descendantSha: integrationTip.sha ?? '',
       });
       if (!ancestorResult.ok) {
-        noteGitError({
-          projectPath,
-          name: remoteBranch.name,
-          operation: 'ancestor-check',
-          gitResult: ancestorResult,
-        });
-        return { ok: false, mergedIntoIntegration: false };
+        noteGitError({ projectPath, name, operation: 'ancestor-check', gitResult: ancestorResult });
       }
-      if ('isAncestor' in ancestorResult && ancestorResult.isAncestor) return { ok: true, mergedIntoIntegration: true };
+      ancestries.push(ancestryFromResult(ancestorResult));
     }
-    return { ok: true, mergedIntoIntegration: false };
+    return ancestries;
+  }
+
+  async function resolveIntegrationTreeOids(
+    projectPath: string,
+    integrationTips: IntegrationTip[],
+  ): Promise<Map<string, GitCallResult>> {
+    const integrationTreeByTipSha = new Map<string, GitCallResult>();
+    for (const integrationTip of integrationTips) {
+      const integrationSha = integrationTip.sha ?? '';
+      if (integrationTreeByTipSha.has(integrationSha)) continue;
+      integrationTreeByTipSha.set(integrationSha, await callGit(gitWorkspace.treeOid, { projectPath, sha: integrationSha }));
+    }
+    return integrationTreeByTipSha;
+  }
+
+  async function resolveMergeProbeEnv(projectPath: string): Promise<MergeProbeEnvResult> {
+    try {
+      return await gitWorkspace.resolveMergeProbeEnv({ projectPath });
+    } catch (error) {
+      return { ok: false, err: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  async function probeTreeContainment({ projectPath, name, tipSha, integrationSha, integrationTree, isAncestor, mergeProbeEnv }: {
+    projectPath: string;
+    name: string;
+    tipSha: string;
+    integrationSha: string;
+    integrationTree: GitCallResult;
+    isAncestor: boolean | null;
+    mergeProbeEnv: MergeProbeEnvResult;
+  }): Promise<TipProbe> {
+    if (!integrationTree.ok) noteGitError({ projectPath, name, operation: 'tree-check', gitResult: integrationTree });
+    if (!mergeProbeEnv.ok) {
+      const gitResult: GitCallResult = { ok: false, err: mergeProbeEnv.err };
+      noteGitError({ projectPath, name, operation: 'merge-probe-env', gitResult });
+      return buildTipProbe({ isAncestor, integrationTree, mergeTree: { ...gitResult, outcome: 'failed' } });
+    }
+    const mergeTree = await callGit(gitWorkspace.writeMergedTree, {
+      projectPath,
+      integrationSha,
+      branchSha: tipSha,
+      probeEnv: mergeProbeEnv.probeEnv,
+    });
+    const outcome: MergeTreeOutcome = 'outcome' in mergeTree ? mergeTree.outcome : 'failed';
+    if (outcome === 'failed') noteGitError({ projectPath, name, operation: 'merge-tree', gitResult: mergeTree });
+    return buildTipProbe({ isAncestor, integrationTree, mergeTree: { ...mergeTree, outcome } });
+  }
+
+  async function probeBranchAgainstTips(
+    projectPath: string,
+    name: string,
+    tipSha: string,
+    integrationTips: IntegrationTip[],
+    integrationTreeByTipSha: Map<string, GitCallResult>,
+    mergeProbeEnv: MergeProbeEnvResult,
+  ): Promise<TipProbe[]> {
+    const ancestries = await probeAncestryAcrossTips(projectPath, name, tipSha, integrationTips);
+    if (ancestries.some((isAncestor) => isAncestor === true)) return [ancestorProvenProbe()];
+    const probes: TipProbe[] = [];
+    for (const [index, integrationTip] of integrationTips.entries()) {
+      const integrationSha = integrationTip.sha ?? '';
+      probes.push(await probeTreeContainment({
+        projectPath,
+        name,
+        tipSha,
+        integrationSha,
+        integrationTree: integrationTreeByTipSha.get(integrationSha) ?? { ok: false, err: 'tree oid was never resolved' },
+        isAncestor: ancestries[index] ?? null,
+        mergeProbeEnv,
+      }));
+    }
+    return probes;
   }
 
   async function tickProject(projectPath: string, config: BranchGcConfig): Promise<BranchGcProjectSummary> {
@@ -178,15 +258,22 @@ function createBranchGcPoller(deps: BranchGcPollerDeps): BranchGcPoller {
     }
     const integrationTips = ('integrationTips' in tipsResult ? tipsResult.integrationTips : undefined) ?? [];
 
-    const checkedBranches: (RemoteSessionBranch & { mergedIntoIntegration: boolean })[] = [];
+    const checkedBranches: (RemoteSessionBranch & { mergedIntoIntegration: boolean; mergedReason: MergeProofReason })[] = [];
     const resolvedIntegrationTips = integrationTips.filter((integrationTip) => integrationTip.sha);
+    const integrationTreeByTipSha = await resolveIntegrationTreeOids(projectPath, resolvedIntegrationTips);
+    const mergeProbeEnv = await resolveMergeProbeEnv(projectPath);
     for (const remoteBranch of listedBranches) {
-      const mergeResult = await branchMergedIntoAnyTip(projectPath, remoteBranch, resolvedIntegrationTips);
-      if (!mergeResult.ok) {
+      const probes = await probeBranchAgainstTips(projectPath, remoteBranch.name, remoteBranch.tipSha, resolvedIntegrationTips, integrationTreeByTipSha, mergeProbeEnv);
+      const proof = proveMergedAcrossTips(probes);
+      if (proof.verdict === 'undecidable') {
         summary.errors += 1;
         continue;
       }
-      checkedBranches.push({ ...remoteBranch, mergedIntoIntegration: mergeResult.mergedIntoIntegration });
+      checkedBranches.push({
+        ...remoteBranch,
+        mergedIntoIntegration: proof.verdict === 'merged',
+        mergedReason: proof.reason,
+      });
     }
 
     const configuredProjectIds = (config.projects || []).map((project) => project.id ?? '');
@@ -203,7 +290,7 @@ function createBranchGcPoller(deps: BranchGcPollerDeps): BranchGcPoller {
       trace({ projectPath, name: keptBranch.name, decision: 'kept', reason: keptBranch.reason });
     }
 
-    for (const name of plan.deletions) {
+    for (const { name, reason } of plan.deletions) {
       const deleted = await callGit(gitWorkspace.deleteRemoteBranch, { projectPath, name });
       if (!deleted.ok) {
         noteGitError({ projectPath, name, operation: 'delete', gitResult: deleted });
@@ -211,7 +298,7 @@ function createBranchGcPoller(deps: BranchGcPollerDeps): BranchGcPoller {
         continue;
       }
       summary.deletions.push(name);
-      trace({ projectPath, name, decision: 'deleted', reason: 'provably-dead' });
+      trace({ projectPath, name, decision: 'deleted', reason });
     }
 
     return summary;

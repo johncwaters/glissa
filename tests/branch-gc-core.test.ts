@@ -28,9 +28,35 @@ test('deletes merged and stale orphaned session branches while preserving input 
   });
 
   assert.deepEqual(planned, {
-    deletions: ['glissa/session/merged', 'glissa/session/stale'],
+    deletions: [
+      { name: 'glissa/session/merged', reason: 'merged-into-integration' },
+      { name: 'glissa/session/stale', reason: 'stale-orphan' },
+    ],
     kept: [],
   });
+});
+
+test('a merged branch is deleted under the merge proof reason that decided it', () => {
+  const planned = planBranchGc({
+    remoteBranches: [
+      branch('glissa/session/rebased', { mergedIntoIntegration: true, mergedReason: 'tree-contained' }),
+      branch('glissa/session/landed', { mergedIntoIntegration: true, mergedReason: 'ancestor' }),
+      branch('glissa/session/aged', {
+        mergedIntoIntegration: false,
+        mergedReason: 'unmerged-content',
+        tipCommitTimeMs: NOW_MS - 15 * DAY_MS,
+      }),
+    ],
+    integrationTips: [{ branch: 'develop', sha: 'develop-sha' }],
+    liveSessionIds: new Set(),
+    nowMs: NOW_MS,
+  });
+
+  assert.deepEqual(planned.deletions, [
+    { name: 'glissa/session/rebased', reason: 'tree-contained' },
+    { name: 'glissa/session/landed', reason: 'ancestor' },
+    { name: 'glissa/session/aged', reason: 'stale-orphan' },
+  ]);
 });
 
 test('a configured session branch is never deleted even when merged and stale', () => {
