@@ -4,8 +4,9 @@ import path from 'node:path';
 import os from 'node:os';
 
 import { canonicalizePath, equalsIgnoringCaseOnWindows } from '../shared/paths.ts';
+import { DEFAULT_BRANCH_GC_PREFIXES } from './core/branch-gc-core.ts';
 import { decideConfigPath, glissaHomeDir as resolveGlissaHomeDir } from './core/config-path-core.ts';
-import { Config, RUNTIME_CONFIG_SCALAR_KEYS } from '../shared/contracts/index.ts';
+import { BranchGcFileSettings, Config, configIssueMessage, RUNTIME_CONFIG_SCALAR_KEYS } from '../shared/contracts/index.ts';
 import { isPlainObject } from './core/usage-number-core.ts';
 import {
   INGEST_SPEC, MEMORY_SPEC, MILL_METRICS_SPEC, PACK_DISTILLER_SPEC, pickMillBlock,
@@ -67,6 +68,8 @@ const DEFAULT_CONFIG = {
   worktreeRerere: true,
   branchGc: {
     enabled: true,
+    prefixes: [...DEFAULT_BRANCH_GC_PREFIXES],
+    dryRun: false,
     staleDays: 14,
     intervalMs: 6 * 60 * 60 * 1000,
   },
@@ -264,9 +267,33 @@ function ensureProjectIds(projects: { id?: string }[]): boolean {
 
 type BranchGcBlock = DefaultConfig['branchGc'];
 
-function resolveBranchGc(branchGc: unknown) {
-  if (!isPlainObject(branchGc)) return { ...DEFAULT_CONFIG.branchGc };
-  return { ...DEFAULT_CONFIG.branchGc, ...branchGc };
+function collectBranchGcIssues(branchGc: unknown): { block: BranchGcBlock; issues: string[] } {
+  if (!isPlainObject(branchGc)) return { block: { ...DEFAULT_CONFIG.branchGc }, issues: [] };
+  const accepted: Record<string, unknown> = {};
+  const issues: string[] = [];
+  for (const [field, value] of Object.entries(branchGc)) {
+    if (!Object.hasOwn(BranchGcFileSettings.shape, field)) {
+      issues.push(`[config] Ignoring unknown branchGc.${field}; it is not a branchGc setting, so the default block applies.`);
+      continue;
+    }
+    const parsed = BranchGcFileSettings.safeParse({ [field]: value });
+    if (!parsed.success) {
+      issues.push(`[config] Ignoring invalid branchGc.${field}; using the default instead: ${configIssueMessage(parsed.error)}`);
+      continue;
+    }
+    accepted[field] = value;
+  }
+  return { block: { ...DEFAULT_CONFIG.branchGc, ...accepted }, issues };
+}
+
+function resolveBranchGc(branchGc: unknown): BranchGcBlock {
+  return collectBranchGcIssues(branchGc).block;
+}
+
+function resolveBranchGcAndWarn(branchGc: unknown): BranchGcBlock {
+  const resolved = collectBranchGcIssues(branchGc);
+  for (const issue of resolved.issues) console.warn(issue);
+  return resolved.block;
 }
 
 const POSTHOG_SETTINGS_KEYS = Object.freeze([
@@ -310,7 +337,7 @@ function createConfigStore({ settingsDefaults }: { settingsDefaults?: Partial<De
   const config = loadedConfig.config;
   writeBackupContent(`${configPath}.boot.bak`, loadedConfig.loadedContent);
   config.repoRoots = config.repoRoots || [];
-  config.branchGc = resolveBranchGc(config.branchGc);
+  config.branchGc = resolveBranchGcAndWarn(config.branchGc);
 
   if (Array.isArray(config.projects) && ensureProjectIds(config.projects)) {
     try {
@@ -471,7 +498,7 @@ function createConfigStore({ settingsDefaults }: { settingsDefaults?: Partial<De
         console.warn('[config] Invalid config.json:', errorMessage(parseErr));
         return;
       }
-      newConfig.branchGc = resolveBranchGc(newConfig.branchGc);
+      newConfig.branchGc = resolveBranchGcAndWarn(newConfig.branchGc);
       if (isSuspectedExternalWipe(newConfig, config)) {
         warnSuspectedWipe('reload config.json');
         return;

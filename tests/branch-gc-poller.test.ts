@@ -26,7 +26,7 @@ function unreachableGitWorkspace(): BranchGcGitWorkspace {
   const refuse = () => Promise.reject(new Error('the faked poller never touches git'));
   return {
     fetchOrigin: refuse,
-    listRemoteSessionBranches: refuse,
+    listRemoteBranches: refuse,
     listIntegrationTips: refuse,
     isAncestor: refuse,
     resolveMergeProbeEnv: refuse,
@@ -45,7 +45,7 @@ test('fetches before listing, deletes separately, continues after failure, and p
       calls.push(['fetch', projectPath, timeoutMs]);
       return { ok: true };
     },
-    async listRemoteSessionBranches({ projectPath }) {
+    async listRemoteBranches({ projectPath }) {
       calls.push(['list', projectPath]);
       return {
         ok: true,
@@ -75,8 +75,8 @@ test('fetches before listing, deletes separately, continues after failure, and p
     async treeOid() {
       return { ok: true, out: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' };
     },
-    async deleteRemoteBranch({ projectPath, name }) {
-      calls.push(['delete', projectPath, name]);
+    async deleteRemoteBranch({ projectPath, name, tipSha }) {
+      calls.push(['delete', projectPath, name, tipSha]);
       if (name === 'glissa/session/failed-delete') return { ok: false, err: 'rejected' };
       return { ok: true };
     },
@@ -101,9 +101,9 @@ test('fetches before listing, deletes separately, continues after failure, and p
   assert.deepEqual(
     calls.filter(([operation]) => operation === 'delete'),
     [
-      ['delete', '/repo', 'glissa/session/merged'],
-      ['delete', '/repo', 'glissa/session/failed-delete'],
-      ['delete', '/repo', 'glissa/session/stale'],
+      ['delete', '/repo', 'glissa/session/merged', 'merged-sha'],
+      ['delete', '/repo', 'glissa/session/failed-delete', 'failed-delete-sha'],
+      ['delete', '/repo', 'glissa/session/stale', 'stale-sha'],
     ],
   );
   assert.equal(calls.some((call) => call[0] === 'delete' && call[2] === 'glissa/session/live'), false);
@@ -113,6 +113,47 @@ test('fetches before listing, deletes separately, continues after failure, and p
     'glissa/session/merged',
     'glissa/session/stale',
   ]);
+});
+
+test('dryRun traces and reports planned deletions without deleting remote branches', async () => {
+  const deletedBranches: string[] = [];
+  const traces: Record<string, unknown>[] = [];
+  const statuses: Record<string, unknown>[] = [];
+  const poller = createBranchGcPoller({
+    gitWorkspace: {
+      async fetchOrigin() { return { ok: true }; },
+      async listRemoteBranches() {
+        return { ok: true, branches: [{ name: 'glissa/session/merged', tipSha: 'merged-sha', tipCommitTimeMs: NOW_MS - DAY_MS }] };
+      },
+      async listIntegrationTips() { return { ok: true, integrationTips: [{ branch: 'develop', sha: 'develop-sha' }] }; },
+      async isAncestor() { return { ok: true, isAncestor: true }; },
+      async resolveMergeProbeEnv() { return { ok: true, probeEnv: {} }; },
+      async writeMergedTree() { return { ok: true, out: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', outcome: 'tree' as const }; },
+      async treeOid() { return { ok: true, out: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }; },
+      async deleteRemoteBranch({ name }) {
+        deletedBranches.push(name);
+        return { ok: true };
+      },
+    },
+    getConfig: () => ({ projects: [{ path: '/repo' }] }),
+    liveSessionIds: () => new Set(),
+    dryRun: true,
+    now: () => NOW_MS,
+    decisionTrace: (entry) => traces.push(entry),
+    onTickComplete: (status) => statuses.push(status),
+  });
+
+  await poller.tick();
+
+  assert.deepEqual(deletedBranches, []);
+  assert.deepEqual(
+    traces.filter((entry) => entry.name === 'glissa/session/merged'),
+    [{ kind: 'branch-gc', ts: NOW_MS, projectPath: '/repo', name: 'glissa/session/merged', decision: 'would-delete', reason: 'ancestor' }],
+  );
+  assert.deepEqual(deletionsOfFirstProject(statuses[0]), ['glissa/session/merged']);
+  assert.equal(statuses[0]?.dryRun, true);
+  const [firstProject] = statuses[0]?.projects as Record<string, unknown>[];
+  assert.deepEqual(Object.keys(firstProject).sort(), ['deletions', 'errors', 'kept', 'projectPath']);
 });
 
 async function deletionsAfterTick({ branchIds, configuredProjectIds, injectedLiveSessionIds }: {
@@ -125,7 +166,7 @@ async function deletionsAfterTick({ branchIds, configuredProjectIds, injectedLiv
     async fetchOrigin() {
       return { ok: true };
     },
-    async listRemoteSessionBranches() {
+    async listRemoteBranches() {
       return {
         ok: true,
         branches: branchIds.map((branchId) => ({
@@ -210,7 +251,7 @@ function branchProofGitWorkspace({ mergeTreeResult, treeResult, tipCommitTimeMs 
     async fetchOrigin() {
       return { ok: true };
     },
-    async listRemoteSessionBranches() {
+    async listRemoteBranches() {
       return {
         ok: true,
         branches: [{ name: 'glissa/session/abandoned', tipSha: 'branch-sha', tipCommitTimeMs }],
@@ -325,7 +366,7 @@ test('each integration tip tree and the merge probe env are resolved once per ti
       async fetchOrigin() {
         return { ok: true };
       },
-      async listRemoteSessionBranches() {
+      async listRemoteBranches() {
         return {
           ok: true,
           branches: [
@@ -465,12 +506,17 @@ test('a merge probe env that never resolves keeps the branch and increments erro
 });
 
 test('git helpers normalize remote refs, retain unresolved protected names, and delete one ref', async () => {
-  const calls: { args: string[]; cwd: string }[] = [];
+  const calls: { args: string[]; cwd: string; extra?: { maxBuffer?: number } }[] = [];
   const gitWorkspace = createGitWorkspace({
-    git: async (args, cwd) => {
-      calls.push({ args, cwd });
-      if (args[0] === 'for-each-ref' && args[1] === 'refs/remotes/origin/glissa/session/') {
-        return 'origin/glissa/session/abc abc-sha 1700000000\n';
+    git: async (args, cwd, extra) => {
+      calls.push({ args, cwd, extra });
+      if (args[0] === 'for-each-ref' && args[1] === 'refs/remotes/origin/') {
+        return [
+          'refs/remotes/origin/HEAD main-sha 1700000000 refs/remotes/origin/main',
+          'refs/remotes/origin/glissa/session/abc abc-sha 1700000000 ',
+          'refs/remotes/origin/worktree-agent-123 agent-sha 1700000100 ',
+          'refs/remotes/origin/release/x release-sha 1700000200 ',
+        ].join('\n');
       }
       if (args[0] === 'for-each-ref') {
         return [
@@ -487,7 +533,7 @@ test('git helpers normalize remote refs, retain unresolved protected names, and 
     },
   });
 
-  const branches = await gitWorkspace.listRemoteSessionBranches({ projectPath: '/repo' });
+  const branches = await gitWorkspace.listRemoteBranches({ projectPath: '/repo', prefixes: ['glissa/session/', 'worktree-agent-'] });
   const tips = await gitWorkspace.listIntegrationTips({ projectPath: '/repo', integrationBranch: 'develop' });
   const ancestor = await gitWorkspace.isAncestor({
     projectPath: '/repo',
@@ -495,11 +541,14 @@ test('git helpers normalize remote refs, retain unresolved protected names, and 
     descendantSha: 'develop-sha',
   });
   await gitWorkspace.fetchOrigin({ projectPath: '/repo' });
-  await gitWorkspace.deleteRemoteBranch({ projectPath: '/repo', name: 'glissa/session/abc' });
+  await gitWorkspace.deleteRemoteBranch({ projectPath: '/repo', name: 'glissa/session/abc', tipSha: 'abc-sha' });
 
   assert.deepEqual(branches, {
     ok: true,
-    branches: [{ name: 'glissa/session/abc', tipSha: 'abc-sha', tipCommitTimeMs: 1700000000000 }],
+    branches: [
+      { name: 'glissa/session/abc', tipSha: 'abc-sha', tipCommitTimeMs: 1700000000000 },
+      { name: 'worktree-agent-123', tipSha: 'agent-sha', tipCommitTimeMs: 1700000100000 },
+    ],
   });
   assert.deepEqual(tips, {
     ok: true,
@@ -511,7 +560,23 @@ test('git helpers normalize remote refs, retain unresolved protected names, and 
   });
   assert.deepEqual(ancestor, { ok: true, isAncestor: false });
   assert.ok(calls.some(({ args }) => args.join(' ') === 'fetch --prune origin'));
-  assert.ok(calls.some(({ args }) => args.join(' ') === 'push origin --delete glissa/session/abc'));
+  assert.ok(calls.some(({ args }) => args.join(' ') === 'for-each-ref refs/remotes/origin/ --format=%(refname) %(objectname) %(committerdate:unix) %(symref)'));
+  assert.equal(calls.find(({ args }) => args[0] === 'for-each-ref' && args[1] === 'refs/remotes/origin/')?.extra?.maxBuffer, 64 * 1024 * 1024);
+  assert.ok(calls.some(({ args }) => args.join(' ') === 'push origin --force-with-lease=refs/heads/glissa/session/abc:abc-sha :refs/heads/glissa/session/abc'));
+});
+
+test('an empty prefix list lists no branches and never runs git', async () => {
+  const calls: string[][] = [];
+  const gitWorkspace = createGitWorkspace({
+    git: async (args) => {
+      calls.push(args);
+      return '';
+    },
+  });
+
+  assert.deepEqual(await gitWorkspace.listRemoteBranches({ projectPath: '/repo', prefixes: [] }), { ok: true, branches: [] });
+  assert.deepEqual(await gitWorkspace.listRemoteBranches({ projectPath: '/repo', prefixes: [''] }), { ok: true, branches: [] });
+  assert.deepEqual(calls, []);
 });
 
 test('integration tips include the detected default when branch config is auto', async () => {

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import type { WebSocket, WebSocketServer } from 'ws';
 import {
+  BRANCH_GC_CONTROL_BOOLEAN_KEYS, BRANCH_GC_CONTROL_NUMERIC_KEYS,
   ClientMessage, RUNTIME_CONFIG_SCALAR_KEYS, ConfigUpdate, configIssueMessage,
 } from '../shared/contracts/index.ts';
 import { STATES } from '../shared/states.ts';
@@ -167,8 +168,6 @@ const PR_REVIEW_NUMERIC_RANGES = Object.freeze({
   maxConcurrentReviews: PR_REVIEW_MAX_CONCURRENT_RANGE,
   reviewTimeoutSeconds: PR_REVIEW_TIMEOUT_RANGE,
 });
-const BRANCH_GC_BOOLEAN_KEYS = Object.freeze(['enabled']);
-const BRANCH_GC_NUMERIC_KEYS = Object.freeze(['staleDays', 'intervalMs']);
 const BRANCH_GC_NUMERIC_RANGES = Object.freeze({
   staleDays: BRANCH_GC_STALE_DAYS_RANGE,
   intervalMs: BRANCH_GC_INTERVAL_MS_RANGE,
@@ -237,8 +236,8 @@ const DASHBOARD_SETTING_PATHS = Object.freeze([
   ...PR_REVIEW_BOOLEAN_KEYS.map((key) => `prReview.${key}`),
   ...PR_REVIEW_VALUE_KEYS.map((key) => `prReview.${key}`),
   ...PR_REVIEW_NUMERIC_KEYS.map((key) => `prReview.${key}`),
-  ...BRANCH_GC_BOOLEAN_KEYS.map((key) => `branchGc.${key}`),
-  ...BRANCH_GC_NUMERIC_KEYS.map((key) => `branchGc.${key}`),
+  ...BRANCH_GC_CONTROL_BOOLEAN_KEYS.map((key) => `branchGc.${key}`),
+  ...BRANCH_GC_CONTROL_NUMERIC_KEYS.map((key) => `branchGc.${key}`),
   ...VISIONS_BOOLEAN_KEYS.map((key) => `visions.${key}`),
   ...VISIONS_VALUE_KEYS.map((key) => `visions.${key}`),
   ...VISIONS_DISPATCH_BOOLEAN_KEYS.map((key) => `visions.dispatch.${key}`),
@@ -628,7 +627,7 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
       }
       if (s.repoRoots != null) cfg.repoRoots = s.repoRoots;
       if (s.prReview != null) cfg.prReview = s.prReview;
-      if (s.branchGc != null) cfg.branchGc = s.branchGc;
+      if (s.branchGc != null) cfg.branchGc = mergeSettingsBlockOverStored(cfg.branchGc, s.branchGc);
       if (s.visions != null) cfg.visions = s.visions;
       if (s.posthog != null) cfg.posthog = mergeSettingsBlockOverStored(cfg.posthog, s.posthog);
       if (s.usage != null) cfg.usage = s.usage;

@@ -6,7 +6,8 @@ import path from 'node:path';
 
 import { createConfigStore, DEFAULT_CONFIG } from '../server/config-store.ts';
 import {
-  BrowserConfig, Config, CONFIG_BLOCK_KEYS, ConfigUpdate, HIDDEN_CONFIG_KEYS,
+  BRANCH_GC_CONTROL_BOOLEAN_KEYS, BRANCH_GC_CONTROL_NUMERIC_KEYS, BranchGcFileSettings,
+  BrowserConfig, Config, CONFIG_BLOCK_KEYS, configIssueMessage, ConfigUpdate, HIDDEN_CONFIG_KEYS,
 } from '../shared/contracts/index.ts';
 
 test('DEFAULT_CONFIG satisfies the persisted Config contract', () => {
@@ -26,6 +27,36 @@ test('mill measurement retention crosses file, browser, and update boundaries', 
 test('the persisted mill measurement block keeps its retention setting', () => {
   const config = { ...DEFAULT_CONFIG, millMetrics: { retainDays: 90 } };
   assert.deepEqual(Config.parse(config).millMetrics, { retainDays: 90 });
+});
+
+test('branchGc prefixes parse as string arrays and reject non-arrays', () => {
+  assert.equal(BranchGcFileSettings.safeParse({ prefixes: ['glissa/session/', 'worktree-agent-'] }).success, true);
+  assert.equal(BranchGcFileSettings.safeParse({ prefixes: 'glissa/session/' }).success, false);
+});
+
+test('a branchGc prefix that would select every origin branch fails closed', () => {
+  const parsed = BranchGcFileSettings.safeParse({ prefixes: ['glissa/session/', ''] });
+  assert.equal(parsed.success, false);
+  assert.equal(parsed.success === false && configIssueMessage(parsed.error), 'branchGc.prefixes entries must be non-empty strings');
+});
+
+test('a hand-edited branchGc field type never costs the boot', () => {
+  assert.equal(Config.safeParse({ ...DEFAULT_CONFIG, branchGc: { staleDays: '21' } }).success, true);
+});
+
+test('the branchGc control update keeps its literal key types', () => {
+  const staleDays: number | undefined = ConfigUpdate.parse({ branchGc: { staleDays: 21 } }).branchGc?.staleDays;
+  assert.equal(staleDays, 21);
+});
+
+test('the control update keeps exactly the exported settable branchGc keys', () => {
+  const parsed = ConfigUpdate.parse({
+    branchGc: { enabled: true, staleDays: 21, intervalMs: 3600000, prefixes: ['evil/'], dryRun: true },
+  });
+  assert.deepEqual(
+    Object.keys(parsed.branchGc ?? {}).sort(),
+    [...BRANCH_GC_CONTROL_BOOLEAN_KEYS, ...BRANCH_GC_CONTROL_NUMERIC_KEYS].sort(),
+  );
 });
 
 test('any hooks value parses, so one hand edit cannot cost the boot', () => {

@@ -1,8 +1,8 @@
-import { planBranchGc } from './core/branch-gc-core.ts';
+import { DEFAULT_BRANCH_GC_PREFIXES, planBranchGc } from './core/branch-gc-core.ts';
 import { configuredIntegrationBranch } from './core/integration-branch-core.ts';
 import { ancestorProvenProbe, ancestryFromResult, buildTipProbe, proveMergedAcrossTips } from './core/merge-proof-core.ts';
 import type { MergeProbeEnvResult, MergeProofReason, MergeTreeOutcome, TipProbe } from './core/merge-proof-core.ts';
-import type { IntegrationTip, KeptBranch } from './core/branch-gc-core.ts';
+import type { IntegrationTip, KeptBranch, RemoteBranchTip } from './core/branch-gc-core.ts';
 import { createTickLoop } from './lane-runner.ts';
 import type { TickOutcome } from './lane-runner.ts';
 
@@ -16,20 +16,14 @@ interface GitCallResult {
   err?: string;
 }
 
-interface RemoteSessionBranch {
-  name: string;
-  tipSha: string;
-  tipCommitTimeMs: number;
-}
-
-type ListBranchesResult = GitCallResult & { branches?: RemoteSessionBranch[] };
+type ListBranchesResult = GitCallResult & { branches?: RemoteBranchTip[] };
 type ListTipsResult = GitCallResult & { integrationTips?: IntegrationTip[] };
 type AncestorResult = GitCallResult & { isAncestor?: boolean };
 type MergeTreeResult = GitCallResult & { outcome: MergeTreeOutcome };
 
 interface BranchGcGitWorkspace {
   fetchOrigin(args: { projectPath: string; timeoutMs?: number }): Promise<GitCallResult>;
-  listRemoteSessionBranches(args: { projectPath: string }): Promise<ListBranchesResult>;
+  listRemoteBranches(args: { projectPath: string; prefixes: string[] }): Promise<ListBranchesResult>;
   listIntegrationTips(args: { projectPath: string; integrationBranch: string | null }): Promise<ListTipsResult>;
   isAncestor(args: { projectPath: string; ancestorSha: string; descendantSha: string }): Promise<AncestorResult>;
   resolveMergeProbeEnv(args: { projectPath: string }): Promise<MergeProbeEnvResult>;
@@ -40,7 +34,7 @@ interface BranchGcGitWorkspace {
     probeEnv: Record<string, string>;
   }): Promise<MergeTreeResult>;
   treeOid(args: { projectPath: string; sha: string }): Promise<GitCallResult>;
-  deleteRemoteBranch(args: { projectPath: string; name: string }): Promise<GitCallResult>;
+  deleteRemoteBranch(args: { projectPath: string; name: string; tipSha: string }): Promise<GitCallResult>;
 }
 
 interface BranchGcConfig {
@@ -67,6 +61,8 @@ interface BranchGcPollerDeps {
   getConfig: () => BranchGcConfig;
   liveSessionIds: () => Set<string>;
   staleDays?: number;
+  prefixes?: string[];
+  dryRun?: boolean;
   intervalMs?: number;
   setIntervalFn?: typeof setInterval;
   clearIntervalFn?: typeof clearInterval;
@@ -88,6 +84,8 @@ function createBranchGcPoller(deps: BranchGcPollerDeps): BranchGcPoller {
     getConfig,
     liveSessionIds,
     staleDays = DEFAULT_STALE_DAYS,
+    prefixes = DEFAULT_BRANCH_GC_PREFIXES,
+    dryRun = false,
     intervalMs = DEFAULT_INTERVAL_MS,
     setIntervalFn = setInterval,
     clearIntervalFn = clearInterval,
@@ -229,7 +227,7 @@ function createBranchGcPoller(deps: BranchGcPollerDeps): BranchGcPoller {
       return summary;
     }
 
-    const listed = await callGit(gitWorkspace.listRemoteSessionBranches, { projectPath });
+    const listed = await callGit(gitWorkspace.listRemoteBranches, { projectPath, prefixes });
     if (!listed.ok) {
       noteGitError({ projectPath, operation: 'list', gitResult: listed });
       summary.errors += 1;
@@ -258,7 +256,7 @@ function createBranchGcPoller(deps: BranchGcPollerDeps): BranchGcPoller {
     }
     const integrationTips = ('integrationTips' in tipsResult ? tipsResult.integrationTips : undefined) ?? [];
 
-    const checkedBranches: (RemoteSessionBranch & { mergedIntoIntegration: boolean; mergedReason: MergeProofReason })[] = [];
+    const checkedBranches: (RemoteBranchTip & { mergedIntoIntegration: boolean; mergedReason: MergeProofReason })[] = [];
     const resolvedIntegrationTips = integrationTips.filter((integrationTip) => integrationTip.sha);
     const integrationTreeByTipSha = await resolveIntegrationTreeOids(projectPath, resolvedIntegrationTips);
     const mergeProbeEnv = await resolveMergeProbeEnv(projectPath);
@@ -281,6 +279,7 @@ function createBranchGcPoller(deps: BranchGcPollerDeps): BranchGcPoller {
       remoteBranches: checkedBranches,
       integrationTips,
       liveSessionIds: new Set([...configuredProjectIds, ...liveSessionIds()]),
+      prefixes,
       nowMs: now(),
       staleDays,
     });
@@ -290,8 +289,13 @@ function createBranchGcPoller(deps: BranchGcPollerDeps): BranchGcPoller {
       trace({ projectPath, name: keptBranch.name, decision: 'kept', reason: keptBranch.reason });
     }
 
-    for (const { name, reason } of plan.deletions) {
-      const deleted = await callGit(gitWorkspace.deleteRemoteBranch, { projectPath, name });
+    for (const { name, reason, tipSha } of plan.deletions) {
+      if (dryRun) {
+        summary.deletions.push(name);
+        trace({ projectPath, name, decision: 'would-delete', reason });
+        continue;
+      }
+      const deleted = await callGit(gitWorkspace.deleteRemoteBranch, { projectPath, name, tipSha });
       if (!deleted.ok) {
         noteGitError({ projectPath, name, operation: 'delete', gitResult: deleted });
         summary.errors += 1;
@@ -316,7 +320,7 @@ function createBranchGcPoller(deps: BranchGcPollerDeps): BranchGcPoller {
       projects.push(summary);
       failures += summary.errors;
     }
-    onTickComplete({ type: 'branch-gc-status', ts: now(), projects });
+    onTickComplete({ type: 'branch-gc-status', ts: now(), dryRun, projects });
     if (failures > 0) return { failed: true };
     return undefined;
   }

@@ -1153,6 +1153,62 @@ test('listSessionWorktrees (real git): a marker branch alive only on origin keep
   }
 });
 
+function initCloneWithPrefixedRemoteBranches(): { rootDir: string; repoDir: string; remoteDir: string } {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-branch-gc-'));
+  const seedDir = initRepoOnMain('glissa-branch-gc-seed-');
+  for (const branchName of ['worktree-agent-123', 'glissa/session/abc', 'release/x']) git(['branch', branchName], seedDir);
+  const remoteDir = path.join(rootDir, 'origin.git');
+  const repoDir = path.join(rootDir, 'repository');
+  git(['clone', '--bare', seedDir, remoteDir], rootDir);
+  git(['symbolic-ref', 'HEAD', 'refs/heads/main'], remoteDir);
+  git(['clone', remoteDir, repoDir], rootDir);
+  git(['config', 'user.email', 'test@example.com'], repoDir);
+  git(['config', 'user.name', 'Glissa Test'], repoDir);
+  git(['config', 'commit.gpgsign', 'false'], repoDir);
+  fs.rmSync(seedDir, { recursive: true, force: true });
+  return { rootDir, repoDir, remoteDir };
+}
+
+test('listRemoteBranches (real git): lists every prefixed remote branch and nothing else', { skip: !GIT }, async () => {
+  const { rootDir, repoDir } = initCloneWithPrefixedRemoteBranches();
+  try {
+    const listed = await createGitWorkspace().listRemoteBranches({
+      projectPath: repoDir,
+      prefixes: ['glissa/session/', 'worktree-agent-'],
+    });
+    if (!('branches' in listed)) throw new Error('listing a cloned repository returns branches');
+    assert.deepEqual(listed.branches.map((remoteBranch) => remoteBranch.name).sort(), ['glissa/session/abc', 'worktree-agent-123']);
+    for (const remoteBranch of listed.branches) assert.match(remoteBranch.tipSha, /^[0-9a-f]{7,}$/);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('deleteRemoteBranch (real git): a remote tip that moved after the listing is never deleted', { skip: !GIT }, async () => {
+  const { rootDir, repoDir, remoteDir } = initCloneWithPrefixedRemoteBranches();
+  try {
+    const gitWorkspace = createGitWorkspace();
+    const listedTipSha = git(['rev-parse', 'refs/remotes/origin/glissa/session/abc'], repoDir).trim();
+    fs.writeFileSync(path.join(repoDir, 'later.txt'), 'later\n', 'utf8');
+    git(['add', '-A'], repoDir);
+    git(['commit', '-m', 'work pushed after the listing'], repoDir);
+    git(['push', 'origin', 'HEAD:refs/heads/glissa/session/abc'], repoDir);
+    const movedTipSha = git(['rev-parse', 'HEAD'], repoDir).trim();
+
+    const refused = await gitWorkspace.deleteRemoteBranch({ projectPath: repoDir, name: 'glissa/session/abc', tipSha: listedTipSha });
+
+    assert.equal(refused.ok, false);
+    assert.equal(git(['rev-parse', 'refs/heads/glissa/session/abc'], remoteDir).trim(), movedTipSha);
+
+    const deleted = await gitWorkspace.deleteRemoteBranch({ projectPath: repoDir, name: 'glissa/session/abc', tipSha: movedTipSha });
+
+    assert.equal(deleted.ok, true);
+    assert.throws(() => git(['rev-parse', '--verify', '--quiet', 'refs/heads/glissa/session/abc'], remoteDir), Error);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test('listSessionWorktrees (injected git): a failing status keeps the worktree even when rev-list counts zero', async () => {
   const failingStatusGit = (args: string[]): string => {
     if (args[0] === 'rev-parse' && args.includes('--is-inside-work-tree')) return 'true';

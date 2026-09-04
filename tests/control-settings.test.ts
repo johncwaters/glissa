@@ -142,15 +142,27 @@ test('worktree conflict switches remain settable while withheld from settings', 
   assert.equal(h.sent.some((message) => message.type === 'settings-error'), false);
 });
 
-test('a valid branchGc payload is sanitized, persisted, and echoed', () => {
+test('a valid branchGc payload is sanitized, persisted, and echoed, and file-only keys sent over the control socket are dropped', () => {
   const h = harness({ projects: [] });
   h.send({
     type: 'update-settings',
-    settings: { branchGc: { enabled: true, staleDays: 21, intervalMs: 3600000, unknown: 'drop' } },
+    settings: { branchGc: { enabled: true, staleDays: 21, intervalMs: 3600000, unknown: 'drop', prefixes: ['evil/'] } },
   });
 
-  assert.deepEqual(h.cfg.branchGc, { enabled: true, staleDays: 21, intervalMs: 3600000 });
-  assert.deepEqual(updatedFrom(h)?.settings?.branchGc, h.cfg.branchGc);
+  assert.equal(h.cfg.branchGc?.enabled, true);
+  assert.equal(h.cfg.branchGc?.staleDays, 21);
+  assert.equal(h.cfg.branchGc?.intervalMs, 3600000);
+  assert.notDeepEqual(h.cfg.branchGc?.prefixes, ['evil/']);
+  const echoed = blockOf(updatedFrom(h)?.settings, 'branchGc');
+  assert.equal(blockOf(echoed, 'staleDays'), 21);
+  assert.deepEqual(blockOf(echoed, 'prefixes'), ['glissa/session/', 'worktree-agent-']);
+});
+
+test('a branchGc control update keeps the stored file-only keys', () => {
+  const h = harness({ branchGc: { enabled: true, prefixes: ['custom/'], dryRun: true, staleDays: 14, intervalMs: 3600000 }, projects: [] });
+  h.send({ type: 'update-settings', settings: { branchGc: { staleDays: 21, prefixes: ['evil/'] } } });
+
+  assert.deepEqual(h.cfg.branchGc, { enabled: true, prefixes: ['custom/'], dryRun: true, staleDays: 21, intervalMs: 3600000 });
 });
 
 test('branchGc rejects non-boolean enablement and non-positive numeric fields', () => {

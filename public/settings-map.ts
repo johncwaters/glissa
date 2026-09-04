@@ -174,6 +174,8 @@ export const SETTINGS_MAP = Object.freeze([
       { id: 'file-phone-escalation-ms', path: 'phoneEscalationMs', title: 'Phone escalation delay', description: 'Delay before off-dashboard escalation.', control: 'readonly', keywords: ['timer', 'telegram'], fileOnly: true },
       { id: 'file-post-turn-checks', path: 'postTurnChecks', title: 'Post-turn checks', description: 'Deterministic checks applied after eligible turns.', control: 'readonly', keywords: ['quality', 'fixes'], fileOnly: true },
       { id: 'file-branch-gc-enabled', path: 'branchGc.enabled', title: 'Branch cleanup', description: 'Enable cleanup of eligible session branches.', control: 'readonly', keywords: ['git', 'cleanup'], fileOnly: true },
+      { id: 'file-branch-gc-prefixes', path: 'branchGc.prefixes', title: 'Branch cleanup prefixes', description: 'Remote branch prefixes eligible for cleanup.', control: 'readonly', keywords: ['git', 'branch'], fileOnly: true },
+      { id: 'file-branch-gc-dry-run', path: 'branchGc.dryRun', title: 'Branch cleanup dry run', description: 'Report planned cleanup without deleting remote branches.', control: 'readonly', keywords: ['git', 'safety'], fileOnly: true },
       { id: 'file-branch-gc-stale-days', path: 'branchGc.staleDays', title: 'Branch stale days', description: 'Age threshold for orphan branch cleanup.', control: 'readonly', keywords: ['git', 'retention'], fileOnly: true },
       { id: 'file-branch-gc-interval-ms', path: 'branchGc.intervalMs', title: 'Branch cleanup interval', description: 'Delay between branch cleanup passes.', control: 'readonly', keywords: ['git', 'schedule'], fileOnly: true },
     ],

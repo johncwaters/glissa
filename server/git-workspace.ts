@@ -3,7 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileAsync, execFileSync } from '../server/child-process-safe.ts';
 import { createSerialQueue } from './spawn-gate.ts';
-import { sessionIdFromBranch } from './core/branch-gc-core.ts';
+import { matchedPrefix, sessionIdFromBranch, usablePrefixes } from './core/branch-gc-core.ts';
+import type { RemoteBranchTip } from './core/branch-gc-core.ts';
 import {
   GIT_FETCH_TIMEOUT_MS,
   parseLeftRightCount,
@@ -28,7 +29,7 @@ type IntegrationSyncResult = {
   to: string | null;
   error?: string;
 };
-type GitExtraOptions = { timeout?: number; env?: Record<string, string>; replaceEnv?: Record<string, string> };
+type GitExtraOptions = { timeout?: number; maxBuffer?: number; env?: Record<string, string>; replaceEnv?: Record<string, string> };
 type GitRunner = (args: string[], cwd: string, extra?: GitExtraOptions) => Promise<string> | string;
 type WorktreeBranch = { cwd: string; branch: string };
 type WorkspaceHandle = {
@@ -62,6 +63,7 @@ type WorktreeArgs = {
   ancestorSha?: string;
   descendantSha?: string;
   sha?: string;
+  tipSha?: string;
   integrationSha?: string;
   branchSha?: string;
   knownProjects?: unknown;
@@ -99,7 +101,6 @@ type SessionWorktree = {
   hasWork: boolean;
   integrationBranch: string | null;
 };
-type RemoteSessionBranch = { name: string; tipSha: string; tipCommitTimeMs: number };
 type IntegrationTip = { branch: string; sha: string | null };
 type BaseClassification = { state: string; upstream: string };
 type BaseSyncResult = BaseClassification & { fetched: boolean | null; error?: string };
@@ -114,6 +115,8 @@ type MergeTreeArgs = {
 };
 
 const MERGE_PROBE_TIMEOUT_MS = 30000;
+const REMOTE_REF_PREFIX = 'refs/remotes/origin/';
+const REMOTE_BRANCH_LISTING_MAX_BUFFER = 64 * 1024 * 1024;
 
 function gitChildEnv(extra?: GitExtraOptions): { env?: Record<string, string | undefined> } {
   if (extra?.replaceEnv) return { env: extra.replaceEnv };
@@ -208,6 +211,7 @@ function createGitWorkspace(opts: {
   const git: GitRunner = opts.git || (async (args, cwd, extra) => {
     const { stdout } = await execFileAsync('git', args, {
       cwd, encoding: 'utf8', timeout: extra?.timeout || 20000,
+      ...(extra?.maxBuffer ? { maxBuffer: extra.maxBuffer } : {}),
       ...gitChildEnv(extra),
     });
     return stdout;
@@ -830,18 +834,22 @@ function createGitWorkspace(opts: {
     return classifyRefusedSync({ projectPath, branch: branch ?? '', localRef, localSha, remoteSha, err: updated.err });
   }
 
-  async function listRemoteSessionBranches({ projectPath }: WorktreeArgs): Promise<GitResult | { ok: true; branches: RemoteSessionBranch[] }> {
+  async function listRemoteBranches({ projectPath, prefixes }: WorktreeArgs & { prefixes: string[] }): Promise<GitResult | { ok: true; branches: RemoteBranchTip[] }> {
+    if (usablePrefixes(prefixes).length === 0) return { ok: true, branches: [] };
     const listed = await run([
       'for-each-ref',
-      'refs/remotes/origin/glissa/session/',
-      '--format=%(refname:short) %(objectname) %(committerdate:unix)',
-    ], projectPath);
+      REMOTE_REF_PREFIX,
+      '--format=%(refname) %(objectname) %(committerdate:unix) %(symref)',
+    ], projectPath, { maxBuffer: REMOTE_BRANCH_LISTING_MAX_BUFFER });
     if (!listed.ok) return listed;
-    const branches: RemoteSessionBranch[] = [];
+    const branches: RemoteBranchTip[] = [];
     for (const line of listed.out.split(/\r?\n/)) {
       if (!line) continue;
-      const [remoteName, tipSha, commitTimeSeconds] = line.trim().split(/\s+/);
-      const name = remoteName.startsWith('origin/') ? remoteName.slice('origin/'.length) : remoteName;
+      const [refName, tipSha, commitTimeSeconds, symbolicTarget] = line.trim().split(/\s+/);
+      if (symbolicTarget) continue;
+      if (!refName.startsWith(REMOTE_REF_PREFIX)) continue;
+      const name = refName.slice(REMOTE_REF_PREFIX.length);
+      if (matchedPrefix(name, prefixes) === null) continue;
       branches.push({
         name,
         tipSha,
@@ -930,8 +938,9 @@ function createGitWorkspace(opts: {
     return run(['rev-parse', `${sha ?? ''}^{tree}`], projectPath, { timeout: timeoutMs });
   }
 
-  async function deleteRemoteBranchBody({ projectPath, name }: WorktreeArgs): Promise<GitResult> {
-    return run(['push', 'origin', '--delete', name ?? ''], projectPath);
+  async function deleteRemoteBranchBody({ projectPath, name, tipSha }: WorktreeArgs): Promise<GitResult> {
+    const branchRef = `refs/heads/${name ?? ''}`;
+    return run(['push', 'origin', `--force-with-lease=${branchRef}:${tipSha ?? ''}`, `:${branchRef}`], projectPath);
   }
 
   return {
@@ -948,7 +957,7 @@ function createGitWorkspace(opts: {
     listSessionWorktrees: serialized(listSessionWorktreesBody),
     hasUnmergedWork: serialized(hasUnmergedWorkBody),
     listWorktreeBranches, detectDefaultBranch,
-    listRemoteSessionBranches, listIntegrationTips, isAncestor, resolveMergeProbeEnv, writeMergedTree, treeOid, resolveProjectPath,
+    listRemoteBranches, listIntegrationTips, isAncestor, resolveMergeProbeEnv, writeMergedTree, treeOid, resolveProjectPath,
   };
 }
 

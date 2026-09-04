@@ -375,7 +375,7 @@ test('getSettings resolves branchGc defaults while opt-in blocks stay null; proj
     store.config.telegram = { botToken: 'tok', chatId: '123' };
     const s2 = store.getSettings();
     assert.deepEqual(s2.prReview, { enabled: true, projects: ['p1'] });
-    assert.deepEqual(s2.branchGc, { enabled: false, staleDays: 21, intervalMs: DEFAULT_CONFIG.branchGc.intervalMs });
+    assert.deepEqual(s2.branchGc, { ...DEFAULT_CONFIG.branchGc, enabled: false, staleDays: 21 });
     assert.deepEqual(s2.visions, { enabled: true, dispatch: { enabled: false } });
     assert.deepEqual(s2.telegram, { chatId: '123', botTokenConfigured: true });
   });
@@ -448,8 +448,8 @@ test('branchGc defaults survive a config save round trip', () => {
 });
 
 test('a partial branchGc config merges over the defaults', () => {
-  withStore({ branchGc: { enabled: false }, projects: [] }, (store) => {
-    assert.deepEqual(store.config.branchGc, { ...DEFAULT_CONFIG.branchGc, enabled: false });
+  withStore({ branchGc: { dryRun: true }, projects: [] }, (store) => {
+    assert.deepEqual(store.config.branchGc, { ...DEFAULT_CONFIG.branchGc, dryRun: true });
   });
 });
 
@@ -470,6 +470,55 @@ test('an explicit millEnabled beats the retired key', () => {
   withStore({ projects: [], packsAutoRebuild: false, millEnabled: true }, (store) => {
     assert.equal(store.getSettings().millEnabled, true);
   });
+});
+
+test('a hand-edited branchGc field of the wrong type falls back to its default and warns', () => {
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(' ')); };
+  try {
+    withStore({ branchGc: { staleDays: '21', dryRun: true }, projects: [] }, (store) => {
+      assert.deepEqual(store.config.branchGc, { ...DEFAULT_CONFIG.branchGc, dryRun: true });
+    });
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.ok(warnings.some((warning) => warning.includes('branchGc.staleDays')), warnings.join('\n'));
+});
+
+function warningsFrom(run: () => void): string[] {
+  const warnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(' ')); };
+  try {
+    run();
+  } finally {
+    console.warn = originalWarn;
+  }
+  return warnings;
+}
+
+test('a misspelled branchGc field is dropped with a warning instead of silently ignored', () => {
+  const warnings = warningsFrom(() => {
+    withStore({ branchGc: { dryrun: true, staleDays: 21 }, projects: [] }, (store) => {
+      assert.deepEqual(store.config.branchGc, { ...DEFAULT_CONFIG.branchGc, staleDays: 21 });
+    });
+  });
+  assert.equal(warnings.filter((warning) => warning.includes('branchGc.dryrun')).length, 1, warnings.join('\n'));
+});
+
+test('an invalid persisted branchGc field warns once at load and never again on save', () => {
+  let warningsOnSave: string[] = [];
+  const warningsOnLoad = warningsFrom(() => {
+    withStore({ branchGc: { staleDays: '21' }, projects: [] }, (store) => {
+      warningsOnSave = warningsFrom(() => {
+        store.save((config) => { config.cursorBlink = true; });
+        store.save((config) => { config.cursorBlink = false; });
+      });
+    });
+  });
+  assert.equal(warningsOnLoad.filter((warning) => warning.includes('branchGc.staleDays')).length, 1, warningsOnLoad.join('\n'));
+  assert.deepEqual(warningsOnSave.filter((warning) => warning.includes('branchGc')), []);
 });
 
 const WATCH_DEADLINE_MS = 15000;

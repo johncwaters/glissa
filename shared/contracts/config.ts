@@ -38,11 +38,22 @@ const PrReviewSettings = optionalObject('prReview', {
   reviewTimeoutSeconds: optionalNumber('prReview.reviewTimeoutSeconds', ranges.PR_REVIEW_TIMEOUT_RANGE),
 });
 
-const BranchGcSettings = optionalObject('branchGc', {
+const BRANCH_GC_SETTINGS_SHAPE = {
   enabled: optionalBoolean('branchGc.enabled'),
+  prefixes: z.array(
+    z.string({ error: 'branchGc.prefixes must be an array of strings' })
+      .min(1, { error: 'branchGc.prefixes entries must be non-empty strings' }),
+    { error: 'branchGc.prefixes must be an array of strings' },
+  ).optional(),
+  dryRun: optionalBoolean('branchGc.dryRun'),
   staleDays: optionalNumber('branchGc.staleDays', ranges.BRANCH_GC_STALE_DAYS_RANGE),
   intervalMs: optionalNumber('branchGc.intervalMs', ranges.BRANCH_GC_INTERVAL_MS_RANGE),
-});
+};
+export const BranchGcFileSettings = z.object(BRANCH_GC_SETTINGS_SHAPE, { error: 'branchGc must be an object' });
+const BranchGcSettings = optionalObject('branchGc', BRANCH_GC_SETTINGS_SHAPE);
+const BranchGcControlSettings = BranchGcFileSettings.omit({ prefixes: true, dryRun: true }).nullable().optional();
+export const BRANCH_GC_CONTROL_BOOLEAN_KEYS = Object.freeze(['enabled']);
+export const BRANCH_GC_CONTROL_NUMERIC_KEYS = Object.freeze(['staleDays', 'intervalMs']);
 
 const VisionsSettings = optionalObject('visions', {
   enabled: optionalBoolean('visions.enabled'),
@@ -181,6 +192,7 @@ export const ConfigUpdate = z.object({
   notifyDebounceMs: z.number({ error: 'notifyDebounceMs must be a positive number' }).finite().positive({ error: 'notifyDebounceMs must be a positive number' }).optional(),
   phoneEscalationMs: z.number({ error: 'phoneEscalationMs must be a positive number' }).finite().positive({ error: 'phoneEscalationMs must be a positive number' }).optional(),
   replayBufferKB: optionalNumber('replayBufferKB', ranges.REPLAY_BUFFER_KB_RANGE),
+  branchGc: BranchGcControlSettings,
   worktreeAutoRebase: optionalBoolean('worktreeAutoRebase'),
   worktreeSyncOnStart: optionalBoolean('worktreeSyncOnStart'),
   worktreeRerere: optionalBoolean('worktreeRerere'),
@@ -251,6 +263,7 @@ export function configIssueMessage(error: z.ZodError): string {
   return error.issues[0]?.message || 'settings are invalid';
 }
 
+export type BranchGcFileSettings = z.infer<typeof BranchGcFileSettings>;
 export type Config = z.infer<typeof Config>;
 export type BrowserConfig = z.infer<typeof BrowserConfig>;
 export type ConfigUpdate = z.infer<typeof ConfigUpdate>;

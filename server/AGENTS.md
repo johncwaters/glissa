@@ -63,7 +63,8 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 ### Remote Branch GC
 
-- Remote cleanup is default-on and opts out only through `branchGc.enabled: false`; it is confined to `glissa/session/`, protects every configured session id, and otherwise requires merge proof or orphan staleness, so unattended cleanup cannot become branch loss (`server/core/branch-gc-core.ts`, `tests/branch-gc-core.test.ts`).
+- Cleanup is default-on and touches only the file-only `branchGc.prefixes` allowlist (default `glissa/session/` and `worktree-agent-`); live-session protection is `glissa/session/` only (`tests/branch-gc-core.test.ts`).
+- Deletion needs ancestry or tree-containment proof (`server/core/merge-proof-core.ts`) or staleness, any probe failure keeps it, and the push is a leased qualified refspec on that listed tip, so cleanup cannot lose a branch; `dryRun` traces would-delete (`tests/branch-gc-poller.test.ts`).
 
 ### GitHub PR Auto-Review (opt-in)
 
