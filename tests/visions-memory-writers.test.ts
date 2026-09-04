@@ -82,13 +82,14 @@ function fakeTimers() {
 type FakeMemoryStore = MemoryStoreSeam & { appended: MemoryInput[] };
 
 function fakeMemoryStore({
-  refuse = false, refuseFirst = false, throws = false, seeded = [],
-}: { refuse?: boolean; refuseFirst?: boolean; throws?: boolean; seeded?: object[] } = {}): FakeMemoryStore {
+  refuse = false, refuseFirst = false, throws = false, seeded = [], retrieved = null,
+}: { refuse?: boolean; refuseFirst?: boolean; throws?: boolean; seeded?: object[]; retrieved?: object[] | null } = {}): FakeMemoryStore {
   const appended: MemoryInput[] = [];
   let minted = 0;
   return {
     appended,
     records: () => seeded.slice(),
+    ...(retrieved ? { retrieve: () => retrieved.slice() } : {}),
     append(input: object) {
       appended.push(input as MemoryInput);
       if (throws) return Promise.reject(new Error('the canon is unwritable'));
@@ -348,6 +349,31 @@ test('dispatch comments and the tier 4 hand are remembered as episodic model kno
     ['episodic', 'model', PROJECT_PATH, 'plan.md:3: the sentence is doing two jobs'],
     ['episodic', 'model', PROJECT_PATH, 'plan.md: the document has two introductions'],
   ]);
+});
+
+test('a comment whose anchor came back as memory this round is not written again', async (t) => {
+  const store = fakeMemoryStore({
+    retrieved: [
+      { id: 'm-old', kind: 'knowledge', layer: 'episodic', text: 'plan.md:3: an earlier wording of the same thought', ts: 1 },
+      { id: 'm-hand', kind: 'knowledge', layer: 'episodic', text: 'plan.md: the document has two introductions', ts: 1 },
+    ],
+  });
+  const driver = dispatchingHarness(store, () => dispatchResult({
+    comments: [
+      { line: 3, message: 'the sentence is doing two jobs', basis: 'edit' },
+      { line: 1, message: 'the title promises more than the body', basis: 'edit' },
+    ],
+    intent: null,
+  }));
+  t.after(() => driver.wiring.stop());
+
+  openMarkdown(driver);
+  driver.timers.runPending();
+  await driver.wiring.whenDispatchSettled();
+  await driver.wiring.whenMemoryIdle();
+
+  const knowledge = store.appended.filter((input) => input.kind === 'knowledge');
+  assert.deepEqual(knowledge.map((input) => input.text), ['plan.md:1: the title promises more than the body']);
 });
 
 test('a dispatch result cannot stamp its own trust fields', async (t) => {

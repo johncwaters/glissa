@@ -6,6 +6,7 @@ import {
   createBoundedKeySet,
   dismissFeedbackInput,
   dispatchMemoryInputs,
+  memoryDelivery,
   servedFindingOf,
   fixFeedbackInput,
   intentMemoryInput,
@@ -183,4 +184,40 @@ test('the served key set dedupes and evicts oldest first', () => {
   assert.equal(keys.size, 2);
   assert.equal(keys.has('a'), false);
   assert.equal(keys.has('c'), true);
+});
+
+test('a basename with spaces still dedupes against what was delivered', () => {
+  const inputs = dispatchMemoryInputs({
+    uri: 'file:///c:/repos/glissa/docs/Copy%20of%20Context%20Engineer%20SuperDay%20.md',
+    project: 'c:/repos/glissa',
+    comments: [{ line: 12, message: 'the same thought, reworded' }, { line: 13, message: 'a new thought' }],
+    hand: 'a reworded hand',
+    delivered: [
+      'Copy of Context Engineer SuperDay .md:12: one suggestion',
+      'Copy of Context Engineer SuperDay .md: an old hand',
+    ],
+  });
+  assert.deepEqual(inputs.map((input) => input.text), ['Copy of Context Engineer SuperDay .md:13: a new thought']);
+});
+
+test('a comment or hand whose text was delivered this round is not written again', () => {
+  const inputs = dispatchMemoryInputs({
+    uri: 'file:///c:/repos/glissa/docs/notes.md',
+    project: 'c:/repos/glissa',
+    comments: [{ line: 12, message: 'the same thought, reworded' }, { line: 13, message: 'a new thought' }],
+    hand: 'a reworded hand',
+    delivered: ['notes.md:12: one suggestion', 'notes.md: an old hand'],
+  });
+  assert.deepEqual(inputs.map((input) => input.text), ['notes.md:13: a new thought']);
+});
+
+test('memoryDelivery reports the texts of exactly the records it delivered', () => {
+  const records = [
+    { id: 'a', text: 'notes.md:1: kept' },
+    { id: 'b', text: 'notes.md:2: kept' },
+    { id: 'c', text: 'notes.md:3: past the cap' },
+  ];
+  const { lines, texts } = memoryDelivery(records, { maxRecords: 2 });
+  assert.equal(lines.length, 2);
+  assert.deepEqual(texts, ['notes.md:1: kept', 'notes.md:2: kept']);
 });

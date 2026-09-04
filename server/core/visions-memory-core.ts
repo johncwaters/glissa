@@ -174,25 +174,29 @@ function latestIntentHeads(records: unknown): Map<string, string> {
 }
 
 function dispatchMemoryInputs({
-  uri, project = null, comments = null, hand = null,
+  uri, project = null, comments = null, hand = null, delivered = null,
 }: {
   uri: string;
   project?: string | null;
   comments?: Array<{ line?: unknown; message?: unknown }> | null;
   hand?: unknown;
+  delivered?: string[] | null;
 }): MemoryRecordInput[] {
   const basename = basenameOfUri(uri);
+  const deliveredTexts = (Array.isArray(delivered) ? delivered : []).filter((text): text is string => typeof text === 'string');
+  const wasDelivered = (prefix: string): boolean => deliveredTexts.some((text) => text.startsWith(prefix));
   const inputs: Array<MemoryRecordInput | null> = [];
   for (const comment of Array.isArray(comments) ? comments : []) {
     const line = positiveInteger(comment?.line);
     const message = sanitizeOneLine(comment?.message, 600);
     if (line === null || !message) continue;
+    if (wasDelivered(`${basename}:${line}: `)) continue;
     inputs.push(memoryInput({
       kind: 'knowledge', layer: 'episodic', project, sourceKind: 'model', text: `${basename}:${line}: ${message}`,
     }));
   }
   const raised = sanitizeOneLine(hand, 600);
-  if (raised) {
+  if (raised && !wasDelivered(`${basename}: `)) {
     inputs.push(memoryInput({
       kind: 'knowledge', layer: 'episodic', project, sourceKind: 'model', text: `${basename}: ${raised}`,
     }));
@@ -264,11 +268,12 @@ function readDismissParams(params: unknown): { uri: string; id: string } | null 
 const MAX_DELIVERED_RECORDS = 8;
 const MAX_DELIVERED_CHARS = 4000;
 
-function memoryDeliveryLines(
+function memoryDelivery(
   records: unknown,
   { maxRecords = MAX_DELIVERED_RECORDS, maxChars = MAX_DELIVERED_CHARS }: { maxRecords?: number; maxChars?: number } = {},
-): string[] {
+): { lines: string[]; texts: string[] } {
   const lines: string[] = [];
+  const texts: string[] = [];
   let used = 0;
   for (const record of Array.isArray(records) ? records : []) {
     if (lines.length >= maxRecords) break;
@@ -279,8 +284,16 @@ function memoryDeliveryLines(
     if (used + line.length + 1 > maxChars) break;
     used += line.length + 1;
     lines.push(line);
+    texts.push(record.text);
   }
-  return lines;
+  return { lines, texts };
 }
 
-export { MAX_DELIVERED_CHARS, MAX_DELIVERED_RECORDS, MAX_FINDING_ID_CHARS, MAX_SERVED_KEYS, MEMORY_VENDOR, basenameOfUri, createBoundedKeySet, dismissFeedbackInput, dispatchMemoryInputs, displayLineOfFix, fixFeedbackInput, intentHeadKey, intentMemoryInput, latestIntentHeads, memoryDeliveryLines, projectTagFor, readDismissParams, servedFeedbackInput, servedFindingOf, servedKey, threadIdOfIntentText };
+function memoryDeliveryLines(
+  records: unknown,
+  options: { maxRecords?: number; maxChars?: number } = {},
+): string[] {
+  return memoryDelivery(records, options).lines;
+}
+
+export { MAX_DELIVERED_CHARS, MAX_DELIVERED_RECORDS, MAX_FINDING_ID_CHARS, MAX_SERVED_KEYS, MEMORY_VENDOR, basenameOfUri, createBoundedKeySet, dismissFeedbackInput, dispatchMemoryInputs, displayLineOfFix, fixFeedbackInput, intentHeadKey, intentMemoryInput, latestIntentHeads, memoryDelivery, memoryDeliveryLines, projectTagFor, readDismissParams, servedFeedbackInput, servedFindingOf, servedKey, threadIdOfIntentText };

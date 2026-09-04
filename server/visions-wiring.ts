@@ -71,7 +71,7 @@ import {
   intentHeadKey,
   intentMemoryInput,
   latestIntentHeads,
-  memoryDeliveryLines,
+  memoryDelivery,
   projectTagFor,
   readDismissParams,
   servedFeedbackInput,
@@ -119,6 +119,7 @@ interface MemorySection {
   text: string;
   count: number;
   version: string | null;
+  deliveredTexts: string[];
 }
 
 interface VisionsMemoryStore {
@@ -697,11 +698,14 @@ function createVisionsWiring({
     result: DispatchOutcome,
     doc: StoredDoc | null,
     send: (message: unknown) => void,
+    delivered: string[],
   ): boolean {
     const discarded = result.verdict === 'COMMENTS' && Array.isArray(result.comments) ? result.comments.length : 0;
     if (discarded > 0) note(`refused comments for ${uri}: orientation=${discarded}`);
     const hand = handFromResult(result);
-    rememberRecords(dispatchMemoryInputs({ uri, project: projectTagForUri(uri), comments: [], hand }));
+    rememberRecords(dispatchMemoryInputs({
+      uri, project: projectTagForUri(uri), comments: [], hand, delivered,
+    }));
     if (!hand) return true;
     const handUpdate = recordHand(uri, hand, doc);
     if (!handUpdate.changed) return true;
@@ -717,13 +721,14 @@ function createVisionsWiring({
     doc: StoredDoc | null,
     send: (message: unknown) => void,
     focus: { touchedRanges: TouchedRange[]; orientation: boolean; activeThread: IntentThread | null },
+    delivered: string[],
   ): boolean {
     if (result.verdict === 'ERROR') {
       warn(`dispatch for ${uri} failed: ${result.reason || 'no reason given'}`);
       return false;
     }
     if (result.reason) note(`dispatch for ${uri}: ${result.reason}`);
-    if (focus.orientation) return applyOrientationResult(uri, result, doc, send);
+    if (focus.orientation) return applyOrientationResult(uri, result, doc, send, delivered);
     const modelUpdate = recordModelDiagnostics(uri, result, doc, focus.touchedRanges);
     const filtered = filterComments({
       comments: result.verdict === 'COMMENTS' ? result.comments : [],
@@ -742,7 +747,7 @@ function createVisionsWiring({
       recordFindings(uri, merged);
     }
     rememberRecords(dispatchMemoryInputs({
-      uri, project: projectTagForUri(uri), comments, hand,
+      uri, project: projectTagForUri(uri), comments, hand, delivered,
     }));
     return true;
   }
@@ -765,12 +770,14 @@ function createVisionsWiring({
       const records = store.retrieve({
         query: text, project: projectTagForUri(uri), limit: memoryDeliveryLimit,
       });
-      const lines = memoryDeliveryLines(records, { maxRecords: memoryDeliveryLimit });
+      const { lines, texts } = memoryDelivery(records, { maxRecords: memoryDeliveryLimit });
       if (lines.length === 0) return null;
       const body = lines.join('\n');
       if (typeof store.noteDelivered === 'function') store.noteDelivered(body);
       debugNote(() => `memory: ${lines.length} record(s) delivered for ${uri}`);
-      return { text: body, count: lines.length, version: await readProjectionVersion(store) };
+      return {
+        text: body, count: lines.length, version: await readProjectionVersion(store), deliveredTexts: texts,
+      };
     } catch (error) {
       warn(`memory retrieval failed: ${errorMessage(error)}`);
       return null;
@@ -877,8 +884,10 @@ function createVisionsWiring({
         reviewConsumed = false;
         restoreReviewRanges(touchState, uri, reviewRanges, changesDuringDispatch, getDoc(store, uri)?.text ?? '');
       };
+      let deliveredTexts: string[] = [];
       const buildPromptThenDispatch = async (): Promise<DispatchOutcome | null> => {
         const memory = memoryStoreOf() ? await readMemorySection(uri, text) : null;
+        deliveredTexts = memory?.deliveredTexts ?? [];
         const digest = readContextDigest();
         const prompt = buildPrompt({
           uri,
@@ -952,7 +961,7 @@ function createVisionsWiring({
         result = carried.result;
       }
       const liveFocus = { ...focus, touchedRanges: touchedRangesFor(touchState, uri) };
-      const recorded = applyDispatchResult(uri, result, currentDoc, send, liveFocus);
+      const recorded = applyDispatchResult(uri, result, currentDoc, send, liveFocus, deliveredTexts);
       if (!recorded) {
         giveBackReview();
         return;
