@@ -132,7 +132,7 @@ test('npm run typecheck runs every root tsconfig project', () => {
 });
 
 test('no source tree holds a non-TypeScript module', () => {
-  const allowedPlainJs = new Set(['scripts/prepare-build.js', 'scripts/postinstall.mjs', 'scripts/build.mjs', 'test/container/ws-check.js']);
+  const allowedPlainJs = new Set(['scripts/prepare-build.js', 'scripts/postinstall.mjs', 'scripts/build.mjs', 'scripts/recover-handoff.mjs', 'test/container/ws-check.js']);
   const offenders: string[] = [];
   for (const file of checkedSourceFiles()) {
     if (/\.ts$|\.mts$|\.cts$/.test(file)) continue;

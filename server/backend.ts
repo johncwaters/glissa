@@ -1,12 +1,14 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import type { Server } from 'node:http';
+import path from 'node:path';
 import packageJson from '../package.json' with { type: 'json' };
 import { resolveAdapter } from '../session/adapters/index.ts';
 import type { Session } from '../session/sessions.ts';
-import { createConfigStore, generateProjectId, ensureProjectIds } from './config-store.ts';
+import { createConfigStore, generateProjectId, ensureProjectIds, glissaHomeDir } from './config-store.ts';
 import type { GlissaConfig } from './config-store.ts';
 import { createLifecycle } from './server-lifecycle.ts';
-import { spawn } from './child-process-safe.ts';
+import { execFileAsync, spawn } from './child-process-safe.ts';
 import { createBackendHttpApp } from './backend-http.ts';
 import { createBackendWebSockets } from './backend-websockets.ts';
 import type { ControlBroadcast } from './backend-websockets.ts';
@@ -26,8 +28,11 @@ import { createBackendHealth } from './backend-health.ts';
 import { createBackendNotifications } from './backend-notifications.ts';
 import { createBackendControl } from './backend-control.ts';
 import { createBackendUpdateCheck } from './backend-update.ts';
+import { normalizeUpdateChannel } from './core/update-core.ts';
 import type { CheckForUpdate } from './backend-update.ts';
 import { createBackendSessionRuntime } from './backend-session-runtime.ts';
+import { createUpdateApplyLane } from './update-apply.ts';
+import { packageRoot } from './runtime-paths.ts';
 
 interface CreateBackendOptions extends BackendLaneOptions {
   staticDir?: string | null;
@@ -238,6 +243,7 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
 
   function applySettingsReload(newConfig: GlissaConfig): void {
     configStore.applySettings(newConfig);
+    updateCheck.applySettings();
     for (const [, sess] of sessions) {
       sess.updateSettings(config);
     }
@@ -253,7 +259,20 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     isLocalConfig: configStore.isLocalConfig,
     currentVersion: packageJson.version,
     checkForUpdate: options.checkForUpdate || undefined,
+    fetchOrigin: (args) => assembledGitWorkspace.fetchOrigin(args),
+    getUpdateJournal: () => updateApply.getJournal(),
     getControlClientCount: () => controlWss.clients.size,
+    broadcastControl,
+    logger: console,
+  });
+  const updateApply = createUpdateApplyLane({
+    gitWorkspace: assembledGitWorkspace,
+    runCommand: execFileAsync,
+    fsPromises: fs.promises,
+    packageRoot,
+    journalPath: path.join(glissaHomeDir(), 'update-journal.json'),
+    getUpdateStatus: updateCheck.getStatus,
+    getUpdateChannel: () => normalizeUpdateChannel(config.updateChannel),
     broadcastControl,
     logger: console,
   });
@@ -264,6 +283,7 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     getStopConfigWatch: () => stopConfigWatch,
     remoteAuth,
     stopUpdateCheck: updateCheck.stop,
+    stopUpdateApply: updateApply.stop,
     notificationManager,
     telegramChannel,
     sessions,
@@ -295,6 +315,7 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     httpServer,
     onRestart: options.onRestart || null,
     spawn,
+    beforeHandOff: updateApply.handOffStagedUpdate,
   });
 
   createBackendControl({
@@ -315,6 +336,11 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     handleClientFocus,
     buildHealthSnapshot,
     getUpdateStatus: updateCheck.getStatus,
+    getUpdateJournal: updateApply.getJournal,
+    checkNow: updateCheck.checkNow,
+    applyUpdate: updateApply.applyUpdate,
+    isStaging: updateApply.isStaging,
+    noteRestartRequested: updateApply.noteRestartRequested,
     laneAssembly,
     posthog,
     prReview,
@@ -328,6 +354,7 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
   webSockets.attachDataConnection();
   const { handleUpgrade } = webSockets;
   httpServer.on('upgrade', handleUpgrade);
+  updateApply.startAfterListening(httpServer);
 
   stopConfigWatch = configStore.watchForChanges((newConfig) => {
     applyConfigReload(newConfig);

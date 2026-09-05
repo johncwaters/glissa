@@ -20,6 +20,7 @@ interface BackendShutdownDependencies {
   getStopConfigWatch: () => (() => void) | null;
   remoteAuth: { stop: () => void } | null;
   stopUpdateCheck: () => void;
+  stopUpdateApply?: () => unknown;
   notificationManager: { destroy: () => void };
   telegramChannel: { destroy: () => void };
   sessions: Map<string, ShutdownSession>;
@@ -82,6 +83,7 @@ function createBackendShutdown(dependencies: BackendShutdownDependencies): () =>
     if (stopConfigWatch) stopConfigWatch();
     if (dependencies.remoteAuth) dependencies.remoteAuth.stop();
     dependencies.stopUpdateCheck();
+    if (dependencies.stopUpdateApply) stoppers.add('update-apply', () => dependencies.stopUpdateApply?.());
 
     dependencies.notificationManager.destroy();
     dependencies.telegramChannel.destroy();

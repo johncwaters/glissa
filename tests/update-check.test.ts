@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { checkForUpdate } from '../server/update-check.ts';
+import { MAIN_FETCH_TIMEOUT_MS, checkForUpdate } from '../server/update-check.ts';
 import type { CheckForUpdateOptions } from '../server/update-check.ts';
 
 const SHA_LOCAL = '0123456789abcdef0123456789abcdef01234567';
@@ -189,13 +189,13 @@ test('releases/latest is the fallback when git ls-remote has no valid release ta
   assert.equal(statusOf(result).latestSha, null);
 });
 
-test('resolves null when the releases/latest fallback body is not JSON', async () => {
+test('records a failed status when the releases/latest fallback body is not JSON', async () => {
   const fixture = makeTempRoot();
   const result = await checkForUpdate(baseOptions(fixture, {
     runCommand: fakeGit({}),
     fetchFn: async () => new Response('not json'),
   }));
-  assert.equal(result, null);
+  assert.equal(statusOf(result).reason, 'release-check-failed');
 });
 
 test('same version is no update even when shas differ', async () => {
@@ -209,23 +209,23 @@ test('same version is no update even when shas differ', async () => {
   assert.equal(statusOf(result).latestSha, SHA_RELEASE_COMMIT);
 });
 
-test('resolves null when no latest release version could be read', async () => {
+test('records a failed status when no latest release version could be read', async () => {
   const fixture = makeTempRoot();
   writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glissa.git#${SHA_LOCAL}`);
   const result = await checkForUpdate(baseOptions(fixture, {
     runCommand: fakeGit({}),
     fetchFn: fakeFetch({ throws: new Error('network down') }),
   }));
-  assert.equal(result, null);
+  assert.equal(statusOf(result).reason, 'release-check-failed');
 });
 
-test('resolves null on a non-200 latest release response', async () => {
+test('records a failed status on a non-200 latest release response', async () => {
   const fixture = makeTempRoot();
   const result = await checkForUpdate(baseOptions(fixture, {
     runCommand: fakeGit({}),
     fetchFn: fakeFetch({ version: '0.21.0', ok: false }),
   }));
-  assert.equal(result, null);
+  assert.equal(statusOf(result).reason, 'release-check-failed');
 });
 
 test('does not write throttle state when no release version resolves', async () => {
@@ -234,18 +234,18 @@ test('does not write throttle state when no release version resolves', async () 
     runCommand: fakeGit({}),
     fetchFn: fakeFetch({ ok: false }),
   }));
-  assert.equal(result, null);
+  assert.equal(statusOf(result).reason, 'release-check-failed');
   assert.equal(fs.existsSync(fixture.statePath), false);
 });
 
-test('resolves null when the request times out', async () => {
+test('records a failed status when the request times out', async () => {
   const fixture = makeTempRoot();
   const result = await checkForUpdate(baseOptions(fixture, {
     runCommand: fakeGit({}),
     fetchFn: hangingFetch,
     timeoutMs: 5,
   }));
-  assert.equal(result, null);
+  assert.equal(statusOf(result).reason, 'release-check-failed');
 });
 
 test('aborts an in-flight request when the caller aborts', async () => {
@@ -258,7 +258,7 @@ test('aborts an in-flight request when the caller aborts', async () => {
     abortController,
   }));
   abortController.abort();
-  assert.equal(await pending, null);
+  assert.equal(statusOf(await pending).reason, 'update-check-failed');
 });
 
 test('an unwritable state path never breaks the check', async () => {
@@ -275,7 +275,14 @@ test('a real check persists the latest version and nullable sha', async () => {
   writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glissa.git#${SHA_LOCAL}`);
   await checkForUpdate(baseOptions(fixture));
   const state = JSON.parse(fs.readFileSync(fixture.statePath, 'utf8'));
-  assert.deepEqual(state, { lastCheckAt: 1000, latestVersion: '0.21.0', latestSha: SHA_RELEASE_COMMIT });
+  assert.deepEqual(state, {
+    lastCheckAt: 1000,
+    channel: 'release',
+    latestVersion: '0.21.0',
+    latestSha: SHA_RELEASE_COMMIT,
+    behindCount: null,
+    reason: null,
+  });
 });
 
 test('a releases/latest fallback persists a nullable sha', async () => {
@@ -285,13 +292,25 @@ test('a releases/latest fallback persists a nullable sha', async () => {
     fetchFn: fakeFetch({ version: '0.21.0' }),
   }));
   const state = JSON.parse(fs.readFileSync(fixture.statePath, 'utf8'));
-  assert.deepEqual(state, { lastCheckAt: 1000, latestVersion: '0.21.0', latestSha: null });
+  assert.deepEqual(state, {
+    lastCheckAt: 1000,
+    channel: 'release',
+    latestVersion: '0.21.0',
+    latestSha: null,
+    behindCount: null,
+    reason: null,
+  });
 });
 
 test('a fresh state is reused and no network call is made', async () => {
   const fixture = makeTempRoot();
   writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glissa.git#${SHA_LOCAL}`);
-  fs.writeFileSync(fixture.statePath, JSON.stringify({ lastCheckAt: 1000, latestVersion: '0.21.0', latestSha: SHA_RELEASE_COMMIT }), 'utf8');
+  fs.writeFileSync(fixture.statePath, JSON.stringify({
+    lastCheckAt: 1000,
+    channel: 'release',
+    latestVersion: '0.21.0',
+    latestSha: SHA_RELEASE_COMMIT,
+  }), 'utf8');
   let networkCalls = 0;
   const result = await checkForUpdate(baseOptions(fixture, {
     now: 1000 + 60 * 60 * 1000,
@@ -310,7 +329,7 @@ test('a fresh state is reused and no network call is made', async () => {
   assert.equal(statusOf(result).updateAvailable, true);
 });
 
-test('a fresh old-shape state is tolerated when it has a latest version', async () => {
+test('a fresh cache with no channel is ignored', async () => {
   const fixture = makeTempRoot();
   fs.writeFileSync(fixture.statePath, JSON.stringify({
     lastCheckAt: 1000,
@@ -321,10 +340,10 @@ test('a fresh old-shape state is tolerated when it has a latest version', async 
   }), 'utf8');
   const result = await checkForUpdate(baseOptions(fixture, {
     now: 1000 + 60 * 60 * 1000,
-    runCommand: async () => { throw new Error('should not be called'); },
+    runCommand: fakeGit({ tags: tagsStdout({ version: '0.22.0' }) }),
     fetchFn: async () => { throw new Error('should not be called'); },
   }));
-  assert.equal(statusOf(result).latest, '0.21.0');
+  assert.equal(statusOf(result).latest, '0.22.0');
   assert.equal(statusOf(result).latestSha, SHA_RELEASE_COMMIT);
   assert.equal(statusOf(result).updateAvailable, true);
 });
@@ -364,4 +383,186 @@ test('a corrupt state file is replaced after a successful check', async () => {
   assert.equal(statusOf(result).latestSha, SHA_RELEASE_COMMIT);
   const state = JSON.parse(fs.readFileSync(fixture.statePath, 'utf8'));
   assert.equal(state.latestVersion, '0.21.0');
+});
+
+test('main channel resolves the upstream tip and reports commits behind after fetching', async () => {
+  const fixture = makeTempRoot();
+  fs.mkdirSync(path.join(fixture.packageRoot, '.git'));
+  const commands: string[][] = [];
+  let fetches = 0;
+  const runCommand: RunCommand = async (_file, ...rest) => {
+    const args = argvOf(rest);
+    commands.push(args);
+    if (args.join(' ') === 'rev-parse HEAD') return { stdout: `${SHA_LOCAL}\n`, stderr: '' };
+    if (args.join(' ') === 'rev-parse --abbrev-ref HEAD') return { stdout: 'main\n', stderr: '' };
+    if (args.join(' ') === 'rev-parse --abbrev-ref @{upstream}') return { stdout: 'origin/main\n', stderr: '' };
+    if (args[0] === 'status') return { stdout: '', stderr: '' };
+    if (args.join(' ') === 'ls-remote origin refs/heads/main') {
+      return { stdout: `${SHA_RELEASE_COMMIT}\trefs/heads/main\n`, stderr: '' };
+    }
+    if (args[0] === 'rev-list') return { stdout: '0\t4\n', stderr: '' };
+    throw new Error(`unexpected git ${args.join(' ')}`);
+  };
+  const status = statusOf(await checkForUpdate(baseOptions(fixture, {
+    updateChannel: 'main',
+    runCommand,
+    fetchOrigin: async () => {
+      fetches += 1;
+      return { ok: true, out: '' };
+    },
+  })));
+  assert.equal(fetches, 1);
+  assert.equal(status.channel, 'main');
+  assert.equal(status.installedBranch, 'main');
+  assert.equal(status.upstream, 'origin/main');
+  assert.equal(status.isTreeClean, true);
+  assert.equal(status.latestSha, SHA_RELEASE_COMMIT);
+  assert.equal(status.behindCount, 4);
+  assert.equal(status.updateAvailable, true);
+  assert.ok(commands.some((args) => args.join(' ') === `rev-list --left-right --count HEAD...${SHA_RELEASE_COMMIT}`));
+});
+
+test('main channel reports no-upstream without querying a remote tip', async () => {
+  const fixture = makeTempRoot();
+  fs.mkdirSync(path.join(fixture.packageRoot, '.git'));
+  let remoteQueries = 0;
+  const runCommand: RunCommand = async (_file, ...rest) => {
+    const args = argvOf(rest);
+    if (args.join(' ') === 'rev-parse HEAD') return { stdout: `${SHA_LOCAL}\n`, stderr: '' };
+    if (args.join(' ') === 'rev-parse --abbrev-ref HEAD') return { stdout: 'main\n', stderr: '' };
+    if (args.join(' ') === 'rev-parse --abbrev-ref @{upstream}') throw new Error('no upstream');
+    if (args[0] === 'status') return { stdout: '', stderr: '' };
+    if (args[0] === 'ls-remote') remoteQueries += 1;
+    throw new Error(`unexpected git ${args.join(' ')}`);
+  };
+  const status = statusOf(await checkForUpdate(baseOptions(fixture, {
+    updateChannel: 'main',
+    runCommand,
+  })));
+  assert.equal(status.reason, 'no-upstream');
+  assert.equal(status.updateAvailable, false);
+  assert.equal(remoteQueries, 0);
+});
+
+test('a cache entry is ignored when its channel does not match', async () => {
+  const fixture = makeTempRoot();
+  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glissa.git#${SHA_LOCAL}`);
+  fs.writeFileSync(fixture.statePath, JSON.stringify({
+    lastCheckAt: 1000,
+    channel: 'main',
+    latestVersion: null,
+    latestSha: SHA_LOCAL,
+    behindCount: 0,
+  }), 'utf8');
+  let releaseQueries = 0;
+  const status = statusOf(await checkForUpdate(baseOptions(fixture, {
+    now: 2000,
+    runCommand: async (file, ...rest) => {
+      if (argvOf(rest)[0] === 'ls-remote') releaseQueries += 1;
+      return fakeGit({ tags: tagsStdout() })(file, ...rest);
+    },
+  })));
+  assert.equal(releaseQueries, 1);
+  assert.equal(status.channel, 'release');
+  assert.equal(status.latest, '0.21.0');
+});
+
+test('a fresh cache is discarded once the installed sha is the sha it names', async () => {
+  const fixture = makeTempRoot();
+  fs.mkdirSync(path.join(fixture.packageRoot, '.git'));
+  fs.writeFileSync(fixture.statePath, JSON.stringify({
+    lastCheckAt: 1000,
+    channel: 'main',
+    latestVersion: null,
+    latestSha: SHA_LOCAL,
+    behindCount: 6,
+  }), 'utf8');
+  let remoteTipQueries = 0;
+  const runCommand: RunCommand = async (_file, ...rest) => {
+    const args = argvOf(rest);
+    if (args.join(' ') === 'rev-parse HEAD') return { stdout: `${SHA_LOCAL}\n`, stderr: '' };
+    if (args.join(' ') === 'rev-parse --abbrev-ref HEAD') return { stdout: 'main\n', stderr: '' };
+    if (args.join(' ') === 'rev-parse --abbrev-ref @{upstream}') return { stdout: 'origin/main\n', stderr: '' };
+    if (args[0] === 'status') return { stdout: '', stderr: '' };
+    if (args[0] === 'ls-remote') {
+      remoteTipQueries += 1;
+      return { stdout: `${SHA_LOCAL}\trefs/heads/main\n`, stderr: '' };
+    }
+    if (args[0] === 'rev-list') return { stdout: '0\t0\n', stderr: '' };
+    throw new Error(`unexpected git ${args.join(' ')}`);
+  };
+  const status = statusOf(await checkForUpdate(baseOptions(fixture, {
+    updateChannel: 'main',
+    now: 1000 + 60 * 60 * 1000,
+    runCommand,
+    fetchOrigin: async () => ({ ok: true, out: '' }),
+  })));
+  assert.equal(remoteTipQueries, 1, 'the cached count against the old head is never trusted');
+  assert.equal(status.behindCount, 0);
+  assert.equal(status.updateAvailable, false);
+});
+
+test('the main-channel fetch takes a fraction of the budget so the probes after it still run', async () => {
+  const fixture = makeTempRoot();
+  fs.mkdirSync(path.join(fixture.packageRoot, '.git'));
+  const fetchTimeouts: Array<number | undefined> = [];
+  const probeTimeouts: Array<{ args: string; timeout: number }> = [];
+  const runCommand: RunCommand = async (_file, ...rest) => {
+    const args = argvOf(rest);
+    const options = rest[1] && typeof rest[1] === 'object' ? rest[1] as Record<string, unknown> : {};
+    if (args[0] === 'ls-remote' || args[0] === 'rev-list') {
+      probeTimeouts.push({ args: args[0], timeout: Number(options.timeout) });
+    }
+    if (args.join(' ') === 'rev-parse HEAD') return { stdout: `${SHA_LOCAL}\n`, stderr: '' };
+    if (args.join(' ') === 'rev-parse --abbrev-ref HEAD') return { stdout: 'main\n', stderr: '' };
+    if (args.join(' ') === 'rev-parse --abbrev-ref @{upstream}') return { stdout: 'origin/main\n', stderr: '' };
+    if (args[0] === 'status') return { stdout: '', stderr: '' };
+    if (args[0] === 'ls-remote') return { stdout: `${SHA_RELEASE_COMMIT}\trefs/heads/main\n`, stderr: '' };
+    if (args[0] === 'rev-list') return { stdout: '0\t2\n', stderr: '' };
+    throw new Error(`unexpected git ${args.join(' ')}`);
+  };
+  const status = statusOf(await checkForUpdate(baseOptions(fixture, {
+    updateChannel: 'main',
+    timeoutMs: 8000,
+    runCommand,
+    fetchOrigin: async ({ timeoutMs }) => {
+      fetchTimeouts.push(timeoutMs);
+      return { ok: true, out: '' };
+    },
+  })));
+  assert.deepEqual(fetchTimeouts, [MAIN_FETCH_TIMEOUT_MS]);
+  assert.ok(MAIN_FETCH_TIMEOUT_MS < 8000);
+  const budgetLeftForProbes = probeTimeouts.reduce((total, probe) => total + probe.timeout, 0);
+  assert.equal(MAIN_FETCH_TIMEOUT_MS + budgetLeftForProbes, 8000);
+  assert.equal(status.behindCount, 2);
+});
+
+test('an abort between main-channel steps stops the remaining probes', async () => {
+  const fixture = makeTempRoot();
+  fs.mkdirSync(path.join(fixture.packageRoot, '.git'));
+  const abortController = new AbortController();
+  let remoteTipQueries = 0;
+  const runCommand: RunCommand = async (_file, ...rest) => {
+    const args = argvOf(rest);
+    if (args.join(' ') === 'rev-parse HEAD') return { stdout: `${SHA_LOCAL}\n`, stderr: '' };
+    if (args.join(' ') === 'rev-parse --abbrev-ref HEAD') return { stdout: 'main\n', stderr: '' };
+    if (args.join(' ') === 'rev-parse --abbrev-ref @{upstream}') return { stdout: 'origin/main\n', stderr: '' };
+    if (args[0] === 'status') return { stdout: '', stderr: '' };
+    if (args[0] === 'ls-remote') {
+      remoteTipQueries += 1;
+      return { stdout: `${SHA_RELEASE_COMMIT}\trefs/heads/main\n`, stderr: '' };
+    }
+    throw new Error(`unexpected git ${args.join(' ')}`);
+  };
+  const status = statusOf(await checkForUpdate(baseOptions(fixture, {
+    updateChannel: 'main',
+    abortController,
+    runCommand,
+    fetchOrigin: async () => {
+      abortController.abort();
+      return { ok: true, out: '' };
+    },
+  })));
+  assert.equal(remoteTipQueries, 0);
+  assert.equal(status.reason, 'remote-tip-unavailable');
 });

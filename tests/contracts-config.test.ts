@@ -13,7 +13,17 @@ import {
 test('DEFAULT_CONFIG satisfies the persisted Config contract', () => {
   assert.equal(Config.safeParse(DEFAULT_CONFIG).success, true);
   assert.equal(DEFAULT_CONFIG.integrationBranch, null);
+  assert.equal(DEFAULT_CONFIG.updateChannel, 'release');
   assert.equal(Config.shape.integrationBranch.safeParse(null).success, true);
+});
+
+test('updateChannel accepts release and main across config boundaries', () => {
+  for (const updateChannel of ['release', 'main']) {
+    assert.equal(Config.safeParse({ ...DEFAULT_CONFIG, updateChannel }).success, true);
+    assert.equal(BrowserConfig.safeParse({ updateChannel }).success, true);
+    assert.equal(ConfigUpdate.safeParse({ updateChannel }).success, true);
+  }
+  assert.equal(ConfigUpdate.safeParse({ updateChannel: 'nightly' }).success, false);
 });
 
 test('mill measurement retention crosses file, browser, and update boundaries', () => {

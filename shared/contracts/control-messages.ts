@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PendingWakeup, SessionSnapshot, SessionState } from './session.ts';
+import { UpdateChannel, UpdateJournal, UpdateJournalSummary } from './update-journal.ts';
 
 const requestId = z.string().nullable().optional();
 const sessionId = z.string();
@@ -12,6 +13,28 @@ const optionalError = nullableString.optional();
 const opaqueObject = openObject();
 const opaqueArray = z.array(z.unknown());
 const trailSteps = z.array(openObject({ at: timestamp, tool: z.string(), detail: z.string() }));
+
+const updateStatusShape = {
+  updateAvailable: z.boolean(),
+  current: nullableString,
+  latest: nullableString,
+  currentSha: nullableString,
+  latestSha: nullableString,
+  releaseUrl: nullableString,
+  command: z.string(),
+  flavor: z.enum(['npm-global', 'clone', 'unknown']),
+  installedBranch: nullableString,
+  upstream: nullableString,
+  isTreeClean: z.boolean().nullable(),
+  lastCheckAt: timestamp,
+  channel: UpdateChannel,
+  behindCount: z.number().int().nonnegative().nullable(),
+  reason: nullableString,
+  journalSummary: UpdateJournalSummary.nullable(),
+};
+
+export const UpdateStatus = z.object(updateStatusShape);
+export type UpdateStatus = z.infer<typeof UpdateStatus>;
 
 export const CLIENT_MESSAGE_TYPES = Object.freeze([
   'add-session',
@@ -54,6 +77,8 @@ export const CLIENT_MESSAGE_TYPES = Object.freeze([
   'restart-server',
   'focus-change',
   'request-health-snapshot',
+  'update-check',
+  'update-apply',
 ]);
 
 const idOnlyClientTypes = [
@@ -87,6 +112,8 @@ const clientVariants = [
   loose('restart-server'),
   loose('focus-change', { focused: z.boolean() }),
   loose('request-health-snapshot'),
+  loose('update-check'),
+  loose('update-apply'),
   ...idOnlyClientTypes.map((type) => loose(type, { id: sessionId, force: z.unknown().optional() })),
 ] as const;
 
@@ -123,7 +150,8 @@ export const SERVER_MESSAGE_TYPES = Object.freeze([
   'post-turn-result',
   'debug-state-response',
   'notify',
-  'update-available',
+  'update-status',
+  'update-progress',
   'error',
   'session-error',
   'settings',
@@ -302,16 +330,8 @@ const serverVariants = [
     message: z.string(),
     escalationCount: z.number().int().nonnegative(),
   }),
-  loose('update-available', {
-    updateAvailable: z.boolean(),
-    current: z.string(),
-    latest: z.string(),
-    currentSha: nullableString,
-    latestSha: nullableString,
-    releaseUrl: z.string(),
-    command: z.string(),
-    flavor: z.string(),
-  }),
+  loose('update-status', updateStatusShape),
+  loose('update-progress', { journal: UpdateJournal }),
   loose('error', { message: z.string(), requestId }),
   loose('session-error', { id: sessionId.optional(), session: z.string(), message: z.string() }),
   loose('settings', { settings: opaqueObject, requestId }),

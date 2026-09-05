@@ -213,6 +213,153 @@ test('supervised restart exits non-zero WITHOUT respawning (systemd starts the r
   assert.deepEqual(exits, [SUPERVISED_RESTART_EXIT_CODE], 'non-zero so Restart=on-failure fires');
 });
 
+test('beforeHandOff runs once when the close callback fires first', async () => {
+  let handOffCalls = 0;
+  const lifecycle = createLifecycle({
+    shutdown: () => [],
+    httpServer: fakeHttpServer(),
+    onRestart: null,
+    env: SYSTEMD,
+    spawn: fakeSpawn().fn,
+    exit: () => {},
+    log: () => {},
+    closeTimeoutMs: 20,
+    beforeHandOff: async () => { handOffCalls += 1; },
+  });
+  await lifecycle.requestRestart();
+  assert.equal(handOffCalls, 1);
+});
+
+test('beforeHandOff runs once when the close fallback fires first', async () => {
+  let handOffCalls = 0;
+  const lifecycle = createLifecycle({
+    shutdown: () => [],
+    httpServer: { close() {} },
+    onRestart: null,
+    env: SYSTEMD,
+    spawn: fakeSpawn().fn,
+    exit: () => {},
+    log: () => {},
+    closeTimeoutMs: 1,
+    beforeHandOff: async () => { handOffCalls += 1; },
+  });
+  await lifecycle.requestRestart();
+  assert.equal(handOffCalls, 1);
+});
+
+test('restart handoff waits for beforeHandOff to settle', async () => {
+  const handOffReady = deferredResolve();
+  const exits: (number | undefined)[] = [];
+  const lifecycle = createLifecycle({
+    shutdown: () => [],
+    httpServer: fakeHttpServer(),
+    onRestart: null,
+    env: SYSTEMD,
+    spawn: fakeSpawn().fn,
+    exit: (code) => exits.push(code),
+    log: () => {},
+    beforeHandOff: () => handOffReady.promise,
+  });
+  const restarting = lifecycle.requestRestart();
+  await tick();
+  assert.deepEqual(exits, []);
+  handOffReady.resolve();
+  await restarting;
+  assert.deepEqual(exits, [SUPERVISED_RESTART_EXIT_CODE]);
+});
+
+test('a rejecting beforeHandOff is logged and restart still hands off', async () => {
+  const exits: (number | undefined)[] = [];
+  const logs: string[] = [];
+  const lifecycle = createLifecycle({
+    shutdown: () => [],
+    httpServer: fakeHttpServer(),
+    onRestart: null,
+    env: SYSTEMD,
+    spawn: fakeSpawn().fn,
+    exit: (code) => exits.push(code),
+    log: (message) => logs.push(message),
+    beforeHandOff: async () => { throw new Error('swap failed'); },
+  });
+  await lifecycle.requestRestart();
+  assert.deepEqual(exits, [SUPERVISED_RESTART_EXIT_CODE]);
+  assert.equal(logs.some((message) => message.includes('before handoff failed: swap failed')), true);
+});
+
+test('the in-process restart path runs beforeHandOff before restarting', async () => {
+  const order: string[] = [];
+  const lifecycle = createLifecycle({
+    shutdown: () => [],
+    httpServer: fakeHttpServer(),
+    onRestart: () => { order.push('restart'); },
+    env: UNSUPERVISED,
+    spawn: fakeSpawn().fn,
+    exit: () => {},
+    log: () => {},
+    beforeHandOff: async () => { order.push('handoff'); },
+  });
+  await lifecycle.requestRestart();
+  assert.deepEqual(order, ['handoff', 'restart']);
+});
+
+test('a beforeHandOff that never settles is bounded and the restart still hands off', async () => {
+  const exits: (number | undefined)[] = [];
+  const logs: string[] = [];
+  const lifecycle = createLifecycle({
+    shutdown: () => [],
+    httpServer: fakeHttpServer(),
+    onRestart: null,
+    env: SYSTEMD,
+    spawn: fakeSpawn().fn,
+    exit: (code) => exits.push(code),
+    log: (message) => logs.push(message),
+    beforeHandOff: () => new Promise<void>(() => {}),
+    beforeHandOffCapMs: 5,
+  });
+  await lifecycle.requestRestart();
+  assert.deepEqual(exits, [SUPERVISED_RESTART_EXIT_CODE]);
+  assert.equal(logs.some((message) => message.includes('before handoff exceeded 5ms')), true);
+});
+
+test('the default five minute cap is the last resort a handoff bounded by its own timeouts never reaches', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const exits: (number | undefined)[] = [];
+  const logs: string[] = [];
+  const handOffReady = deferredResolve();
+  const lifecycle = createLifecycle({
+    shutdown: () => [],
+    httpServer: fakeHttpServer(),
+    onRestart: null,
+    env: SYSTEMD,
+    spawn: fakeSpawn().fn,
+    exit: (code) => exits.push(code),
+    log: (message) => logs.push(message),
+    beforeHandOff: () => handOffReady.promise,
+  });
+  const restarted = lifecycle.requestRestart();
+  t.mock.timers.tick(299_999);
+  assert.deepEqual(exits, [], 'the cap has not fired yet');
+  handOffReady.resolve();
+  await restarted;
+  assert.deepEqual(exits, [SUPERVISED_RESTART_EXIT_CODE]);
+  assert.equal(logs.some((message) => message.includes('before handoff exceeded')), false);
+});
+
+test('requestShutdown never calls beforeHandOff', async () => {
+  let handOffCalls = 0;
+  const lifecycle = createLifecycle({
+    shutdown: () => [],
+    httpServer: fakeHttpServer(),
+    onRestart: null,
+    env: SYSTEMD,
+    spawn: fakeSpawn().fn,
+    exit: () => {},
+    beforeHandOff: async () => { handOffCalls += 1; },
+  });
+  await lifecycle.requestShutdown();
+  assert.equal(handOffCalls, 0);
+});
+
 test('supervised SHUTDOWN still exits 0 so the unit stays down', async () => {
   const exits: (number | undefined)[] = [];
   const lc = createLifecycle({

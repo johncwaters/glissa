@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileAsync, execFileSync } from '../server/child-process-safe.ts';
-import { createSerialQueue } from './spawn-gate.ts';
+import { createSerialQueue, isQueueAdmissionTimeout } from './spawn-gate.ts';
 import { matchedPrefix, sessionIdFromBranch, usablePrefixes } from './core/branch-gc-core.ts';
 import { comparableDirectoryPath } from '../shared/paths.ts';
 import type { RemoteBranchTip } from './core/branch-gc-core.ts';
@@ -20,6 +20,7 @@ import type { MarkerProbes } from './core/integration-branch-core.ts';
 import { MERGE_DRIVER_KEY_PATTERN, driverEnumerationEnv, mergeProbeEnv, neutralGitConfigEnv } from './core/merge-proof-core.ts';
 import type { MergeProbeEnvResult, MergeTreeOutcome } from './core/merge-proof-core.ts';
 import type { IntegrationSyncOutcome } from './core/integration-sync-core.ts';
+import { normalizeSha } from './core/update-core.ts';
 
 const fsp = fs.promises;
 
@@ -46,6 +47,7 @@ type WorkspaceHandle = {
 };
 type WorktreeArgs = {
   projectPath: string;
+  admissionTimeoutMs?: number;
   workspace?: WorkspaceHandle | null;
   targetBranch?: string | null;
   integrationBranch?: string | null;
@@ -117,7 +119,23 @@ type IntegrationTip = { branch: string; sha: string | null };
 type BaseClassification = { state: string; upstream: string };
 type BaseSyncResult = BaseClassification & { fetched: boolean | null; error?: string };
 type MergeTreeProbe = GitResult & { outcome: MergeTreeOutcome };
+type MergeFastForwardOutcome = 'invalid-target-sha' | 'merged' | 'head-mismatch' | 'head-unreadable' | 'merge-failed' | 'queue-admission-timed-out';
+type MergeFastForwardResult = GitResult & {
+  sampledHead: string | null;
+  outcome: MergeFastForwardOutcome;
+};
+type QueuedGitResult = GitResult & { admissionRefused?: boolean };
+type WorktreeDirtyProbe = { ok: boolean; dirty: boolean; headSha: string | null; err?: string; admissionRefused?: boolean };
 type MergeProbeEnvArgs = { projectPath: string; timeoutMs?: number };
+type StageDetachedWorktreeArgs = { projectPath: string; worktreePath?: string; sha?: string };
+type MergeFastForwardArgs = {
+  projectPath: string;
+  expectedHead?: string;
+  sha?: string;
+  timeoutMs?: number;
+  admissionTimeoutMs?: number;
+};
+type ResetKeepArgs = { projectPath: string; expectedHead?: string; sha?: string; timeoutMs?: number; admissionTimeoutMs?: number };
 type MergeTreeArgs = {
   projectPath: string;
   integrationSha: string;
@@ -261,7 +279,19 @@ function createGitWorkspace(opts: {
 
   const engineQueue = createSerialQueue();
   const serialize = <T>(fn: () => Promise<T>): Promise<T> => engineQueue.run(fn);
-  const serialized = <T>(body: (args: WorktreeArgs) => Promise<T>) => (args: WorktreeArgs): Promise<T> => serialize(() => body(args));
+  const serialized = <TArgs, TResult>(body: (args: TArgs) => Promise<TResult>) => (args: TArgs): Promise<TResult> => serialize(() => body(args));
+  const admitted = <TArgs extends { admissionTimeoutMs?: number }, TResult>(
+    body: (args: TArgs) => Promise<TResult>,
+    refuse: (args: TArgs) => TResult,
+  ) => async (args: TArgs): Promise<TResult> => {
+    const admission = args.admissionTimeoutMs === undefined ? {} : { admissionTimeoutMs: args.admissionTimeoutMs };
+    try {
+      return await engineQueue.run(() => body(args), admission);
+    } catch (error) {
+      if (!isQueueAdmissionTimeout(error)) throw error;
+      return refuse(args);
+    }
+  };
 
   async function run(args: string[], cwd: string, extra?: GitExtraOptions): Promise<GitResult> {
     try { return okResult(await git(args, cwd, extra)); }
@@ -820,7 +850,7 @@ function createGitWorkspace(opts: {
     });
   }
 
-  async function probeWorktreeDirtyBody({ cwd }: WorktreeArgs): Promise<{ ok: boolean; dirty: boolean; headSha: string | null; err?: string }> {
+  async function probeWorktreeDirtyBody({ cwd }: WorktreeArgs): Promise<WorktreeDirtyProbe> {
     if (!cwd) return { ok: false, dirty: true, headSha: null, err: 'a worktree status probe needs a path' };
     const status = await run(WORKTREE_STATUS_ARGS, cwd);
     if (!status.ok) return { ok: false, dirty: true, headSha: null, err: status.err };
@@ -829,7 +859,7 @@ function createGitWorkspace(opts: {
     return { ok: true, dirty: status.out !== '', headSha: head.out };
   }
 
-  async function removeWorktreeByPathBody({ projectPath, cwd, branch }: WorktreeArgs): Promise<GitResult> {
+  async function removeWorktreeByPathBody({ projectPath, cwd, branch }: WorktreeArgs): Promise<QueuedGitResult> {
     let failure: GitResult | null = null;
     if (cwd) {
       removeWorktreeLinks(cwd);
@@ -863,6 +893,63 @@ function createGitWorkspace(opts: {
       ], projectPath, fetchOptions);
     }
     return run(['fetch', '--prune', 'origin'], projectPath, fetchOptions);
+  }
+
+  async function stageDetachedWorktreeBody({ projectPath, worktreePath, sha }: StageDetachedWorktreeArgs): Promise<GitResult> {
+    if (!worktreePath) return { ok: false, out: '', err: 'a detached worktree needs a path' };
+    if (normalizeSha(sha) !== sha) return { ok: false, out: '', err: 'a detached worktree sha must be 40 lowercase hexadecimal characters' };
+    return run(['worktree', 'add', '--detach', worktreePath, sha], projectPath);
+  }
+
+  async function mergeFastForwardToBody({ projectPath, expectedHead, sha, timeoutMs }: MergeFastForwardArgs): Promise<MergeFastForwardResult> {
+    if (normalizeSha(sha) !== sha) {
+      return {
+        ok: false,
+        out: '',
+        err: 'a fast-forward merge needs a 40 lowercase hexadecimal target sha',
+        sampledHead: null,
+        outcome: 'invalid-target-sha',
+      };
+    }
+    const commandOptions = timeoutMs ? { timeout: timeoutMs } : undefined;
+    const head = await run(['rev-parse', 'HEAD'], projectPath, commandOptions);
+    if (!head.ok || !head.out) {
+      return { ...head, ok: false, sampledHead: null, outcome: 'head-unreadable' };
+    }
+    if (head.out !== expectedHead) {
+      return {
+        ok: false,
+        out: '',
+        err: `HEAD changed from ${expectedHead ?? 'unknown'} to ${head.out}`,
+        sampledHead: head.out,
+        outcome: 'head-mismatch',
+      };
+    }
+    const merged = await run(['merge', '--ff-only', sha], projectPath, commandOptions);
+    return {
+      ...merged,
+      sampledHead: head.out,
+      outcome: merged.ok ? 'merged' : 'merge-failed',
+    };
+  }
+
+  const mergeFastForwardTo = admitted(mergeFastForwardToBody, (args: MergeFastForwardArgs): MergeFastForwardResult => ({
+    ok: false,
+    out: '',
+    err: `the git queue did not admit the merge within ${args.admissionTimeoutMs}ms`,
+    sampledHead: null,
+    outcome: 'queue-admission-timed-out',
+  }));
+
+  async function resetKeepToBody({ projectPath, expectedHead, sha, timeoutMs }: ResetKeepArgs): Promise<QueuedGitResult> {
+    if (normalizeSha(sha) !== sha) return { ok: false, out: '', err: 'a keep reset needs a 40 lowercase hexadecimal target sha' };
+    const commandOptions = timeoutMs ? { timeout: timeoutMs } : undefined;
+    const head = await run(['rev-parse', 'HEAD'], projectPath, commandOptions);
+    if (!head.ok || !head.out) return { ...head, ok: false };
+    if (head.out !== expectedHead) {
+      return { ok: false, out: '', err: `HEAD changed from ${expectedHead ?? 'unknown'} to ${head.out}` };
+    }
+    return run(['reset', '--keep', sha], projectPath, commandOptions);
   }
 
   async function classifyRefusedSync({ projectPath, branch, localRef, localSha, remoteSha, err }: {
@@ -1042,9 +1129,28 @@ function createGitWorkspace(opts: {
     mergeKeep: serialized(mergeKeepBody),
     rebaseOnly: serialized(rebaseOnlyBody),
     populate: serialized(populateShare),
-    removeWorktreeByPath: serialized(removeWorktreeByPathBody),
-    probeWorktreeDirty: serialized(probeWorktreeDirtyBody),
+    removeWorktreeByPath: admitted(removeWorktreeByPathBody, (args: WorktreeArgs): QueuedGitResult => ({
+      ok: false,
+      out: '',
+      err: `the git queue did not admit the worktree removal within ${args.admissionTimeoutMs}ms`,
+      admissionRefused: true,
+    })),
+    probeWorktreeDirty: admitted(probeWorktreeDirtyBody, (args: WorktreeArgs): WorktreeDirtyProbe => ({
+      ok: false,
+      dirty: true,
+      headSha: null,
+      err: `the git queue did not admit the worktree status probe within ${args.admissionTimeoutMs}ms`,
+      admissionRefused: true,
+    })),
     fetchOrigin: serialized(fetchOriginBody),
+    stageDetachedWorktree: serialized(stageDetachedWorktreeBody),
+    mergeFastForwardTo,
+    resetKeepTo: admitted(resetKeepToBody, (args: ResetKeepArgs): QueuedGitResult => ({
+      ok: false,
+      out: '',
+      err: `the git queue did not admit the head reset within ${args.admissionTimeoutMs}ms`,
+      admissionRefused: true,
+    })),
     syncIntegrationBranch: serialized(syncIntegrationBranchBody),
     deleteRemoteBranch: serialized(deleteRemoteBranchBody),
     listWorktrees: serialized(listWorktreesBody),
@@ -1197,6 +1303,8 @@ export type {
   GitResult,
   GitWorkspaceInstance,
   IntegrationSyncResult,
+  MergeFastForwardOutcome,
+  MergeFastForwardResult,
   MergeOutcome,
   RebaseOutcome,
   SessionWorktree,

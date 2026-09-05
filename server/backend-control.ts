@@ -5,6 +5,9 @@ import type { ConfigStore, GlissaConfig, ProjectEntry } from './config-store.ts'
 import { registerControlHandlers } from './control-handlers.ts';
 import type { MillControl } from './control-handlers.ts';
 import type { ReplayLog } from './control-replay-core.ts';
+import type { UpdateJournal } from '../shared/contracts/update-journal.ts';
+import type { UpdateApplyOutcome } from './update-apply.ts';
+import type { UpdateStatus } from './backend-update.ts';
 
 interface SnapshotLane {
   snapshotMessage: () => Record<string, unknown>;
@@ -53,7 +56,12 @@ interface BackendControlDependencies {
   requestRestart: () => unknown;
   handleClientFocus: (socket: ControlSocket, focused: boolean) => void;
   buildHealthSnapshot: () => Record<string, unknown>;
-  getUpdateStatus: () => { updateAvailable?: boolean } | null;
+  getUpdateStatus: () => UpdateStatus | null;
+  getUpdateJournal: () => UpdateJournal;
+  checkNow: () => Promise<UpdateStatus>;
+  applyUpdate: () => Promise<UpdateApplyOutcome>;
+  isStaging: () => boolean;
+  noteRestartRequested: () => void;
   laneAssembly: LaneReader;
   posthog: PosthogControl;
   prReview: PrReviewControl;
@@ -98,6 +106,11 @@ function createBackendControl(dependencies: BackendControlDependencies): void {
     handleClientFocus: dependencies.handleClientFocus,
     buildHealthSnapshot: dependencies.buildHealthSnapshot,
     getUpdateStatus: dependencies.getUpdateStatus,
+    getUpdateJournal: dependencies.getUpdateJournal,
+    checkNow: dependencies.checkNow,
+    applyUpdate: dependencies.applyUpdate,
+    isStaging: dependencies.isStaging,
+    noteRestartRequested: dependencies.noteRestartRequested,
     getPosthogStatus: () => posthog.getStatus(),
     posthogSetIssueStatus: (args) => posthog.setIssueStatus(args),
     posthogArchiveInvestigation: (args) => posthog.archiveInvestigation(args),

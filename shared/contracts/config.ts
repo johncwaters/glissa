@@ -165,6 +165,7 @@ const BROWSER_CONFIG_SHAPE = {
   antiSlopPrompt: optionalBoolean('antiSlopPrompt'),
   rtk: optionalBoolean('rtk'),
   checkForUpdates: optionalBoolean('checkForUpdates'),
+  updateChannel: z.enum(['release', 'main'], { error: 'updateChannel must be one of release, main' }).optional(),
   autoResume: optionalBoolean('autoResume'),
   telegramNotifications: optionalBoolean('telegramNotifications'),
   millEnabled: optionalBoolean('millEnabled'),

@@ -180,6 +180,9 @@ test('decideUpdateStatus reports updates by version only', () => {
     releaseUrl: 'https://github.com/johncwaters/glissa/releases/tag/v0.21.0',
     command: 'npm install -g github:johncwaters/glissa#v0.21.0 --allow-git=root',
     flavor: 'npm-global',
+    channel: 'release',
+    behindCount: null,
+    reason: null,
   });
 
   const sameVersionWithDifferentSha = decideUpdateStatus({
@@ -191,6 +194,37 @@ test('decideUpdateStatus reports updates by version only', () => {
   });
   assert.equal(sameVersionWithDifferentSha.updateAvailable, false);
   assert.equal(sameVersionWithDifferentSha.command, CLONE_COMMAND);
+});
+
+test('decideUpdateStatus reports a main-channel update from the behind count', () => {
+  const behind = decideUpdateStatus({
+    installedSha: SHA_A,
+    latestSha: SHA_B,
+    currentVersion: '0.21.0',
+    latestVersion: null,
+    flavor: 'clone',
+    channel: 'main',
+    behindCount: 3,
+  });
+  assert.equal(behind.updateAvailable, true);
+  assert.equal(behind.channel, 'main');
+  assert.equal(behind.behindCount, 3);
+
+  const current = decideUpdateStatus({ channel: 'main', behindCount: 0, flavor: 'clone' });
+  assert.equal(current.updateAvailable, false);
+});
+
+test('decideUpdateStatus ignores a stale main-channel count once the installed sha is the target', () => {
+  const justUpdated = decideUpdateStatus({
+    installedSha: SHA_A,
+    latestSha: SHA_A,
+    currentVersion: '0.21.0',
+    flavor: 'clone',
+    channel: 'main',
+    behindCount: 7,
+  });
+  assert.equal(justUpdated.updateAvailable, false);
+  assert.equal(justUpdated.behindCount, 7);
 });
 
 test('decideUpdateStatus reports no update when current is equal, newer or latest is missing', () => {

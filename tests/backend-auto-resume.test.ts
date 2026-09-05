@@ -298,7 +298,7 @@ test('createBackend defers boot auto-resume until the HTTP listener has a hook p
   }
 });
 
-test('createBackend shutdown removes pending boot auto-resume listener before listen', async () => {
+test('createBackend shutdown removes pending boot listeners before listen', async () => {
   const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-autoresume-cfg-'));
   const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-autoresume-proj-'));
   const cfgPath = path.join(cfgDir, 'config.json');
@@ -324,7 +324,7 @@ test('createBackend shutdown removes pending boot auto-resume listener before li
   try {
     const listenersBeforeBackend = server.listenerCount('listening');
     live.backend = createBackend(server, { staticDir: null });
-    assert.equal(server.listenerCount('listening'), listenersBeforeBackend + 1);
+    assert.equal(server.listenerCount('listening'), listenersBeforeBackend + 2);
     live.backend.shutdown();
     live.backend = null;
     assert.equal(server.listenerCount('listening'), listenersBeforeBackend);

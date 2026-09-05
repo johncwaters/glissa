@@ -79,3 +79,28 @@ test('the emitted dist manifest never carries a name, which would hijack the pac
   assert.equal(distManifest.name, undefined);
   assert.equal(distManifest.type, 'module');
 });
+
+test('the built server entry recovers a half-finished handoff before any dependency loads', () => {
+  const entrySource = fs.readFileSync(path.join(repoRoot, 'server', 'index.ts'), 'utf8');
+  assert.match(entrySource, /^import \{ recoverHandoff \} from '\.\.\/scripts\/recover-handoff\.mjs';$/m);
+  assert.match(entrySource, /recoverHandoff\(packageRoot\);/);
+  assert.match(entrySource, /await import\('\.\/main\.ts'\);/);
+  assert.ok(!/^import .* from '\.\/main\.ts';$/m.test(entrySource), 'the real server loads only after recovery, so it cannot be a static import');
+
+  const buildConfig = fs.readFileSync(path.join(repoRoot, 'vite.server.config.ts'), 'utf8');
+  assert.match(buildConfig, /'server\/index': path\.join\(repoRoot, 'server', 'index\.ts'\)/);
+
+  const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')) as {
+    scripts: Record<string, string>;
+    files: string[];
+  };
+  assert.equal(manifest.scripts.start, 'node dist/server/index.js');
+  assert.ok(manifest.files.includes('scripts/recover-handoff.mjs'), 'the shim ships with the package');
+});
+
+test('the shipped launcher starts the server through the recovering bootstrap', () => {
+  const launcherSource = fs.readFileSync(path.join(repoRoot, 'bin', 'glissa.ts'), 'utf8');
+  assert.match(launcherSource, /await import\('\.\.\/server\/index\.ts'\);/);
+  assert.ok(!/['"]\.\.\/server\/main\.ts['"]/.test(launcherSource), 'the launcher never reaches main ahead of recovery');
+});
+

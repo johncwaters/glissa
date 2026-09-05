@@ -10,7 +10,7 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 
 | Path | Role |
 |------|------|
-| `server/main.ts`, `vite.config.ts` | Production entry; frontend build and dev wiring |
+| `server/index.ts`, `server/main.ts`, `vite.config.ts` | Production entry (bootstrap: handoff recovery, then the server module); frontend build and dev wiring |
 | `vite.server.config.ts`, `vite.extension.config.ts`, `scripts/build.mjs` | The node and VS Code bundles, and the orchestrator that owns `dist/` |
 | `server/runtime-paths.ts` | The ONLY derivation of where a shipped asset lives (pure core in `server/core/runtime-paths.ts`); nothing else may guess from `import.meta` |
 | `config.json`, `package.json`, `biome.json`, `socket.yml` | Runtime/dev config; package, lint and scan policy |

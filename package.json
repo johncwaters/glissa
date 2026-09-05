@@ -16,6 +16,7 @@
     "!dist/client/pictures/",
     "!dist/client/AGENTS.md",
     "scripts/postinstall.mjs",
+    "scripts/recover-handoff.mjs",
     "scripts/prepare-build.js"
   ],
   "engines": {

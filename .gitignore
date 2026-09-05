@@ -28,6 +28,7 @@ uploads/
 # Runtime output (team runs, post-turn checker telemetry, etc). Not a deliverable.
 # Excludes the project pack (.glissa/pack/, .glissa/teams/*/pack/), which AGENTS.md documents as committed.
 .glissa/post-turn/
+.glissa/update/
 .glissa/teams/*/runs/
 .glissa/teams/*/log.md
 # Leftovers from a retired team id; the live teams are listed in teams/.

@@ -1,3 +1,5 @@
+import type { UpdateChannel } from '../../shared/contracts/update-journal.ts';
+
 const REPO_SLUG = 'johncwaters/glissa';
 const SHA_RE = /^[0-9a-f]{40}$/;
 const NPM_GLOBAL_COMMAND = `npm install -g github:${REPO_SLUG} --allow-git=root`;
@@ -5,6 +7,7 @@ const CLONE_COMMAND = 'git pull --ff-only && npm ci && npm run build';
 const SHORT_SHA_LENGTH = 7;
 const INSTALL_FLAVORS = new Set<string>(['npm-global', 'clone', 'unknown']);
 const TAG_VERSION_RE = /^v(\d+\.\d+\.\d+)$/;
+const UPDATE_CHANNELS = new Set<string>(['release', 'main']);
 
 export type InstallFlavor = 'npm-global' | 'clone' | 'unknown';
 
@@ -137,19 +140,38 @@ function normalizeFlavor(flavor: unknown): InstallFlavor {
   return 'unknown';
 }
 
-function decideUpdateStatus({ installedSha, latestSha: remoteSha, currentVersion, latestVersion, flavor }: {
+function normalizeUpdateChannel(channel: unknown): UpdateChannel {
+  if (typeof channel === 'string' && UPDATE_CHANNELS.has(channel)) return channel as UpdateChannel;
+  return 'release';
+}
+
+function normalizeBehindCount(value: unknown): number | null {
+  if (!Number.isInteger(value)) return null;
+  const count = Number(value);
+  if (count < 0) return null;
+  return count;
+}
+
+function decideUpdateStatus({ installedSha, latestSha: remoteSha, currentVersion, latestVersion, flavor, channel, behindCount, reason }: {
   installedSha?: unknown;
   latestSha?: unknown;
   currentVersion?: unknown;
   latestVersion?: unknown;
   flavor?: unknown;
+  channel?: unknown;
+  behindCount?: unknown;
+  reason?: unknown;
 } = {}) {
   const currentSha = normalizeSha(installedSha);
   const latestSha = normalizeSha(remoteSha);
   const current = textOrNull(currentVersion);
   const latest = textOrNull(latestVersion);
+  const normalizedChannel = normalizeUpdateChannel(channel);
+  const normalizedBehindCount = normalizeBehindCount(behindCount);
   return {
-    updateAvailable: compareSemver(latest, current) > 0,
+    updateAvailable: normalizedChannel === 'main'
+      ? normalizedBehindCount !== null && normalizedBehindCount > 0 && currentSha !== latestSha
+      : compareSemver(latest, current) > 0,
     current,
     latest,
     currentSha,
@@ -157,6 +179,9 @@ function decideUpdateStatus({ installedSha, latestSha: remoteSha, currentVersion
     releaseUrl: buildReleaseUrl(latest),
     command: buildUpdateCommand(flavor, latest),
     flavor: normalizeFlavor(flavor),
+    channel: normalizedChannel,
+    behindCount: normalizedBehindCount,
+    reason: textOrNull(reason),
   };
 }
 
@@ -169,4 +194,4 @@ function isCheckFresh(lastCheckAt: unknown, nowMs: unknown, ttlMs: unknown): boo
   return age < Number(ttlMs);
 }
 
-export { NPM_GLOBAL_COMMAND, CLONE_COMMAND, normalizeSha, shortSha, parseResolvedSha, parseTagVersion, parseLsRemoteTags, decideInstallFlavor, buildUpdateCommand, buildReleaseUrl, compareSemver, parseLatestReleaseTag, decideUpdateStatus, isCheckFresh };
+export { NPM_GLOBAL_COMMAND, CLONE_COMMAND, normalizeSha, normalizeUpdateChannel, shortSha, parseResolvedSha, parseTagVersion, parseLsRemoteTags, decideInstallFlavor, buildUpdateCommand, buildReleaseUrl, compareSemver, parseLatestReleaseTag, decideUpdateStatus, isCheckFresh };

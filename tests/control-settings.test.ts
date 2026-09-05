@@ -142,6 +142,21 @@ test('worktree conflict switches remain settable while withheld from settings', 
   assert.equal(h.sent.some((message) => message.type === 'settings-error'), false);
 });
 
+test('updateChannel persists, echoes, and hot-applies', () => {
+  const h = harness({ projects: [], updateChannel: 'release' });
+  h.send({ type: 'update-settings', settings: { updateChannel: 'main' } });
+  assert.equal(h.cfg.updateChannel, 'main');
+  assert.equal(updatedFrom(h)?.settings?.updateChannel, 'main');
+  assert.equal(h.reloadCalls.length, 1);
+});
+
+test('updateChannel rejects values outside release and main', () => {
+  const h = harness({ projects: [], updateChannel: 'release' });
+  h.send({ type: 'update-settings', settings: { updateChannel: 'nightly' } });
+  assert.match(String(errorFrom(h)?.message), /updateChannel/);
+  assert.equal(h.cfg.updateChannel, 'release');
+});
+
 test('a valid branchGc payload is sanitized, persisted, and echoed, and file-only keys sent over the control socket are dropped', () => {
   const h = harness({ projects: [] });
   h.send({

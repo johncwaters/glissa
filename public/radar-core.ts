@@ -87,9 +87,11 @@ export interface RadarSnapshot {
 }
 
 export interface RadarUpdateFeed {
+  updateAvailable?: unknown;
   command?: unknown;
   current?: unknown;
   latest?: unknown;
+  currentSha?: unknown;
   latestSha?: unknown;
   [key: string]: unknown;
 }
@@ -423,17 +425,24 @@ export function shortSha(sha: unknown) {
   return text.slice(0, 7).toLowerCase();
 }
 
+function versionOrShortSha(version: unknown, sha: unknown) {
+  const labelled = textOr(version, '');
+  if (labelled) return labelled;
+  return shortSha(sha);
+}
+
 export function updateAvailableRow(update: RadarUpdateFeed | null | undefined) {
+  if (update?.updateAvailable !== true) return null;
   const command = textOr(update?.command, '');
-  const current = textOr(update?.current, '');
-  const latest = textOr(update?.latest, '');
+  const current = versionOrShortSha(update?.current, update?.currentSha);
+  const latest = versionOrShortSha(update?.latest, update?.latestSha);
   if (!current || !latest) return null;
   return { text: `Update available: ${current} -> ${latest}`, command };
 }
 
 export function updateBannerText(update: RadarUpdateFeed | null | undefined) {
-  const current = textOr(update?.current, '');
-  const latest = textOr(update?.latest, '');
+  const current = versionOrShortSha(update?.current, update?.currentSha);
+  const latest = versionOrShortSha(update?.latest, update?.latestSha);
   return `Update available: ${current} -> ${latest}`;
 }
 

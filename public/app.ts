@@ -315,7 +315,7 @@ const messageHandlers = {
   'debug-state-response': (msg) => handleDebugStateResponse(msg),
 
   'notify':             (msg) => { showDesktopNotification(msg); handleDebugStateRefresh(msg.session); },
-  'update-available':   (msg) => { showUpdateBanner(msg); applyRadarUpdate(msg); },
+  'update-status':      (msg) => { showUpdateBanner(msg); applyRadarUpdate(msg); },
   'error':              (msg) => showErrorToast(msg.message, { persist: true }),
   'session-error':      (msg) => showErrorToast(`${msg.session}: ${msg.message}`, { persist: true }),
   'settings-updated':   (msg) => { if (msg.settings) { applyTerminalSettings(msg.settings); applySettingsBroadcast(msg.settings); applyVisionsSettings(msg.settings); } },
@@ -379,10 +379,14 @@ function updateIdentity(msg: ServerMessage) {
 }
 
 function showUpdateBanner(msg: ServerMessage) {
+  const banner = queryTag(document, '#update-banner', 'div');
+  if (!msg.updateAvailable) {
+    banner.hidden = true;
+    return;
+  }
   if (updateBannerDismissed) return;
   const identity = updateIdentity(msg);
   if (identity && getDismissedUpdate() === identity) return;
-  const banner = queryTag(document, '#update-banner', 'div');
   const command = String(msg.command ?? '');
   queryTag(document, '#update-banner-text', 'span').textContent = updateBannerText(msg);
   queryTag(document, '#update-banner-cmd', 'code').textContent = command;

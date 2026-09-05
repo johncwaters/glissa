@@ -280,17 +280,23 @@ test('healthAnomalyRows: labels match the health monitor wording', () => {
 
 test('updateAvailableRow: needs both versions, carries the command', () => {
   assert.deepEqual(
-    updateAvailableRow({ current: '1.2.0', latest: '1.3.0', command: 'npm i -g glissa' }),
+    updateAvailableRow({ updateAvailable: true, current: '1.2.0', latest: '1.3.0', command: 'npm i -g glissa' }),
     { text: 'Update available: 1.2.0 -> 1.3.0', command: 'npm i -g glissa' },
   );
-  assert.equal(updateAvailableRow({ current: '1.2.0' }), null);
-  assert.equal(updateAvailableRow({ latest: '1.3.0' }), null);
+  assert.equal(updateAvailableRow({ updateAvailable: true, current: '1.2.0' }), null);
+  assert.equal(updateAvailableRow({ updateAvailable: true, latest: '1.3.0' }), null);
   assert.equal(updateAvailableRow(null), null);
+});
+
+test('updateAvailableRow: an up-to-date status renders no row', () => {
+  assert.equal(updateAvailableRow({ updateAvailable: false, current: '1.2.0', latest: '1.2.0', command: 'c' }), null);
+  assert.equal(updateAvailableRow({ current: '1.2.0', latest: '1.3.0', command: 'c' }), null);
 });
 
 test('updateAvailableRow: ignores shas and renders the version pair', () => {
   assert.deepEqual(
     updateAvailableRow({
+      updateAvailable: true,
       current: '1.2.0',
       latest: '1.3.0',
       currentSha: '0123456789abcdef0123456789abcdef01234567',
@@ -299,7 +305,7 @@ test('updateAvailableRow: ignores shas and renders the version pair', () => {
     }),
     { text: 'Update available: 1.2.0 -> 1.3.0', command: 'npm i -g glissa' },
   );
-  const versionFallback = updateAvailableRow({ current: '1.2.0', latest: '1.3.0', currentSha: 'not-a-sha', command: 'c' });
+  const versionFallback = updateAvailableRow({ updateAvailable: true, current: '1.2.0', latest: '1.3.0', currentSha: 'not-a-sha', command: 'c' });
   assert.equal(versionFallback?.text, 'Update available: 1.2.0 -> 1.3.0');
 });
 
@@ -313,6 +319,28 @@ test('updateBannerText: renders only the version pair', () => {
   assert.equal(updateBannerText({ current: '1.2.0', latest: '1.3.0' }), 'Update available: 1.2.0 -> 1.3.0');
 });
 
+test('a main-channel status without versions labels both sides with short shas', () => {
+  const mainChannelStatus = {
+    updateAvailable: true,
+    channel: 'main',
+    current: '0.24.2',
+    latest: null,
+    currentSha: '0123456789abcdef0123456789abcdef01234567',
+    latestSha: 'FEDCBA9876543210fedcba9876543210fedcba98',
+    command: 'git pull',
+  };
+  assert.deepEqual(
+    updateAvailableRow(mainChannelStatus),
+    { text: 'Update available: 0.24.2 -> fedcba9', command: 'git pull' },
+  );
+  assert.equal(updateBannerText(mainChannelStatus), 'Update available: 0.24.2 -> fedcba9');
+  const withoutVersions = { ...mainChannelStatus, current: null };
+  assert.equal(updateBannerText(withoutVersions), 'Update available: 0123456 -> fedcba9');
+  assert.deepEqual(opsRows({ update: mainChannelStatus }), [
+    { kind: 'update', key: 'update', text: 'Update available: 0.24.2 -> fedcba9', detail: 'git pull', tone: 'dim' },
+  ]);
+});
+
 test('shortSha: 7 lowercase chars for a hex sha, empty string otherwise', () => {
   assert.equal(shortSha('0123456789ABCDEF0123456789abcdef01234567'), '0123456');
   assert.equal(shortSha('0123abc'), '0123abc');
@@ -322,7 +350,7 @@ test('shortSha: 7 lowercase chars for a hex sha, empty string otherwise', () => 
 
 test('opsRows: the update line leads, then one row per live anomaly', () => {
   const rows = opsRows({
-    update: { current: '1.0.0', latest: '1.1.0', command: 'npm i' },
+    update: { updateAvailable: true, current: '1.0.0', latest: '1.1.0', command: 'npm i' },
     health: { anomalies: { orphanPty: true, destroyedReachable: true } },
   });
   assert.deepEqual(rows.map((r) => r.kind), ['update', 'anomaly', 'anomaly']);

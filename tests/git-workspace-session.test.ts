@@ -10,6 +10,12 @@ import type { WorkspaceHandle } from '../server/git-workspace.ts';
 import { comparableDirectoryPath, isSameDirectoryPath } from '../shared/paths.ts';
 import { hasGit, git } from './helpers/git-fixture.ts';
 
+function deferredResolve(): { promise: Promise<void>; resolve: () => void } {
+  let settle: () => void = () => {};
+  const promise = new Promise<void>((resolve) => { settle = resolve; });
+  return { promise, resolve: () => settle() };
+}
+
 function makeNodeModulesJunction(projectPath: string, wtDir: string): boolean {
   execFileSync('cmd', ['/c', 'mklink', '/J', path.join(wtDir, 'node_modules'), path.join(projectPath, 'node_modules')], { stdio: 'ignore' });
   return fs.existsSync(path.join(wtDir, 'node_modules'));
@@ -169,6 +175,187 @@ test('a git refusal keeps its stderr unmarked', async () => {
   });
   const fetched = await gitWorkspace.fetchOrigin({ projectPath: '/repo' });
   assert.deepEqual(fetched, { ok: false, out: '', err: 'fatal: could not read Username\n' });
+});
+
+test('stageDetachedWorktree adds the fixed sha as a detached worktree', async () => {
+  const calls: Array<{ args: string[]; cwd: string }> = [];
+  const gitWorkspace = createGitWorkspace({
+    git: (args, cwd) => {
+      calls.push({ args, cwd });
+      return '';
+    },
+  });
+  const sha = 'a'.repeat(40);
+  const staged = await gitWorkspace.stageDetachedWorktree({ projectPath: '/repo', worktreePath: '/repo/.glissa/update/next', sha });
+  assert.equal(staged.ok, true);
+  assert.deepEqual(calls, [{ args: ['worktree', 'add', '--detach', '/repo/.glissa/update/next', sha], cwd: '/repo' }]);
+});
+
+test('stageDetachedWorktree refuses a non-lowercase full sha without running git', async () => {
+  const calls: string[][] = [];
+  const gitWorkspace = createGitWorkspace({ git: (args) => { calls.push(args); return ''; } });
+  const staged = await gitWorkspace.stageDetachedWorktree({ projectPath: '/repo', worktreePath: '/stage', sha: 'A'.repeat(40) });
+  assert.equal(staged.ok, false);
+  assert.deepEqual(calls, []);
+});
+
+test('mergeFastForwardTo refuses when the sampled head differs from expectedHead', async () => {
+  const calls: string[][] = [];
+  const gitWorkspace = createGitWorkspace({
+    git: (args) => {
+      calls.push(args);
+      return 'b'.repeat(40);
+    },
+  });
+  const merged = await gitWorkspace.mergeFastForwardTo({ projectPath: '/repo', expectedHead: 'a'.repeat(40), sha: 'c'.repeat(40) });
+  assert.equal(merged.ok, false);
+  assert.equal(merged.outcome, 'head-mismatch');
+  assert.equal(merged.sampledHead, 'b'.repeat(40));
+  assert.deepEqual(calls, [['rev-parse', 'HEAD']]);
+});
+
+test('mergeFastForwardTo refuses an invalid target sha without running git', async () => {
+  const calls: string[][] = [];
+  const gitWorkspace = createGitWorkspace({ git: (args) => { calls.push(args); return ''; } });
+  const merged = await gitWorkspace.mergeFastForwardTo({ projectPath: '/repo', expectedHead: 'a'.repeat(40), sha: 'b'.repeat(39) });
+  assert.equal(merged.ok, false);
+  assert.equal(merged.outcome, 'invalid-target-sha');
+  assert.deepEqual(calls, []);
+});
+
+test('mergeFastForwardTo refuses when the head probe succeeds with empty output', async () => {
+  const calls: string[][] = [];
+  const gitWorkspace = createGitWorkspace({
+    git: (args) => {
+      calls.push(args);
+      return '';
+    },
+  });
+  const merged = await gitWorkspace.mergeFastForwardTo({ projectPath: '/repo', expectedHead: 'a'.repeat(40), sha: 'c'.repeat(40) });
+  assert.equal(merged.ok, false);
+  assert.equal(merged.outcome, 'head-unreadable');
+  assert.equal(merged.sampledHead, null);
+  assert.deepEqual(calls, [['rev-parse', 'HEAD']]);
+});
+
+test('mergeFastForwardTo reports a queue admission timeout instead of merging late', async () => {
+  const calls: string[][] = [];
+  const blocked = deferredResolve();
+  const gitWorkspace = createGitWorkspace({
+    git: async (args) => {
+      calls.push(args);
+      if (args[0] === 'status') await blocked.promise;
+      return 'a'.repeat(40);
+    },
+  });
+  const holding = gitWorkspace.probeWorktreeDirty({ projectPath: '/repo', cwd: '/repo' });
+  const merged = await gitWorkspace.mergeFastForwardTo({
+    projectPath: '/repo',
+    expectedHead: 'a'.repeat(40),
+    sha: 'b'.repeat(40),
+    admissionTimeoutMs: 5,
+  });
+  blocked.resolve();
+  await holding;
+  assert.equal(merged.ok, false);
+  assert.equal(merged.outcome, 'queue-admission-timed-out');
+  assert.equal(calls.some((args) => args[0] === 'merge'), false);
+});
+
+test('a queue admission timeout returns a refusal from the worktree probe and removal', async () => {
+  const calls: string[][] = [];
+  const blocked = deferredResolve();
+  const gitWorkspace = createGitWorkspace({
+    git: async (args) => {
+      calls.push(args);
+      if (args[0] === 'status') await blocked.promise;
+      return 'a'.repeat(40);
+    },
+  });
+  const holding = gitWorkspace.probeWorktreeDirty({ projectPath: '/repo', cwd: '/repo' });
+  const probed = await gitWorkspace.probeWorktreeDirty({ projectPath: '/repo', cwd: '/repo', admissionTimeoutMs: 5 });
+  const removed = await gitWorkspace.removeWorktreeByPath({ projectPath: '/repo', cwd: '/repo/staging', admissionTimeoutMs: 5 });
+  blocked.resolve();
+  await holding;
+  assert.equal(probed.ok, false);
+  assert.equal(probed.admissionRefused, true);
+  assert.equal(probed.headSha, null);
+  assert.equal(removed.ok, false);
+  assert.equal(removed.admissionRefused, true);
+  assert.equal(calls.some((args) => args[0] === 'worktree'), false);
+});
+
+test('mergeFastForwardTo merges the fixed sha when the sampled head matches', async () => {
+  const calls: string[][] = [];
+  const expectedHead = 'a'.repeat(40);
+  const targetSha = 'b'.repeat(40);
+  const gitWorkspace = createGitWorkspace({
+    git: (args) => {
+      calls.push(args);
+      if (args[0] === 'rev-parse') return expectedHead;
+      return '';
+    },
+  });
+  const merged = await gitWorkspace.mergeFastForwardTo({ projectPath: '/repo', expectedHead, sha: targetSha });
+  assert.equal(merged.ok, true);
+  assert.equal(merged.outcome, 'merged');
+  assert.equal(merged.sampledHead, expectedHead);
+  assert.deepEqual(calls, [['rev-parse', 'HEAD'], ['merge', '--ff-only', targetSha]]);
+});
+
+test('resetKeepTo resets to the fixed sha with keep semantics', async () => {
+  const calls: Array<{ args: string[]; cwd: string }> = [];
+  const expectedHead = 'd'.repeat(40);
+  const gitWorkspace = createGitWorkspace({
+    git: (args, cwd) => {
+      calls.push({ args, cwd });
+      if (args[0] === 'rev-parse') return expectedHead;
+      return '';
+    },
+  });
+  const sha = 'c'.repeat(40);
+  const reset = await gitWorkspace.resetKeepTo({ projectPath: '/repo', expectedHead, sha });
+  assert.equal(reset.ok, true);
+  assert.deepEqual(calls, [
+    { args: ['rev-parse', 'HEAD'], cwd: '/repo' },
+    { args: ['reset', '--keep', sha], cwd: '/repo' },
+  ]);
+});
+
+test('resetKeepTo refuses when HEAD moved off the sha the merge left behind', async () => {
+  const calls: string[][] = [];
+  const gitWorkspace = createGitWorkspace({
+    git: (args) => {
+      calls.push(args);
+      return 'e'.repeat(40);
+    },
+  });
+  const reset = await gitWorkspace.resetKeepTo({
+    projectPath: '/repo',
+    expectedHead: 'd'.repeat(40),
+    sha: 'c'.repeat(40),
+  });
+  assert.equal(reset.ok, false);
+  assert.match(String(reset.err), /HEAD changed/);
+  assert.deepEqual(calls, [['rev-parse', 'HEAD']]);
+});
+
+test('resetKeepTo refuses when the head probe returns nothing', async () => {
+  const gitWorkspace = createGitWorkspace({ git: () => '' });
+  const reset = await gitWorkspace.resetKeepTo({
+    projectPath: '/repo',
+    expectedHead: 'd'.repeat(40),
+    sha: 'c'.repeat(40),
+  });
+  assert.equal(reset.ok, false);
+});
+
+test('resetKeepTo refuses an invalid target sha without running git', async () => {
+  const calls: string[][] = [];
+  const gitWorkspace = createGitWorkspace({ git: (args) => { calls.push(args); return ''; } });
+  const reset = await gitWorkspace.resetKeepTo({ projectPath: '/repo', sha: 'c'.repeat(39) });
+  assert.equal(reset.ok, false);
+  assert.deepEqual(calls, []);
 });
 
 test('mergeBack (injected): committed-only rebase + ff-only merge when target is checked out, then junction-safe teardown', async () => {

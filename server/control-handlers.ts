@@ -54,6 +54,9 @@ import {
   USAGE_INTEGER_RANGES,
 } from '../shared/settings-ranges.ts';
 import { USAGE_VENDOR_KEYS, USAGE_BUDGET_KEYS } from '../shared/usage-config.ts';
+import type { UpdateJournal } from '../shared/contracts/update-journal.ts';
+import type { UpdateStatus } from './backend-update.ts';
+import type { UpdateApplyOutcome } from './update-apply.ts';
 
 interface ControlRequest {
   type: string;
@@ -107,7 +110,12 @@ interface ControlHandlerDeps {
   requestRestart?: (() => unknown) | null;
   handleClientFocus?: ((socket: ControlSocket, focused: boolean) => void) | null;
   buildHealthSnapshot?: (() => unknown) | null;
-  getUpdateStatus?: (() => { updateAvailable?: boolean } | null) | null;
+  getUpdateStatus?: (() => UpdateStatus | null) | null;
+  getUpdateJournal?: (() => UpdateJournal | null) | null;
+  checkNow?: (() => Promise<UpdateStatus>) | null;
+  applyUpdate?: (() => Promise<UpdateApplyOutcome>) | null;
+  isStaging?: (() => boolean) | null;
+  noteRestartRequested?: (() => void) | null;
   getPosthogStatus?: (() => PosthogLaneStatus | null) | null;
   posthogReportsDir?: string | null;
   posthogSetIssueStatus?: ((args: { projectId: string; issueId: string; action: string }) => Promise<Record<string, unknown>>) | null;
@@ -328,6 +336,11 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     handleClientFocus,
     buildHealthSnapshot,
     getUpdateStatus,
+    getUpdateJournal = null,
+    checkNow = null,
+    applyUpdate = null,
+    isStaging = null,
+    noteRestartRequested = null,
 
     getPosthogStatus,
     posthogReportsDir = null,
@@ -906,7 +919,30 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     console.log(`[control] delete-hook: ${id}`);
   }
 
-  function handleRestart(): void {
+  async function handleUpdateCheck(_msg: ControlRequest, ws: ControlSocket): Promise<void> {
+    if (!checkNow) {
+      sendError(ws, '[update-check-unavailable] Update checking is unavailable.');
+      return;
+    }
+    await checkNow();
+  }
+
+  async function handleUpdateApply(_msg: ControlRequest, ws: ControlSocket): Promise<void> {
+    if (!applyUpdate) {
+      sendError(ws, '[update-apply-unavailable] Update application is unavailable.');
+      return;
+    }
+    const outcome = await applyUpdate();
+    if (outcome.ok) return;
+    sendError(ws, `[${outcome.reason || 'update-refused'}] ${outcome.message}`);
+  }
+
+  function handleRestart(_msg: ControlRequest, ws: ControlSocket): void {
+    if (isStaging?.()) {
+      sendError(ws, '[update-staging] Wait for the update staging run to finish before restarting.');
+      return;
+    }
+    noteRestartRequested?.();
     console.log('[control] Restart requested via UI');
     broadcastControl({ type: 'restarting' });
     setTimeout(() => {
@@ -982,6 +1018,8 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     },
     'shutdown':         handleShutdown,
     'restart-server':   handleRestart,
+    'update-check':     handleUpdateCheck,
+    'update-apply':     handleUpdateApply,
     'focus-change':     (msg: ControlRequest, ws: ControlSocket) => { if (handleClientFocus) handleClientFocus(ws, !!msg.focused); },
     'request-health-snapshot': (_msg: ControlRequest, ws: ControlSocket) => {
       if (!buildHealthSnapshot) return;
@@ -1001,9 +1039,10 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     }
 
     const update = typeof getUpdateStatus === 'function' ? getUpdateStatus() : null;
-    if (update?.updateAvailable) {
-      ws.send(JSON.stringify({ type: 'update-available', ...update }));
-    }
+    if (update) ws.send(JSON.stringify({ type: 'update-status', ...update }));
+
+    const updateJournal = typeof getUpdateJournal === 'function' ? getUpdateJournal() : null;
+    if (updateJournal) ws.send(JSON.stringify({ type: 'update-progress', journal: updateJournal }));
 
     const posthogStatus = typeof getPosthogStatus === 'function' ? getPosthogStatus() : null;
     if (posthogStatus) {

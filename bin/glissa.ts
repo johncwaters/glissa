@@ -107,7 +107,7 @@ if (isMemoryCommand) {
 }
 
 if (!isPackCommand && !isMemoryCommand && !isAgentCommand && !isVisionsCommand) {
-  await import('../server/main.ts');
+  await import('../server/index.ts');
 }
 
 function messageOf(error: unknown): string {

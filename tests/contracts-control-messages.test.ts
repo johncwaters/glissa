@@ -35,6 +35,24 @@ test('control dispatch tables contain only contract message types', () => {
 });
 
 const NOW = 1_777_000_000_000;
+const UPDATE_JOURNAL = {
+  state: 'staged' as const,
+  fromSha: '1111111111111111111111111111111111111111',
+  toSha: '0123456789abcdef0123456789abcdef01234567',
+  toVersion: '0.24.0',
+  channel: 'release' as const,
+  steps: [{
+    id: 'fetch' as const,
+    status: 'succeeded' as const,
+    startedAt: NOW,
+    finishedAt: NOW + 1,
+    outputTail: [],
+  }],
+  activeStep: null,
+  reason: null,
+  startedAt: NOW,
+  finishedAt: NOW + 2,
+};
 const SESSION = {
   id: 'session-1',
   name: 'glissa',
@@ -84,7 +102,14 @@ const REAL_SERVER_PAYLOADS: ServerPayload[] = [
   { type: 'post-turn-result', id: 'session-1', session: 'glissa', mode: 'fix', skipped: null, filesFixed: 1, findings: [{ file: 'a.js', rule: 'finalNewline', count: 1 }], timestamp: NOW },
   { type: 'debug-state-response', id: 'session-1', payload: { state: STATES.RUNNING } },
   { type: 'notify', session: 'session-1', category: 'complete', message: 'finished', escalationCount: 0 },
-  { type: 'update-available', updateAvailable: true, current: '0.23.1', latest: '0.24.0', currentSha: null, latestSha: '0123456789abcdef0123456789abcdef01234567', releaseUrl: 'https://example.test/release', command: 'npm install', flavor: 'npm-global' },
+  {
+    type: 'update-status', updateAvailable: true, current: '0.23.1', latest: '0.24.0', currentSha: null,
+    latestSha: '0123456789abcdef0123456789abcdef01234567', releaseUrl: 'https://example.test/release',
+    command: 'npm install', flavor: 'npm-global', installedBranch: null, upstream: null, isTreeClean: null,
+    lastCheckAt: NOW, channel: 'release', behindCount: null, reason: null,
+    journalSummary: { state: 'staged', activeStep: null, reason: null, startedAt: NOW, finishedAt: NOW + 2 },
+  },
+  { type: 'update-progress', journal: UPDATE_JOURNAL },
   { type: 'error', message: 'refused' },
   { type: 'session-error', id: 'session-1', session: 'glissa', message: 'failed' },
   { type: 'settings', requestId: 'settings-1', settings: { cursorBlink: false } },
@@ -176,6 +201,14 @@ test('server variants read by the browser validate more than their type name', (
 test('id-only client variants reject the removed session-name fallback', () => {
   assert.equal(ClientMessage.safeParse({ type: 'kill', session: 'glissa' }).success, false);
   assert.equal(ClientMessage.safeParse({ type: 'kill', id: 'session-1' }).success, true);
+});
+
+test('update requests carry only their type beside the request envelope', () => {
+  for (const type of ['update-check', 'update-apply']) {
+    assert.equal(ClientMessage.safeParse({ type }).success, true);
+    const parsed = ClientMessage.parse({ type, requestId: 'r1' });
+    assert.deepEqual(Object.keys(parsed).filter((key) => key !== 'type' && key !== 'requestId'), []);
+  }
 });
 
 test('a malformed request receives its typed error reply with the Zod message', () => {

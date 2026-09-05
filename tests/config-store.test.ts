@@ -267,8 +267,20 @@ test('getSettings falls back to DEFAULT_CONFIG for absent keys', () => {
     assert.equal(s.cursorBlink, DEFAULT_CONFIG.cursorBlink);
     assert.equal(s.detectBackgroundAgents, DEFAULT_CONFIG.detectBackgroundAgents);
     assert.equal(s.rtk, DEFAULT_CONFIG.rtk);
+    assert.equal(s.updateChannel, 'release');
     assert.equal(s.integrationBranch, DEFAULT_CONFIG.integrationBranch);
     assert.deepEqual(s.worktreeShare, DEFAULT_CONFIG.worktreeShare);
+  });
+});
+
+test('updateChannel round-trips through settings and hot application', () => {
+  withStore({ projects: [], updateChannel: 'release' }, (store, configPath) => {
+    const saved = store.save((config) => { config.updateChannel = 'main'; });
+    assert.equal(saved?.updateChannel, 'main');
+    store.applySettings(saved || { projects: [] });
+    assert.equal(store.config.updateChannel, 'main');
+    assert.equal(store.getSettings().updateChannel, 'main');
+    assert.equal(readJson(configPath).updateChannel, 'main');
   });
 });
 

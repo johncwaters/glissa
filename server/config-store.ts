@@ -40,6 +40,7 @@ const DEFAULT_CONFIG = {
   recordSignals: true,
 
   checkForUpdates: true,
+  updateChannel: 'release' as const,
 
   autoResume: true,
 
@@ -413,6 +414,7 @@ function createConfigStore({ settingsDefaults }: { settingsDefaults?: Partial<De
       antiSlopPrompt: config.antiSlopPrompt ?? effectiveDefaults.antiSlopPrompt,
       rtk: config.rtk ?? effectiveDefaults.rtk,
       checkForUpdates: config.checkForUpdates ?? effectiveDefaults.checkForUpdates,
+      updateChannel: config.updateChannel ?? effectiveDefaults.updateChannel,
       autoResume: config.autoResume ?? effectiveDefaults.autoResume,
       telegramNotifications: config.telegramNotifications ?? effectiveDefaults.telegramNotifications,
       millEnabled: config.millEnabled ?? effectiveDefaults.millEnabled,

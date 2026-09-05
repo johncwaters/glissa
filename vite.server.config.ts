@@ -47,7 +47,7 @@ export default defineConfig({
     rollupOptions: {
       external: isExternal,
       input: {
-        'server/index': path.join(repoRoot, 'server', 'main.ts'),
+        'server/index': path.join(repoRoot, 'server', 'index.ts'),
         'bin/glissa': path.join(repoRoot, 'bin', 'glissa.ts'),
         'session/hook-relay': path.join(repoRoot, 'session', 'hook-relay.ts'),
         'session/statusline-relay': path.join(repoRoot, 'session', 'statusline-relay.ts'),

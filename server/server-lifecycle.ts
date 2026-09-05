@@ -35,6 +35,8 @@ interface LifecycleOptions {
   log?: (message: string) => void;
   capMs?: number;
   closeTimeoutMs?: number;
+  beforeHandOff?: () => Promise<void>;
+  beforeHandOffCapMs?: number;
 }
 
 interface Lifecycle {
@@ -87,13 +89,32 @@ function createLifecycle({
   log = console.log,
   capMs = 3000,
   closeTimeoutMs = 2000,
+  beforeHandOff,
+  beforeHandOffCapMs = 300_000,
 }: LifecycleOptions): Lifecycle {
   let requested = false;
+  let handOffPrepared = false;
 
-  function fallbackTimer(fn: () => void): NodeJS.Timeout {
-    const t = setTimeout(fn, closeTimeoutMs);
-    if (t?.unref) t.unref();
-    return t;
+  function fallbackTimer(fn: () => void, keepProcessAlive = false): NodeJS.Timeout {
+    const timeout = setTimeout(fn, closeTimeoutMs);
+    if (!keepProcessAlive && timeout?.unref) timeout.unref();
+    return timeout;
+  }
+
+  async function reportBeforeHandOffFailure(prepare: () => Promise<void>): Promise<void> {
+    try {
+      await prepare();
+    } catch (error) {
+      log(`[lifecycle] before handoff failed: ${stopFailureText(error)}`);
+    }
+  }
+
+  async function prepareHandOffOnce(): Promise<void> {
+    if (!beforeHandOff || handOffPrepared) return;
+    handOffPrepared = true;
+    const outcome = await awaitBounded([reportBeforeHandOffFailure(beforeHandOff)], { capMs: beforeHandOffCapMs });
+    if (!outcome.timedOut) return;
+    log(`[lifecycle] before handoff exceeded ${beforeHandOffCapMs}ms - handing off anyway`);
   }
 
   async function requestShutdown(): Promise<void> {
@@ -119,6 +140,7 @@ function createLifecycle({
     requested = true;
     await awaitTeardown(shutdown(), { capMs, warn: log });
     closeExtraServers(extraServers);
+    await prepareHandOffOnce();
 
     const restartInPlace = onRestart;
     if (restartInPlace) {
@@ -134,9 +156,7 @@ function createLifecycle({
     const strategy = decideRestartStrategy(env);
     let handedOff = false;
 
-    const handOffAndExit = () => {
-      if (handedOff) return;
-      handedOff = true;
+    async function handOffAndExit(): Promise<void> {
       if (strategy === 'exit-for-supervisor') {
         log(`[lifecycle] Supervised by systemd - exiting ${SUPERVISED_RESTART_EXIT_CODE} so the supervisor restarts the unit`);
         exit(SUPERVISED_RESTART_EXIT_CODE);
@@ -150,9 +170,21 @@ function createLifecycle({
         windowsHide: true,
       }).unref();
       exit(0);
-    };
-    httpServer.close(handOffAndExit);
-    fallbackTimer(handOffAndExit);
+    }
+
+    const handOffFinished = new Promise<void>((resolve, reject) => {
+      const handOff = () => {
+        if (handedOff) return;
+        handedOff = true;
+        void handOffAndExit().then(resolve, reject);
+      };
+      const closeFallback = fallbackTimer(handOff, true);
+      httpServer.close(() => {
+        clearTimeout(closeFallback);
+        handOff();
+      });
+    });
+    await handOffFinished;
   }
 
   return { requestShutdown, requestRestart };
