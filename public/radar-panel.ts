@@ -34,7 +34,7 @@ import {
   summarizeIssues,
   verdictLabel,
 } from './radar-core.ts';
-import type { InvestigationActivityFrame, InvestigationFinishedFrame, RadarHealthFeed, RadarIssue, RadarProject, RadarProjectAlert, RadarSnapshot, RadarUpdateFeed } from './radar-core.ts';
+import type { InvestigationActivityFrame, InvestigationFinishedFrame, RadarHealthFeed, RadarIssue, RadarOpsRow, RadarProject, RadarProjectAlert, RadarSnapshot, RadarUpdateFeed } from './radar-core.ts';
 import type { PrStatusSnapshot } from './pr-view-core.ts';
 
 interface RadarSnapshotWithClock extends RadarSnapshot {
@@ -512,7 +512,7 @@ function buildInvestigationsSection(rows: InvestigationRow[]) {
   return section;
 }
 
-function buildOpsSection(rows: { kind: string; key: string; text: string; detail: string; tone: string }[]) {
+function buildOpsSection(rows: RadarOpsRow[]) {
   const section = buildSection('Ops');
   const list = el('div', 'radar-ops');
   for (const row of rows) {
@@ -523,6 +523,11 @@ function buildOpsSection(rows: { kind: string; key: string; text: string; detail
     item.append(stripe, el('span', 'radar-ops-text', row.text));
 
     if (row.detail) item.append(el('code', 'radar-ops-detail', row.detail));
+    if (row.sectionId && row.settingId) {
+      const link = createSettingsLink(row.sectionId, row.settingId, 'Open Updates');
+      link.classList.add('radar-ops-link');
+      item.append(link);
+    }
     list.append(item);
   }
   section.append(list);

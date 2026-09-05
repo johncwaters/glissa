@@ -34,6 +34,12 @@ test('control dispatch tables contain only contract message types', () => {
   assert.deepEqual(serverTypes.filter((type) => !serverSchemaTypes.has(type)), []);
 });
 
+test('the browser dispatches update-progress from the complete contract table', () => {
+  const serverTypes = dispatchTypes('public/app.ts', 'const messageHandlers = {', 'onControlMessage((msg)');
+  assert.equal(serverTypes.includes('update-progress'), true);
+  assert.equal(schemaTypes(ServerMessage).has('update-progress'), true);
+});
+
 const NOW = 1_777_000_000_000;
 const UPDATE_JOURNAL = {
   state: 'staged' as const,
@@ -105,9 +111,10 @@ const REAL_SERVER_PAYLOADS: ServerPayload[] = [
   {
     type: 'update-status', updateAvailable: true, current: '0.23.1', latest: '0.24.0', currentSha: null,
     latestSha: '0123456789abcdef0123456789abcdef01234567', releaseUrl: 'https://example.test/release',
-    command: 'npm install', flavor: 'npm-global', installedBranch: null, upstream: null, isTreeClean: null,
+    command: 'npm install', flavor: 'npm-global', platform: 'linux', installedBranch: null, upstream: null, isTreeClean: null,
     lastCheckAt: NOW, channel: 'release', behindCount: null, reason: null,
     journalSummary: { state: 'staged', activeStep: null, reason: null, startedAt: NOW, finishedAt: NOW + 2 },
+    applyRefusal: { reason: 'already-staged', message: 'Restart to apply the staged update.' },
   },
   { type: 'update-progress', journal: UPDATE_JOURNAL },
   { type: 'error', message: 'refused' },

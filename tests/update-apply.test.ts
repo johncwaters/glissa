@@ -161,11 +161,13 @@ function makeStatus(options: HarnessOptions): UpdateStatus {
       channel,
       behindCount: channel === 'main' ? 1 : null,
     }),
+    platform: 'linux',
     installedBranch: options.statusBranch === undefined ? 'main' : options.statusBranch,
     upstream: options.statusUpstream === undefined ? 'origin/main' : options.statusUpstream,
     isTreeClean: true,
     lastCheckAt: 1000,
     journalSummary: null,
+    applyRefusal: null,
   };
 }
 

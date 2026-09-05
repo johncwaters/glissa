@@ -2152,6 +2152,11 @@ a.radar-issue-title:hover {
   white-space: nowrap;
 }
 
+.radar-ops-link {
+  flex: 0 0 auto;
+  font-size: 10px;
+}
+
 .radar-pr-row[data-severity="crit"] .radar-stripe { background: var(--state-failed); }
 .radar-pr-row[data-severity="warn"] .radar-stripe { background: var(--state-waiting); }
 .radar-pr-row[data-severity="info"] .radar-stripe { background: var(--accent-dim); }
@@ -5374,6 +5379,120 @@ html[data-layout="phone"] .hooks-editor-footer .btn-dialog { flex: 1 1 0; min-he
   background: var(--bg-surface);
 }
 
+.settings-update-latest-label,
+.settings-update-behind {
+  display: block;
+}
+
+.settings-update-behind {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.settings-update-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-update-action {
+  display: grid;
+  grid-template-columns: minmax(130px, max-content) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-update-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.settings-update-action-status {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.settings-update-progress[data-state="failed"],
+.settings-update-progress[data-state="discarded"],
+.settings-update-progress[data-state="interrupted"] {
+  border-color: color-mix(in oklab, var(--state-failed) 45%, var(--border));
+}
+
+.settings-update-progress[data-state="staged"],
+.settings-update-progress[data-state="succeeded"] {
+  border-color: color-mix(in oklab, var(--state-complete) 45%, var(--border));
+}
+
+.settings-update-terminal {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.settings-update-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-update-step {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 8px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.settings-update-step-state {
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.settings-update-step[data-status="running"] .settings-update-step-state {
+  color: var(--state-waiting);
+}
+
+.settings-update-step[data-status="succeeded"] .settings-update-step-state {
+  color: var(--state-complete);
+}
+
+.settings-update-step[data-status="failed"] .settings-update-step-state {
+  color: var(--state-failed);
+}
+
+.settings-update-output-label {
+  margin-top: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.settings-update-output-label + .settings-update-output {
+  margin-top: 4px;
+}
+
+.settings-update-output {
+  max-height: 220px;
+  margin: 10px 0 0;
+  padding: 9px 10px;
+  overflow: auto;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
 .settings-view-shortcuts {
   margin-top: 22px;
   max-height: none;
@@ -6610,6 +6729,12 @@ html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-nav { displa
 
 .update-banner-copy:hover {
   border-color: var(--border-hover);
+}
+
+.update-banner-copy-status {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
 }
 
 .update-banner-dismiss {

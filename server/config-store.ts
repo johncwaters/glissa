@@ -400,6 +400,7 @@ function createConfigStore({ settingsDefaults }: { settingsDefaults?: Partial<De
 
   function getSettings() {
     return {
+      isLocalConfig,
       port: config.port,
       autoRecoverSeconds: config.autoRecoverSeconds,
       inputGraceSeconds: config.inputGraceSeconds,

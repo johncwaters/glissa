@@ -94,6 +94,40 @@ test('aliases resolve without shadowing canonical section ids', async () => {
   }
 });
 
+test('the machine Updates section owns its alias, channel, status rows, actions and moved toggle', async () => {
+  const { SETTINGS_MAP, SETTINGS_SECTION_ALIASES } = await loadMap();
+  const updates = SETTINGS_MAP.find((section) => section.id === 'machine-updates');
+  assert.ok(updates);
+  assert.equal(updates.level, 'machine');
+  assert.equal(SETTINGS_SECTION_ALIASES.updates, 'machine-updates');
+  const updateSettings: SettingsSetting[] = updates.settings;
+  assert.deepEqual(updateSettings.map((setting) => setting.id), [
+    'update-installed',
+    'update-latest',
+    'update-last-checked',
+    'update-channel',
+    'check-updates',
+    'update-actions',
+  ]);
+  assert.deepEqual(updateSettings.find((setting) => setting.id === 'update-channel')?.options, [
+    { value: 'release', label: 'Release' },
+    { value: 'main', label: 'Main' },
+  ]);
+  const toggleOwners = SETTINGS_MAP.filter((section) => section.settings.some((setting) => setting.id === 'check-updates'));
+  assert.deepEqual(toggleOwners.map((section) => section.id), ['machine-updates']);
+});
+
+test('the update deep link the banner and the Radar ops row share resolves to a real section and setting', async () => {
+  const { SETTINGS_MAP } = await loadMap();
+  const { UPDATES_ACTIONS_SETTING_ID, UPDATES_SECTION_ID } = await import('../public/radar-core.ts');
+  const section = SETTINGS_MAP.find((entry) => entry.id === UPDATES_SECTION_ID);
+  assert.ok(section, 'the deep link names a missing section');
+  assert.ok(
+    section.settings.some((setting: SettingsSetting) => setting.id === UPDATES_ACTIONS_SETTING_ID),
+    'the deep link names a missing setting',
+  );
+});
+
 test('file-only paths exist in defaults and never enter a dirty payload', async () => {
   const { SETTINGS_MAP } = await loadMap();
   const { collectDirtyBlocks, hydrateFromSettings } = await import('../public/settings-view-core.ts');

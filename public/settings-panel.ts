@@ -1,9 +1,11 @@
 import type { SettingsRange } from '#shared/settings-ranges.ts';
 import { SETTINGS_RANGES } from '#shared/settings-ranges.ts';
+import type { UpdateJournal } from '#shared/contracts/update-journal.ts';
 import { playAlertSound, SOUND_OPTIONS } from './alert-sound.ts';
-import { sendControlRequest } from './control-ws.ts';
+import { sendControlMsg, sendControlRequest } from './control-ws.ts';
 import { el } from './dom-helpers.ts';
 import { ensureNotificationPermission, notificationPermission, notificationsSupported } from './notifications.ts';
+import { formatAgo } from './poll-ago.ts';
 import type { SettingsSection, SettingsSetting, SettingsOption } from './settings-map.ts';
 import { SETTINGS_MAP, SETTINGS_SECTION_ALIASES } from './settings-map.ts';
 import {
@@ -32,6 +34,16 @@ import {
   setThemeId,
 } from './ui-prefs.ts';
 import { usageStatusLines } from './usage-panel.ts';
+import {
+  IDLE_UPDATE_REQUEST,
+  installedUpdateText,
+  lastUpdateCheckText,
+  latestUpdateDetails,
+  projectUpdateProgress,
+  reduceUpdateRequest,
+  updateActionAvailability,
+} from './updates-view-core.ts';
+import type { UpdateRequestEvent, UpdateRequestState, UpdateStatusView } from './updates-view-core.ts';
 
 const RANGES_BY_NAME: Record<string, SettingsRange> = SETTINGS_RANGES;
 
@@ -91,6 +103,10 @@ const dangerConfirmationBySettingId = new Map<string, string>();
 let dangerConfirmationFocusSettingId: string | null = null;
 let sectionPickerDocumentClickHandler: ((event: MouseEvent) => void) | null = null;
 let sectionPickerDocumentKeydownHandler: ((event: KeyboardEvent) => void) | null = null;
+let updateStatus: UpdateStatusView | null = null;
+let updateJournal: UpdateJournal | null = null;
+let updateRequest: UpdateRequestState = IDLE_UPDATE_REQUEST;
+let restartServer = () => {};
 
 function browserPreferences() {
   return {
@@ -408,7 +424,84 @@ function renderFileOnly(setting: SettingsSetting) {
   return block;
 }
 
+function buildInstalledUpdateStatus() {
+  return el('div', 'settings-readonly settings-update-readout', installedUpdateText(updateStatus));
+}
+
+function buildLatestUpdateStatus() {
+  const details = latestUpdateDetails(updateStatus);
+  const block = el('div', 'settings-readonly settings-update-readout');
+  block.appendChild(el('span', 'settings-update-latest-label', details.label));
+  if (details.behind) block.appendChild(el('span', 'settings-update-behind', details.behind));
+  if (!details.releaseUrl) return block;
+  const release = el('a', 'settings-link', 'View release');
+  release.href = details.releaseUrl;
+  release.target = '_blank';
+  release.rel = 'noopener noreferrer';
+  block.appendChild(release);
+  return block;
+}
+
+function buildLastUpdateCheckStatus() {
+  const lastCheckedAt = typeof updateStatus?.lastCheckAt === 'number' ? updateStatus.lastCheckAt : null;
+  const text = lastUpdateCheckText({
+    status: updateStatus,
+    checkForUpdates: settingsPayload.checkForUpdates,
+    isLocalConfig: settingsPayload.isLocalConfig,
+    relativeTime: formatAgo(lastCheckedAt),
+  });
+  const block = el('div', 'settings-readonly settings-update-readout', text);
+  if (lastCheckedAt) block.title = new Date(lastCheckedAt).toLocaleString();
+  return block;
+}
+
+function buildUpdateAction(
+  label: string,
+  onClick: () => void,
+  decision: { enabled: boolean; reason: string | null } = { enabled: true, reason: null },
+) {
+  const row = el('div', 'settings-update-action');
+  const button = el('button', 'btn-dialog btn-dialog-confirm settings-update-button', label);
+  button.type = 'button';
+  button.disabled = !decision.enabled;
+  button.addEventListener('click', onClick);
+  const status = el('span', 'settings-update-action-status', decision.reason ?? '');
+  status.setAttribute('role', 'status');
+  row.append(button, status);
+  return row;
+}
+
+function dispatchUpdateRequest(event: UpdateRequestEvent) {
+  const next = reduceUpdateRequest(updateRequest, event);
+  if (next === updateRequest) return;
+  updateRequest = next;
+  refreshUpdateRows();
+}
+
+function requestUpdateApply() {
+  dispatchUpdateRequest(sendControlMsg({ type: 'update-apply' }) ? 'request-sent' : 'request-unsent');
+}
+
+function buildUpdateActions() {
+  const decisions = updateActionAvailability({
+    status: updateStatus,
+    journal: updateJournal,
+    request: updateRequest,
+  });
+  const actions = el('div', 'settings-update-actions settings-update-readout');
+  actions.append(
+    buildUpdateAction('Check for updates', () => sendControlMsg({ type: 'update-check' })),
+    buildUpdateAction('Update', requestUpdateApply, decisions.update),
+    buildUpdateAction('Restart', restartServer, decisions.restart),
+  );
+  return actions;
+}
+
 function renderReadonly(setting: SettingsSetting) {
+  if (setting.status === 'update-installed') return buildInstalledUpdateStatus();
+  if (setting.status === 'update-latest') return buildLatestUpdateStatus();
+  if (setting.status === 'update-last-checked') return buildLastUpdateCheckStatus();
+  if (setting.status === 'update-actions') return buildUpdateActions();
   return el('div', 'settings-readonly', String(setting.value || 'Not configured'));
 }
 
@@ -439,9 +532,42 @@ function statusText(setting: SettingsSetting) {
 
 function buildStatusSlot(setting: SettingsSetting) {
   if (setting.status === 'usage-last-report') return buildUsageStatus();
+  if (setting.status === 'update-actions') return buildUpdateProgress();
+  if (setting.status?.startsWith('update-')) return null;
   const status = statusText(setting);
   if (!status) return null;
   return el('div', 'settings-view-warning settings-view-status-slot', status);
+}
+
+function buildUpdateProgress() {
+  const projection = projectUpdateProgress(updateJournal);
+  if (!projection) return null;
+  const panel = el('div', 'settings-update-progress settings-view-status-block settings-view-status-slot');
+  panel.dataset.state = projection.state;
+  panel.setAttribute('role', 'status');
+  if (projection.terminalLine) panel.appendChild(el('div', 'settings-update-terminal', projection.terminalLine));
+  const list = el('ol', 'settings-update-steps');
+  for (const step of projection.steps) {
+    const item = el('li', 'settings-update-step');
+    item.dataset.status = step.status;
+    item.append(
+      el('span', 'settings-update-step-state', step.status),
+      el('span', 'settings-update-step-label', step.label),
+    );
+    list.appendChild(item);
+  }
+  panel.appendChild(list);
+  if (projection.outputTail.length === 0) return panel;
+  const output = el('pre', 'settings-update-output', projection.outputTail.join('\n'));
+  if (projection.outputStepId) output.dataset.step = projection.outputStepId;
+  if (!projection.outputStepLabel) {
+    panel.appendChild(output);
+    return panel;
+  }
+  const caption = `Output from ${projection.outputStepLabel}`;
+  output.setAttribute('aria-label', caption);
+  panel.append(el('div', 'settings-update-output-label', caption), output);
+  return panel;
 }
 
 function renderSettingHeading(setting: SettingsSetting) {
@@ -762,7 +888,11 @@ function handleNavigationKeydown(event: KeyboardEvent) {
   buttons[(currentIndex + direction + buttons.length) % buttons.length].focus();
 }
 
-export function mountSettingsView(container: HTMLElement) {
+export function mountSettingsView(
+  container: HTMLElement,
+  { onRestart = () => {} }: { onRestart?: () => void } = {},
+) {
+  restartServer = onRestart;
   rootEl = container;
   rootEl.textContent = '';
   shellEl = el('div', 'settings-view-shell');
@@ -858,17 +988,52 @@ export function applySettingsBroadcast(freshSettings: unknown, options: { rehydr
   renderContent();
 }
 
+function settingRow(setting: SettingsSetting) {
+  return document.getElementById(setting.id)?.closest('.settings-view-setting') ?? null;
+}
+
+function refreshRowStatusSlot(setting: SettingsSetting, row: Element) {
+  const currentStatus = row.querySelector('.settings-view-status-slot');
+  const nextStatus = buildStatusSlot(setting);
+  if (currentStatus && nextStatus) currentStatus.replaceWith(nextStatus);
+  if (currentStatus && !nextStatus) currentStatus.remove();
+  if (!currentStatus && nextStatus) row.appendChild(nextStatus);
+}
+
 export function refreshSettingsStatus() {
   for (const setting of selectedSection.settings || []) {
     if (!setting.status) continue;
-    const row = document.getElementById(setting.id)?.closest('.settings-view-setting');
+    const row = settingRow(setting);
     if (!row) continue;
-    const currentStatus = row?.querySelector('.settings-view-status-slot');
-    const nextStatus = buildStatusSlot(setting);
-    if (currentStatus && nextStatus) currentStatus.replaceWith(nextStatus);
-    if (currentStatus && !nextStatus) currentStatus.remove();
-    if (!currentStatus && nextStatus) row.appendChild(nextStatus);
+    refreshRowStatusSlot(setting, row);
   }
+}
+
+function refreshUpdateRows() {
+  if (selectedSection.id !== 'machine-updates') return;
+  for (const setting of selectedSection.settings || []) {
+    if (!setting.status?.startsWith('update-')) continue;
+    const row = settingRow(setting);
+    if (!row) continue;
+    row.querySelector('.settings-update-readout')?.replaceWith(renderControl(setting));
+    refreshRowStatusSlot(setting, row);
+  }
+}
+
+export function applySettingsUpdateStatus(status: unknown) {
+  updateStatus = status as UpdateStatusView;
+  updateRequest = reduceUpdateRequest(updateRequest, 'status-frame');
+  refreshUpdateRows();
+}
+
+export function applySettingsUpdateProgress(journal: unknown) {
+  updateJournal = journal as UpdateJournal;
+  updateRequest = reduceUpdateRequest(updateRequest, 'progress-frame');
+  refreshUpdateRows();
+}
+
+export function clearSettingsUpdateRequest() {
+  dispatchUpdateRequest('error-frame');
 }
 
 export function applySettingsProjectReport(msg: unknown) {

@@ -189,6 +189,16 @@ test('branchGc rejects non-boolean enablement and non-positive numeric fields', 
   }
 });
 
+test('the settings payload tells the dashboard whether the config is the package-local one', () => {
+  const h = harness({ projects: [] });
+  h.send({ type: 'update-settings', settings: { cursorBlink: true } });
+
+  const updated = updatedFrom(h);
+  assert.ok(updated, 'replied settings-updated');
+  assert.equal(holdsKey(updated.settings, 'isLocalConfig'), true);
+  assert.equal(updated.settings?.isLocalConfig, h.store.isLocalConfig);
+});
+
 test('a settings save that omits branchGc preserves its existing opt-out', () => {
   const h = harness({ branchGc: { enabled: false }, projects: [] });
   h.send({ type: 'update-settings', settings: { cursorBlink: true } });

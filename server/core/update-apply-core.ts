@@ -21,6 +21,7 @@ type PreflightRefusalReason =
   | 'unsupported-flavor'
   | 'unsupported-platform'
   | 'channel-mismatch'
+  | 'no-update-available'
   | 'dirty-tree'
   | 'no-branch'
   | 'no-upstream'
@@ -38,6 +39,7 @@ interface PreflightFacts {
   platform: string;
   statusChannel: UpdateChannel;
   configuredChannel: UpdateChannel;
+  updateAvailable: boolean;
   isTreeClean: boolean;
   branch: string | null;
   upstream: string | null;
@@ -113,17 +115,20 @@ function decidePreflight(facts: PreflightFacts): PreflightDecision {
   if (facts.statusChannel !== facts.configuredChannel) {
     return { ok: false, reason: 'channel-mismatch', message: 'The update status is for another channel. Check for updates again.' };
   }
+  if (!facts.updateAvailable) {
+    return { ok: false, reason: 'no-update-available', message: 'No update is available.' };
+  }
   if (!facts.isTreeClean) {
-    return { ok: false, reason: 'dirty-tree', message: 'Commit or discard the checkout changes before updating.' };
+    return { ok: false, reason: 'dirty-tree', message: 'Commit or discard the checkout changes before updating. Check for updates again.' };
   }
   if (!facts.branch) {
-    return { ok: false, reason: 'no-branch', message: 'Check out a branch before updating.' };
+    return { ok: false, reason: 'no-branch', message: 'Check out a branch before updating. Check for updates again.' };
   }
   if (!facts.upstream) {
-    return { ok: false, reason: 'no-upstream', message: 'Set an upstream for the checked-out branch before updating.' };
+    return { ok: false, reason: 'no-upstream', message: 'Set an upstream for the checked-out branch before updating. Check for updates again.' };
   }
   if (parseRemoteFromUpstream(facts.upstream) !== SUPPORTED_UPDATE_REMOTE) {
-    return { ok: false, reason: 'unsupported-remote', message: 'Track the branch on origin before updating.' };
+    return { ok: false, reason: 'unsupported-remote', message: 'Track the branch on origin before updating. Check for updates again.' };
   }
   if (facts.statusBranch !== facts.branch || facts.statusUpstream !== facts.upstream) {
     return { ok: false, reason: 'checkout-changed', message: 'The checkout moved since the last check. Check for updates again.' };
@@ -149,7 +154,7 @@ function decidePreflight(facts: PreflightFacts): PreflightDecision {
 
 function decideFastForward({ canFastForward }: { canFastForward: boolean }): PreflightDecision {
   if (canFastForward) return { ok: true, lockfileCheckNeeded: true };
-  return { ok: false, reason: 'not-fast-forward', message: 'The target is not a fast-forward. Update the branch manually.' };
+  return { ok: false, reason: 'not-fast-forward', message: 'Update the branch manually because the target is not a fast-forward. Check for updates again.' };
 }
 
 function planSteps({ lockfileChanged }: { lockfileChanged: boolean }): UpdateStepId[] {

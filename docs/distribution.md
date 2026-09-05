@@ -9,7 +9,7 @@ Provisioning and updating are owned by the operator's dotfiles repo. Its server 
 1. Clones `https://github.com/johncwaters/glissa.git` to `~/Projects/glissa`.
 2. Ensures Linux has the node-pty build tools: `sudo apt install build-essential python3`.
 3. Runs `npm ci` then `npm run build`.
-4. Installs a systemd user unit (`glissa.service`, `ExecStart` = `node dist/server/index.js`, `Restart=on-failure`) and enables linger so it survives logout.
+4. Installs a systemd user unit (`glissa.service`) and enables linger so it survives logout.
 5. Fronts the remote listener with `tailscale serve`.
 
 To update a server, re-run the dotfiles apply script; it does `git pull --ff-only`, `npm ci`, `npm run build`, and restarts the service. By hand, the same sequence is:
@@ -47,6 +47,7 @@ A release is a version bump plus a `CHANGELOG.md` entry plus an annotated `vX.Y.
 Per the repo's docs-must-be-enforceable norm, these claims are pinned by tests rather than by this page:
 
 - The update check (installed identity, latest release sources, advisory-only failure paths, the per-flavor update command, the persisted throttle): `tests/update-check.test.ts` and `tests/update-core.test.ts`, part of `npm test`.
+- Dashboard-driven update staging, guarded handoff, startup recovery and lifecycle coordination: `tests/update-apply.test.ts`, `tests/update-apply-core.test.ts`, `tests/recover-handoff.test.ts`, `tests/server-lifecycle.test.ts` and `tests/git-workspace-session.test.ts`, part of `npm test`.
 - The `files` whitelist covering every module the entry points require, and every SHIPPED pack spec having its sources inside the tarball (a spec reaching outside `packs/`, like the repo-development `glissa` pack, must be excluded or first boot logs a rebuild failure): the packaged-install job in `.github/workflows/test.yml` installs the real tarball and runs `glissa doctor` against it.
 
 The provisioning flow itself (clone path, systemd unit, tailscale serve, apply script) lives in the dotfiles repo, not here. Treat the steps above as a description of that repo's behavior, and change them there.

@@ -36,10 +36,10 @@ export function onControlMessage(handler: ControlMessageHandler) {
   _messageHandler = handler;
 }
 
-export function sendControlMsg(msg: Record<string, unknown>) {
-  if (controlWs?.readyState === WebSocket.OPEN) {
-    controlWs.send(JSON.stringify(msg));
-  }
+export function sendControlMsg(msg: Record<string, unknown>): boolean {
+  if (controlWs?.readyState !== WebSocket.OPEN) return false;
+  controlWs.send(JSON.stringify(msg));
+  return true;
 }
 
 export function sendControlRequest(type: string, payload?: Record<string, unknown>): Promise<ServerMessage> {

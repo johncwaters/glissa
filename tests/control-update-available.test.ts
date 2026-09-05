@@ -30,11 +30,30 @@ function makeUpdateStatus(latest: string): UpdateStatus {
     latestSha: 'fedcba9876543210fedcba9876543210fedcba98',
     flavor: 'npm-global',
     }),
+    platform: 'linux',
     installedBranch: null,
     upstream: null,
     isTreeClean: null,
     lastCheckAt: 1000,
     journalSummary: null,
+    applyRefusal: null,
+  };
+}
+
+function makeCloneStatus(overrides: Partial<UpdateStatus> = {}): UpdateStatus {
+  return {
+    ...makeUpdateStatus('0.17.0'),
+    ...decideUpdateStatus({
+      currentVersion: '0.16.0',
+      latestVersion: '0.17.0',
+      installedSha: '0123456789abcdef0123456789abcdef01234567',
+      latestSha: 'fedcba9876543210fedcba9876543210fedcba98',
+      flavor: 'clone',
+    }),
+    installedBranch: 'main',
+    upstream: 'origin/main',
+    isTreeClean: true,
+    ...overrides,
   };
 }
 
@@ -94,6 +113,99 @@ test('getStatus projects the latest journal summary', async () => {
     startedAt: 2000,
     finishedAt: null,
   });
+});
+
+test('the recorded status carries the preflight verdict instead of leaving it to the browser', async () => {
+  const journal = makeJournal();
+  const updateCheck = createBackendUpdateCheck({
+    config: { checkForUpdates: true, updateChannel: 'release' },
+    isLocalConfig: false,
+    currentVersion: '0.16.0',
+    platform: 'linux',
+    checkForUpdate: async () => makeCloneStatus(),
+    getUpdateJournal: () => journal,
+    getControlClientCount: () => 0,
+    broadcastControl: () => {},
+    logger: { log: () => {} },
+  });
+  assert.equal((await updateCheck.checkNow()).applyRefusal, null);
+  assert.equal(updateCheck.getStatus()?.applyRefusal, null);
+
+  const dirty = createBackendUpdateCheck({
+    config: { checkForUpdates: true, updateChannel: 'release' },
+    isLocalConfig: false,
+    currentVersion: '0.16.0',
+    platform: 'linux',
+    checkForUpdate: async () => makeCloneStatus({ isTreeClean: false }),
+    getControlClientCount: () => 0,
+    broadcastControl: () => {},
+    logger: { log: () => {} },
+  });
+  assert.deepEqual((await dirty.checkNow()).applyRefusal, {
+    reason: 'dirty-tree',
+    message: 'Commit or discard the checkout changes before updating. Check for updates again.',
+  });
+
+  const windows = createBackendUpdateCheck({
+    config: { checkForUpdates: true, updateChannel: 'release' },
+    isLocalConfig: false,
+    currentVersion: '0.16.0',
+    platform: 'win32',
+    checkForUpdate: async () => makeCloneStatus({ platform: 'win32' }),
+    getControlClientCount: () => 0,
+    broadcastControl: () => {},
+    logger: { log: () => {} },
+  });
+  assert.equal((await windows.checkNow()).applyRefusal?.reason, 'unsupported-platform');
+});
+
+test('the apply refusal tracks the lane and re-broadcasts the status when it changes', async () => {
+  const journal = makeJournal();
+  let restartRequested = false;
+  const broadcasts: ControlMessageRecord[] = [];
+  const updateCheck = createBackendUpdateCheck({
+    config: { checkForUpdates: true, updateChannel: 'release' },
+    isLocalConfig: false,
+    currentVersion: '0.16.0',
+    platform: 'linux',
+    checkForUpdate: async () => makeCloneStatus(),
+    getUpdateJournal: () => journal,
+    isRestartRequested: () => restartRequested,
+    getControlClientCount: () => 0,
+    broadcastControl: (message) => { broadcasts.push(message); },
+    logger: { log: () => {} },
+  });
+  await updateCheck.checkNow();
+  assert.equal(broadcasts.length, 1);
+
+  updateCheck.refreshApplyAvailability();
+  assert.equal(broadcasts.length, 1, 'an unchanged lane broadcasts nothing');
+
+  journal.state = 'running';
+  journal.activeStep = 'fetch';
+  updateCheck.refreshApplyAvailability();
+  assert.equal(broadcasts.length, 2);
+  assert.deepEqual(broadcasts.at(-1)?.applyRefusal, {
+    reason: 'already-running',
+    message: 'Wait for the current update to finish.',
+  });
+
+  journal.state = 'staged';
+  journal.activeStep = null;
+  updateCheck.refreshApplyAvailability();
+  assert.deepEqual(broadcasts.at(-1)?.applyRefusal, {
+    reason: 'already-staged',
+    message: 'Restart to apply the staged update.',
+  });
+
+  journal.state = 'idle';
+  restartRequested = true;
+  updateCheck.refreshApplyAvailability();
+  assert.deepEqual(broadcasts.at(-1)?.applyRefusal, {
+    reason: 'restart-requested',
+    message: 'Wait for the requested restart to finish.',
+  });
+  assert.equal(broadcasts.length, 4);
 });
 
 test('every check broadcasts update-status while banner logging stays deduplicated', async (t) => {

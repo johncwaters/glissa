@@ -258,9 +258,11 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     config,
     isLocalConfig: configStore.isLocalConfig,
     currentVersion: packageJson.version,
+    platform: process.platform,
     checkForUpdate: options.checkForUpdate || undefined,
     fetchOrigin: (args) => assembledGitWorkspace.fetchOrigin(args),
     getUpdateJournal: () => updateApply.getJournal(),
+    isRestartRequested: () => updateApply.isRestartRequested(),
     getControlClientCount: () => controlWss.clients.size,
     broadcastControl,
     logger: console,
@@ -273,7 +275,10 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     journalPath: path.join(glissaHomeDir(), 'update-journal.json'),
     getUpdateStatus: updateCheck.getStatus,
     getUpdateChannel: () => normalizeUpdateChannel(config.updateChannel),
-    broadcastControl,
+    broadcastControl: (message) => {
+      broadcastControl(message);
+      updateCheck.refreshApplyAvailability();
+    },
     logger: console,
   });
   let stopConfigWatch: (() => void) | null = null;
@@ -340,7 +345,10 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     checkNow: updateCheck.checkNow,
     applyUpdate: updateApply.applyUpdate,
     isStaging: updateApply.isStaging,
-    noteRestartRequested: updateApply.noteRestartRequested,
+    noteRestartRequested: () => {
+      updateApply.noteRestartRequested();
+      updateCheck.refreshApplyAvailability();
+    },
     laneAssembly,
     posthog,
     prReview,

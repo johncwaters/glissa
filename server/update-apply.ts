@@ -95,6 +95,7 @@ interface UpdateApplyLane {
   applyUpdate(): Promise<UpdateApplyOutcome>;
   getJournal(): UpdateJournal;
   handOffStagedUpdate(): Promise<void>;
+  isRestartRequested(): boolean;
   isStaging(): boolean;
   noteRestartRequested(): void;
   startAfterListening(httpServer: ListeningServer): void;
@@ -265,6 +266,7 @@ function createUpdateApplyLane(dependencies: UpdateApplyDependencies): UpdateApp
       platform: dependencies.platform || process.platform,
       statusChannel: status.channel,
       configuredChannel: channel,
+      updateAvailable: status.updateAvailable,
       isTreeClean: tree.ok && !tree.dirty,
       branch: checkout.branch,
       upstream: checkout.upstream,
@@ -479,6 +481,10 @@ function createUpdateApplyLane(dependencies: UpdateApplyDependencies): UpdateApp
     return inFlight;
   }
 
+  function isRestartRequested(): boolean {
+    return restartRequested;
+  }
+
   function noteRestartRequested(): void {
     restartRequested = true;
   }
@@ -560,6 +566,7 @@ function createUpdateApplyLane(dependencies: UpdateApplyDependencies): UpdateApp
     applyUpdate,
     getJournal,
     handOffStagedUpdate,
+    isRestartRequested,
     isStaging,
     noteRestartRequested,
     startAfterListening,

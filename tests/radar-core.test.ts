@@ -337,7 +337,15 @@ test('a main-channel status without versions labels both sides with short shas',
   const withoutVersions = { ...mainChannelStatus, current: null };
   assert.equal(updateBannerText(withoutVersions), 'Update available: 0123456 -> fedcba9');
   assert.deepEqual(opsRows({ update: mainChannelStatus }), [
-    { kind: 'update', key: 'update', text: 'Update available: 0.24.2 -> fedcba9', detail: 'git pull', tone: 'dim' },
+    {
+      kind: 'update',
+      key: 'update',
+      text: 'Update available: 0.24.2 -> fedcba9',
+      detail: 'git pull',
+      tone: 'dim',
+      sectionId: 'machine-updates',
+      settingId: 'update-actions',
+    },
   ]);
 });
 
@@ -356,6 +364,8 @@ test('opsRows: the update line leads, then one row per live anomaly', () => {
   assert.deepEqual(rows.map((r) => r.kind), ['update', 'anomaly', 'anomaly']);
   assert.deepEqual(rows.map((r) => r.key), ['update', 'orphanPty', 'destroyedReachable']);
   assert.equal(rows[0].tone, 'dim');
+  assert.equal(rows[0].sectionId, 'machine-updates');
+  assert.equal(rows[0].settingId, 'update-actions');
   assert.equal(rows[1].tone, 'warn');
 });
 

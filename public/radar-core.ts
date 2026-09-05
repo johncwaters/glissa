@@ -107,6 +107,19 @@ export interface RadarProjectAlert {
   staleMs: number;
 }
 
+export interface RadarOpsRow {
+  kind: string;
+  key: string;
+  text: string;
+  detail: string;
+  tone: string;
+  sectionId?: string;
+  settingId?: string;
+}
+
+export const UPDATES_SECTION_ID = 'machine-updates';
+export const UPDATES_ACTIONS_SETTING_ID = 'update-actions';
+
 const CHANGE_RANK: Record<string, number> = {
   spiking: 0,
   regressed: 1,
@@ -447,9 +460,17 @@ export function updateBannerText(update: RadarUpdateFeed | null | undefined) {
 }
 
 export function opsRows({ update, health }: { update?: RadarUpdateFeed | null; health?: RadarHealthFeed | null } = {}) {
-  const rows: { kind: string; key: string; text: string; detail: string; tone: string }[] = [];
+  const rows: RadarOpsRow[] = [];
   const updateEntry = updateAvailableRow(update);
-  if (updateEntry) rows.push({ kind: 'update', key: 'update', text: updateEntry.text, detail: updateEntry.command, tone: 'dim' });
+  if (updateEntry) rows.push({
+    kind: 'update',
+    key: 'update',
+    text: updateEntry.text,
+    detail: updateEntry.command,
+    tone: 'dim',
+    sectionId: UPDATES_SECTION_ID,
+    settingId: UPDATES_ACTIONS_SETTING_ID,
+  });
   for (const anomaly of healthAnomalyRows(health)) {
     rows.push({ kind: 'anomaly', key: anomaly.key, text: anomaly.label, detail: '', tone: 'warn' });
   }

@@ -20,7 +20,7 @@ import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, isPhoneScr
 import { noteKnownProjectPath } from './project-registry.ts';
 import { acknowledgePrAttention, applyPrStatus, mountPrView, setPrActivityCallback } from './pr-panel.ts';
 
-import { updateBannerText } from './radar-core.ts';
+import { UPDATES_ACTIONS_SETTING_ID, UPDATES_SECTION_ID, updateBannerText } from './radar-core.ts';
 import { acknowledgeRadarAttention, applyHealthSnapshot as applyRadarHealth, applyInvestigationActivity, applyInvestigationFinished, applyPosthogStatus, applyPrStatus as applyRadarPrStatus, applyUpdateAvailable as applyRadarUpdate, mountRadarView, setRadarActivityCallback, setRadarNavigateToPrs } from './radar-panel.ts';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.ts';
 import { sessionUIs } from './session-card/card-registry.ts';
@@ -28,12 +28,15 @@ import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, 
 import { openConfirmDialog } from './session-card/modal.ts';
 import { reconnectDataWs } from './session-card/terminal.ts';
 import { showErrorToast } from './session-card/toast.ts';
-import { activateSettingsSection, applySettingsBroadcast, applySettingsProjectReport, applySettingsProjects, mountSettingsView, refreshSettingsStatus, resolveSettingsTarget } from './settings-panel.ts';
+import { activateSettingsSection, applySettingsBroadcast, applySettingsProjectReport, applySettingsProjects, applySettingsUpdateProgress, applySettingsUpdateStatus, clearSettingsUpdateRequest, mountSettingsView, refreshSettingsStatus, resolveSettingsTarget } from './settings-panel.ts';
 import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar, resolveSelectedSession, resyncSelectedSession, setReviewBranchSync } from './sidebar/review-sidebar.ts';
 import { decideReloadOnBuild } from './server-build-core.ts';
+import { createSettingsLink } from './settings-link.ts';
 import { applyTheme } from './theme.ts';
 import { getActiveView as getSavedActiveView, getDismissedUpdate, getThemeId, isSoundEnabled, setActiveView, setDismissedUpdate, setSoundEnabled } from './ui-prefs.ts';
 import { getActiveView, uiState } from './ui-state-core.ts';
+import { updateBannerMode } from './updates-view-core.ts';
+import type { UpdateStatusView } from './updates-view-core.ts';
 import { acknowledgeUsageAttention, applyPlanLimits, applyUsageReport, applyUsageSessions, mountUsageView, refreshUsageView, requestUsageReport, setUsageActivityCallback, setUsageRequestSender } from './usage-panel.ts';
 
 applyTheme(getThemeId());
@@ -315,8 +318,9 @@ const messageHandlers = {
   'debug-state-response': (msg) => handleDebugStateResponse(msg),
 
   'notify':             (msg) => { showDesktopNotification(msg); handleDebugStateRefresh(msg.session); },
-  'update-status':      (msg) => { showUpdateBanner(msg); applyRadarUpdate(msg); },
-  'error':              (msg) => showErrorToast(msg.message, { persist: true }),
+  'update-status':      (msg) => { showUpdateBanner(msg); applyRadarUpdate(msg); applySettingsUpdateStatus(msg); },
+  'update-progress':    (msg) => applySettingsUpdateProgress(msg.journal),
+  'error':              (msg) => { clearSettingsUpdateRequest(); showErrorToast(msg.message, { persist: true }); },
   'session-error':      (msg) => showErrorToast(`${msg.session}: ${msg.message}`, { persist: true }),
   'settings-updated':   (msg) => { if (msg.settings) { applyTerminalSettings(msg.settings); applySettingsBroadcast(msg.settings); applyVisionsSettings(msg.settings); } },
   'health-snapshot':    (msg) => { if (msg.stats) { applyHealthSnapshot(msg.stats as HealthSnapshot); applyRadarHealth(msg.stats as HealthSnapshot); } },
@@ -371,6 +375,8 @@ onControlMessage((msg) => {
 
 let updateBannerDismissed = false;
 
+const UPDATES_SECTION_HREF = createSettingsLink(UPDATES_SECTION_ID, UPDATES_ACTIONS_SETTING_ID, 'Update').href;
+
 function updateIdentity(msg: ServerMessage) {
   const { latestSha, latest } = msg;
   if (typeof latest === 'string' && latest) return latest;
@@ -390,25 +396,31 @@ function showUpdateBanner(msg: ServerMessage) {
   const command = String(msg.command ?? '');
   queryTag(document, '#update-banner-text', 'span').textContent = updateBannerText(msg);
   queryTag(document, '#update-banner-cmd', 'code').textContent = command;
+  const mode = updateBannerMode(msg as UpdateStatusView);
+  const updateLink = queryTag(document, '#update-banner-update', 'a');
+  updateLink.href = UPDATES_SECTION_HREF;
+  updateLink.hidden = mode !== 'link';
+  const commandEl = queryTag(document, '#update-banner-cmd', 'code');
+  commandEl.hidden = mode !== 'command';
+  const copyBtn = queryTag(document, '#update-banner-copy', 'button');
+  copyBtn.hidden = mode !== 'command';
+  const copyStatus = queryTag(document, '#update-banner-copy-status', 'span');
+  copyStatus.hidden = mode !== 'command';
+  copyStatus.textContent = '';
   const link = queryTag(document, '#update-banner-link', 'a');
   link.hidden = !msg.releaseUrl;
   link.href = typeof msg.releaseUrl === 'string' ? msg.releaseUrl : '';
   banner.hidden = false;
 
-  const copyBtn = queryTag(document, '#update-banner-copy', 'button');
-  const flashLabel = (text: string) => {
-    copyBtn.textContent = text;
-    setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
-  };
   copyBtn.onclick = () => {
     const write = writeClipboardText(command);
     if (!write) {
-      flashLabel('Copy failed');
+      copyStatus.textContent = 'Copy failed';
       return;
     }
     write
-      .then(() => flashLabel('Copied'))
-      .catch(() => flashLabel('Copy failed'));
+      .then(() => { copyStatus.textContent = 'Copied'; })
+      .catch(() => { copyStatus.textContent = 'Copy failed'; });
   };
   queryTag(document, '#update-banner-dismiss', 'button').onclick = () => {
     updateBannerDismissed = true;
@@ -548,7 +560,7 @@ mountVisionsView(viewVisionsEl);
 
 mountHooksView(viewHooksEl);
 
-mountSettingsView(viewSettingsEl);
+mountSettingsView(viewSettingsEl, { onRestart: confirmServerRestart });
 
 const VIEW_TABS = [
   { view: 'focus', tab: tabFocus, el: viewFocusEl },
@@ -682,7 +694,7 @@ if (isPhoneLayout()) applyFormFactorLayout('phone');
 onLayoutChange(applyFormFactorLayout);
 window.addEventListener('hashchange', activateSettingsHash);
 
-queryTag(document, '#btn-restart', 'button').addEventListener('click', () => {
+function confirmServerRestart() {
   headerMenu.classList.remove('open');
   syncMenuAria();
   const count = getSessionCount();
@@ -697,7 +709,9 @@ queryTag(document, '#btn-restart', 'button').addEventListener('click', () => {
     danger: false,
     onConfirm: () => sendControlMsg({ type: 'restart-server' }),
   });
-});
+}
+
+queryTag(document, '#btn-restart', 'button').addEventListener('click', confirmServerRestart);
 
 function applyClientTrust(trust: unknown) {
   const showShutdown = shouldShowServerAction('shutdown', trust);

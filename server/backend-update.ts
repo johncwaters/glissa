@@ -1,6 +1,7 @@
-import type { UpdateStatus } from '../shared/contracts/control-messages.ts';
+import type { UpdateApplyRefusal, UpdateStatus } from '../shared/contracts/control-messages.ts';
 import type { UpdateChannel, UpdateJournal, UpdateJournalSummary } from '../shared/contracts/update-journal.ts';
 import type { ControlBroadcast } from './backend-websockets.ts';
+import { decideFastForward, decidePreflight } from './core/update-apply-core.ts';
 import { decideUpdateStatus, normalizeUpdateChannel, shortSha } from './core/update-core.ts';
 import { checkForUpdate as defaultCheckForUpdate } from './update-check.ts';
 import type { FetchOrigin, UpdateCheckStatus } from './update-check.ts';
@@ -19,9 +20,11 @@ interface BackendUpdateDependencies {
   config: { checkForUpdates?: boolean; updateChannel?: UpdateChannel };
   isLocalConfig: boolean;
   currentVersion: string;
+  platform?: NodeJS.Platform;
   checkForUpdate: CheckForUpdate | undefined;
   fetchOrigin?: FetchOrigin;
   getUpdateJournal?: () => UpdateJournal | null;
+  isRestartRequested?: () => boolean;
   getControlClientCount: () => number;
   broadcastControl: ControlBroadcast;
   logger: Pick<Console, 'log'>;
@@ -32,9 +35,12 @@ interface BackendUpdateCheck {
   applySettings(): void;
   checkNow(): Promise<UpdateStatus>;
   getStatus(): UpdateStatus | null;
+  refreshApplyAvailability(): void;
   start(): void;
   stop(): void;
 }
+
+type RecordedUpdateStatus = Omit<UpdateStatus, 'journalSummary' | 'applyRefusal'>;
 
 function journalSummary(journal: UpdateJournal | null | undefined): UpdateJournalSummary | null {
   if (!journal) return null;
@@ -48,7 +54,8 @@ function journalSummary(journal: UpdateJournal | null | undefined): UpdateJourna
 }
 
 function createBackendUpdateCheck(dependencies: BackendUpdateDependencies): BackendUpdateCheck {
-  let updateStatus: UpdateStatus | null = null;
+  let recordedStatus: RecordedUpdateStatus | null = null;
+  let lastLaneSignature: string | null = null;
   let updateAbort: AbortController | null = null;
   let updateRecheckInterval: NodeJS.Timeout | null = null;
   let inFlight: Promise<UpdateStatus> | null = null;
@@ -57,13 +64,62 @@ function createBackendUpdateCheck(dependencies: BackendUpdateDependencies): Back
   let pendingChannelRefresh = false;
   let stopped = false;
   const now = dependencies.now || (() => Date.now());
+  const platform: string = dependencies.platform || process.platform;
+
+  function decideApplyRefusal(
+    recorded: RecordedUpdateStatus,
+    journal: UpdateJournal | null | undefined,
+  ): UpdateApplyRefusal | null {
+    const decision = decidePreflight({
+      flavor: recorded.flavor,
+      platform,
+      statusChannel: recorded.channel,
+      configuredChannel: normalizeUpdateChannel(dependencies.config.updateChannel),
+      updateAvailable: recorded.updateAvailable,
+      isTreeClean: recorded.isTreeClean === true,
+      branch: recorded.installedBranch,
+      upstream: recorded.upstream,
+      statusBranch: recorded.installedBranch,
+      statusUpstream: recorded.upstream,
+      headSha: recorded.currentSha,
+      targetSha: recorded.latestSha,
+      journalState: journal?.state || 'idle',
+      restartRequested: dependencies.isRestartRequested?.() === true,
+    });
+    if (!decision.ok) return { reason: decision.reason, message: decision.message };
+    const fastForward = decideFastForward({ canFastForward: recorded.reason !== 'branch-diverged' });
+    if (fastForward.ok) return null;
+    return { reason: fastForward.reason, message: fastForward.message };
+  }
+
+  function projectStatus(recorded: RecordedUpdateStatus): UpdateStatus {
+    const journal = dependencies.getUpdateJournal?.();
+    return {
+      ...recorded,
+      journalSummary: journalSummary(journal),
+      applyRefusal: decideApplyRefusal(recorded, journal),
+    };
+  }
+
+  function laneSignature(status: UpdateStatus): string {
+    return `${status.journalSummary?.state || 'none'}|${status.applyRefusal?.reason || 'none'}`;
+  }
+
+  function broadcastStatus(status: UpdateStatus): void {
+    lastLaneSignature = laneSignature(status);
+    dependencies.broadcastControl({ type: 'update-status', ...status });
+  }
 
   function getStatus(): UpdateStatus | null {
-    if (!updateStatus) return null;
-    return {
-      ...updateStatus,
-      journalSummary: journalSummary(dependencies.getUpdateJournal?.()),
-    };
+    if (!recordedStatus) return null;
+    return projectStatus(recordedStatus);
+  }
+
+  function refreshApplyAvailability(): void {
+    if (stopped || !recordedStatus) return;
+    const status = projectStatus(recordedStatus);
+    if (laneSignature(status) === lastLaneSignature) return;
+    broadcastStatus(status);
   }
 
   function failedStatus(channel: UpdateChannel, lastCheckAt: number): UpdateCheckStatus {
@@ -81,14 +137,9 @@ function createBackendUpdateCheck(dependencies: BackendUpdateDependencies): Back
   }
 
   function recordStatus(updateResult: UpdateCheckStatus | null, checkedAt: number, channel: UpdateChannel): UpdateStatus {
-    const recorded = updateResult || failedStatus(channel, checkedAt);
-    const status: UpdateStatus = {
-      ...recorded,
-      lastCheckAt: checkedAt,
-      journalSummary: journalSummary(dependencies.getUpdateJournal?.()),
-    };
-    updateStatus = status;
-    dependencies.broadcastControl({ type: 'update-status', ...status });
+    recordedStatus = { ...(updateResult || failedStatus(channel, checkedAt)), platform, lastCheckAt: checkedAt };
+    const status = projectStatus(recordedStatus);
+    broadcastStatus(status);
     return status;
   }
 
@@ -120,10 +171,7 @@ function createBackendUpdateCheck(dependencies: BackendUpdateDependencies): Back
       .catch(() => null)
       .then((updateResult) => {
         if (stopped || channel !== normalizeUpdateChannel(dependencies.config.updateChannel)) {
-          return {
-            ...failedStatus(channel, checkedAt),
-            journalSummary: journalSummary(dependencies.getUpdateJournal?.()),
-          };
+          return projectStatus({ ...failedStatus(channel, checkedAt), platform });
         }
         const status = recordStatus(updateResult, checkedAt, channel);
         surfaceAvailableUpdate(status);
@@ -150,7 +198,8 @@ function createBackendUpdateCheck(dependencies: BackendUpdateDependencies): Back
     const channel = normalizeUpdateChannel(dependencies.config.updateChannel);
     if (channel === lastChannel) return;
     lastChannel = channel;
-    updateStatus = null;
+    recordedStatus = null;
+    lastLaneSignature = null;
     lastSurfacedIdentity = null;
     if (inFlight) {
       pendingChannelRefresh = true;
@@ -179,7 +228,7 @@ function createBackendUpdateCheck(dependencies: BackendUpdateDependencies): Back
     updateRecheckInterval = null;
   }
 
-  return { applySettings, checkNow, getStatus, start, stop };
+  return { applySettings, checkNow, getStatus, refreshApplyAvailability, start, stop };
 }
 
 export { createBackendUpdateCheck };

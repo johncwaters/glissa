@@ -47,6 +47,7 @@ export interface SettingsSection {
 
 export const SETTINGS_SECTION_ALIASES = Object.freeze({
   general: 'machine-general',
+  updates: 'machine-updates',
   terminal: 'machine-terminal',
   repos: 'machine-repositories',
   repositories: 'machine-repositories',
@@ -129,6 +130,45 @@ export const SETTINGS_MAP = Object.freeze([
     unattendedLinks: [{ settingId: 'rtk-compression', title: 'rtk output compression' }],
   },
   {
+    id: 'machine-updates',
+    level: 'machine',
+    title: 'Updates',
+    description: 'Inspect, stage and hand off Glissa updates without opening a terminal.',
+    settings: [
+      {
+        id: 'update-installed', path: 'checkForUpdates', title: 'Installed',
+        description: 'Version, commit, branch and checkout state currently running.',
+        control: 'readonly', keywords: ['version', 'commit'], status: 'update-installed',
+      },
+      {
+        id: 'update-latest', path: 'updateChannel', title: 'Latest',
+        description: 'Latest target found on the selected update channel.',
+        control: 'readonly', keywords: ['release', 'commit'], status: 'update-latest',
+      },
+      {
+        id: 'update-last-checked', path: 'checkForUpdates', title: 'Last checked',
+        description: 'Most recent update check or the reason automatic checks are off.',
+        control: 'readonly', keywords: ['time', 'failure'], status: 'update-last-checked',
+      },
+      {
+        id: 'update-channel', path: 'updateChannel', title: 'Channel',
+        description: 'Track tagged releases or the upstream of the checked-out branch.',
+        control: 'select', options: [{ value: 'release', label: 'Release' }, { value: 'main', label: 'Main' }],
+        keywords: ['release', 'branch'], defaultValue: 'release',
+      },
+      {
+        id: 'check-updates', path: 'checkForUpdates', title: 'Check for updates on startup',
+        description: 'Check for a newer Glissa at launch and while a dashboard is connected.',
+        control: 'toggle', keywords: ['release', 'github'], defaultValue: true,
+      },
+      {
+        id: 'update-actions', path: 'checkForUpdates', title: 'Actions',
+        description: 'Check immediately, stage the selected target, or restart to hand off a staged build.',
+        control: 'readonly', keywords: ['check', 'restart'], status: 'update-actions',
+      },
+    ],
+  },
+  {
     id: 'machine-terminal',
     level: 'machine',
     title: 'Terminal',
@@ -143,11 +183,6 @@ export const SETTINGS_MAP = Object.freeze([
         id: 'cursor-blink', path: 'cursorBlink', title: 'Cursor blink',
         description: 'Blink the cursor in every terminal.',
         control: 'toggle', keywords: ['caret', 'terminal'], defaultValue: false,
-      },
-      {
-        id: 'check-updates', path: 'checkForUpdates', title: 'Check for updates on startup',
-        description: 'Check GitHub at launch and show the update command when a newer Glissa is available.',
-        control: 'toggle', keywords: ['release', 'github'], defaultValue: true,
       },
     ],
   },

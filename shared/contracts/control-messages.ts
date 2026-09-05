@@ -14,6 +14,9 @@ const opaqueObject = openObject();
 const opaqueArray = z.array(z.unknown());
 const trailSteps = z.array(openObject({ at: timestamp, tool: z.string(), detail: z.string() }));
 
+export const UpdateApplyRefusal = z.object({ reason: z.string(), message: z.string() });
+export type UpdateApplyRefusal = z.infer<typeof UpdateApplyRefusal>;
+
 const updateStatusShape = {
   updateAvailable: z.boolean(),
   current: nullableString,
@@ -23,6 +26,7 @@ const updateStatusShape = {
   releaseUrl: nullableString,
   command: z.string(),
   flavor: z.enum(['npm-global', 'clone', 'unknown']),
+  platform: z.string(),
   installedBranch: nullableString,
   upstream: nullableString,
   isTreeClean: z.boolean().nullable(),
@@ -31,6 +35,7 @@ const updateStatusShape = {
   behindCount: z.number().int().nonnegative().nullable(),
   reason: nullableString,
   journalSummary: UpdateJournalSummary.nullable(),
+  applyRefusal: UpdateApplyRefusal.nullable(),
 };
 
 export const UpdateStatus = z.object(updateStatusShape);
