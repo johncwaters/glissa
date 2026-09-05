@@ -1,6 +1,6 @@
 # Plan: Dashboard Updates
 
-Status: drafted 2026-09-05, challenged the same day, nothing shipped.
+Status: shipped 2026-09-05, all three milestones (commits 528957a U1, 8594be6 U2 and U3). Held for the operator: the necessity cuts listed in the U1 and U2 commit reports.
 
 ## Why
 
