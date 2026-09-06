@@ -497,7 +497,5 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
   };
 }
 
-type BackendLanes = ReturnType<typeof createBackendLanes>;
-
 export { createBackendLanes, tokensFromUsage };
-export type { BackendLaneDependencies, BackendLaneOptions, BackendLanes };
+export type { BackendLaneDependencies, BackendLaneOptions };

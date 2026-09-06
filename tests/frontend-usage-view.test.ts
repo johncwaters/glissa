@@ -185,7 +185,7 @@ test('token limit: 80 percent warns, 100 is critical, and the line names the ref
 });
 
 test('projected limit: where the burn rate lands, not only where the block already is', async () => {
-  const { projectedLimitPct, projectionLimitLine, blockAttentionTone, hasUsageAttention } = await importCore();
+  const { projectedLimitPct, projectionLimitLine, blockAttentionTone, usageAttentionSignature } = await importCore();
   const tokenLimit = { max: 1000, pct: 0.2 };
   assert.equal(projectedLimitPct({ projectedTokens: 900 }, tokenLimit), 90);
   assert.equal(projectedLimitPct({ projectedTokens: 900 }, { max: 0 }), null);
@@ -202,16 +202,16 @@ test('projected limit: where the burn rate lands, not only where the block alrea
 
   const heading = { tokenLimit, activeBlock: { projection: { projectedTokens: 900 } } };
   assert.equal(blockAttentionTone(heading), 'warn');
-  assert.equal(hasUsageAttention(heading), true);
+  assert.equal(usageAttentionSignature(heading), 'block:warn');
   const calm = { tokenLimit, activeBlock: { projection: { projectedTokens: 300 } } };
   assert.equal(blockAttentionTone(calm), 'ok');
-  assert.equal(hasUsageAttention(calm), false);
+  assert.equal(usageAttentionSignature(calm), '');
 
   assert.equal(blockAttentionTone({ tokenLimit: { max: 10, pct: 0.81 } }), 'warn');
   assert.equal(blockAttentionTone({ tokenLimit: { max: 10, pct: 1.4 } }), 'crit');
-  assert.equal(hasUsageAttention({ tokenLimit: { max: 10, pct: 0.12 } }), false);
-  assert.equal(hasUsageAttention({ tokenLimit: null }), false);
-  assert.equal(hasUsageAttention(null), false);
+  assert.equal(usageAttentionSignature({ tokenLimit: { max: 10, pct: 0.12 } }), '');
+  assert.equal(usageAttentionSignature({ tokenLimit: null }), '');
+  assert.equal(usageAttentionSignature(null), '');
 });
 
 test('usageAttentionSignature: names which arbiter fires, at a coarse bucket', async () => {
@@ -236,15 +236,13 @@ test('usageAttentionSignature: a wobbling percentage keeps its bucket, a crossed
   assert.notEqual(budgetAt(91), budgetAt(101));
 });
 
-test('usageAttentionSignature: a calm report is the empty signature, and hasUsageAttention agrees with it', async () => {
-  const { usageAttentionSignature, hasUsageAttention } = await importCore();
+test('usageAttentionSignature: distinguishes calm reports from combined anomalies', async () => {
+  const { usageAttentionSignature } = await importCore();
   const calm = { tokenLimit: { max: 10, pct: 0.1 }, anomaly: null, budget: null };
   assert.equal(usageAttentionSignature(calm), '');
-  assert.equal(hasUsageAttention(calm), false);
   assert.equal(usageAttentionSignature(null), '');
   const alarming = { tokenLimit: { max: 10, pct: 0.95 }, anomaly: { burn: { ratio: 2 } } };
   assert.equal(usageAttentionSignature(alarming), 'anomaly:burn|block:warn');
-  assert.equal(hasUsageAttention(alarming), true);
 });
 
 test('usageAttentionSignature: official plan limits drive the block bucket when they exist', async () => {
@@ -515,18 +513,18 @@ test('planWindowOf and hasOfficialPlanLimits: a window is absent unless it repor
 });
 
 test('blockAttentionTone: official five-hour usage outranks the largest-block estimate', async () => {
-  const { blockAttentionTone, hasUsageAttention } = await importCore();
+  const { blockAttentionTone, usageAttentionSignature } = await importCore();
 
   const calmEstimate = { tokenLimit: { max: 1000, pct: 0.1 }, activeBlock: { projection: { projectedTokens: 200 } } };
   assert.equal(blockAttentionTone(calmEstimate), 'ok');
   assert.equal(blockAttentionTone(calmEstimate, { fiveHour: { pct: 85 } }), 'warn');
   assert.equal(blockAttentionTone(calmEstimate, { fiveHour: { pct: 100 } }), 'crit');
-  assert.equal(hasUsageAttention(calmEstimate, { fiveHour: { pct: 85 } }), true);
+  assert.equal(usageAttentionSignature(calmEstimate, { fiveHour: { pct: 85 } }), 'block:warn');
 
   const hotEstimate = { tokenLimit: { max: 1000, pct: 0.95 } };
   assert.equal(blockAttentionTone(hotEstimate), 'warn');
   assert.equal(blockAttentionTone(hotEstimate, { fiveHour: { pct: 4 } }), 'ok');
-  assert.equal(hasUsageAttention(hotEstimate, { fiveHour: { pct: 4 } }), false);
+  assert.equal(usageAttentionSignature(hotEstimate, { fiveHour: { pct: 4 } }), '');
 
   assert.equal(blockAttentionTone(hotEstimate, { fiveHour: null }), 'warn');
   assert.equal(blockAttentionTone(hotEstimate, null), 'warn');

@@ -30,7 +30,6 @@ import {
   forgetUri,
   hashText,
   mergeDiagnostics,
-  modelDiagnosticsToLsp,
   recordDispatch,
   resolveDispatchConfig,
   resolveVisionsConfig,
@@ -718,7 +717,7 @@ test('invalid model diagnostics are dropped and caps match comments', () => {
 });
 
 test('model diagnostics convert to LSP ranges over whole one-based lines', () => {
-  const diagnostics = modelDiagnosticsToLsp([
+  const { diagnostics } = sanitizeModelDiagnostics([
     { line: 1, message: 'first line' },
     { line: 2, message: 'blank line' },
     { line: 3, message: 'third line' },
@@ -750,7 +749,7 @@ test('model diagnostics convert to LSP ranges over whole one-based lines', () =>
 });
 
 test('model diagnostics ignore claimed severity and publish as hints', () => {
-  const diagnostics = modelDiagnosticsToLsp([
+  const { diagnostics } = sanitizeModelDiagnostics([
     { line: 1, severity: 1, message: 'The acceptance criteria contradict the title.' },
   ], { text: 'abc\n' });
   assert.equal(diagnostics[0].severity, 4);

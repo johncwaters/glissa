@@ -119,7 +119,7 @@ function createSessionBackgroundTracking({
       gateHeldReadyTimer = null;
       evaluateGateHeldReady();
     }, ms);
-    if (typeof gateHeldReadyTimer.unref === "function") gateHeldReadyTimer.unref();
+    gateHeldReadyTimer.unref();
   }
 
   function gateRecheckMs(now: number): number {

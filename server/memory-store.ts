@@ -13,7 +13,6 @@ import { writeTextAtomic, writeTextAtomicSync } from './json-file.ts';
 import { createMemoryDb } from './memory-db.ts';
 import type { MemoryDb, TailEntry } from './memory-db.ts';
 
-const MEMORY_DIR_NAME = 'memory';
 const HMAC_KEY_FILE = 'hmac-key';
 const DIST_DIR_NAME = 'dist';
 const CURRENT_DIR_NAME = 'current';
@@ -786,5 +785,5 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
   };
 }
 
-export { MEMORY_DIR_NAME, createCanonicalProjectLookupPlanner, createMemoryStore };
+export { createCanonicalProjectLookupPlanner, createMemoryStore };
 export type { MemoryStoreOptions, ProjectionFile };

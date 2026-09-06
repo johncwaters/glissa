@@ -523,10 +523,6 @@ function radarAttentionParts({ posthog, health }: { posthog?: RadarSnapshot | nu
   return parts;
 }
 
-export function radarAttentionCount(input: { posthog?: RadarSnapshot | null; health?: RadarHealthFeed | null } = {}) {
-  return radarAttentionParts(input).length;
-}
-
 export function radarAttentionSignature(input: { posthog?: RadarSnapshot | null; health?: RadarHealthFeed | null } = {}) {
   return attentionSignature(radarAttentionParts(input));
 }

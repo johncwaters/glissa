@@ -238,7 +238,7 @@ class NotificationManager extends EventEmitter {
       entry.phoneTimer = null;
       this._transition(sessionName, 'phone_escalation');
     }, this._phoneEscalationMs);
-    if (typeof entry.phoneTimer.unref === 'function') entry.phoneTimer.unref();
+    entry.phoneTimer.unref();
   }
 
   _exitHook(_sessionName: string, entry: NotificationEntry, state: NotificationState): void {

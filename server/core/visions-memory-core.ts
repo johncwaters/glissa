@@ -289,11 +289,4 @@ function memoryDelivery(
   return { lines, texts };
 }
 
-function memoryDeliveryLines(
-  records: unknown,
-  options: { maxRecords?: number; maxChars?: number } = {},
-): string[] {
-  return memoryDelivery(records, options).lines;
-}
-
-export { MAX_DELIVERED_CHARS, MAX_DELIVERED_RECORDS, MAX_FINDING_ID_CHARS, MAX_SERVED_KEYS, MEMORY_VENDOR, basenameOfUri, createBoundedKeySet, dismissFeedbackInput, dispatchMemoryInputs, displayLineOfFix, fixFeedbackInput, intentHeadKey, intentMemoryInput, latestIntentHeads, memoryDelivery, memoryDeliveryLines, projectTagFor, readDismissParams, servedFeedbackInput, servedFindingOf, servedKey, threadIdOfIntentText };
+export { MAX_DELIVERED_CHARS, MAX_DELIVERED_RECORDS, MAX_FINDING_ID_CHARS, MAX_SERVED_KEYS, MEMORY_VENDOR, basenameOfUri, createBoundedKeySet, dismissFeedbackInput, dispatchMemoryInputs, displayLineOfFix, fixFeedbackInput, intentHeadKey, intentMemoryInput, latestIntentHeads, memoryDelivery, projectTagFor, readDismissParams, servedFeedbackInput, servedFindingOf, servedKey, threadIdOfIntentText };

@@ -139,7 +139,5 @@ function createBackendNotifications(dependencies: BackendNotificationDependencie
   };
 }
 
-type BackendNotifications = ReturnType<typeof createBackendNotifications>;
-
 export { createBackendNotifications };
-export type { BackendNotificationDependencies, BackendNotifications, NotificationConfig };
+export type { BackendNotificationDependencies, NotificationConfig };

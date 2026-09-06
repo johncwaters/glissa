@@ -21,7 +21,3 @@ export function stalePackNames(deliveredPacks: readonly DeliveredPack[] | unknow
   }
   return names;
 }
-
-export function hasStalePack(deliveredPacks: readonly DeliveredPack[] | unknown, latestVersionsByName: LatestPackVersions | null | undefined) {
-  return stalePackNames(deliveredPacks, latestVersionsByName).length > 0;
-}

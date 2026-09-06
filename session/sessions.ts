@@ -9,7 +9,6 @@ import { createOscTitleSource } from "../detection/osc-title-source.ts";
 import { createStatusSource } from "../detection/status-source.ts";
 import type { MetaStatusSignal, ResolvedStatusSignal } from "../detection/status-source.ts";
 import type { HookSignal } from "../detection/hook-source.ts";
-import { classifyClaudeKind, buildSpawnCommand } from "./core/spawn-command.ts";
 import type { ResolvedCommand } from "./core/spawn-command.ts";
 import { DEFAULT_AGENT_ID, resolveAdapter, commandFor } from "./adapters/index.ts";
 import type { AgentAdapter, AgentCapabilities } from "./adapters/index.ts";
@@ -1480,5 +1479,5 @@ function claudeCommand(): ResolvedCommand {
   return commandFor(DEFAULT_AGENT_ID);
 }
 
-export { Session, buildSpawnCommand, classifyClaudeKind, claudeCommand };
+export { Session, claudeCommand };
 export type { SessionOptions, SessionPty, SessionRecorderPort };

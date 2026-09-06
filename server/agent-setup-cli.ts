@@ -175,6 +175,5 @@ export {
   ensureWritableHooksDirectory,
   replaceFileAtomically,
 };
-type GrokSetupInputs = ReturnType<typeof setupInputs>;
 
-export type { AgentSetupDeps, AtomicWriteFileSystem, DirectoryFileSystem, GrokSetupInputs, GrokSetupInspection, SetupFileSystem };
+export type { AgentSetupDeps, AtomicWriteFileSystem, DirectoryFileSystem, GrokSetupInspection, SetupFileSystem };

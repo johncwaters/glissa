@@ -18,7 +18,6 @@ import {
   needsActionPrRows,
   opsRows,
   partitionRadarProjects,
-  radarAttentionCount,
   radarAttentionSignature,
   radarDisplayName,
   radarPlaceholder,
@@ -434,31 +433,12 @@ test('needsActionPrRows: malformed entries fall back rather than throwing', () =
 
 const posthogWith = (issues: { change?: string; verdict?: string }[]) => ({ projects: [{ projectId: 'ph', issues }] });
 
-test('radarAttentionCount: PostHog spiking and needsHuman issues still count', () => {
-  const posthog = posthogWith([
-    { change: 'spiking', verdict: 'NEEDS_HUMAN' },
-    { change: 'quiet', verdict: 'TRANSIENT' },
-  ]);
-  assert.equal(radarAttentionCount({ posthog }), 2);
-});
-
-test('radarAttentionCount: each live anomaly counts once', () => {
-  assert.equal(radarAttentionCount({ health: { anomalies: { orphanPty: true, listenerMismatch: true } } }), 2);
-  assert.equal(radarAttentionCount({ health: { anomalies: { orphanPty: false } } }), 0);
-});
-
-test('radarAttentionCount: the two sources sum', () => {
-  const total = radarAttentionCount({
+test('radarAttentionSignature: includes issues and health anomalies together', () => {
+  const signature = radarAttentionSignature({
     posthog: posthogWith([{ change: 'spiking' }, { change: 'quiet', verdict: 'NEEDS_HUMAN' }]),
     health: { anomalies: { destroyedReachable: true } },
   });
-  assert.equal(total, 3);
-});
-
-test('radarAttentionCount: every feed absent is zero, never a throw', () => {
-  assert.equal(radarAttentionCount(), 0);
-  assert.equal(radarAttentionCount({}), 0);
-  assert.equal(radarAttentionCount({ posthog: null, health: null }), 0);
+  assert.equal(signature, 'health:destroyedReachable|issue:ph/#0:spiking|issue:ph/#1:needs-human');
 });
 
 test('radarAttentionSignature: names each attention issue by project, id and why', () => {
@@ -499,7 +479,6 @@ test('radarAttentionSignature: an issue with no id still counts, keyed by title 
     { title: 'Cannot read length', change: 'spiking' },
     { change: 'spiking' },
   ] }] };
-  assert.equal(radarAttentionCount({ posthog }), 2);
   assert.equal(radarAttentionSignature({ posthog }), 'issue:ph/#1:spiking|issue:ph/Cannot read length:spiking');
 });
 
@@ -630,10 +609,10 @@ test('investigationRows: a non-https prUrl is dropped', () => {
   }
 });
 
-test('investigationRows: an unarchived record never moves the attention count', () => {
+test('investigationRows: an unarchived record never raises attention', () => {
   const posthog = { projects: [], investigations: [investigationRecord()] };
   assert.equal(investigationRows(posthog).length, 1);
-  assert.equal(radarAttentionCount({ posthog }), 0, 'the inbox is quiet review material');
+  assert.equal(radarAttentionSignature({ posthog }), '', 'the inbox is quiet review material');
 });
 
 test('trailStepRows keeps only steps that name a tool and coerces the rest', () => {

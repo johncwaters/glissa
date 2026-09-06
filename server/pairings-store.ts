@@ -58,8 +58,6 @@ interface SeenStore {
   readonly pending: Promise<void> | null;
 }
 
-const EMPTY_DOC: PairingsDocument = { version: 1, pending: [], devices: [] };
-
 const SNAPSHOT_RELOAD_MS = 30000;
 
 const REVOCATION_PROPAGATION_SECONDS = Math.ceil(SNAPSHOT_RELOAD_MS / 1000);
@@ -398,7 +396,6 @@ function createSeenStore({
 }
 
 export {
-  EMPTY_DOC,
   REVOCATION_PROPAGATION_SECONDS,
   SNAPSHOT_RELOAD_MS,
   configSiblingPath,

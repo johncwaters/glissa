@@ -73,11 +73,7 @@ function planReplay(
   const send: OutboxEntry[] = [];
   const expired: OutboxEntry[] = [];
   for (const entry of entries) {
-    if (entry.attempts >= maxAttempts) {
-      expired.push(entry);
-      continue;
-    }
-    if (now - entry.queuedAt > maxAgeMs) {
+    if (entry.attempts >= maxAttempts || now - entry.queuedAt > maxAgeMs) {
       expired.push(entry);
       continue;
     }

@@ -31,9 +31,7 @@ const DETAIL_FIELD_BY_TOOL: Record<string, string> = {
 
 function firstLineOf(value: unknown): string {
   if (typeof value !== 'string') return '';
-  const line = value.split(/\r?\n/, 1)[0]?.trim() ?? '';
-  if (line.length <= TRAIL_DETAIL_MAX_CHARS) return line;
-  return line.slice(0, TRAIL_DETAIL_MAX_CHARS);
+  return value.split(/\r?\n/, 1)[0].trim().slice(0, TRAIL_DETAIL_MAX_CHARS);
 }
 
 export function describeToolStep(toolName: unknown, toolInput: unknown): { tool: string; detail: string } | null {

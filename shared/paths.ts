@@ -27,18 +27,16 @@ export function isSameDirectoryPath(a: unknown, b: unknown): boolean {
   return equalsIgnoringCaseOnWindows(canonicalizePath(resolvedA), canonicalizePath(resolvedB));
 }
 
-export async function canonicalizePathAsync(p: string): Promise<string> {
-  try {
-    return await realpathNative(p);
-  } catch {
-    return p;
-  }
-}
-
 export async function comparableDirectoryPath(candidatePath: unknown): Promise<string> {
-  const canonical = await canonicalizePathAsync(path.resolve(String(candidatePath || '')));
-  if (process.platform !== 'win32') return canonical;
-  return canonical.toLowerCase();
+  const resolvedPath = path.resolve(String(candidatePath || ''));
+  let canonicalPath: string;
+  try {
+    canonicalPath = await realpathNative(resolvedPath);
+  } catch {
+    canonicalPath = resolvedPath;
+  }
+  if (process.platform !== 'win32') return canonicalPath;
+  return canonicalPath.toLowerCase();
 }
 
 export function safePathSegment(value: unknown): string {

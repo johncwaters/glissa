@@ -553,10 +553,9 @@ function createConfigStore({ settingsDefaults }: { settingsDefaults?: Partial<De
 }
 
 type ConfigStore = ReturnType<typeof createConfigStore>;
-type SettingsSnapshot = ReturnType<ConfigStore['getSettings']>;
 
 export {
   createConfigStore, resolveConfigPath, glissaHomeDir, generateProjectId, ensureProjectIds, validateConfig, loadConfigFile,
   DEFAULT_CONFIG, CONFIG_DIR_MODE, CONFIG_FILE_MODE, SECRET_PRESENCE_SUFFIX,
 };
-export type { BranchGcBlock, ConfigStore, DefaultConfig, GlissaConfig, LoadedConfig, ProjectEntry, SettingsSnapshot };
+export type { BranchGcBlock, ConfigStore, DefaultConfig, GlissaConfig, LoadedConfig, ProjectEntry };

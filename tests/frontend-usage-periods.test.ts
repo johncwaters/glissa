@@ -248,13 +248,13 @@ test('anomalyLine: the wording names the comparison, not just "unusual"', async 
 });
 
 test('an anomaly raises the tab attention dot on its own', async () => {
-  const { hasUsageAttention } = await importCore();
+  const { usageAttentionSignature } = await importCore();
   const calm = { tokenLimit: null, anomaly: { daily: null, burn: null } };
-  assert.equal(hasUsageAttention(calm), false);
+  assert.equal(usageAttentionSignature(calm), '');
   const flagged = { tokenLimit: null, anomaly: { daily: { ratio: 3, todayUsd: 30, baselineUsd: 10 }, burn: null } };
-  assert.equal(hasUsageAttention(flagged), true, 'nothing else would surface it');
+  assert.equal(usageAttentionSignature(flagged), 'anomaly:daily', 'nothing else would surface it');
 
-  assert.equal(hasUsageAttention({ tokenLimit: { max: 10, pct: 0.9 }, anomaly: null }), true);
+  assert.equal(usageAttentionSignature({ tokenLimit: { max: 10, pct: 0.9 }, anomaly: null }), 'block:warn');
 });
 
 test('no forbidden characters reach the DOM from the new builders', async () => {
@@ -302,17 +302,17 @@ test('budget row formatting: a position, not a bare percentage', async () => {
 });
 
 test('a budget at or past 90 percent raises the tab dot on its own', async () => {
-  const { hasUsageAttention, BUDGET_ATTENTION_PCT } = await importCore();
+  const { usageAttentionSignature, BUDGET_ATTENTION_PCT } = await importCore();
   assert.equal(BUDGET_ATTENTION_PCT, 90);
   const at = (pct: number) => ({ tokenLimit: null, anomaly: null, budget: { rows: [{ scope: 'daily', spentUsd: 1, budgetUsd: 2, pct, tone: 'crit' }] } });
-  assert.equal(hasUsageAttention(at(89.9)), false);
-  assert.equal(hasUsageAttention(at(90)), true);
-  assert.equal(hasUsageAttention(at(150)), true);
-  assert.equal(hasUsageAttention({ budget: null }), false);
+  assert.equal(usageAttentionSignature(at(89.9)), '');
+  assert.equal(usageAttentionSignature(at(90)), 'budget:daily:near');
+  assert.equal(usageAttentionSignature(at(150)), 'budget:daily:over');
+  assert.equal(usageAttentionSignature({ budget: null }), '');
 
-  assert.equal(hasUsageAttention(at(95)), true);
-  assert.equal(hasUsageAttention(at(10)), false);
-  assert.equal(hasUsageAttention({ tokenLimit: { max: 10, pct: 0.95 }, budget: null }), true);
+  assert.equal(usageAttentionSignature(at(95)), 'budget:daily:near');
+  assert.equal(usageAttentionSignature(at(10)), '');
+  assert.equal(usageAttentionSignature({ tokenLimit: { max: 10, pct: 0.95 }, budget: null }), 'block:warn');
 });
 
 test('laneRows and laneLabel: known lanes get names, unknown ids pass through', async () => {

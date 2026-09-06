@@ -89,7 +89,7 @@ function createSessionOutput(options: SessionOutputOptions): SessionOutput {
     };
     const onExit = (): void => clearPendingPaste();
     const timer = setTimeout(() => clearPendingPaste(), timeoutMs);
-    if (typeof timer.unref === "function") timer.unref();
+    timer.unref();
     pendingPaste = { timer, onStateChange, onExit };
     options.on("state-change", onStateChange);
     options.once("exit", onExit);

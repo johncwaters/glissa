@@ -117,27 +117,11 @@ function buildAgentSpawnCommand(
   return { file: "cmd.exe", args: ["/c", name, ...childArgs] };
 }
 
-const classifyClaudeKind = classifyCommandKind;
-const resolveClaudeCommand = (
-  opts: { platform?: NodeJS.Platform; exec?: PathLookupExec } = {},
-): ResolvedCommand => resolveAgentCommand({ name: "claude", ...opts });
-const buildSpawnCommand = ({ platform, resolved, settingsArgs = [], packArgs = [], claudeArgs = [] }: {
-  platform: NodeJS.Platform;
-  resolved?: ResolvedCommand | null;
-  settingsArgs?: string[];
-  packArgs?: string[];
-  claudeArgs?: string[];
-}): { file: string; args: string[] } =>
-  buildAgentSpawnCommand({ name: "claude", platform, resolved, argGroups: [settingsArgs, packArgs, claudeArgs] });
-
 export {
   classifyCommandKind,
   dedupePathMatches,
   resolvePathCommandMatches,
   resolveAgentCommand,
   buildAgentSpawnCommand,
-  classifyClaudeKind,
-  resolveClaudeCommand,
-  buildSpawnCommand,
 };
 export type { CommandKind, PathLookupExec, ResolvedCommand };

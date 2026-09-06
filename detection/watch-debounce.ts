@@ -25,7 +25,7 @@ function createWatchDebounce(
       if (stopped) return;
       try { onChange(); } catch {  }
     }, debounceMs);
-    if (typeof timer.unref === 'function') timer.unref();
+    timer.unref();
   }
 
   function watch(dir: string, listener?: WatchListener<string> | null): boolean {

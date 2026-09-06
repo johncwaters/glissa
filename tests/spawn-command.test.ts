@@ -1,16 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSpawnCommand, classifyClaudeKind } from '../session/sessions.ts';
-import { dedupePathMatches, resolveClaudeCommand } from '../session/core/spawn-command.ts';
+import claudeCode from '../session/adapters/claude-code.ts';
+import { classifyCommandKind, dedupePathMatches, resolveAgentCommand } from '../session/core/spawn-command.ts';
 const SETTINGS = ['--settings', 'C:\\tmp\\glissa\\settings.json'];
 const DANGER = ['--dangerously-skip-permissions'];
 
 test('posix -> bare claude, args preserved in order', () => {
-  const { file, args } = buildSpawnCommand({
+  const { file, args } = claudeCode.buildSpawnCommand({
     platform: 'linux',
     resolved: { path: '/usr/local/bin/claude', kind: 'shim' },
     settingsArgs: SETTINGS,
-    claudeArgs: DANGER,
+    agentArgs: DANGER,
   });
   assert.equal(file, 'claude');
   assert.deepEqual(args, [...SETTINGS, ...DANGER]);
@@ -18,11 +18,11 @@ test('posix -> bare claude, args preserved in order', () => {
 
 test('win + .exe -> direct absolute path, no cmd.exe and no /c', () => {
   const p = 'C:\\Users\\johnw\\.local\\bin\\claude.exe';
-  const { file, args } = buildSpawnCommand({
+  const { file, args } = claudeCode.buildSpawnCommand({
     platform: 'win32',
     resolved: { path: p, kind: 'exe' },
     settingsArgs: SETTINGS,
-    claudeArgs: DANGER,
+    agentArgs: DANGER,
   });
   assert.equal(file, p);
   assert.deepEqual(args, [...SETTINGS, ...DANGER]);
@@ -32,43 +32,43 @@ test('win + .exe -> direct absolute path, no cmd.exe and no /c', () => {
 
 test('win + .com (classified exe) -> direct path', () => {
   const p = 'C:\\tools\\claude.com';
-  const { file } = buildSpawnCommand({
+  const { file } = claudeCode.buildSpawnCommand({
     platform: 'win32',
     resolved: { path: p, kind: 'exe' },
     settingsArgs: SETTINGS,
-    claudeArgs: [],
+    agentArgs: [],
   });
   assert.equal(file, p);
 });
 
 test('win + .cmd shim -> cmd.exe /c claude (historical form unchanged)', () => {
-  const { file, args } = buildSpawnCommand({
+  const { file, args } = claudeCode.buildSpawnCommand({
     platform: 'win32',
     resolved: { path: 'C:\\Users\\johnw\\AppData\\Roaming\\npm\\claude.cmd', kind: 'shim' },
     settingsArgs: SETTINGS,
-    claudeArgs: DANGER,
+    agentArgs: DANGER,
   });
   assert.equal(file, 'cmd.exe');
   assert.deepEqual(args, ['/c', 'claude', ...SETTINGS, ...DANGER]);
 });
 
 test('win + unresolved -> cmd.exe /c claude', () => {
-  const { file, args } = buildSpawnCommand({
+  const { file, args } = claudeCode.buildSpawnCommand({
     platform: 'win32',
     resolved: { path: null, kind: 'unresolved' },
     settingsArgs: [],
-    claudeArgs: [],
+    agentArgs: [],
   });
   assert.equal(file, 'cmd.exe');
   assert.deepEqual(args, ['/c', 'claude']);
 });
 
 test('win + missing resolved object -> cmd.exe fallback (defensive)', () => {
-  const { file, args } = buildSpawnCommand({
+  const { file, args } = claudeCode.buildSpawnCommand({
     platform: 'win32',
     resolved: undefined,
     settingsArgs: [],
-    claudeArgs: [],
+    agentArgs: [],
   });
   assert.equal(file, 'cmd.exe');
   assert.deepEqual(args, ['/c', 'claude']);
@@ -76,11 +76,11 @@ test('win + missing resolved object -> cmd.exe fallback (defensive)', () => {
 
 test('win + spaced exe path stays a single file arg, never word-split', () => {
   const p = 'C:\\Program Files\\Anthropic\\claude.exe';
-  const { file, args } = buildSpawnCommand({
+  const { file, args } = claudeCode.buildSpawnCommand({
     platform: 'win32',
     resolved: { path: p, kind: 'exe' },
     settingsArgs: SETTINGS,
-    claudeArgs: [],
+    agentArgs: [],
   });
   assert.equal(file, p);
   assert.ok(args.every((a) => !a.toLowerCase().includes('claude.exe')),
@@ -89,19 +89,19 @@ test('win + spaced exe path stays a single file arg, never word-split', () => {
     'spaced path must not be split into separate args');
 });
 
-test('no dangerous flag passthrough when claudeArgs is empty', () => {
-  const { args } = buildSpawnCommand({
+test('no dangerous flag passthrough when agentArgs is empty', () => {
+  const { args } = claudeCode.buildSpawnCommand({
     platform: 'win32',
     resolved: { path: 'C:\\x\\claude.exe', kind: 'exe' },
     settingsArgs: SETTINGS,
-    claudeArgs: [],
+    agentArgs: [],
   });
   assert.ok(!args.includes('--dangerously-skip-permissions'));
   assert.deepEqual(args, SETTINGS);
 });
 
 test('empty inputs default safely (no crash, posix bare claude)', () => {
-  const { file, args } = buildSpawnCommand({ platform: 'linux', resolved: null });
+  const { file, args } = claudeCode.buildSpawnCommand({ platform: 'linux', resolved: null });
   assert.equal(file, 'claude');
   assert.deepEqual(args, []);
 });
@@ -139,9 +139,10 @@ test('dedupePathMatches leaves an empty or single-entry list alone', () => {
   assert.deepEqual(dedupePathMatches(['/usr/bin/claude'], 'linux'), ['/usr/bin/claude']);
 });
 
-test('resolveClaudeCommand falls back to command -v when which is missing on posix', () => {
+test('resolveAgentCommand falls back to command -v when which is missing on posix', () => {
   const commands: string[] = [];
-  const resolved = resolveClaudeCommand({
+  const resolved = resolveAgentCommand({
+    name: 'claude',
     platform: 'linux',
     exec(command) {
       commands.push(command);
@@ -155,9 +156,10 @@ test('resolveClaudeCommand falls back to command -v when which is missing on pos
   assert.deepEqual(resolved, { path: '/home/u/.local/bin/claude', kind: 'shim' });
 });
 
-test('resolveClaudeCommand falls back to command -v when which returns no matches', () => {
+test('resolveAgentCommand falls back to command -v when which returns no matches', () => {
   const commands: string[] = [];
-  const resolved = resolveClaudeCommand({
+  const resolved = resolveAgentCommand({
+    name: 'claude',
     platform: 'linux',
     exec(command) {
       commands.push(command);
@@ -170,50 +172,50 @@ test('resolveClaudeCommand falls back to command -v when which returns no matche
   assert.deepEqual(resolved, { path: '/usr/local/bin/claude', kind: 'shim' });
 });
 
-test('classifyClaudeKind maps extensions correctly', () => {
-  assert.equal(classifyClaudeKind('C:\\a\\claude.exe'), 'exe');
-  assert.equal(classifyClaudeKind('C:\\a\\claude.EXE'), 'exe');
-  assert.equal(classifyClaudeKind('C:\\a\\claude.com'), 'exe');
-  assert.equal(classifyClaudeKind('C:\\a\\claude.cmd'), 'shim');
-  assert.equal(classifyClaudeKind('C:\\a\\claude.bat'), 'shim');
-  assert.equal(classifyClaudeKind('C:\\a\\claude.ps1'), 'shim');
-  assert.equal(classifyClaudeKind('/usr/local/bin/claude'), 'shim');
+test('classifyCommandKind maps extensions correctly', () => {
+  assert.equal(classifyCommandKind('C:\\a\\claude.exe'), 'exe');
+  assert.equal(classifyCommandKind('C:\\a\\claude.EXE'), 'exe');
+  assert.equal(classifyCommandKind('C:\\a\\claude.com'), 'exe');
+  assert.equal(classifyCommandKind('C:\\a\\claude.cmd'), 'shim');
+  assert.equal(classifyCommandKind('C:\\a\\claude.bat'), 'shim');
+  assert.equal(classifyCommandKind('C:\\a\\claude.ps1'), 'shim');
+  assert.equal(classifyCommandKind('/usr/local/bin/claude'), 'shim');
 
-  assert.equal(classifyClaudeKind('C:\\Users\\johnw\\.local\\bin\\claude'), 'shim');
-  assert.equal(classifyClaudeKind('/home/u/.local/bin/claude'), 'shim');
-  assert.equal(classifyClaudeKind('C:\\Program Files\\x\\claude.exe'), 'exe');
-  assert.equal(classifyClaudeKind(null), 'unresolved');
-  assert.equal(classifyClaudeKind(''), 'unresolved');
+  assert.equal(classifyCommandKind('C:\\Users\\johnw\\.local\\bin\\claude'), 'shim');
+  assert.equal(classifyCommandKind('/home/u/.local/bin/claude'), 'shim');
+  assert.equal(classifyCommandKind('C:\\Program Files\\x\\claude.exe'), 'exe');
+  assert.equal(classifyCommandKind(null), 'unresolved');
+  assert.equal(classifyCommandKind(''), 'unresolved');
 });
 
-test('packArgs land between the settings block and claudeArgs, on both spawn forms', () => {
+test('packArgs land between the settings block and agentArgs, on both spawn forms', () => {
   const PACKS = ['--add-dir', 'C:/Users/johnw/.glissa/packs/built/house-rules/current'];
-  const direct = buildSpawnCommand({
+  const direct = claudeCode.buildSpawnCommand({
     platform: 'win32',
     resolved: { path: 'C:/a/claude.exe', kind: 'exe' },
     settingsArgs: SETTINGS,
     packArgs: PACKS,
-    claudeArgs: [...DANGER, 'THE PROMPT'],
+    agentArgs: [...DANGER, 'THE PROMPT'],
   });
   assert.deepEqual(direct.args, [...SETTINGS, ...PACKS, ...DANGER, 'THE PROMPT']);
   assert.equal(direct.args[direct.args.length - 1], 'THE PROMPT', 'the prompt positional stays last');
 
-  const shim = buildSpawnCommand({
+  const shim = claudeCode.buildSpawnCommand({
     platform: 'win32',
     resolved: { path: 'C:/a/claude.cmd', kind: 'shim' },
     settingsArgs: SETTINGS,
     packArgs: PACKS,
-    claudeArgs: DANGER,
+    agentArgs: DANGER,
   });
   assert.deepEqual(shim.args, ['/c', 'claude', ...SETTINGS, ...PACKS, ...DANGER]);
 });
 
 test('omitting packArgs reproduces the pre-pack argv exactly', () => {
-  const before = buildSpawnCommand({
+  const before = claudeCode.buildSpawnCommand({
     platform: 'linux',
     resolved: { path: '/usr/local/bin/claude', kind: 'shim' },
     settingsArgs: SETTINGS,
-    claudeArgs: DANGER,
+    agentArgs: DANGER,
   });
   assert.deepEqual(before.args, [...SETTINGS, ...DANGER]);
 });

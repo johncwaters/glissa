@@ -887,10 +887,6 @@ export function usageAttentionSignature(report: UsageReport | null | undefined, 
   return attentionSignature(parts);
 }
 
-export function hasUsageAttention(report: UsageReport | null | undefined, planLimits: PlanLimits | null = null) {
-  return usageAttentionSignature(report, planLimits) !== '';
-}
-
 export function planWindowUsedText(window: PlanWindow | null | undefined) {
   const pct = finiteNumber(window?.pct);
   if (pct === null) return NO_VALUE;

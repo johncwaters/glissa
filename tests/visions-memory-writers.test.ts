@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import { createVisionsWiring } from '../server/visions-wiring.ts';
 import { screenMemoryText } from '../server/core/memory-core.ts';
-import { memoryDeliveryLines } from '../server/core/visions-memory-core.ts';
+import { memoryDelivery } from '../server/core/visions-memory-core.ts';
 import type { VisionsWiringOptions } from '../server/visions-wiring.ts';
 
 type MemoryStoreSeam = NonNullable<ReturnType<NonNullable<VisionsWiringOptions['getMemoryStore']>>>;
@@ -186,7 +186,7 @@ test('the thread prefix passes the entropy screen, so a threaded intent enters t
 });
 
 test('the delivered bullet carries the thread prefix intact', () => {
-  const [line] = memoryDeliveryLines([{
+  const { lines: [line] } = memoryDelivery([{
     id: 'm-1', text: 'thread t-716d49b4: shipping the memory writers', rank: 'model', kind: 'intent',
   }]);
   assert.ok(line?.includes('thread t-716d49b4: shipping the memory writers'), line);

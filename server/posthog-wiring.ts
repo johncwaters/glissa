@@ -26,7 +26,7 @@ import type { PosthogApi } from './posthog-api.ts';
 import { createPosthogPoller } from './posthog-poller.ts';
 import type { PosthogState, SpawnInvestigationArgs } from './posthog-poller.ts';
 import { DEFAULT_POSTHOG_REPORT_DIR } from './posthog-report.ts';
-import { sendPosthogPing } from './posthog-telegram.ts';
+import { sendTelegramMessage } from './telegram-transport.ts';
 import { configuredIntegrationBranch } from './core/integration-branch-core.ts';
 
 const POSTHOG_DENY = {
@@ -741,7 +741,7 @@ function createPosthogWiring({
         host: posthogConfig.host,
         resolveProjects: makeResolveProjects(api, config),
         spawnInvestigation: posthogInvestigationSpawn,
-        telegram: (text: string) => { void sendPosthogPing(botToken, chatId, text); },
+        telegram: (text: string) => { void sendTelegramMessage({ botToken, chatId, text, tag: 'posthog' }); },
         readState: readPosthogState,
         writeState: writePosthogState,
         intervalMinutes: posthogConfig.intervalMinutes || 15,

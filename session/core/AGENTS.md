@@ -13,7 +13,7 @@ Pure cores seam-extracted from `sessions.js`: no fs, no git, no async, no Sessio
 | `state-machine.ts` | `TRANSITIONS`, `GUARDS`, `ENTRY_HOOKS`, `EXIT_HOOKS` lifecycle tables for the session state machine (states defined in `shared/states.ts`) |
 | `status-mapper.ts` | Pure `mapSignalToEvent(signal, state, confidence, activeAgents)` -> event or null; `activeAgents > 0` suppresses `ready` -> `task_complete` |
 | `exit-transition.ts` | Pure `decideExitTransition(state, exitCode, signal, receivedFirstOutput)` -> `{ event, detail }`: the real-PTY-exit decision extracted from `Session._handlePtyExit` |
-| `spawn-command.ts` | Agent-neutral resolve-then-branch spawn mechanics (direct `.exe` vs `cmd.exe /c` shim fallback) plus the Claude-bound shims `classifyClaudeKind`, `resolveClaudeCommand`, `buildSpawnCommand`; the command constant lives in the adapter registry cache |
+| `spawn-command.ts` | Agent-neutral command resolution and spawn mechanics; agent vocabulary lives in `../adapters/` |
 | `spawn-env.ts` | Pure `buildAgentEnv(baseEnv, extraEnv, profile)`: the adapter's scrub/set profile applied plus the always-on Glissa marker scrub, optional PATH prepend, returns a copy |
 | `agent-tracker.ts` | Live background sub-agent bookkeeping over a `Map<agent_id, ts>` with TTL prune; feeds the completion gate |
 | `gate-release.ts` | Pure `decideGateRelease(...)` -> `cancel` / `gated` / `wait` / `release`: the ONE judge of whether a gate-held (deferred) `ready` may complete the card. Cancels any hold with a newer non-ready signal (by sequence, not clock), so a Stop held across a new turn can never fire |

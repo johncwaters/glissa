@@ -45,7 +45,7 @@ function createTelegramCompletionDefer({
       pendingCompletions.delete(delivery.sessionId);
       send(latest);
     }, recheckMs);
-    if (typeof timer.unref === 'function') timer.unref();
+    timer.unref();
     pendingCompletions.set(delivery.sessionId, { delivery, timer });
   }
 

@@ -72,7 +72,5 @@ function createBackendSessionRuntime(dependencies: BackendSessionRuntimeDependen
   return { getHookPort, hookRouter, makeSession, rtkInstall };
 }
 
-type BackendSessionRuntime = ReturnType<typeof createBackendSessionRuntime>;
-
 export { createBackendSessionRuntime };
-export type { BackendSessionRuntime, BackendSessionRuntimeDependencies };
+export type { BackendSessionRuntimeDependencies };
