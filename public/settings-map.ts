@@ -194,6 +194,7 @@ export const SETTINGS_MAP = Object.freeze([
     settings: [
       { id: 'file-detect-background-agents', path: 'detectBackgroundAgents', title: 'Detect background agents', description: 'Hold completion while tracked background work is active.', control: 'readonly', keywords: ['subagents', 'completion'], fileOnly: true },
       { id: 'file-record-signals', path: 'recordSignals', title: 'Record structural signals', description: 'Keep forensic status and hook recordings.', control: 'readonly', keywords: ['recordings', 'diagnostics'], fileOnly: true },
+      { id: 'file-trace-enabled', path: 'trace.enabled', title: 'Capture session traces', description: 'Keep normalized Claude transcript traces for session debugging.', control: 'readonly', keywords: ['transcripts', 'diagnostics'], fileOnly: true },
       { id: 'file-anti-slop-prompt', path: 'antiSlopPrompt', title: 'Anti-slop prompt', description: 'Append the configured quality prompt to session instructions.', control: 'readonly', keywords: ['quality', 'instructions'], fileOnly: true },
       { id: 'file-detect-scheduled-wakeups', path: 'detectScheduledWakeups', title: 'Detect scheduled wakeups', description: 'Surface advisory wakeup timing for scheduled sessions.', control: 'readonly', keywords: ['schedule', 'sleep'], fileOnly: true },
       { id: 'file-worktree-auto-rebase', path: 'worktreeAutoRebase', title: 'Worktree auto-rebase', description: 'Rebase eligible session worktrees when the integration branch moves.', control: 'readonly', keywords: ['git', 'branch'], fileOnly: true },

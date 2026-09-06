@@ -4,6 +4,7 @@ import type { Session } from '../session/sessions.ts';
 import type { ControlBroadcast } from './backend-websockets.ts';
 import { comparableDirectoryPath } from '../shared/paths.ts';
 import { createBranchGcWiring } from './branch-gc-wiring.ts';
+import { DEFAULT_CONFIG } from './config-store.ts';
 import type { ConfigStore, GlissaConfig } from './config-store.ts';
 import { configSiblingPath } from './pairings-store.ts';
 import { createGitWorkspace, createGitWorkspaceSync } from './git-workspace.ts';
@@ -27,6 +28,7 @@ import { createPrReviewWiring } from './pr-review-wiring.ts';
 import { createSpawnGate } from './spawn-gate.ts';
 import { createUsageWiring, resolveUsageConfig } from './usage-wiring.ts';
 import { createLaneLedger } from './usage-lane-ledger.ts';
+import { createTraceWiring } from './trace-wiring.ts';
 import { createVisionsDispatcher, createVisionsSpawn } from './visions-dispatch.ts';
 import { createVisionsSetup } from './visions-setup.ts';
 import { createVisionsWiring } from './visions-wiring.ts';
@@ -206,6 +208,13 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
       laneFloorMs: () => earliestLaneEntryMs(laneLedger),
       knownProjects: () => configStore.config.projects,
       debug: () => configStore.getSettings().debugMode === true,
+    })
+    : null;
+  const isTraceEnabled = config.trace?.enabled ?? DEFAULT_CONFIG.trace.enabled;
+  const traceWiring = isTraceEnabled
+    ? createTraceWiring({
+      configPath: configStore.configPath,
+      logger,
     })
     : null;
   const memoryDistillSessions = new Map<string, Session>();
@@ -406,6 +415,7 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
     'memory-ingest': memoryIngest,
     'memory-distill': memoryDistiller,
     'memory-store': memoryStore,
+    trace: traceWiring,
   };
   const fixedLanes = new Map<string, unknown>(Object.entries(fixedLaneEntries));
   type LaneMap = typeof fixedLaneEntries & { ingest: typeof ingestLane; visions: typeof visionsLane };
@@ -440,6 +450,7 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
         packService.start().catch((error: unknown) => logger.warn(`[packs] auto-rebuild failed to start: ${errorMessage(error)}`));
       },
       () => packDistiller.start().catch((error: unknown) => logger.warn(`[distill] failed to start: ${errorMessage(error)}`)),
+      () => traceWiring?.start().catch((error: unknown) => logger.warn(`[trace] start failed: ${errorMessage(error)}`)),
     ];
     for (const start of startSteps) start();
   }
@@ -491,6 +502,7 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
     startMemoryLanes,
     startRuntimeLanes,
     tapIngestForSession,
+    traceWiring,
     usage,
     visionsSessions,
     visionsSetup,

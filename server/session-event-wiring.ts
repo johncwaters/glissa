@@ -43,6 +43,7 @@ interface SessionEventDependencies {
   tapIngestForSession: (session: Session) => void;
   closeSessionDataClients: (id: string) => void;
   millMetricsPort?: MillMetricsPort | null;
+  traceWiring?: { attachSession: (session: Session) => void } | null;
   logger: Pick<Console, 'error' | 'log' | 'warn'>;
 }
 
@@ -75,6 +76,7 @@ function persistSessionField(
 
 function createSessionEventWiring(dependencies: SessionEventDependencies): (session: Session) => void {
   return function wireSessionEvents(session: Session): void {
+    dependencies.traceWiring?.attachSession(session);
     let postTurnDebounce: NodeJS.Timeout | null = null;
     const notifyGate = createNotifyGate();
     let lastPersistedWasActive: boolean | null = null;

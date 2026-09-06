@@ -70,7 +70,7 @@ for (const source of ['startup', 'resume', 'clear', 'compact', 'fork']) {
     assert.equal(s.resumeSessionId, id, 'mirrored into the live resume binding');
     assert.equal(events.length, 1, 'emitted claude-session-id once');
 
-    assert.deepEqual(events[0], { id, source, vendor: 'claude', sessionId: id });
+    assert.deepEqual(events[0], { id, source, vendor: 'claude', sessionId: id, transcriptPath: null });
     s.destroy();
   });
 }
@@ -80,6 +80,34 @@ test('a later SessionStart re-captures a new id (resume assigns a new id each ti
   sessionStart(s, { session_id: 'abcd1234-0000-0000-0000-abcdabcdabcd', source: 'startup' });
   sessionStart(s, { session_id: 'ffff9999-0000-0000-0000-ffffffffffff', source: 'resume' });
   assert.equal(s.resumeSessionId, 'ffff9999-0000-0000-0000-ffffffffffff');
+  s.destroy();
+});
+
+test('the captured session id event keeps the transcript path from the same hook payload', () => {
+  const s = makeSession();
+  const events: Record<string, unknown>[] = [];
+  s.on('claude-session-id', (event) => events.push(event));
+  const id = 'abcd1234-0000-0000-0000-abcdabcdabcd';
+  const transcriptPath = '/tmp/claude/session.jsonl';
+  sessionStart(s, { session_id: id, source: 'startup', transcript_path: transcriptPath });
+  assert.equal(events[0]?.transcriptPath, transcriptPath);
+  s.destroy();
+});
+
+test('a later transcript path for the same session id is emitted without a fresh resume capture', () => {
+  const s = makeSession();
+  const events: Record<string, unknown>[] = [];
+  const resumeChanges: unknown[] = [];
+  s.on('claude-session-id', (event) => events.push(event));
+  s.on('session-resume', (event) => resumeChanges.push(event));
+  const id = 'abcd1234-0000-0000-0000-abcdabcdabcd';
+  sessionStart(s, { session_id: id, source: 'startup' });
+  sessionStart(s, { session_id: id, source: 'startup', transcript_path: '/tmp/claude/resumed.jsonl' });
+  sessionStart(s, { session_id: id, source: 'startup', transcript_path: '/tmp/claude/resumed.jsonl' });
+
+  assert.equal(events.length, 2, 'emitted again only for the new transcript path');
+  assert.equal(events[1]?.transcriptPath, '/tmp/claude/resumed.jsonl');
+  assert.equal(s.resumeSessionId, id);
   s.destroy();
 });
 

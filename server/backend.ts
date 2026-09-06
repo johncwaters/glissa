@@ -188,6 +188,7 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     recordLane,
     spawnGate,
     tapIngestForSession,
+    traceWiring,
     usage,
     visionsSessions,
     visionsSetup,
@@ -205,6 +206,7 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     notificationManager,
     getIngestLane: getCurrentIngestLane,
     tapIngestForSession,
+    traceWiring,
     closeSessionDataClients,
     logger: console,
   });
@@ -308,6 +310,7 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     memoryIngest,
     memoryDistiller,
     memoryStore,
+    traceWiring,
     millMetricsIdle: () => laneAssembly.millMetrics.whenIdle(),
     millMetricsPort: laneAssembly.millMetrics.port,
     telegramOutbox,

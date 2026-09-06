@@ -40,6 +40,7 @@ interface BackendShutdownDependencies {
   memoryIngest: Stoppable | null;
   memoryDistiller: Stoppable | null;
   memoryStore: Stoppable | null;
+  traceWiring?: Stoppable | null;
   millMetricsIdle?: (() => Promise<void>) | null;
   millMetricsPort?: ShutdownMillMetricsPort | null;
   telegramOutbox: { idle: () => unknown };
@@ -106,6 +107,13 @@ function createBackendShutdown(dependencies: BackendShutdownDependencies): () =>
     if (memoryDistiller) stoppers.add('memory-distill', () => memoryDistiller.stop());
     const memoryStore = dependencies.memoryStore;
     if (memoryStore) stoppers.add('memory-store', () => memoryStore.stop());
+    const traceWiring = dependencies.traceWiring;
+    if (traceWiring) {
+      stoppers.add('trace', async () => {
+        await Promise.allSettled([...pendingReaps]);
+        return traceWiring.stop();
+      });
+    }
 
     const millMetricsIdle = dependencies.millMetricsIdle;
     if (millMetricsIdle) stoppers.add('mill-metrics', () => millMetricsIdle());

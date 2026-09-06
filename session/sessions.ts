@@ -192,6 +192,7 @@ class Session extends EventEmitter {
   _initialPrompt: string | null;
   _extraClaudeArgs: string[];
   _resumeSessionId: string | null;
+  _transcriptPath: string | null;
   _suppressResumeCapture: boolean;
   _antiSlopPrompt: boolean;
   _spawnEnv: Record<string, string> | null;
@@ -371,6 +372,7 @@ class Session extends EventEmitter {
     this._extraClaudeArgs = Array.isArray(extraClaudeArgs) ? extraClaudeArgs : [];
     this._packsBuiltRoot = packsBuiltRoot;
     this._resumeSessionId = resumeSessionId || null;
+    this._transcriptPath = null;
     this._suppressResumeCapture = false;
     this._antiSlopPrompt = !!antiSlopPrompt && this._can("antiSlop");
     this.ephemeral = !!ephemeral;
@@ -519,7 +521,7 @@ class Session extends EventEmitter {
       const sessionIdOf = typeof this._adapter.sessionIdOf === "function"
         ? this._adapter.sessionIdOf
         : (payload: HookPayload) => payload?.session_id;
-      this._captureClaudeSessionId(sessionIdOf(raw.payload), raw.payload.source);
+      this._captureClaudeSessionId(sessionIdOf(raw.payload), raw.payload.source, raw.payload.transcript_path);
     }
 
     if (raw && raw.signal === "awaiting-input") this._setPendingPromptKind(raw.promptKind || null);
@@ -557,13 +559,22 @@ class Session extends EventEmitter {
     this._setPendingPromptKind(null);
   }
 
-  _captureClaudeSessionId(id: unknown, source: unknown): void {
+  _captureClaudeSessionId(id: unknown, source: unknown, transcriptPath: unknown): void {
     if (this._suppressResumeCapture) return;
     if (typeof id !== "string" || !RESUME_ID_RE.test(id)) return;
-    if (id === this._resumeSessionId) return;
-    this.setResumeConversation(id);
+    const nextTranscriptPath = typeof transcriptPath === "string" && transcriptPath ? transcriptPath : null;
+    const isKnownId = id === this._resumeSessionId;
+    if (isKnownId && (!nextTranscriptPath || nextTranscriptPath === this._transcriptPath)) return;
+    if (nextTranscriptPath) this._transcriptPath = nextTranscriptPath;
+    if (!isKnownId) this.setResumeConversation(id);
 
-    this.emit("claude-session-id", { id, source: source || null, vendor: this.usageVendor, sessionId: id });
+    this.emit("claude-session-id", {
+      id,
+      source: source || null,
+      vendor: this.usageVendor,
+      sessionId: id,
+      transcriptPath: this._transcriptPath,
+    });
   }
 
   _setPendingPromptKind(kind: string | null): void {
@@ -1471,6 +1482,7 @@ class Session extends EventEmitter {
     this.worktreeLifecycle.stopWatching();
     this._titleSource.destroy();
     this._statusSource.destroy();
+    this.emit("teardown", { id: this.id });
     this.removeAllListeners();
   }
 }

@@ -118,14 +118,13 @@ async function writeJsonAtomic(filePath: string, value: unknown, options?: Async
 
 const appendChains = new Map<string, Promise<void>>();
 
-function appendJsonLine(filePath: string, value: unknown, {
+function appendChained(filePath: string, payload: string, {
   fsPromises = fs.promises, mkdir = false, encoding = 'utf8', mode,
 }: AsyncWriteOptions = {}): Promise<void> {
-  const line = `${JSON.stringify(value)}\n`;
   const previous = appendChains.get(filePath) || Promise.resolve();
   const next = previous.then(async () => {
     if (mkdir) await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
-    await fsPromises.appendFile(filePath, line, writeOptions(mode, encoding));
+    await fsPromises.appendFile(filePath, payload, writeOptions(mode, encoding));
   });
   const settled = next.then(() => {}, () => {});
   appendChains.set(filePath, settled);
@@ -133,6 +132,15 @@ function appendJsonLine(filePath: string, value: unknown, {
     if (appendChains.get(filePath) === settled) appendChains.delete(filePath);
   });
   return next;
+}
+
+function appendJsonLine(filePath: string, value: unknown, options?: AsyncWriteOptions): Promise<void> {
+  return appendChained(filePath, `${JSON.stringify(value)}\n`, options);
+}
+
+function appendJsonLines(filePath: string, values: unknown[], options?: AsyncWriteOptions): Promise<void> {
+  if (values.length === 0) return Promise.resolve();
+  return appendChained(filePath, values.map((value) => `${JSON.stringify(value)}\n`).join(''), options);
 }
 
 function appendJsonLineIdle(filePath: string): Promise<void> {
@@ -181,6 +189,7 @@ function createJsonStateWriter({ filePath, fsPromises = fs.promises, warn = () =
 export {
   appendJsonLine,
   appendJsonLineIdle,
+  appendJsonLines,
   createJsonStateWriter,
   writeJsonAtomic,
   writeJsonAtomicSync,

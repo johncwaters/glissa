@@ -39,6 +39,10 @@ const DEFAULT_CONFIG = {
 
   recordSignals: true,
 
+  trace: {
+    enabled: true,
+  },
+
   checkForUpdates: true,
   updateChannel: 'release' as const,
 
@@ -412,6 +416,7 @@ function createConfigStore({ settingsDefaults }: { settingsDefaults?: Partial<De
       debugMode: config.debugMode ?? effectiveDefaults.debugMode,
       detectBackgroundAgents: config.detectBackgroundAgents ?? effectiveDefaults.detectBackgroundAgents,
       recordSignals: config.recordSignals ?? effectiveDefaults.recordSignals,
+      trace: { enabled: config.trace?.enabled ?? DEFAULT_CONFIG.trace.enabled },
       antiSlopPrompt: config.antiSlopPrompt ?? effectiveDefaults.antiSlopPrompt,
       rtk: config.rtk ?? effectiveDefaults.rtk,
       checkForUpdates: config.checkForUpdates ?? effectiveDefaults.checkForUpdates,

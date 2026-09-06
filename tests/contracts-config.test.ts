@@ -15,6 +15,14 @@ test('DEFAULT_CONFIG satisfies the persisted Config contract', () => {
   assert.equal(DEFAULT_CONFIG.integrationBranch, null);
   assert.equal(DEFAULT_CONFIG.updateChannel, 'release');
   assert.equal(Config.shape.integrationBranch.safeParse(null).success, true);
+  assert.equal(DEFAULT_CONFIG.trace.enabled, true);
+});
+
+test('trace.enabled is a boolean file-only setting with a default-on projection', () => {
+  assert.equal(Config.safeParse({ ...DEFAULT_CONFIG, trace: { enabled: false } }).success, true);
+  assert.equal(Config.safeParse({ ...DEFAULT_CONFIG, trace: { enabled: 'false' } }).success, false);
+  assert.equal('trace' in ConfigUpdate.shape, false);
+  assert.equal('trace' in BrowserConfig.shape, false);
 });
 
 test('updateChannel accepts release and main across config boundaries', () => {
@@ -93,12 +101,13 @@ test('any hooks value parses, so one hand edit cannot cost the boot', () => {
 test('hidden persisted config keys never enter the browser settings projection', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-contract-config-'));
   const configPath = path.join(directory, 'config.json');
-  fs.writeFileSync(configPath, JSON.stringify(DEFAULT_CONFIG), 'utf8');
+  fs.writeFileSync(configPath, JSON.stringify({ ...DEFAULT_CONFIG, trace: {} }), 'utf8');
   const previousConfig = process.env.GLISSA_CONFIG;
   process.env.GLISSA_CONFIG = configPath;
   try {
     const settings = createConfigStore().getSettings();
     assert.deepEqual(HIDDEN_CONFIG_KEYS.filter((key) => Object.hasOwn(settings, key)), []);
+    assert.deepEqual(settings.trace, { enabled: true });
   } finally {
     if (previousConfig == null) delete process.env.GLISSA_CONFIG;
     if (previousConfig != null) process.env.GLISSA_CONFIG = previousConfig;

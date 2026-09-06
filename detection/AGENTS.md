@@ -66,3 +66,8 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 - Signal-level recording is ON by default: the detection design is only debuggable after the fact, and an incident with it off costs a reconstruction, not one grep.
 - Recordings land in `~/.glissa/recordings`, never cwd-relative, or an always-on recorder scatters files through whichever repo launched it.
+
+### Session Trace
+
+- The trace tails the vendor transcript itself on the pure tail core and never the shared memory source, because one shared cursor and slot table leak one lane's lifecycle into the other; hook bodies are never the source, since they cap at 64 KB and carry no thinking or skill body (`server/core/trace-tail-core.ts`, `server/trace-wiring.ts`).
+- A trace file is keyed by Glissa session UUID under `~/.glissa/traces`, never by project name, because a recording keyed by project name cannot answer what one terminal did (`server/trace-wiring.ts`).

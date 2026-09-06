@@ -68,7 +68,7 @@ Each subsystem states its own rules beside its code, so a rule is loaded when th
 
 | Subsystem | Rules live in |
 |---|---|
-| Status Detection, Session Recording | `detection/AGENTS.md` |
+| Status Detection, Session Recording, Session Trace | `detection/AGENTS.md` |
 | Agent Adapters | `session/adapters/AGENTS.md` |
 | Session Spawning, Auto-Resume and Shutdown | `session/AGENTS.md` |
 | Notifications | `notifications/AGENTS.md` |

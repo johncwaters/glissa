@@ -381,7 +381,9 @@ export {
   MAX_RAW_CHARS,
   PROMPT_KIND,
   isDispatchWorkdir,
+  firstTextBlock,
   mapAgentLine,
+  parseJson,
   parseTimestamp,
   toolTarget,
 };
