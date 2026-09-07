@@ -128,6 +128,31 @@ test('thinking, assistant, notice and subagent rows have concise labels', async 
   assert.equal(rows[2].isMuted, true);
 });
 
+test('a truncated prompt row label ends with a truncation marker', async () => {
+  const rows = (await turnsOf([record({ kind: 'prompt', text: 'prompt', truncated: true })]))[0].head;
+  assert.equal(rows?.label.endsWith(', truncated'), true);
+});
+
+test('a truncated tool call row keeps its detail field ahead of the truncation marker', async () => {
+  const records = [
+    record({ kind: 'prompt', text: 'write it' }),
+    record({
+      kind: 'tool_call',
+      toolUseId: 'write-1',
+      name: 'Write',
+      input: { file_path: '/repo/src/big.ts', content: 'c'.repeat(64) },
+      truncated: true,
+    }),
+  ];
+  const rows = (await turnsOf(records))[0].rows;
+  assert.equal(rows[0].label, 'Write: /repo/src/big.ts, truncated');
+});
+
+test('a truncated raw row label ends with a truncation marker', async () => {
+  const rows = (await turnsOf([record({ kind: 'raw', line: 'not json', truncated: true })]))[0].rows;
+  assert.equal(rows[0].label, 'Raw: not json, truncated');
+});
+
 test('selector rules honor a valid preselection, preserve selection and fall back only once the panel is shown', async () => {
   const { resolveTraceSessionId, traceSessionOptions } = await importCore();
   const options = traceSessionOptions([

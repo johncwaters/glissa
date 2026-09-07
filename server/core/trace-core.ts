@@ -2,7 +2,8 @@ import type { TraceRecord } from '../../shared/contracts/trace.ts';
 import { MAX_RAW_LINE_CHARS } from '../../shared/contracts/trace.ts';
 import { firstTextBlock, parseJson, parseTimestamp } from './ingest-agent-core.ts';
 
-const MAX_TOOL_RESULT_CHARS = 65536;
+const MAX_TRACE_BODY_CHARS = 65536;
+const MAX_TRACE_CALL_INPUT_CHARS = MAX_TRACE_BODY_CHARS * 2;
 
 const DROPPED_LINE_TYPES = new Set([
   'agent-name',
@@ -86,7 +87,13 @@ function baseRecord(line: TranscriptLine | null, context: TraceLineContext): Tra
 }
 
 function rawRecord(rawLine: string, line: TranscriptLine | null, context: TraceLineContext): TraceRecord {
-  return { ...baseRecord(line, context), kind: 'raw', line: rawLine.slice(0, MAX_RAW_LINE_CHARS) };
+  const isCut = rawLine.length > MAX_RAW_LINE_CHARS;
+  return {
+    ...baseRecord(line, context),
+    kind: 'raw',
+    line: rawLine.slice(0, MAX_RAW_LINE_CHARS),
+    ...(isCut ? { truncated: true } : {}),
+  };
 }
 
 function isDroppedLine(line: TranscriptLine): boolean {
@@ -114,10 +121,51 @@ function textContent(content: unknown): string {
   }).join('\n');
 }
 
-function boundedToolResult(content: unknown): { content: string; truncated: boolean } {
-  const complete = textContent(content);
-  if (complete.length <= MAX_TOOL_RESULT_CHARS) return { content: complete, truncated: false };
-  return { content: complete.slice(0, MAX_TOOL_RESULT_CHARS), truncated: true };
+function boundedText(value: string): { text: string; truncated: boolean } {
+  if (value.length <= MAX_TRACE_BODY_CHARS) return { text: value, truncated: false };
+  return { text: value.slice(0, MAX_TRACE_BODY_CHARS), truncated: true };
+}
+
+function boundedTextFields(value: string): { text: string; truncated?: true } {
+  const bounded = boundedText(value);
+  if (!bounded.truncated) return { text: bounded.text };
+  return { text: bounded.text, truncated: true };
+}
+
+function serializedInputText(input: unknown): string {
+  const serialized = JSON.stringify(input);
+  if (typeof serialized === 'string') return serialized;
+  return String(input);
+}
+
+function boundedInputProperties(input: Record<string, unknown>): { input: Record<string, unknown>; hasCutProperty: boolean } {
+  const boundedEntries = Object.entries(input).map(([propertyName, propertyValue]) => {
+    if (typeof propertyValue !== 'string') return { propertyName, boundedValue: propertyValue as unknown, isCut: false };
+    const bounded = boundedText(propertyValue);
+    return { propertyName, boundedValue: bounded.text as unknown, isCut: bounded.truncated };
+  });
+  return {
+    input: Object.fromEntries(boundedEntries.map((entry) => [entry.propertyName, entry.boundedValue])),
+    hasCutProperty: boundedEntries.some((entry) => entry.isCut),
+  };
+}
+
+function boundedToolCallInput(input: unknown): { input: unknown; truncated?: true } {
+  if (typeof input === 'string') {
+    const bounded = boundedText(input);
+    if (!bounded.truncated) return { input };
+    return { input: bounded.text, truncated: true };
+  }
+  if (!input || typeof input !== 'object') return { input };
+  const bounded = Array.isArray(input)
+    ? { input: input as unknown, hasCutProperty: false }
+    : boundedInputProperties(input as Record<string, unknown>);
+  const serialized = serializedInputText(bounded.input);
+  if (serialized.length > MAX_TRACE_CALL_INPUT_CHARS) {
+    return { input: serialized.slice(0, MAX_TRACE_BODY_CHARS), truncated: true };
+  }
+  if (!bounded.hasCutProperty) return { input };
+  return { input: bounded.input, truncated: true };
 }
 
 function mapUserLine(
@@ -132,12 +180,12 @@ function mapUserLine(
   if (toolResult) {
     const toolUseId = nonEmptyString(toolResult.tool_use_id);
     if (!toolUseId) return [rawRecord(rawLine, line, context)];
-    const bounded = boundedToolResult(toolResult.content);
+    const bounded = boundedText(textContent(toolResult.content));
     return [{
       ...base,
       kind: 'tool_result',
       toolUseId,
-      content: bounded.content,
+      content: bounded.text,
       isError: toolResult.is_error === true,
       truncated: bounded.truncated,
     }];
@@ -150,35 +198,43 @@ function mapUserLine(
     const launchingSkillToolUseId = sourceToolUseId && context.skillToolUseIds?.has(sourceToolUseId)
       ? sourceToolUseId
       : null;
-    if (!launchingSkillToolUseId) return [{ ...base, kind: 'expansion', text }];
-    return [{ ...base, kind: 'expansion', text, toolUseId: launchingSkillToolUseId }];
+    if (!launchingSkillToolUseId) return [{ ...base, kind: 'expansion', ...boundedTextFields(text) }];
+    return [{ ...base, kind: 'expansion', toolUseId: launchingSkillToolUseId, ...boundedTextFields(text) }];
   }
   if (!text) return [rawRecord(rawLine, line, context)];
   if (typeof content === 'string' && /<command-name>[\s\S]*?<\/command-name>/.test(content)) {
-    return [{ ...base, kind: 'expansion', text: content }];
+    return [{ ...base, kind: 'expansion', ...boundedTextFields(content) }];
   }
-  return [{ ...base, kind: 'prompt', text }];
+  return [{ ...base, kind: 'prompt', ...boundedTextFields(text) }];
 }
 
 function mapAssistantLine(rawLine: string, line: TranscriptLine, context: TraceLineContext): TraceRecord[] {
   const base = baseRecord(line, context);
   const records: TraceRecord[] = [];
+  let hasSkippedThinkingBlock = false;
   for (const block of contentBlocks(line)) {
     if (block.type === 'thinking' && typeof block.thinking === 'string') {
-      records.push({ ...base, kind: 'thinking', text: block.thinking });
+      if (block.thinking.length === 0) {
+        hasSkippedThinkingBlock = true;
+        continue;
+      }
+      records.push({ ...base, kind: 'thinking', ...boundedTextFields(block.thinking) });
       continue;
     }
     if (block.type === 'text') {
       const text = firstTextBlock([block]);
-      if (text) records.push({ ...base, kind: 'assistant', text });
+      if (text) {
+        records.push({ ...base, kind: 'assistant', ...boundedTextFields(text) });
+      }
       continue;
     }
     if (block.type !== 'tool_use') continue;
     const toolUseId = nonEmptyString(block.id);
     const name = nonEmptyString(block.name);
     if (!toolUseId || !name) return [rawRecord(rawLine, line, context)];
-    records.push({ ...base, kind: 'tool_call', toolUseId, name, input: block.input });
+    records.push({ ...base, kind: 'tool_call', toolUseId, name, ...boundedToolCallInput(block.input) });
   }
+  if (records.length === 0 && hasSkippedThinkingBlock) return [];
   if (records.length === 0) return [rawRecord(rawLine, line, context)];
   return records;
 }
@@ -194,7 +250,7 @@ function traceRecordsFromTranscriptLine(rawLine: string, context: TraceLineConte
 
 export {
   DROPPED_LINE_TYPES,
-  MAX_TOOL_RESULT_CHARS,
+  MAX_TRACE_BODY_CHARS,
   traceRecordsFromTranscriptLine,
 };
 export type { TraceLineContext };

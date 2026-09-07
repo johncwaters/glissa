@@ -36,6 +36,11 @@ test('kind-specific fields and the raw line cap fail closed', () => {
   assert.equal(TraceRecord.safeParse({ ...base, kind: 'prompt', text: 'p', transcriptOffset: -1 }).success, false);
 });
 
+test('prompt records accept optional truncation markers', () => {
+  assert.equal(TraceRecord.safeParse({ ...base, kind: 'prompt', text: 'prompt' }).success, true);
+  assert.equal(TraceRecord.safeParse({ ...base, kind: 'prompt', text: 'prompt', truncated: true }).success, true);
+});
+
 test('a checkpoint parses only with a path, a vendor session id and a whole offset', () => {
   const checkpoint = {
     transcriptPath: '/tmp/session.jsonl',

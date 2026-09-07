@@ -80,7 +80,7 @@ export function traceRecordBody(record: TraceRecord): string {
   ].filter(Boolean).join('\n');
 }
 
-function baseTraceRecordLabel(record: TraceRecord, toolCallByUseId: ReadonlyMap<string, ToolCallRecord>): string {
+function labelWithoutTruncation(record: TraceRecord, toolCallByUseId: ReadonlyMap<string, ToolCallRecord>): string {
   if (record.kind === 'prompt') return `Prompt: ${firstDetailLine(record.text)}`;
   if (record.kind === 'thinking') return `Thinking: ${firstDetailLine(record.text)}`;
   if (record.kind === 'assistant') return `Assistant: ${firstDetailLine(record.text)}`;
@@ -93,9 +93,14 @@ function baseTraceRecordLabel(record: TraceRecord, toolCallByUseId: ReadonlyMap<
     return detail ? `${record.name}: ${detail}` : record.name;
   }
   const toolName = toolCallByUseId.get(record.toolUseId)?.name ?? 'Tool';
-  const markers = [record.isError ? 'error' : '', record.truncated ? 'truncated' : ''].filter(Boolean);
-  const markerText = markers.length > 0 ? `, ${markers.join(', ')}` : '';
-  return `${toolName} result: ${byteCount(record.content)} bytes${markerText}`;
+  const errorMarker = record.isError ? ', error' : '';
+  return `${toolName} result: ${byteCount(record.content)} bytes${errorMarker}`;
+}
+
+function baseTraceRecordLabel(record: TraceRecord, toolCallByUseId: ReadonlyMap<string, ToolCallRecord>): string {
+  const label = labelWithoutTruncation(record, toolCallByUseId);
+  if (record.truncated !== true) return label;
+  return `${label}, truncated`;
 }
 
 function traceViewRow(record: TraceRecord, toolCallByUseId: ReadonlyMap<string, ToolCallRecord>): TraceViewRow {

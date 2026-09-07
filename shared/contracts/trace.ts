@@ -10,6 +10,7 @@ const TraceRecordBase = z.object({
   agentId: z.string().min(1).optional(),
   agentType: z.string().min(1).optional(),
   transcriptOffset: z.number().int().nonnegative().optional(),
+  truncated: z.boolean().optional(),
 });
 
 export const TraceRecord = z.discriminatedUnion('kind', [
