@@ -46,7 +46,7 @@ import {
   warehouseDailyRows,
 } from './core/usage-warehouse-core.ts';
 import type { WarehouseRecord } from './core/usage-warehouse-core.ts';
-import { createJsonStateWriter } from './json-file.ts';
+import { createJsonStateStore } from './json-file.ts';
 import { createLaneLog } from './lane-log.ts';
 import type { LaneLog } from './lane-log.ts';
 
@@ -70,11 +70,10 @@ interface ScannerFileHandle {
 }
 
 type ScannerFileSystem =
-  Pick<typeof nodeFsPromises, 'mkdir' | 'writeFile' | 'rename' | 'rm' | 'appendFile'>
+  Pick<typeof nodeFsPromises, 'mkdir' | 'writeFile' | 'rename' | 'rm' | 'appendFile' | 'readFile'>
   & {
     stat(filePath: string): Promise<ScannerFileStat>;
     readdir(dir: string, options: { withFileTypes: true }): Promise<Dirent[]>;
-    readFile(filePath: string, encoding: 'utf8'): Promise<string>;
     open(filePath: string, flags: string): Promise<ScannerFileHandle>;
   };
 
@@ -147,6 +146,8 @@ interface PassResult {
   partial: boolean;
   durationMs: number;
 }
+
+type StoredWarehouseRecords = NonNullable<Parameters<typeof pruneWarehouse>[0]>;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -408,14 +409,22 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
   let cachedSessionTotals: Map<string, SessionTotal> | null = null;
   let currentFileJournal: FileJournalAction[] | null = null;
   let warehouseRecords: WarehouseRecord[] = [];
-  let warehouseLoaded = false;
-  const warehouseWriter = warehousePath
-    ? createJsonStateWriter({
-      filePath: warehousePath,
-      fsPromises,
-      warn: (error: unknown) => laneLog.warn('warehouse write failed', { error: errorMessage(error) }),
-    })
-    : null;
+  const warehouseStore = createJsonStateStore<StoredWarehouseRecords>({
+    name: 'warehouse',
+    filePath: warehousePath,
+    fsPromises,
+    nowMs: nowFn,
+    warn: laneLog.warn,
+    parse: (raw) => {
+      const rawRecords = raw && typeof raw === 'object' ? (raw as { records?: unknown }).records : null;
+      return Array.isArray(rawRecords) ? rawRecords : [];
+    },
+    adopt: (loadedRecords) => {
+      warehouseRecords = loadedRecords
+        ? pruneWarehouse(loadedRecords, { retainDays: warehouseRetainDays, todayKey: todayDayKey() })
+        : [];
+    },
+  });
 
   function markDirty(): void {
     isReportDirty = true;
@@ -663,37 +672,14 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     return localDayKey(nowFn());
   }
 
-  async function loadWarehouse(): Promise<void> {
-    if (warehouseLoaded || !warehousePath) return;
-    if (!warehouseWriter) return;
-    warehouseLoaded = true;
-    let text: string | null = null;
-    try {
-      text = await fsPromises.readFile(warehousePath, 'utf8');
-    } catch {
-      return;
-    }
-    if (text === null) return;
-    try {
-      const parsed: unknown = JSON.parse(String(text));
-      const rawRecords = parsed && typeof parsed === 'object' ? (parsed as { records?: unknown }).records : null;
-      const records = Array.isArray(rawRecords) ? rawRecords : [];
-      warehouseRecords = pruneWarehouse(records, { retainDays: warehouseRetainDays, todayKey: todayDayKey() });
-      warehouseWriter.reset();
-    } catch (error) {
-      laneLog.warn('warehouse unreadable, starting empty', { error: errorMessage(error) });
-      warehouseRecords = [];
-    }
-  }
-
   async function persistWarehouse(): Promise<void> {
-    if (!warehouseWriter) return;
-    await loadWarehouse();
+    if (!warehousePath) return;
+    await warehouseStore.load();
     const rollups = cachedRollupsForDays(undefined, retainDays);
     const liveDays = rollups.daily.map((row) => row.day);
     const merged = mergeWarehouse(warehouseRecords, rollupFromReport(rollups.daily), { liveDays });
     warehouseRecords = pruneWarehouse(merged, { retainDays: warehouseRetainDays, todayKey: todayDayKey() });
-    await warehouseWriter.write(
+    await warehouseStore.write(
       warehouseRecords,
       () => `${JSON.stringify({ version: 1, updatedAt: new Date(nowFn()).toISOString(), records: warehouseRecords }, null, 2)}\n`,
     );

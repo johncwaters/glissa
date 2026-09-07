@@ -209,9 +209,31 @@ test('a corrupt warehouse starts empty, warns, and never crashes the pass', asyn
   const scanner = makeScanner(root, { logger: { warn: (message: string) => { warnings.push(message); } } });
   const pass = await scanner.runPass();
   assert.equal(pass.partial, false, 'the pass completed regardless');
-  assert.ok(warnings.some((message) => message.includes('warehouse')), `warned: ${warnings.join(' | ')}`);
+  const warehousePath = path.join(root, '.glissa', 'usage-warehouse.json');
+  const movedTo = `${warehousePath}.corrupt-${NOW}`;
+  assert.equal(await fs.readFile(movedTo, 'utf8'), '{ not json at all');
+  assert.ok(warnings.some((message) => message.includes('warehouse quarantined') && message.includes(warehousePath) && message.includes(movedTo)), `warned: ${warnings.join(' | ')}`);
   const stored = await readWarehouse(root);
   assert.deepEqual(stored.records.map((record) => record.day), ['2026-08-18']);
+});
+
+test('an unreadable warehouse warns, keeps its bytes, and never rewrites them', async () => {
+  const root = await makeTempRoot();
+  const warehousePath = path.join(root, '.glissa', 'usage-warehouse.json');
+  const original = '{ recoverable later';
+  await fs.mkdir(path.dirname(warehousePath), { recursive: true });
+  await fs.writeFile(warehousePath, original);
+  await writeTranscript(root, 'a.jsonl', [claudeLine({ messageId: 'm1', day: '2026-08-18' })]);
+  const warnings: string[] = [];
+  const error: NodeJS.ErrnoException = new Error('EACCES simulated');
+  error.code = 'EACCES';
+  const scanner = makeScanner(root, {
+    logger: { warn: (message: string) => { warnings.push(message); } },
+    fsPromises: { ...fs, readFile: async () => { throw error; } },
+  });
+  await scanner.runPass();
+  assert.equal(await fs.readFile(warehousePath, 'utf8'), original);
+  assert.ok(warnings.some((message) => message.includes('warehouse unreadable') && message.includes(warehousePath)), `warned: ${warnings.join(' | ')}`);
 });
 
 test('an unwritable warehouse path degrades to a warning, not a failed scan', async () => {

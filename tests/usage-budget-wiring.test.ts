@@ -95,11 +95,13 @@ interface HarnessOptions {
   telegramNotifications?: boolean;
   connections?: number;
   spend?: { todayUsd: number; monthUsd: number };
+  fsPromises?: typeof fs;
 }
 
-function harness({ root, usage = {}, telegram = null, telegramNotifications = false, connections = 1, spend = { todayUsd: 0, monthUsd: 0 } }: HarnessOptions) {
+function harness({ root, usage = {}, telegram = null, telegramNotifications = false, connections = 1, spend = { todayUsd: 0, monthUsd: 0 }, fsPromises = fs }: HarnessOptions) {
   const sent: Record<string, unknown>[] = [];
   const telegrams: { text?: string; botToken?: string; chatId?: string }[] = [];
+  const warnings: string[] = [];
   const state = { spend };
   const scanner = fakeScanner({ spend: () => ({ todayKey: TODAY, monthKey: MONTH, ...state.spend }) });
   const config = { usage, telegramNotifications, telegram };
@@ -113,8 +115,9 @@ function harness({ root, usage = {}, telegram = null, telegramNotifications = fa
     nowFn: () => 1_800_000_000_000,
     setIntervalFn: inertInterval,
     clearIntervalFn: (handle) => clearTimeout(handle),
-    logger: { warn: () => {}, log: () => {} },
+    logger: { warn: (message) => { warnings.push(String(message)); }, log: () => {} },
     budgetStatePath: path.join(root, '.glissa', 'usage-budget-state.json'),
+    fsPromises,
     sendTelegram: async (args) => {
       telegrams.push(args);
       return { ok: true, error: null };
@@ -126,6 +129,7 @@ function harness({ root, usage = {}, telegram = null, telegramNotifications = fa
     sent,
     telegrams,
     state,
+    warnings,
     alerts: (): BudgetAlert[] => sent.filter(isBudgetAlert),
     statePath: path.join(root, '.glissa', 'usage-budget-state.json'),
   };
@@ -239,7 +243,60 @@ test('a corrupt state file starts empty, warns, and still alerts', async () => {
   const h = harness({ root, usage: { budget: { dailyUsd: 16 } }, spend: { todayUsd: 12.4, monthUsd: 12.4 } });
   await h.wiring.start();
   assert.equal(h.alerts().length, 1);
+  const movedTo = `${h.statePath}.corrupt-1800000000000`;
+  assert.equal(await fs.readFile(movedTo, 'utf8'), '{ not json');
+  assert.ok(h.warnings.some((message) => message.includes('budget state quarantined') && message.includes(h.statePath) && message.includes(movedTo)), `warned: ${h.warnings.join(' | ')}`);
   assert.deepEqual((await readState(h.statePath)).fired.daily[TODAY], [50, 75]);
+});
+
+test('an unreadable budget state warns, keeps its bytes, and never rewrites them', async () => {
+  const root = await makeTempRoot();
+  const statePath = path.join(root, '.glissa', 'usage-budget-state.json');
+  const original = '{ recoverable later';
+  await fs.mkdir(path.dirname(statePath), { recursive: true });
+  await fs.writeFile(statePath, original);
+  const error: NodeJS.ErrnoException = new Error('EACCES simulated');
+  error.code = 'EACCES';
+  const h = harness({
+    root,
+    usage: { budget: { dailyUsd: 16 } },
+    spend: { todayUsd: 12.4, monthUsd: 12.4 },
+    fsPromises: { ...fs, readFile: async () => { throw error; } },
+  });
+  await h.wiring.start();
+  assert.equal(await fs.readFile(statePath, 'utf8'), original);
+  assert.ok(h.warnings.some((message) => message.includes('budget state unreadable') && message.includes(statePath)), `warned: ${h.warnings.join(' | ')}`);
+});
+
+test('a budget state that becomes readable keeps the marks that fired while it was not', async () => {
+  const root = await makeTempRoot();
+  const statePath = path.join(root, '.glissa', 'usage-budget-state.json');
+  await fs.mkdir(statePath, { recursive: true });
+  const h = harness({ root, usage: { budget: { dailyUsd: 16 } }, spend: { todayUsd: 12.4, monthUsd: 12.4 } });
+  await h.wiring.start();
+  assert.deepEqual(h.alerts().map((alert) => alert.threshold), [75]);
+  assert.ok(h.warnings.some((message) => message.includes('budget state unreadable')), `warned: ${h.warnings.join(' | ')}`);
+
+  await fs.rm(statePath, { recursive: true });
+  await fs.writeFile(statePath, JSON.stringify({ version: 1, fired: { daily: {}, monthly: {} } }));
+  await h.wiring.requestReport({ force: true });
+  assert.deepEqual(h.alerts().map((alert) => alert.threshold), [75], 'a recovered read never re-fires an alert already delivered');
+  assert.deepEqual((await readState(statePath)).fired.daily[TODAY], [50, 75]);
+});
+
+test('a budget state that goes missing after an unreadable read keeps the marks that fired while it was not', async () => {
+  const root = await makeTempRoot();
+  const statePath = path.join(root, '.glissa', 'usage-budget-state.json');
+  await fs.mkdir(statePath, { recursive: true });
+  const h = harness({ root, usage: { budget: { dailyUsd: 16 } }, spend: { todayUsd: 12.4, monthUsd: 12.4 } });
+  await h.wiring.start();
+  assert.deepEqual(h.alerts().map((alert) => alert.threshold), [75]);
+  assert.ok(h.warnings.some((message) => message.includes('budget state unreadable')), `warned: ${h.warnings.join(' | ')}`);
+
+  await fs.rm(statePath, { recursive: true });
+  await h.wiring.requestReport({ force: true });
+  assert.deepEqual(h.alerts().map((alert) => alert.threshold), [75], 'a read that finds nothing never re-fires an alert already delivered');
+  assert.deepEqual((await readState(statePath)).fired.daily[TODAY], [50, 75]);
 });
 
 test('an unwritable state path degrades to a warning, not a failed pass', async () => {

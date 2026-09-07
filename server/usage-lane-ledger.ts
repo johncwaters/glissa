@@ -3,10 +3,11 @@ import nodeFsPromises from 'node:fs/promises';
 import { laneMapFromLedger, pruneLedger } from './core/usage-lane-core.ts';
 import type { LaneLedgerEntry } from './core/usage-lane-core.ts';
 import type { RecordLane } from './ephemeral-session.ts';
-import { createJsonStateWriter } from './json-file.ts';
+import { createJsonStateStore } from './json-file.ts';
 import { createLaneLog } from './lane-log.ts';
 
 type LedgerFileSystem = Pick<typeof nodeFsPromises, 'readFile' | 'mkdir' | 'writeFile' | 'rename' | 'rm' | 'appendFile'>;
+type StoredLedgerEntries = NonNullable<Parameters<typeof pruneLedger>[0]>;
 
 interface LaneLedgerOptions {
   ledgerPath?: string | null;
@@ -34,45 +35,32 @@ function createLaneLedger({
   const laneLog = createLaneLog({ prefix: '[usage]', logger });
   let entries: LaneLedgerEntry[] = [];
   let opsChain: Promise<void> = Promise.resolve();
-  let loadPromise: Promise<void> | null = null;
 
   function failureText(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
   }
 
-  const writer = ledgerPath
-    ? createJsonStateWriter({
-      filePath: ledgerPath,
-      fsPromises,
-      warn: (error: unknown) => laneLog.warn('ledger write failed', { error: failureText(error) }),
-    })
-    : null;
+  const store = createJsonStateStore<StoredLedgerEntries>({
+    name: 'ledger',
+    filePath: ledgerPath,
+    fsPromises,
+    nowMs: nowFn,
+    warn: laneLog.warn,
+    parse: (raw) => {
+      const rawEntries = raw && typeof raw === 'object' ? (raw as { entries?: unknown }).entries : null;
+      return Array.isArray(rawEntries) ? rawEntries : [];
+    },
+    adopt: (loadedEntries) => {
+      entries = loadedEntries ? pruneLedger(loadedEntries, { now: nowFn(), retainDays }) : [];
+    },
+  });
 
   function load(): Promise<void> {
-    if (!ledgerPath) return Promise.resolve();
-    if (loadPromise) return loadPromise;
-    loadPromise = (async () => {
-      let text: string | null = null;
-      try {
-        text = await fsPromises.readFile(ledgerPath, 'utf8');
-      } catch {
-        return;
-      }
-      try {
-        const parsed: unknown = JSON.parse(text);
-        const rawEntries = parsed && typeof parsed === 'object' ? (parsed as { entries?: unknown }).entries : null;
-        entries = pruneLedger(Array.isArray(rawEntries) ? rawEntries : [], { now: nowFn(), retainDays });
-      } catch (error) {
-        laneLog.warn('ledger unreadable, starting empty', { error: failureText(error) });
-        entries = [];
-      }
-    })();
-    return loadPromise;
+    return store.load();
   }
 
   async function persist(): Promise<void> {
-    if (!writer) return;
-    await writer.write(entries, () => `${JSON.stringify({ version: 1, updatedAt: new Date(nowFn()).toISOString(), entries }, null, 2)}\n`);
+    await store.write(entries, () => `${JSON.stringify({ version: 1, updatedAt: new Date(nowFn()).toISOString(), entries }, null, 2)}\n`);
   }
 
   const record: RecordLane = (sessionId, lane, vendor = 'claude') => {
@@ -88,7 +76,7 @@ function createLaneLedger({
   };
 
   function whenIdle(): Promise<void> {
-    return opsChain.then(() => (writer ? writer.idle() : undefined));
+    return opsChain.then(() => store.idle());
   }
 
   function laneMap(): Map<string, string> {

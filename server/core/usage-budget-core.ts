@@ -121,12 +121,46 @@ function prunedFiredState(
 function filteredScopeState(scopeState: unknown, periodKey: unknown): Record<string, number[]> {
   if (!scopeState || typeof scopeState !== 'object') return {};
   if (typeof periodKey !== 'string' || periodKey.length === 0) return {};
-  const stored = (scopeState as Record<string, unknown>)[periodKey];
-  const thresholds: number[] = Array.isArray(stored)
-    ? stored.filter((threshold): threshold is number => BUDGET_THRESHOLDS.includes(threshold))
-    : [];
+  const thresholds = knownThresholds((scopeState as Record<string, unknown>)[periodKey]);
   if (thresholds.length === 0) return {};
-  return { [periodKey]: Array.from(new Set(thresholds)).sort((a, b) => a - b) };
+  return { [periodKey]: thresholds };
+}
+
+function knownThresholds(stored: unknown): number[] {
+  if (!Array.isArray(stored)) return [];
+  return sortedUniqueThresholds(stored.filter((threshold): threshold is number => BUDGET_THRESHOLDS.includes(threshold)));
+}
+
+function sortedUniqueThresholds(thresholds: number[]): number[] {
+  return Array.from(new Set(thresholds)).sort((a, b) => a - b);
+}
+
+function scopeFiredThresholds(source: unknown, scope: BudgetScope): Record<string, number[]> {
+  if (!source || typeof source !== 'object') return {};
+  const scoped = (source as Record<string, unknown>)[scope];
+  if (!scoped || typeof scoped !== 'object') return {};
+  const thresholdsByPeriodKey: Record<string, number[]> = {};
+  for (const [periodKey, stored] of Object.entries(scoped as Record<string, unknown>)) {
+    const thresholds = knownThresholds(stored);
+    if (thresholds.length === 0) continue;
+    thresholdsByPeriodKey[periodKey] = thresholds;
+  }
+  return thresholdsByPeriodKey;
+}
+
+function unionScopeState(left: Record<string, number[]>, right: Record<string, number[]>): Record<string, number[]> {
+  const unioned: Record<string, number[]> = {};
+  for (const [periodKey, thresholds] of [...Object.entries(left), ...Object.entries(right)]) {
+    unioned[periodKey] = sortedUniqueThresholds([...(unioned[periodKey] ?? []), ...thresholds]);
+  }
+  return unioned;
+}
+
+function mergeFiredState(inMemory: unknown, onDisk: unknown): BudgetFiredState {
+  return {
+    daily: unionScopeState(scopeFiredThresholds(inMemory, 'daily'), scopeFiredThresholds(onDisk, 'daily')),
+    monthly: unionScopeState(scopeFiredThresholds(inMemory, 'monthly'), scopeFiredThresholds(onDisk, 'monthly')),
+  };
 }
 
 function hasFired(firedState: BudgetFiredState, scope: BudgetScope, periodKey: string, threshold: number): boolean {
@@ -137,7 +171,7 @@ function hasFired(firedState: BudgetFiredState, scope: BudgetScope, periodKey: s
 function markFired(firedState: BudgetFiredState, scope: BudgetScope, periodKey: string, threshold: number): void {
   const stored = firedState[scope]?.[periodKey];
   const existing = Array.isArray(stored) ? stored : [];
-  firedState[scope][periodKey] = Array.from(new Set([...existing, threshold])).sort((a, b) => a - b);
+  firedState[scope][periodKey] = sortedUniqueThresholds([...existing, threshold]);
 }
 
 function standingRow(scope: BudgetScope, spentUsd: unknown, budgetUsd: number | null): BudgetStandingRow | null {
@@ -168,4 +202,4 @@ function positiveNumberOrNull(value: unknown): number | null {
   return number;
 }
 
-export { BUDGET_THRESHOLDS, budgetStanding, evaluateBudget, normalizeBudgetConfig };
+export { BUDGET_THRESHOLDS, budgetStanding, evaluateBudget, mergeFiredState, normalizeBudgetConfig };

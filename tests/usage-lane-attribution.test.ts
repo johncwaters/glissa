@@ -251,10 +251,33 @@ test('a corrupt ledger starts empty, warns, and still records', async () => {
   const ledger = createLaneLedger({ ledgerPath, nowFn: () => NOW, logger: { warn: (message) => warnings.push(String(message)) } });
   await ledger.load();
   assert.deepEqual(ledger.snapshot(), []);
-  assert.ok(warnings.some((message) => message.includes('unreadable')), `warned: ${warnings.join(' | ')}`);
+  const movedTo = `${ledgerPath}.corrupt-${NOW}`;
+  assert.equal(await fs.readFile(movedTo, 'utf8'), '{ not json');
+  assert.ok(warnings.some((message) => message.includes('ledger quarantined') && message.includes(ledgerPath) && message.includes(movedTo)), `warned: ${warnings.join(' | ')}`);
   ledger.record('claude-1', 'pr-review');
   await ledger.whenIdle();
   assert.equal(ledger.laneMap().get('claude:claude-1'), 'pr-review');
+});
+
+test('an unreadable ledger warns, keeps its bytes, and never rewrites them', async () => {
+  const root = await makeTempRoot();
+  const ledgerPath = path.join(root, '.glissa', 'usage-lanes.json');
+  const original = '{ recoverable later';
+  await fs.mkdir(path.dirname(ledgerPath), { recursive: true });
+  await fs.writeFile(ledgerPath, original);
+  const warnings: string[] = [];
+  const error: NodeJS.ErrnoException = new Error('EACCES simulated');
+  error.code = 'EACCES';
+  const ledger = createLaneLedger({
+    ledgerPath,
+    nowFn: () => NOW,
+    logger: { warn: (message) => warnings.push(String(message)) },
+    fsPromises: { ...fs, readFile: async () => { throw error; } },
+  });
+  ledger.record('claude-1', 'pr-review');
+  await ledger.whenIdle();
+  assert.equal(await fs.readFile(ledgerPath, 'utf8'), original);
+  assert.ok(warnings.some((message) => message.includes('ledger unreadable') && message.includes(ledgerPath)), `warned: ${warnings.join(' | ')}`);
 });
 
 test('an unwritable ledger degrades to a warning and keeps working in memory', async () => {

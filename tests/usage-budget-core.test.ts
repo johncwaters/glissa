@@ -5,6 +5,7 @@ import {
   BUDGET_THRESHOLDS,
   budgetStanding,
   evaluateBudget,
+  mergeFiredState,
   normalizeBudgetConfig,
 } from '../server/core/usage-budget-core.ts';
 
@@ -83,4 +84,32 @@ test('budgetStanding reports tones', () => {
     { scope: 'daily', spentUsd: 9, budgetUsd: 10, pct: 90, tone: 'crit' },
   ]);
   assert.deepEqual(budgetStanding({ budget: {}, todayUsd: 9, monthUsd: 90 }), []);
+});
+
+test('mergeFiredState unions both sides per scope and period key', () => {
+  const merged = mergeFiredState(
+    { daily: { '2026-08-19': [75], '2026-08-20': [50] }, monthly: { '2026-08': [100] } },
+    { daily: { '2026-08-19': [50] }, monthly: { '2026-08': [50], '2026-09': [75] } },
+  );
+  assert.deepEqual(merged, {
+    daily: { '2026-08-19': [50, 75], '2026-08-20': [50] },
+    monthly: { '2026-08': [50, 100], '2026-09': [75] },
+  });
+});
+
+test('mergeFiredState drops threshold values off the ladder', () => {
+  const merged = mergeFiredState(
+    { daily: { '2026-08-19': [75, 42] } },
+    { daily: { '2026-08-19': ['50', 60] }, monthly: { '2026-08': [7] } },
+  );
+  assert.deepEqual(merged, { daily: { '2026-08-19': [75] }, monthly: {} });
+});
+
+test('mergeFiredState treats a missing or malformed side as empty', () => {
+  assert.deepEqual(mergeFiredState({}, {}), { daily: {}, monthly: {} });
+  assert.deepEqual(mergeFiredState(null, undefined), { daily: {}, monthly: {} });
+  assert.deepEqual(
+    mergeFiredState({ daily: { '2026-08-19': [50] } }, { daily: 'not a map', monthly: 7 }),
+    { daily: { '2026-08-19': [50] }, monthly: {} },
+  );
 });

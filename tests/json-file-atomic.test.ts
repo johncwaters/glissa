@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { writeTextAtomic, writeTextAtomicSync } from '../server/json-file.ts';
+import { createJsonStateStore, loadJsonStateFile, writeTextAtomic, writeTextAtomicSync } from '../server/json-file.ts';
 import type { AsyncWriteOptions, SyncWriteOptions } from '../server/json-file.ts';
 
 type AsyncFileSystem = NonNullable<AsyncWriteOptions['fsPromises']>;
@@ -145,4 +145,128 @@ test('the retried rename keeps the atomic contract: the target is never a partia
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('the state loader distinguishes missing, loaded, quarantined, and unreadable files', async () => {
+  const dir = tempDir();
+  try {
+    const target = path.join(dir, 'state.json');
+    const missing = await loadJsonStateFile({ filePath: target, fsPromises: fs.promises, parse: (raw) => raw, nowMs: () => 10 });
+    assert.deepEqual(missing, { status: 'missing' });
+
+    fs.writeFileSync(target, '{"saved":true}');
+    const loaded = await loadJsonStateFile({ filePath: target, fsPromises: fs.promises, parse: (raw) => raw, nowMs: () => 10 });
+    assert.deepEqual(loaded, { status: 'loaded', value: { saved: true } });
+
+    const original = '{}';
+    fs.writeFileSync(target, original);
+    const quarantined = await loadJsonStateFile({ filePath: target, fsPromises: fs.promises, parse: () => null, nowMs: () => 42 });
+    const movedTo = `${target}.corrupt-42`;
+    assert.deepEqual(quarantined, { status: 'quarantined', movedTo });
+    assert.equal(fs.readFileSync(movedTo, 'utf8'), original);
+
+    const unreadable = await loadJsonStateFile({
+      filePath: target,
+      fsPromises: { ...fs.promises, readFile: async () => { throw renameError('EACCES'); } },
+      parse: (raw) => raw,
+      nowMs: () => 10,
+    });
+    assert.equal(unreadable.status, 'unreadable');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the state store stops writing while the file is unreadable and resumes once it loads again', async () => {
+  const dir = tempDir();
+  try {
+    const target = path.join(dir, 'state.json');
+    const corruptBytes = 'not json at all';
+    fs.writeFileSync(target, corruptBytes);
+    let quarantineFails = true;
+    const adopted: Array<{ saved: number } | null> = [];
+    const warnings: string[] = [];
+    const store = createJsonStateStore<{ saved: number }>({
+      name: 'ledger',
+      filePath: target,
+      fsPromises: {
+        ...fs.promises,
+        rename: (from, to) => {
+          if (quarantineFails && String(to).includes('.corrupt-')) return Promise.reject(renameError('EACCES'));
+          return fs.promises.rename(from, to);
+        },
+      },
+      nowMs: () => 42,
+      parse: (raw) => (raw && typeof raw === 'object' ? raw as { saved: number } : null),
+      adopt: (loadedValue) => { adopted.push(loadedValue); },
+      warn: (message) => { warnings.push(message); },
+    });
+
+    await store.load();
+    assert.deepEqual(warnings, ['ledger unreadable']);
+    assert.deepEqual(adopted, [], 'an unreadable file hands the caller nothing to adopt');
+
+    await store.write({ saved: 1 }, () => '{"saved":1}');
+    assert.equal(fs.readFileSync(target, 'utf8'), corruptBytes, 'the bytes stand while the file is unreadable');
+
+    quarantineFails = false;
+    fs.writeFileSync(target, '{"saved":7}');
+    await store.load();
+    assert.deepEqual(adopted, [{ saved: 7 }], 'the loaded value reaches the caller');
+
+    await store.write({ saved: 8 }, () => '{"saved":8}');
+    await store.idle();
+    assert.equal(fs.readFileSync(target, 'utf8'), '{"saved":8}', 'a readable file takes writes again');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the state store quarantines a corrupt file once and warns with both paths', async () => {
+  const dir = tempDir();
+  try {
+    const target = path.join(dir, 'state.json');
+    const corruptBytes = '{ invalid';
+    fs.writeFileSync(target, corruptBytes);
+    const adopted: Array<{ saved: number } | null> = [];
+    const warnings: Array<{ message: string; fields: Record<string, string> }> = [];
+    const store = createJsonStateStore<{ saved: number }>({
+      name: 'warehouse',
+      filePath: target,
+      nowMs: () => 42,
+      parse: () => null,
+      adopt: (loadedValue) => { adopted.push(loadedValue); },
+      warn: (message, fields) => { warnings.push({ message, fields }); },
+    });
+
+    await store.load();
+    await store.load();
+
+    assert.deepEqual(warnings, [{ message: 'warehouse quarantined', fields: { path: target, movedTo: `${target}.corrupt-42` } }]);
+    assert.deepEqual(adopted, [null], 'a quarantined file leaves the caller with no value');
+    assert.equal(fs.readFileSync(`${target}.corrupt-42`, 'utf8'), corruptBytes);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a state store without a path reads nothing and writes nothing', async () => {
+  const adopted: Array<{ saved: number } | null> = [];
+  const warnings: string[] = [];
+  const store = createJsonStateStore<{ saved: number }>({
+    name: 'budget state',
+    filePath: null,
+    parse: (raw) => raw as { saved: number },
+    adopt: (loadedValue) => { adopted.push(loadedValue); },
+    warn: (message) => { warnings.push(message); },
+  });
+
+  await store.load();
+  await store.write({ saved: 1 }, () => {
+    throw new Error('a store with no path never builds a payload');
+  });
+  await store.idle();
+
+  assert.deepEqual(adopted, []);
+  assert.deepEqual(warnings, []);
 });

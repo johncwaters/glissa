@@ -6,7 +6,7 @@ import { USAGE_INTEGER_RANGES } from '../shared/settings-ranges.ts';
 import { USAGE_BUDGET_KEYS, USAGE_COST_MODES, USAGE_VENDOR_KEYS } from '../shared/usage-config.ts';
 import type { UsageVendorKey } from '../shared/usage-config.ts';
 import { execFileAsync as defaultExecFileAsync } from './child-process-safe.ts';
-import { evaluateBudget, normalizeBudgetConfig } from './core/usage-budget-core.ts';
+import { evaluateBudget, mergeFiredState, normalizeBudgetConfig } from './core/usage-budget-core.ts';
 import type { BudgetAlert, BudgetConfig, BudgetFiredState } from './core/usage-budget-core.ts';
 import { computeCacheSavings, normalizeRtkGain } from './core/usage-savings-core.ts';
 import {
@@ -15,7 +15,7 @@ import {
   shouldBroadcastPlanLimits,
 } from './core/usage-statusline-core.ts';
 import type { StatuslineSnapshot } from './core/usage-statusline-core.ts';
-import { createJsonStateWriter } from './json-file.ts';
+import { createJsonStateStore } from './json-file.ts';
 import { createLaneLog } from './lane-log.ts';
 import { getRtkPath } from './rtk-resolver.ts';
 import { sendTelegramMessage } from './telegram-transport.ts';
@@ -242,15 +242,21 @@ function createUsageWiring({
   let planLimits: StatuslineSnapshot | null = null;
   const officialCostByClaudeId = new Map<string, number>();
   let budgetFiredState: BudgetFiredState | Record<string, never> = {};
-  let budgetStateLoaded = false;
 
-  const budgetStateWriter = budgetStatePath
-    ? createJsonStateWriter({
-      filePath: budgetStatePath,
-      fsPromises,
-      warn: (error: unknown) => laneLog.warn('budget state write failed', { error: errorMessage(error) }),
-    })
-    : null;
+  const budgetStateStore = createJsonStateStore<BudgetFiredState>({
+    name: 'budget state',
+    filePath: budgetStatePath,
+    fsPromises,
+    nowMs: nowFn,
+    warn: laneLog.warn,
+    parse: (raw) => {
+      const fired = raw && typeof raw === 'object' ? (raw as { fired?: unknown }).fired : null;
+      return fired && typeof fired === 'object' ? fired as BudgetFiredState : { daily: {}, monthly: {} };
+    },
+    adopt: (loadedFiredState) => {
+      budgetFiredState = mergeFiredState(budgetFiredState, loadedFiredState ?? {});
+    },
+  });
   let rtkSavingsCache: RtkSavings | null = null;
   let rtkSavingsCacheMs = 0;
 
@@ -442,30 +448,12 @@ function createUsageWiring({
     return buildPlanLimitsMessage(planLimits);
   }
 
-  async function loadBudgetState(): Promise<void> {
-    if (budgetStateLoaded || !budgetStatePath) return;
-    budgetStateLoaded = true;
-    let text: string | null = null;
-    try {
-      text = await fsPromises.readFile(budgetStatePath, 'utf8');
-    } catch {
-
-      return;
-    }
-    try {
-      const parsed: unknown = JSON.parse(text);
-      const fired = parsed && typeof parsed === 'object' ? (parsed as { fired?: unknown }).fired : null;
-      budgetFiredState = fired && typeof fired === 'object' ? (fired as BudgetFiredState) : {};
-    } catch (error) {
-
-      laneLog.warn('budget state unreadable, starting empty', { error: errorMessage(error) });
-      budgetFiredState = {};
-    }
+  function loadBudgetState(): Promise<void> {
+    return budgetStateStore.load();
   }
 
   async function saveBudgetState(): Promise<void> {
-    if (!budgetStateWriter) return;
-    await budgetStateWriter.write(
+    await budgetStateStore.write(
       budgetFiredState,
       () => `${JSON.stringify({ version: 1, fired: budgetFiredState }, null, 2)}\n`,
     );

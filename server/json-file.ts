@@ -3,6 +3,14 @@ import path from 'node:path';
 
 type SyncFileSystem = Pick<typeof fs, 'mkdirSync' | 'writeFileSync' | 'renameSync' | 'rmSync'>;
 type AsyncFileSystem = Pick<typeof fs.promises, 'mkdir' | 'writeFile' | 'rename' | 'rm' | 'appendFile'>;
+type JsonStateLoadFileSystem = Pick<typeof import('node:fs/promises'), 'readFile' | 'rename'>;
+type JsonStateFileSystem = AsyncFileSystem & JsonStateLoadFileSystem;
+
+type JsonStateLoadOutcome<T> =
+  | { status: 'missing' }
+  | { status: 'loaded'; value: T }
+  | { status: 'quarantined'; movedTo: string }
+  | { status: 'unreadable'; error: unknown };
 
 interface SyncWriteOptions {
   mode?: number;
@@ -50,6 +58,46 @@ function sleepSync(ms: number): void {
 function renameRetryPlan(error: unknown, attempt: number): number | null {
   if (!isRetryableRename(error, attempt)) return null;
   return renameRetryDelayMs(attempt);
+}
+
+function isMissingFileError(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === 'ENOENT' || code === 'ENOTDIR';
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function loadJsonStateFile<T>({ filePath, fsPromises, parse, nowMs }: {
+  filePath: string;
+  fsPromises: JsonStateLoadFileSystem;
+  parse: (raw: unknown) => T | null;
+  nowMs: () => number;
+}): Promise<JsonStateLoadOutcome<T>> {
+  let text: string;
+  try {
+    text = await fsPromises.readFile(filePath, 'utf8');
+  } catch (error) {
+    if (isMissingFileError(error)) return { status: 'missing' };
+    return { status: 'unreadable', error };
+  }
+
+  let value: T | null;
+  try {
+    value = parse(JSON.parse(text));
+  } catch {
+    value = null;
+  }
+  if (value !== null) return { status: 'loaded', value };
+
+  const movedTo = `${filePath}.corrupt-${nowMs()}`;
+  try {
+    await fsPromises.rename(filePath, movedTo);
+  } catch (error) {
+    return { status: 'unreadable', error };
+  }
+  return { status: 'quarantined', movedTo };
 }
 
 function renameWithRetrySync(fsSync: SyncFileSystem, tmpPath: string, filePath: string): void {
@@ -186,14 +234,77 @@ function createJsonStateWriter({ filePath, fsPromises = fs.promises, warn = () =
   return { write, reset, idle: () => writeChain };
 }
 
+interface JsonStateStore {
+  load(): Promise<void>;
+  write(subject: unknown, buildPayload: () => string): Promise<void>;
+  idle(): Promise<void>;
+}
+
+function createJsonStateStore<T>({
+  name,
+  filePath,
+  fsPromises = fs.promises,
+  parse,
+  adopt,
+  nowMs = Date.now,
+  warn = () => {},
+}: {
+  name: string;
+  filePath: string | null;
+  fsPromises?: JsonStateFileSystem;
+  parse: (raw: unknown) => T | null;
+  adopt: (loadedValue: T | null) => void;
+  nowMs?: () => number;
+  warn?: (message: string, fields: Record<string, string>) => void;
+}): JsonStateStore {
+  const writer = filePath
+    ? createJsonStateWriter({
+      filePath,
+      fsPromises,
+      warn: (error: unknown) => warn(`${name} write failed`, { error: errorText(error) }),
+    })
+    : null;
+  let isFileReadable = true;
+  let loadPromise: Promise<void> | null = null;
+
+  function load(): Promise<void> {
+    const statePath = filePath;
+    if (!statePath) return Promise.resolve();
+    if (loadPromise) return loadPromise;
+    loadPromise = (async () => {
+      const outcome = await loadJsonStateFile({ filePath: statePath, fsPromises, parse, nowMs });
+      if (outcome.status === 'unreadable') {
+        isFileReadable = false;
+        loadPromise = null;
+        warn(`${name} unreadable`, { path: statePath, error: errorText(outcome.error) });
+        return;
+      }
+      if (outcome.status === 'quarantined') warn(`${name} quarantined`, { path: statePath, movedTo: outcome.movedTo });
+      isFileReadable = true;
+      adopt(outcome.status === 'loaded' ? outcome.value : null);
+      writer?.reset();
+    })();
+    return loadPromise;
+  }
+
+  async function write(subject: unknown, buildPayload: () => string): Promise<void> {
+    if (!writer || !isFileReadable) return;
+    await writer.write(subject, buildPayload);
+  }
+
+  return { load, write, idle: () => (writer ? writer.idle() : Promise.resolve()) };
+}
+
 export {
   appendJsonLine,
   appendJsonLineIdle,
   appendJsonLines,
+  createJsonStateStore,
   createJsonStateWriter,
+  loadJsonStateFile,
   writeJsonAtomic,
   writeJsonAtomicSync,
   writeTextAtomic,
   writeTextAtomicSync,
 };
-export type { AsyncWriteOptions, JsonStateWriter, SyncWriteOptions };
+export type { AsyncWriteOptions, JsonStateLoadOutcome, JsonStateStore, JsonStateWriter, SyncWriteOptions };
