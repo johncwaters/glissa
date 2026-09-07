@@ -74,3 +74,81 @@ test('a debug getter that throws reads as off rather than propagating', () => {
   assert.deepEqual(notes, []);
   assert.deepEqual(warnings, [], 'a failed debug check is not itself news');
 });
+
+test('note and warn render fields as key=value pairs after the message, in object key order, behind the prefix', () => {
+  const { log, notes, warnings } = capture();
+  log.note('started', { source: 'git', retryCount: 2, enabled: true });
+  log.warn('disabled', { source: 'git', retryCount: 2, enabled: false });
+  assert.deepEqual(notes, ['[ingest] started source=git retryCount=2 enabled=true']);
+  assert.deepEqual(warnings, ['[ingest] disabled source=git retryCount=2 enabled=false']);
+});
+
+test('absent, empty, and all-null field sets leave the message byte-identical with no trailing space', () => {
+  const { log, notes, warnings } = capture();
+  log.note('absent');
+  log.note('empty', {});
+  log.warn('null', { missing: null, alsoMissing: undefined });
+  assert.deepEqual(notes, ['[ingest] absent', '[ingest] empty']);
+  assert.deepEqual(warnings, ['[ingest] null']);
+});
+
+test('a string value containing a space or an equals sign is quoted, a bare word and a number are not', () => {
+  const { log, notes } = capture();
+  log.note('values', { space: 'two words', equals: 'left=right', word: 'bare', count: 4 });
+  assert.deepEqual(notes, ['[ingest] values space="two words" equals="left=right" word=bare count=4']);
+});
+
+test('warnOnce emits once per key and emits again for a different key', () => {
+  const { log, warnings } = capture();
+  log.warnOnce('first', 'first warning');
+  log.warnOnce('first', 'first warning');
+  log.warnOnce('second', 'second warning');
+  assert.deepEqual(warnings, ['[ingest] first warning', '[ingest] second warning']);
+});
+
+test('warnOnce past 256 keys keeps warning for new keys and forgets the oldest', () => {
+  const { log, warnings } = capture();
+  for (let keyNumber = 1; keyNumber <= 300; keyNumber += 1) {
+    log.warnOnce(`key-${keyNumber}`, `warning ${keyNumber}`);
+  }
+  log.warnOnce('key-1', 'warning 1 again');
+  assert.equal(warnings.length, 301);
+  assert.equal(warnings.at(-1), '[ingest] warning 1 again');
+});
+
+test('warnOnce marks the key before emitting so a logger that throws on the first call still suppresses the second', () => {
+  let warningCalls = 0;
+  const log = createLaneLog({
+    logger: {
+      warn: () => {
+        warningCalls += 1;
+        throw new Error('logger failed');
+      },
+    },
+  });
+  assert.throws(() => log.warnOnce('only-once', 'first'));
+  assert.doesNotThrow(() => log.warnOnce('only-once', 'second'));
+  assert.equal(warningCalls, 1);
+});
+
+test('debugNote builds neither the message nor the fields when debug is off, and renders both when on', () => {
+  let builtMessages = 0;
+  let builtFields = 0;
+  const off = capture();
+  off.log.debugNote(
+    () => { builtMessages += 1; return 'off'; },
+    () => { builtFields += 1; return { source: 'debug' }; },
+  );
+  assert.equal(builtMessages, 0);
+  assert.equal(builtFields, 0);
+  assert.deepEqual(off.notes, []);
+
+  const on = capture({ debugFlag: true });
+  on.log.debugNote(
+    () => { builtMessages += 1; return 'on'; },
+    () => { builtFields += 1; return { source: 'debug' }; },
+  );
+  assert.equal(builtMessages, 1);
+  assert.equal(builtFields, 1);
+  assert.deepEqual(on.notes, ['[ingest] on source=debug']);
+});
