@@ -337,6 +337,37 @@ function stubScannerWiring({ passResults, clients = 1 }: { passResults: PassResu
 const PARTIAL_PASS: PassResult = { files: 1, entries: 1, newEntries: 1, partial: true, durationMs: 1 };
 const COMPLETE_PASS: PassResult = { files: 1, entries: 1, newEntries: 0, partial: false, durationMs: 1 };
 
+test('completed passes write one debug note only when usage debug is enabled', async () => {
+  const debugNotes: string[] = [];
+  const debugScanner = scriptedScanner([], [COMPLETE_PASS]);
+  const debugWiring = createUsageWiring({
+    config: {},
+    sessions: new Map(),
+    createScanner: () => debugScanner,
+    loadPricingFn: async () => ({ table: new Map(), source: 'snapshot', fetchedAt: null }),
+    logger: { warn: () => {}, log: (message: string) => { debugNotes.push(message); } },
+    debug: true,
+  });
+  await debugWiring.start();
+  assert.equal(debugNotes.length, 1);
+  assert.match(debugNotes[0], /^\[usage\] pass complete files=1 entries=1 newEntries=0 durationMs=1 outcome=complete$/);
+  await debugWiring.stop();
+
+  const quietNotes: string[] = [];
+  const quietScanner = scriptedScanner([], [COMPLETE_PASS]);
+  const quietWiring = createUsageWiring({
+    config: {},
+    sessions: new Map(),
+    createScanner: () => quietScanner,
+    loadPricingFn: async () => ({ table: new Map(), source: 'snapshot', fetchedAt: null }),
+    logger: { warn: () => {}, log: (message: string) => { quietNotes.push(message); } },
+    debug: false,
+  });
+  await quietWiring.start();
+  assert.deepEqual(quietNotes, []);
+  await quietWiring.stop();
+});
+
 test('a partial pass is continued on the short timer until the scan completes', async () => {
   const { wiring, passes } = stubScannerWiring({ passResults: [PARTIAL_PASS, PARTIAL_PASS, COMPLETE_PASS] });
   await wiring.start();

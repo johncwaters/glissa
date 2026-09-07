@@ -16,6 +16,7 @@ import {
 } from './core/usage-statusline-core.ts';
 import type { StatuslineSnapshot } from './core/usage-statusline-core.ts';
 import { createJsonStateWriter } from './json-file.ts';
+import { createLaneLog } from './lane-log.ts';
 import { getRtkPath } from './rtk-resolver.ts';
 import { sendTelegramMessage } from './telegram-transport.ts';
 import { loadPricing } from './usage-pricing.ts';
@@ -122,6 +123,7 @@ interface UsageWiringOptions {
   setIntervalFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
   clearIntervalFn?: (handle: NodeJS.Timeout) => void;
   logger?: Pick<Console, 'warn' | 'log'>;
+  debug?: boolean | (() => boolean);
 }
 
 function errorMessage(error: unknown): string {
@@ -217,7 +219,9 @@ function createUsageWiring({
   setIntervalFn = (fn: () => void, ms: number) => setInterval(fn, ms),
   clearIntervalFn = clearInterval,
   logger = console,
+  debug = false,
 }: UsageWiringOptions) {
+  const laneLog = createLaneLog({ prefix: '[usage]', logger, debugFlag: debug });
   let cfg = resolveUsageConfig(config.usage);
   let lastKey = usageCfgKey(config);
   let scanner: UsageScannerApi | null = null;
@@ -240,27 +244,21 @@ function createUsageWiring({
   let budgetFiredState: BudgetFiredState | Record<string, never> = {};
   let budgetStateLoaded = false;
 
-  function warn(message: string): void {
-    if (!logger || typeof logger.warn !== 'function') return;
-    logger.warn(`[usage] ${message}`);
-  }
-
   const budgetStateWriter = budgetStatePath
     ? createJsonStateWriter({
       filePath: budgetStatePath,
       fsPromises,
-      warn: (error: unknown) => warn(`budget state write failed: ${errorMessage(error)}`),
+      warn: (error: unknown) => laneLog.warn('budget state write failed', { error: errorMessage(error) }),
     })
     : null;
   let rtkSavingsCache: RtkSavings | null = null;
   let rtkSavingsCacheMs = 0;
-  let warnedRtkGain = false;
 
   async function loadPricingSafely(): Promise<PricingResult> {
     try {
       return await loadPricingFn({ fetchEnabled: cfg.fetchPricing, logger });
     } catch (error) {
-      warn(`pricing load failed: ${errorMessage(error)}`);
+      laneLog.warn('pricing load failed', { error: errorMessage(error) });
       return { table: new Map(), source: 'unavailable', fetchedAt: null };
     }
   }
@@ -284,7 +282,10 @@ function createUsageWiring({
     startRequested = true;
     cfg = resolveUsageConfig(config.usage);
     lastKey = usageCfgKey(config);
-    if (!usageShouldStart(config)) return Promise.resolve();
+    if (!usageShouldStart(config)) {
+      laneLog.note('usage lane not started: disabled by config');
+      return Promise.resolve();
+    }
     startPromise = (async () => {
       const loadedPricing = await loadPricingSafely();
       pricing = loadedPricing;
@@ -305,7 +306,7 @@ function createUsageWiring({
       });
       await runPassAndPush({ force: false });
       armInterval();
-    })().catch((error: unknown) => warn(`start failed: ${errorMessage(error)}`));
+    })().catch((error: unknown) => laneLog.warn('start failed', { error: errorMessage(error) }));
     return startPromise;
   }
 
@@ -316,11 +317,24 @@ function createUsageWiring({
     try {
       result = await scanner.runPass({ force });
     } catch (error) {
-      warn(`scan pass failed: ${errorMessage(error)}`);
+      laneLog.warn('scan pass failed', { error: errorMessage(error) });
     } finally {
       passInFlight = false;
     }
     if (stopped) return result;
+
+    if (result) {
+      laneLog.debugNote(
+        () => 'pass complete',
+        () => ({
+          files: result.files,
+          entries: result.entries,
+          newEntries: result.newEntries,
+          durationMs: result.durationMs,
+          outcome: result.partial ? 'partial' : 'complete',
+        }),
+      );
+    }
 
     if (lastSessionsMessage === null || (result && result.newEntries > 0)) pushSessions();
 
@@ -444,7 +458,7 @@ function createUsageWiring({
       budgetFiredState = fired && typeof fired === 'object' ? (fired as BudgetFiredState) : {};
     } catch (error) {
 
-      warn(`budget state unreadable, starting empty: ${errorMessage(error)}`);
+      laneLog.warn('budget state unreadable, starting empty', { error: errorMessage(error) });
       budgetFiredState = {};
     }
   }
@@ -501,14 +515,6 @@ function createUsageWiring({
     await saveBudgetState();
   }
 
-  function warnRtkOnce(message: string): RtkSavings {
-    if (!warnedRtkGain) {
-      warnedRtkGain = true;
-      warn(message);
-    }
-    return RTK_UNAVAILABLE;
-  }
-
   async function fetchRtkSavings(): Promise<RtkSavings> {
     if (!cfg.rtkSavings) return RTK_UNAVAILABLE;
     const rtkPath = rtkPathFn();
@@ -521,12 +527,16 @@ function createUsageWiring({
         encoding: 'utf8',
       });
       const normalized = normalizeRtkGain(JSON.parse(stdout));
-      if (!normalized) return warnRtkOnce('rtk gain reported an unrecognized shape');
+      if (!normalized) {
+        laneLog.warnOnce('rtk-gain', 'rtk gain reported an unrecognized shape');
+        return RTK_UNAVAILABLE;
+      }
       rtkSavingsCache = { available: true, ...normalized };
       rtkSavingsCacheMs = nowFn();
       return rtkSavingsCache;
     } catch (error) {
-      return warnRtkOnce(`rtk gain failed: ${errorMessage(error)}`);
+      laneLog.warnOnce('rtk-gain', 'rtk gain failed', { error: errorMessage(error) });
+      return RTK_UNAVAILABLE;
     }
   }
 
@@ -534,7 +544,7 @@ function createUsageWiring({
     try {
       return { rtk: await fetchRtkSavings(), cache: computeCacheSavings(report.models, pricing?.table) };
     } catch (error) {
-      warn(`savings unavailable: ${errorMessage(error)}`);
+      laneLog.warn('savings unavailable', { error: errorMessage(error) });
       return { rtk: RTK_UNAVAILABLE, cache: null };
     }
   }
@@ -556,7 +566,7 @@ function createUsageWiring({
     try {
       report = scanner.buildReport({ days });
     } catch (error) {
-      warn(`report build failed: ${errorMessage(error)}`);
+      laneLog.warn('report build failed', { error: errorMessage(error) });
       return unavailableReport(requestId, `Usage report failed: ${errorMessage(error)}`);
     }
     const scanStats = scanner.stats();
@@ -630,7 +640,7 @@ function createUsageWiring({
       await teardown();
       if (!startRequested) return;
       await start();
-    }).catch((error: unknown) => warn(`restart failed: ${errorMessage(error)}`));
+    }).catch((error: unknown) => laneLog.warn('restart failed', { error: errorMessage(error) }));
   }
 
   async function stop(): Promise<void> {

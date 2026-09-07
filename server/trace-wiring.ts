@@ -29,6 +29,7 @@ import { readSessionTracePage } from './core/session-trace-core.ts';
 import { isSafePathSegment } from './core/upload-core.ts';
 import { appendJsonLines, createJsonStateWriter } from './json-file.ts';
 import type { JsonStateWriter } from './json-file.ts';
+import { createLaneLog } from './lane-log.ts';
 import { configSiblingPath } from './pairings-store.ts';
 
 const TRACE_RETAIN_DAYS = 7;
@@ -65,6 +66,7 @@ interface TraceSession {
 interface TraceWiringOptions {
   configPath?: string | null;
   logger?: Pick<Console, 'log' | 'warn'> | null;
+  debug?: boolean | (() => boolean);
   nowFn?: () => number;
   setIntervalFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
   clearIntervalFn?: (handle: NodeJS.Timeout) => void;
@@ -98,6 +100,11 @@ interface TraceResumeState {
 interface LineContext {
   agentId?: string;
   agentType?: string;
+}
+
+interface PendingCommit {
+  didAppend: boolean;
+  appendedRecordCount: number;
 }
 
 interface OpenedFile {
@@ -215,6 +222,7 @@ async function pruneTraceFiles({
 function createTraceWiring({
   configPath = null,
   logger = console,
+  debug = false,
   nowFn = Date.now,
   setIntervalFn = (fn: () => void, ms: number) => setInterval(fn, ms),
   clearIntervalFn = clearInterval,
@@ -232,16 +240,12 @@ function createTraceWiring({
   let hasEnsuredDirectory = false;
   let stopPromise: Promise<void> | null = null;
   let operationChain: Promise<void> = Promise.resolve();
-
-  function warn(message: string): void {
-    if (!logger) return;
-    logger.warn(`[trace] ${message}`);
-  }
+  const laneLog = createLaneLog({ prefix: '[trace]', logger, debugFlag: debug });
 
   function chain(step: () => Promise<void>, failure: string): void {
     operationChain = operationChain
       .then(step)
-      .catch((error: unknown) => { warn(`${failure}: ${errorMessage(error)}`); });
+      .catch((error: unknown) => { laneLog.warn(failure, { error: errorMessage(error) }); });
   }
 
   function traceFilePath(glissaSessionId: string): string | null {
@@ -282,7 +286,7 @@ function createTraceWiring({
     if (!traceFilePath(glissaSessionId)) return;
     const parsed = TraceRecordSchema.safeParse(record);
     if (!parsed.success) {
-      warn(`record refused for ${glissaSessionId}`);
+      laneLog.warn('record refused', { session: glissaSessionId });
       return;
     }
     const existing = pendingRecordsBySessionId.get(glissaSessionId);
@@ -309,7 +313,7 @@ function createTraceWiring({
       emitter.emit('trace-appended', { id: glissaSessionId });
       return true;
     } catch (error) {
-      warn(`append failed for ${glissaSessionId}: ${errorMessage(error)}`);
+      laneLog.warn('append failed', { session: glissaSessionId, error: errorMessage(error) });
       requeueAtHead(glissaSessionId, records);
       return false;
     }
@@ -481,11 +485,13 @@ function createTraceWiring({
     binding.isSkippingOversizedLine = true;
   }
 
-  async function commitPending(binding: TraceBinding): Promise<void> {
+  async function commitPending(binding: TraceBinding): Promise<PendingCommit> {
     stampCommittedOffset(binding.glissaSessionId, committedOffsetOf(binding));
+    const recordCount = pendingRecordsBySessionId.get(binding.glissaSessionId)?.length ?? 0;
     const didAppend = await flushSession(binding.glissaSessionId);
-    if (!didAppend) return;
+    if (!didAppend) return { didAppend, appendedRecordCount: 0 };
     await writeCheckpoint(binding);
+    return { didAppend, appendedRecordCount: recordCount };
   }
 
   async function drainBinding(binding: TraceBinding): Promise<void> {
@@ -499,11 +505,12 @@ function createTraceWiring({
           if (isMissingFileError(error)) return;
         }
       }
-      if (!binding.hasWarnedUnreadable) warn(`transcript unreadable for ${binding.glissaSessionId}`);
+      if (!binding.hasWarnedUnreadable) laneLog.warn('transcript unreadable', { session: binding.glissaSessionId });
       binding.hasWarnedUnreadable = true;
       return;
     }
     binding.hasWarnedUnreadable = false;
+    let committedOffsetBeforeRead = committedOffsetOf(binding);
     try {
       if (!binding.hasOpenedTranscript) {
         if (binding.bindingBeforeFirstOpen) await drainBinding(binding.bindingBeforeFirstOpen);
@@ -517,14 +524,27 @@ function createTraceWiring({
         binding.tailState.offset = resumed.offset;
         binding.hasOpenedTranscript = true;
         queueSessionRecord(binding, resumed.didReset ? 'transcript smaller than the stored checkpoint' : null);
+        committedOffsetBeforeRead = committedOffsetOf(binding);
       }
       await readOnce(binding, opened.handle);
     } catch (error) {
-      warn(`transcript read failed: ${errorMessage(error)}`);
+      laneLog.warn('transcript read failed', { error: errorMessage(error) });
     } finally {
       await opened.handle.close().catch(() => {});
     }
-    await commitPending(binding);
+    const commit = await commitPending(binding);
+    if (!commit.didAppend) return;
+    const committedOffsetAfterRead = committedOffsetOf(binding);
+    if (committedOffsetAfterRead <= committedOffsetBeforeRead) return;
+    laneLog.debugNote(
+      () => 'drained',
+      () => ({
+        session: binding.glissaSessionId,
+        records: commit.appendedRecordCount,
+        bytes: committedOffsetAfterRead - committedOffsetBeforeRead,
+        offset: committedOffsetAfterRead,
+      }),
+    );
   }
 
   function predecessorAwaitingDrain(previous: TraceBinding | undefined): TraceBinding | null {
@@ -546,7 +566,7 @@ function createTraceWiring({
     if (!checkpointPath) return;
     const containedTranscript = await openContainedFile(requestedTranscriptPath, projectsRoot(), true);
     if (!containedTranscript) {
-      warn('transcript refused: outside the Claude projects root or not a regular file');
+      laneLog.warn('transcript refused: outside the Claude projects root or not a regular file');
       return;
     }
     const transcriptPath = containedTranscript.realPath;
@@ -574,7 +594,7 @@ function createTraceWiring({
       committedOffsetByTranscriptPath: resumed ? resumed.committedOffsetByTranscriptPath : {},
       checkpointWriter: createJsonStateWriter({
         filePath: checkpointPath,
-        warn: (error: unknown) => { warn(`checkpoint write failed: ${errorMessage(error)}`); },
+        warn: (error: unknown) => { laneLog.warn('checkpoint write failed', { error: errorMessage(error) }); },
       }),
       bindingBeforeFirstOpen: transcriptStat ? null : predecessorAwaitingDrain(previous),
       isSkippingOversizedLine: false,
@@ -619,21 +639,23 @@ function createTraceWiring({
     if (binding.ingestedSubagentPaths.has(subagentPath)) return;
     const subagentRoot = path.dirname(binding.transcriptPath);
     if (!isPathInsideRoot(projectsRoot(), subagentRoot)) {
-      warn('subagent transcript refused: the session transcript sits outside a Claude project directory');
+      laneLog.warn('subagent transcript refused: the session transcript sits outside a Claude project directory');
       return;
     }
     const opened = await openContainedFile(subagentPath, subagentRoot);
     if (!opened) {
-      warn('subagent transcript refused: outside the session transcript root');
+      laneLog.warn('subagent transcript refused: outside the session transcript root');
       return;
     }
+    let mappedLineCount = 0;
+    let bytesRead = 0;
     try {
       await drainBinding(binding);
       if (!binding.hasOpenedTranscript) return;
       const stat = await opened.handle.stat();
       const end = Math.min(stat.size, MAX_SUBAGENT_READ_BYTES);
       const buffer = Buffer.alloc(end);
-      const { bytesRead } = await opened.handle.read(buffer, 0, end, 0);
+      ({ bytesRead } = await opened.handle.read(buffer, 0, end, 0));
       const agentId = typeof eventPayload.agent_id === 'string' && eventPayload.agent_id
         ? eventPayload.agent_id
         : undefined;
@@ -651,17 +673,22 @@ function createTraceWiring({
         end: bytesRead,
         stat,
       });
+      mappedLineCount = lines.length;
       for (const line of lines) mapAndAppend(line, binding, context);
       if (stat.size > end) noteSkippedBytes(binding, subagentPath, stat.size - end);
       binding.ingestedSubagentPaths.add(subagentPath);
       trimOldest(binding.ingestedSubagentPaths, MAX_REMEMBERED_SUBAGENTS);
     } catch (error) {
-      warn(`subagent transcript read failed: ${errorMessage(error)}`);
+      laneLog.warn('subagent transcript read failed', { error: errorMessage(error) });
       return;
     } finally {
       await opened.handle.close().catch(() => {});
     }
     await commitPending(binding);
+    laneLog.debugNote(
+      () => 'subagent captured',
+      () => ({ session: glissaSessionId, records: mappedLineCount, bytes: bytesRead }),
+    );
   }
 
   function noteHookEvent(glissaSessionId: string, eventRecord: Record<string, unknown>): void {
@@ -751,7 +778,7 @@ function createTraceWiring({
       try {
         await drainBinding(binding);
       } catch (error) {
-        warn(`final drain failed: ${errorMessage(error)}`);
+        laneLog.warn('final drain failed', { error: errorMessage(error) });
       }
       await binding.checkpointWriter.idle();
     }

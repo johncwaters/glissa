@@ -41,11 +41,13 @@ function createHarness(
   configDirectory: string,
   nowMs = 10,
   logger: Pick<Console, 'log' | 'warn'> = silentLogger(),
+  debug = false,
 ) {
   const timers: { fn: () => void; ms: number }[] = [];
   const wiring = createTraceWiring({
     configPath: path.join(configDirectory, 'config.json'),
     logger,
+    debug,
     nowFn: () => nowMs,
     setIntervalFn: (fn: () => void, ms: number) => {
       timers.push({ fn, ms });
@@ -158,6 +160,38 @@ test('main and subagent transcript records append under the Glissa session id', 
   const checkpoint = readCheckpoint(harness.checkpointPath('glissa-session-id'));
   assert.equal(checkpoint.offset, fs.statSync(transcriptPath).size);
   assert.deepEqual(checkpoint.ingestedSubagentPaths, [subagentPath]);
+
+  await harness.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
+test('a draining poll logs debug details only when it appends transcript records', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('debug-drain');
+  const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
+  fs.writeFileSync(transcriptPath, '', 'utf8');
+  const notes: string[] = [];
+  const harness = createHarness(configDirectory, 10, {
+    log: (message) => { notes.push(String(message)); },
+    warn: () => {},
+  }, true);
+  await harness.wiring.start();
+  const session = new TestTraceSession('glissa-session-id');
+  harness.wiring.attachSession(session);
+
+  session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
+  await harness.wiring.whenIdle();
+  const record = mainPrompt('main prompt', 'prompt-id');
+  fs.appendFileSync(transcriptPath, record, 'utf8');
+  await harness.poll();
+
+  const offset = Buffer.byteLength(record);
+  assert.deepEqual(notes, [
+    `[trace] drained session=glissa-session-id records=1 bytes=${offset} offset=${offset}`,
+  ]);
+
+  notes.length = 0;
+  await harness.poll();
+  assert.deepEqual(notes, []);
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });

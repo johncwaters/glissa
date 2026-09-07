@@ -47,6 +47,8 @@ import {
 } from './core/usage-warehouse-core.ts';
 import type { WarehouseRecord } from './core/usage-warehouse-core.ts';
 import { createJsonStateWriter } from './json-file.ts';
+import { createLaneLog } from './lane-log.ts';
+import type { LaneLog } from './lane-log.ts';
 
 const DEFAULT_BYTE_BUDGET = 64 * 1024 * 1024;
 const DEFAULT_CHUNK_SIZE = 1024 * 1024;
@@ -56,7 +58,6 @@ const ANOMALY_BASELINE_DAYS = 30;
 
 const noopLogger = Object.freeze({ warn: () => {} });
 
-type ScannerLogger = Pick<Console, 'warn'> | { warn: (message: string) => void };
 interface ScannerFileStat {
   isDirectory(): boolean;
   size: number;
@@ -134,7 +135,7 @@ interface UsageScannerOptions {
   warehouseRetainDays?: number;
   budget?: { dailyUsd?: unknown; monthlyUsd?: unknown } | null;
   laneMap?: (() => Map<string, string>) | null;
-  logger?: ScannerLogger;
+  logger?: Pick<Console, 'warn'>;
   byteBudget?: number;
   chunkSize?: number;
 }
@@ -149,11 +150,6 @@ interface PassResult {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function warn(logger: ScannerLogger | null | undefined, message: string): void {
-  if (!logger || typeof logger.warn !== 'function') return;
-  logger.warn(message);
 }
 
 function yieldNow(): Promise<void> {
@@ -263,12 +259,12 @@ function keysForEntry(entry: StoredEntry, syntheticPrimary: string | null = null
 }
 
 async function resolveProjectsDirsAsync(
-  { fsPromises, env, extraProjectsDirs, homeDir, logger }: {
+  { fsPromises, env, extraProjectsDirs, homeDir, laneLog }: {
     fsPromises: ScannerFileSystem;
     env: NodeJS.ProcessEnv;
     extraProjectsDirs: string[];
     homeDir: string;
-    logger: ScannerLogger;
+    laneLog: LaneLog;
   },
 ): Promise<{ dirs: string[]; error: string | null }> {
   const candidates = projectDirCandidates(env, extraProjectsDirs, homeDir);
@@ -288,7 +284,7 @@ async function resolveProjectsDirsAsync(
       error: null,
     };
   } catch (error) {
-    warn(logger, `usage scan project dir resolution failed: ${errorMessage(error)}`);
+    laneLog.warn('project dir resolution failed', { error: errorMessage(error) });
     return { dirs: [], error: errorMessage(error) };
   }
 }
@@ -332,19 +328,19 @@ async function walkDir(
   vendor: string,
   fsPromises: ScannerFileSystem,
   files: string[],
-  logger: ScannerLogger,
+  laneLog: LaneLog,
 ): Promise<void> {
   let entries: Dirent[];
   try {
     entries = await fsPromises.readdir(dir, { withFileTypes: true });
   } catch (error) {
-    warn(logger, `usage scan readdir failed for ${dir}: ${errorMessage(error)}`);
+    laneLog.warn('readdir failed', { path: dir, error: errorMessage(error) });
     return;
   }
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      await walkDir(fullPath, vendor, fsPromises, files, logger);
+      await walkDir(fullPath, vendor, fsPromises, files, laneLog);
       continue;
     }
     if (!entry.isFile()) continue;
@@ -356,12 +352,12 @@ async function walkDir(
 async function walkSourceFiles(
   roots: ScanRoot[],
   fsPromises: ScannerFileSystem,
-  logger: ScannerLogger,
+  laneLog: LaneLog,
 ): Promise<SourceFile[]> {
   const files: SourceFile[] = [];
   for (const root of roots) {
     const found: string[] = [];
-    await walkDir(root.dir, root.vendor, fsPromises, found, logger);
+    await walkDir(root.dir, root.vendor, fsPromises, found, laneLog);
     for (const file of found) files.push({ file, vendor: root.vendor, kind: root.kind });
   }
   const codexFiles = dedupeCodexFiles(files.filter((entry) => entry.vendor === 'codex'));
@@ -391,6 +387,8 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     chunkSize = DEFAULT_CHUNK_SIZE,
   } = deps;
 
+  const laneLog = createLaneLog({ prefix: '[usage]', logger });
+
   const budget = normalizeBudgetConfig(budgetDep);
   const fileStates = new Map<string, FileState | null>();
   const primaryIndex = new Map<string, number>();
@@ -415,7 +413,7 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     ? createJsonStateWriter({
       filePath: warehousePath,
       fsPromises,
-      warn: (error: unknown) => warn(logger, `usage warehouse write failed: ${errorMessage(error)}`),
+      warn: (error: unknown) => laneLog.warn('warehouse write failed', { error: errorMessage(error) }),
     })
     : null;
 
@@ -573,7 +571,7 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     try {
       stat = await fsPromises.stat(file);
     } catch (error) {
-      warn(logger, `usage scan stat failed for ${file}: ${errorMessage(error)}`);
+      laneLog.warn('stat failed', { path: file, error: errorMessage(error) });
       return { bytesRead: 0, partial: false };
     }
 
@@ -642,7 +640,7 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     } catch (error) {
       if (hadPrior) fileStates.set(file, priorSnapshot);
       if (!hadPrior) fileStates.delete(file);
-      warn(logger, `usage scan read failed for ${file}: ${errorMessage(error)}`);
+      laneLog.warn('read failed', { path: file, error: errorMessage(error) });
       return { bytesRead, partial: false, failed: true };
     } finally {
       if (handle) await handle.close().catch(() => {});
@@ -683,7 +681,7 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
       warehouseRecords = pruneWarehouse(records, { retainDays: warehouseRetainDays, todayKey: todayDayKey() });
       warehouseWriter.reset();
     } catch (error) {
-      warn(logger, `usage warehouse unreadable, starting empty: ${errorMessage(error)}`);
+      laneLog.warn('warehouse unreadable, starting empty', { error: errorMessage(error) });
       warehouseRecords = [];
     }
   }
@@ -874,7 +872,7 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     let partial = false;
     let bytesReadThisPass = 0;
     if (force) resetStore();
-    const resolved = await resolveProjectsDirsAsync({ fsPromises, env, extraProjectsDirs, homeDir, logger });
+    const resolved = await resolveProjectsDirsAsync({ fsPromises, env, extraProjectsDirs, homeDir, laneLog });
     claudeDirs = resolved.dirs;
     resolutionError = resolved.error;
     const vendorRoots = await resolveVendorRootsAsync({ fsPromises, env, homeDir, vendors });
@@ -883,7 +881,7 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
       ...vendorRoots,
     ];
     dirs = roots.map((root) => root.dir);
-    const files = await walkSourceFiles(roots, fsPromises, logger);
+    const files = await walkSourceFiles(roots, fsPromises, laneLog);
     lastFileCount = files.length;
 
     for (const file of files) {

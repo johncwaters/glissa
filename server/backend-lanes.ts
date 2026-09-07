@@ -216,6 +216,7 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
     ? createTraceWiring({
       configPath: configStore.configPath,
       logger,
+      debug: () => configStore.getSettings().debugMode === true,
     })
     : null;
   const traceChangeBroadcast = traceWiring
@@ -367,6 +368,8 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
     warehousePath: configSiblingPath(configStore.configPath, 'usage-warehouse.json'),
     laneMap: () => laneLedger.laneMap(),
     budgetStatePath: configSiblingPath(configStore.configPath, 'usage-budget-state.json'),
+    logger,
+    debug: () => configStore.getSettings().debugMode === true,
     ...(options.usageWiringOptions || {}),
   });
   const millMetrics = createMillMetricsLane({

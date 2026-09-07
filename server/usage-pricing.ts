@@ -5,6 +5,7 @@ import { glissaHomeDir } from './config-store.ts';
 import { normalizePricingTable } from './core/usage-pricing-core.ts';
 import type { ModelPrice } from './core/usage-pricing-core.ts';
 import pricingSnapshot from './data/claude-pricing.json' with { type: 'json' };
+import { createLaneLog } from './lane-log.ts';
 
 const LITELLM_PRICING_URL = 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -135,7 +136,10 @@ async function writeCache({ fsPromises, cachePath, fetchedAt, models, logger }: 
     await fsPromises.mkdir(path.dirname(cachePath), { recursive: true });
     await fsPromises.writeFile(cachePath, JSON.stringify({ fetchedAt, models }, null, 2));
   } catch (error) {
-    if (logger && typeof logger.warn === 'function') logger.warn(`usage pricing cache write failed: ${errorMessage(error)}`);
+    createLaneLog({ prefix: '[usage]', logger }).warn('pricing cache write failed', {
+      path: cachePath,
+      error: errorMessage(error),
+    });
   }
 }
 

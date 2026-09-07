@@ -4,6 +4,7 @@ import { laneMapFromLedger, pruneLedger } from './core/usage-lane-core.ts';
 import type { LaneLedgerEntry } from './core/usage-lane-core.ts';
 import type { RecordLane } from './ephemeral-session.ts';
 import { createJsonStateWriter } from './json-file.ts';
+import { createLaneLog } from './lane-log.ts';
 
 type LedgerFileSystem = Pick<typeof nodeFsPromises, 'readFile' | 'mkdir' | 'writeFile' | 'rename' | 'rm' | 'appendFile'>;
 
@@ -30,14 +31,10 @@ function createLaneLedger({
   retainDays = 365,
   logger = null,
 }: LaneLedgerOptions = {}): LaneLedger {
+  const laneLog = createLaneLog({ prefix: '[usage]', logger });
   let entries: LaneLedgerEntry[] = [];
   let opsChain: Promise<void> = Promise.resolve();
   let loadPromise: Promise<void> | null = null;
-
-  function warn(message: string): void {
-    if (!logger || typeof logger.warn !== 'function') return;
-    logger.warn(`[usage-lanes] ${message}`);
-  }
 
   function failureText(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
@@ -47,7 +44,7 @@ function createLaneLedger({
     ? createJsonStateWriter({
       filePath: ledgerPath,
       fsPromises,
-      warn: (error: unknown) => warn(`write failed: ${failureText(error)}`),
+      warn: (error: unknown) => laneLog.warn('ledger write failed', { error: failureText(error) }),
     })
     : null;
 
@@ -66,7 +63,7 @@ function createLaneLedger({
         const rawEntries = parsed && typeof parsed === 'object' ? (parsed as { entries?: unknown }).entries : null;
         entries = pruneLedger(Array.isArray(rawEntries) ? rawEntries : [], { now: nowFn(), retainDays });
       } catch (error) {
-        warn(`ledger unreadable, starting empty: ${failureText(error)}`);
+        laneLog.warn('ledger unreadable, starting empty', { error: failureText(error) });
         entries = [];
       }
     })();
@@ -87,7 +84,7 @@ function createLaneLedger({
       if (existing && existing.lane === lane) return;
       entries = pruneLedger([...entries, { vendor, sessionId, lane, ts: nowFn() }], { now: nowFn(), retainDays });
       await persist();
-    }).catch((error: unknown) => warn(`record failed: ${failureText(error)}`));
+    }).catch((error: unknown) => laneLog.warn('ledger record failed', { error: failureText(error) }));
   };
 
   function whenIdle(): Promise<void> {
