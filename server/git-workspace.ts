@@ -1119,7 +1119,7 @@ function createGitWorkspace(opts: {
 
   async function deleteRemoteBranchBody({ projectPath, name, tipSha }: WorktreeArgs): Promise<GitResult> {
     const branchRef = `refs/heads/${name ?? ''}`;
-    return run(['push', 'origin', `--force-with-lease=${branchRef}:${tipSha ?? ''}`, `:${branchRef}`], projectPath);
+    return run(['push', '--no-verify', 'origin', `--force-with-lease=${branchRef}:${tipSha ?? ''}`, `:${branchRef}`], projectPath);
   }
 
   return {

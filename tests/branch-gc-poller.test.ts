@@ -854,7 +854,7 @@ test('a merge probe env that never resolves keeps the branch and increments erro
   assert.ok(traces.some((entry) => entry.name === 'glissa/session/abandoned' && entry.reason === 'merge-probe-env-error'));
 });
 
-test('git helpers normalize remote refs, retain unresolved protected names, and delete one ref', async () => {
+test('git helpers delete a remote ref with no-verify while retaining normalized protected refs', async () => {
   const calls: { args: string[]; cwd: string; extra?: { maxBuffer?: number } }[] = [];
   const gitWorkspace = createGitWorkspace({
     git: async (args, cwd, extra) => {
@@ -911,7 +911,7 @@ test('git helpers normalize remote refs, retain unresolved protected names, and 
   assert.ok(calls.some(({ args }) => args.join(' ') === 'fetch --prune origin'));
   assert.ok(calls.some(({ args }) => args.join(' ') === 'for-each-ref refs/remotes/origin/ --format=%(refname) %(objectname) %(committerdate:unix) %(symref)'));
   assert.equal(calls.find(({ args }) => args[0] === 'for-each-ref' && args[1] === 'refs/remotes/origin/')?.extra?.maxBuffer, 64 * 1024 * 1024);
-  assert.ok(calls.some(({ args }) => args.join(' ') === 'push origin --force-with-lease=refs/heads/glissa/session/abc:abc-sha :refs/heads/glissa/session/abc'));
+  assert.ok(calls.some(({ args }) => args.join(' ') === 'push --no-verify origin --force-with-lease=refs/heads/glissa/session/abc:abc-sha :refs/heads/glissa/session/abc'));
 });
 
 test('an empty prefix list lists no branches and never runs git', async () => {
