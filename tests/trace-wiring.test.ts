@@ -114,8 +114,6 @@ function subagentStop(subagentPath: string) {
   };
 }
 
-const REFUSAL_WARNING = '[trace] transcript refused: outside the Claude projects root or not a regular file';
-
 function readTrace(filePath: string) {
   return fs.readFileSync(filePath, 'utf8').trim().split('\n').map((line) => TraceRecord.parse(JSON.parse(line)));
 }
@@ -229,7 +227,11 @@ test('a subagent transcript outside the bound session directory is refused', asy
   fs.writeFileSync(transcriptPath, '', 'utf8');
   const strayPath = path.join(strayProject, 'agent-a1.jsonl');
   fs.writeFileSync(strayPath, subagentAnswer('stray answer'), 'utf8');
-  const harness = createHarness(configDirectory);
+  const warnings: string[] = [];
+  const harness = createHarness(configDirectory, 10, {
+    log: () => {},
+    warn: (message) => { warnings.push(String(message)); },
+  });
   await harness.wiring.start();
   const session = new TestTraceSession('glissa-session-id');
   harness.wiring.attachSession(session);
@@ -239,7 +241,73 @@ test('a subagent transcript outside the bound session directory is refused', asy
   await harness.wiring.whenIdle();
 
   const records = readTrace(harness.tracePath('glissa-session-id'));
-  assert.deepEqual(records.map((record) => record.kind), ['session']);
+  assert.deepEqual(records.map((record) => record.kind), ['session', 'notice']);
+  assert.equal(records[1].kind === 'notice' ? records[1].text : null, 'refused agent-a1.jsonl: outside-root');
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /^\[trace\] subagent transcript refused /);
+  assert.match(warnings[0], /session=glissa-session-id/);
+  assert.match(warnings[0], /reason=outside-root/);
+
+  await harness.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
+test('a repeated refused subagent transcript warns once for its reason', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('repeated-refuse');
+  const strayProject = fs.mkdtempSync(path.join(projectsRoot, 'stray-'));
+  const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
+  fs.writeFileSync(transcriptPath, '', 'utf8');
+  const strayPath = path.join(strayProject, 'agent-a1.jsonl');
+  fs.writeFileSync(strayPath, subagentAnswer('stray answer'), 'utf8');
+  const warnings: string[] = [];
+  const harness = createHarness(configDirectory, 10, {
+    log: () => {},
+    warn: (message) => { warnings.push(String(message)); },
+  });
+  await harness.wiring.start();
+  const session = new TestTraceSession('glissa-session-id');
+  harness.wiring.attachSession(session);
+
+  session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
+  session.emit('hook-event', subagentStop(strayPath));
+  session.emit('hook-event', subagentStop(strayPath));
+  await harness.wiring.whenIdle();
+
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /reason=outside-root/);
+  const records = readTrace(harness.tracePath('glissa-session-id'));
+  assert.deepEqual(records.map((record) => record.kind), ['session', 'notice']);
+  assert.equal(records[1].kind === 'notice' ? records[1].text : null, 'refused agent-a1.jsonl: outside-root');
+
+  await harness.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+  fs.rmSync(strayProject, { recursive: true, force: true });
+});
+
+test('a missing subagent transcript is refused as missing', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('missing-subagent');
+  const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
+  const subagentPath = path.join(projectDirectory, 'agent-a1.jsonl');
+  fs.writeFileSync(transcriptPath, '', 'utf8');
+  const warnings: string[] = [];
+  const harness = createHarness(configDirectory, 10, {
+    log: () => {},
+    warn: (message) => { warnings.push(String(message)); },
+  });
+  await harness.wiring.start();
+  const session = new TestTraceSession('glissa-session-id');
+  harness.wiring.attachSession(session);
+
+  session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
+  session.emit('hook-event', subagentStop(subagentPath));
+  await harness.wiring.whenIdle();
+
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /reason=missing/);
+  assert.doesNotMatch(warnings[0], /reason=outside-root/);
+  const records = readTrace(harness.tracePath('glissa-session-id'));
+  assert.deepEqual(records.map((record) => record.kind), ['session', 'notice']);
+  assert.equal(records[1].kind === 'notice' ? records[1].text : null, 'refused agent-a1.jsonl: missing');
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });
@@ -337,7 +405,10 @@ test('a nonexistent transcript with a separator in its basename is refused', asy
   await harness.poll();
 
   assert.equal(fs.existsSync(harness.tracePath('glissa-session-id')), false);
-  assert.deepEqual(warnings, ['[trace] transcript refused: outside the Claude projects root or not a regular file']);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /^\[trace\] transcript refused /);
+  assert.match(warnings[0], /session=glissa-session-id/);
+  assert.match(warnings[0], /reason=outside-root/);
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });
@@ -361,7 +432,10 @@ test('a named pipe under the projects root is refused without wedging the lane',
   await harness.poll();
 
   assert.equal(fs.existsSync(harness.tracePath('glissa-session-id')), false);
-  assert.deepEqual(warnings, [REFUSAL_WARNING]);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /^\[trace\] transcript refused /);
+  assert.match(warnings[0], /session=glissa-session-id/);
+  assert.match(warnings[0], /reason=not-a-regular-file/);
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });
@@ -385,7 +459,10 @@ test('a directory at the transcript path is refused instead of left pending', as
   await harness.poll();
 
   assert.equal(fs.existsSync(harness.tracePath('glissa-session-id')), false);
-  assert.deepEqual(warnings, [REFUSAL_WARNING]);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /^\[trace\] transcript refused /);
+  assert.match(warnings[0], /session=glissa-session-id/);
+  assert.match(warnings[0], /reason=not-a-regular-file/);
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });
@@ -794,6 +871,93 @@ test('a rebind the validator refuses keeps the working binding', async () => {
   fs.rmSync(configDirectory, { recursive: true, force: true });
 });
 
+test('a rebind to a path nested under an existing transcript keeps the working binding', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('nested-rebind');
+  const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
+  fs.writeFileSync(transcriptPath, mainPrompt('before the nested rebind', 'prompt-one'), 'utf8');
+  const subagentPath = writeSubagentTranscript(projectDirectory, 'subagent answer');
+  const warnings: string[] = [];
+  const harness = createHarness(configDirectory, 10, {
+    log: () => {},
+    warn: (message) => { warnings.push(String(message)); },
+  });
+  await harness.wiring.start();
+  const session = new TestTraceSession('glissa-session-id');
+  harness.wiring.attachSession(session);
+
+  session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
+  await harness.wiring.whenIdle();
+  session.emit('claude-session-id', {
+    id: 'nested-session',
+    vendor: 'claude',
+    transcriptPath: path.join(transcriptPath, 'nested-session.jsonl'),
+  });
+  await harness.wiring.whenIdle();
+  session.emit('hook-event', subagentStop(subagentPath));
+  await harness.wiring.whenIdle();
+  fs.appendFileSync(transcriptPath, mainPrompt('after the nested rebind', 'prompt-two'), 'utf8');
+  await harness.poll();
+
+  const records = readTrace(harness.tracePath('glissa-session-id'));
+  assert.deepEqual(records.map((record) => record.kind), ['session', 'prompt', 'assistant', 'prompt']);
+  assert.equal(records[3].kind === 'prompt' ? records[3].text : null, 'after the nested rebind');
+  assert.equal(readCheckpoint(harness.checkpointPath('glissa-session-id')).transcriptPath, transcriptPath);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /^\[trace\] transcript refused /);
+  assert.match(warnings[0], /reason=missing/);
+
+  await harness.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
+test('a subagent refused while the rebound transcript is still missing leaves the checkpoint alone', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('refused-subagent-pending');
+  const firstTranscript = path.join(projectDirectory, 'vendor-session.jsonl');
+  const pendingTranscript = path.join(projectDirectory, 'pending-session.jsonl');
+  const unflushedSubagent = path.join(projectDirectory, 'agent-a1.jsonl');
+  const paddingText = 'x'.repeat(4000);
+  fs.writeFileSync(
+    firstTranscript,
+    Array.from({ length: 20 }, (_unused, index) => mainPrompt(paddingText, `prompt-${index}`)).join(''),
+    'utf8',
+  );
+  const first = createHarness(configDirectory);
+  await first.wiring.start();
+  const session = new TestTraceSession('glissa-session-id');
+  first.wiring.attachSession(session);
+
+  session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath: firstTranscript });
+  await first.wiring.whenIdle();
+  session.emit('claude-session-id', { id: 'pending-session', vendor: 'claude', transcriptPath: pendingTranscript });
+  await first.wiring.whenIdle();
+  session.emit('hook-event', subagentStop(unflushedSubagent));
+  await first.wiring.whenIdle();
+
+  const checkpoint = readCheckpoint(first.checkpointPath('glissa-session-id'));
+  assert.equal(checkpoint.transcriptPath, firstTranscript);
+  assert.equal(checkpoint.offsetByTranscriptPath[firstTranscript], fs.statSync(firstTranscript).size);
+  assert.ok(fs.statSync(first.tracePath('glissa-session-id')).size > 64 * 1024);
+
+  const second = createHarness(configDirectory);
+  await second.wiring.start();
+  const resumedSession = new TestTraceSession('glissa-session-id');
+  second.wiring.attachSession(resumedSession);
+  resumedSession.emit('claude-session-id', {
+    id: 'vendor-session',
+    vendor: 'claude',
+    transcriptPath: firstTranscript,
+  });
+  await second.wiring.whenIdle();
+
+  const records = readTrace(first.tracePath('glissa-session-id'));
+  assert.equal(records.filter((record) => record.kind === 'prompt').length, 20);
+  assert.equal(records.filter((record) => record.kind === 'notice').length, 0);
+
+  await second.wiring.stop();
+  await first.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
 test('a rebind switches from the old transcript when the new transcript appears', async () => {
   const { configDirectory, projectDirectory } = makeWorkspace('pending-rebind');
   const firstTranscript = path.join(projectDirectory, 'vendor-session.jsonl');
@@ -994,9 +1158,10 @@ test('the subagent root follows the resolved transcript, not the path the hook h
   await harness.wiring.whenIdle();
 
   const records = readTrace(harness.tracePath('glissa-session-id'));
-  assert.deepEqual(records.map((record) => record.kind), ['session', 'assistant']);
+  assert.deepEqual(records.map((record) => record.kind), ['session', 'notice', 'assistant']);
   assert.equal(records[0].kind === 'session' ? records[0].transcriptPath : null, realTranscript);
-  assert.equal(records[1].kind === 'assistant' ? records[1].text : null, 'answer beside the transcript');
+  assert.equal(records[1].kind === 'notice' ? records[1].text : null, 'refused agent-a1.jsonl: outside-root');
+  assert.equal(records[2].kind === 'assistant' ? records[2].text : null, 'answer beside the transcript');
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });

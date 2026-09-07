@@ -7,12 +7,19 @@ import {
   MAX_TRANSCRIPT_READ_BYTES,
   committedOffsetFromTraceTail,
   completeLineBytes,
+  containmentRefusalReason,
   isOversizedPartialLine,
   isPathInsideRoot,
   planContiguousRead,
   resumeOffsetFrom,
   withCommittedOffset,
 } from '../server/core/trace-tail-core.ts';
+
+test('containment classifies missing path errors apart from unreadable errors', () => {
+  assert.equal(containmentRefusalReason({ code: 'ENOENT' }), 'missing');
+  assert.equal(containmentRefusalReason({ code: 'ENOTDIR' }), 'missing');
+  assert.equal(containmentRefusalReason({ code: 'EACCES' }), 'unreadable');
+});
 
 test('a contiguous plan reads forward from the committed offset and defers the overflow', () => {
   assert.deepEqual(planContiguousRead({ offset: 10 }, { size: 40 }, { maxReadBytes: 8 }), {

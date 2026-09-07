@@ -9,6 +9,8 @@ const TRACE_TAIL_SCAN_BYTES = 64 * 1024;
 const MAX_REMEMBERED_TRANSCRIPTS = 16;
 const LINE_BREAK = 0x0a;
 
+type ContainmentRefusal = 'missing' | 'unreadable' | 'outside-root' | 'not-a-regular-file' | 'root-unresolvable';
+
 interface TraceReadPlan {
   action: 'read' | 'skip';
   start: number;
@@ -119,6 +121,13 @@ function isPathInsideRoot(root: string, candidate: string): boolean {
   return relative.length > 0 && !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 
+function containmentRefusalReason(error: unknown): 'missing' | 'unreadable' {
+  if (!error || typeof error !== 'object') return 'unreadable';
+  const code = (error as { code?: unknown }).code;
+  if (code === 'ENOENT' || code === 'ENOTDIR') return 'missing';
+  return 'unreadable';
+}
+
 function isOversizedPartialLine(carry: string, { maxPartialLineBytes = MAX_PARTIAL_LINE_BYTES } = {}): boolean {
   return Buffer.byteLength(carry, 'utf8') > Math.max(1, Math.floor(maxPartialLineBytes));
 }
@@ -130,9 +139,11 @@ export {
   TRACE_TAIL_SCAN_BYTES,
   committedOffsetFromTraceTail,
   completeLineBytes,
+  containmentRefusalReason,
   isOversizedPartialLine,
   isPathInsideRoot,
   planContiguousRead,
   resumeOffsetFrom,
   withCommittedOffset,
 };
+export type { ContainmentRefusal };

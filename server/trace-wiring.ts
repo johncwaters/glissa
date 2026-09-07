@@ -19,12 +19,14 @@ import {
   TRACE_TAIL_SCAN_BYTES,
   committedOffsetFromTraceTail,
   completeLineBytes,
+  containmentRefusalReason,
   isOversizedPartialLine,
   isPathInsideRoot,
   planContiguousRead,
   resumeOffsetFrom,
   withCommittedOffset,
 } from './core/trace-tail-core.ts';
+import type { ContainmentRefusal } from './core/trace-tail-core.ts';
 import { readSessionTracePage } from './core/session-trace-core.ts';
 import { isSafePathSegment } from './core/upload-core.ts';
 import { appendJsonLines, createJsonStateWriter } from './json-file.ts';
@@ -36,6 +38,7 @@ const TRACE_RETAIN_DAYS = 7;
 const PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const POLL_INTERVAL_MS = 2000;
 const MAX_REMEMBERED_SUBAGENTS = 512;
+const MAX_REMEMBERED_FILE_REFUSALS = 64;
 const MAX_REMEMBERED_CLOSED_SESSIONS = 512;
 const TRACE_SUFFIX = '.jsonl';
 const CHECKPOINT_SUFFIX = '.checkpoint.json';
@@ -81,6 +84,7 @@ interface TraceBinding {
   tailState: TailState;
   skillToolUseIds: Set<string>;
   ingestedSubagentPaths: Set<string>;
+  notedFileRefusals: Set<string>;
   committedOffsetByTranscriptPath: Record<string, number>;
   checkpointWriter: JsonStateWriter;
   bindingBeforeFirstOpen: TraceBinding | null;
@@ -117,12 +121,12 @@ interface MissingContainedFile {
   realPath: string;
 }
 
+type ContainedFileResult<File extends OpenedFile | MissingContainedFile> =
+  | { ok: true; file: File }
+  | { ok: false; reason: ContainmentRefusal };
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function isMissingFileError(error: unknown): boolean {
-  return error instanceof Error && (error as NodeJS.ErrnoException).code === 'ENOENT';
 }
 
 function trimOldest(entries: Set<string>, limit: number): void {
@@ -139,46 +143,58 @@ function projectsRoot(): string {
 
 async function containedPathForMissingFile(
   candidate: string,
-  root: string,
-): Promise<MissingContainedFile | null> {
+  realRoot: string,
+): Promise<ContainedFileResult<MissingContainedFile>> {
   const transcriptName = path.basename(candidate);
-  if (!isSafePathSegment(transcriptName)) return null;
+  if (!isSafePathSegment(transcriptName)) return { ok: false, reason: 'outside-root' };
   try {
-    const realRoot = await fs.promises.realpath(root);
     const realDirectory = await fs.promises.realpath(path.dirname(candidate));
-    if (!isPathInsideRoot(realRoot, realDirectory)) return null;
-    return { realPath: path.join(realDirectory, transcriptName) };
-  } catch {
-    return null;
+    if (!isPathInsideRoot(realRoot, realDirectory)) return { ok: false, reason: 'outside-root' };
+    const directoryStat = await fs.promises.lstat(realDirectory);
+    if (!directoryStat.isDirectory()) return { ok: false, reason: 'missing' };
+    return { ok: true, file: { realPath: path.join(realDirectory, transcriptName) } };
+  } catch (error) {
+    return { ok: false, reason: containmentRefusalReason(error) };
   }
 }
 
-function openContainedFile(candidate: string, root: string): Promise<OpenedFile | null>;
+function openContainedFile(candidate: string, root: string): Promise<ContainedFileResult<OpenedFile>>;
 function openContainedFile(
   candidate: string,
   root: string,
   allowsMissingFile: true,
-): Promise<OpenedFile | MissingContainedFile | null>;
+): Promise<ContainedFileResult<OpenedFile | MissingContainedFile>>;
 async function openContainedFile(
   candidate: string,
   root: string,
   allowsMissingFile = false,
-): Promise<OpenedFile | MissingContainedFile | null> {
+): Promise<ContainedFileResult<OpenedFile | MissingContainedFile>> {
+  let realRoot: string;
+  try {
+    realRoot = await fs.promises.realpath(root);
+  } catch {
+    return { ok: false, reason: 'root-unresolvable' };
+  }
+  let realCandidate: string;
+  try {
+    realCandidate = await fs.promises.realpath(candidate);
+  } catch (error) {
+    const reason = containmentRefusalReason(error);
+    if (!allowsMissingFile || reason !== 'missing') return { ok: false, reason };
+    return containedPathForMissingFile(candidate, realRoot);
+  }
+  if (!isPathInsideRoot(realRoot, realCandidate)) return { ok: false, reason: 'outside-root' };
   let handle: FileHandle | null = null;
   try {
-    const realRoot = await fs.promises.realpath(root);
-    const realCandidate = await fs.promises.realpath(candidate);
-    if (!isPathInsideRoot(realRoot, realCandidate)) return null;
     handle = await fs.promises.open(realCandidate, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
     const stat = await handle.stat();
-    if (stat.isFile()) return { handle, realPath: realCandidate, stat };
+    if (stat.isFile()) return { ok: true, file: { handle, realPath: realCandidate, stat } };
     await handle.close().catch(() => {});
-    return null;
+    return { ok: false, reason: 'not-a-regular-file' };
   } catch (error) {
     if (handle) await handle.close().catch(() => {});
-    if (!allowsMissingFile || !isMissingFileError(error)) return null;
+    return { ok: false, reason: containmentRefusalReason(error) };
   }
-  return containedPathForMissingFile(candidate, root);
 }
 
 function traceSessionIdOf(entry: string): string | null {
@@ -275,8 +291,8 @@ function createTraceWiring({
       });
       return { ...page, reset: isRewoundCursor(request, page.next), path: filePath };
     } catch (error) {
-      if (isMissingFileError(error)) return { records: [], start: 0, next: 0, reset: isRewoundCursor(request, 0), path: filePath };
-      throw error;
+      if (containmentRefusalReason(error) !== 'missing') throw error;
+      return { records: [], start: 0, next: 0, reset: isRewoundCursor(request, 0), path: filePath };
     } finally {
       if (handle) await handle.close().catch(() => {});
     }
@@ -442,6 +458,21 @@ function createTraceWiring({
     });
   }
 
+  function noteRefusedFile(binding: TraceBinding, filePath: string, reason: ContainmentRefusal): void {
+    const refusalKey = `${filePath}:${reason}`;
+    if (binding.notedFileRefusals.has(refusalKey)) return;
+    binding.notedFileRefusals.add(refusalKey);
+    trimOldest(binding.notedFileRefusals, MAX_REMEMBERED_FILE_REFUSALS);
+    queueRecord(binding.glissaSessionId, {
+      ts: nowFn(),
+      uuid: null,
+      parentUuid: null,
+      vendorSessionId: binding.vendorSessionId,
+      kind: 'notice',
+      text: `refused ${path.basename(filePath)}: ${reason}`,
+    });
+  }
+
   function mapAndAppend(rawLine: string, binding: TraceBinding, context: LineContext = {}): void {
     const records = traceRecordsFromTranscriptLine(rawLine, {
       vendorSessionId: binding.vendorSessionId,
@@ -496,13 +527,13 @@ function createTraceWiring({
 
   async function drainBinding(binding: TraceBinding): Promise<void> {
     const opened = await openContainedFile(binding.transcriptPath, projectsRoot());
-    if (!opened) {
+    if (!opened.ok) {
       if (binding.bindingBeforeFirstOpen) await drainBinding(binding.bindingBeforeFirstOpen);
       if (!binding.hasOpenedTranscript) {
         try {
           await fs.promises.lstat(binding.transcriptPath);
         } catch (error) {
-          if (isMissingFileError(error)) return;
+          if (containmentRefusalReason(error) === 'missing') return;
         }
       }
       if (!binding.hasWarnedUnreadable) laneLog.warn('transcript unreadable', { session: binding.glissaSessionId });
@@ -515,8 +546,8 @@ function createTraceWiring({
       if (!binding.hasOpenedTranscript) {
         if (binding.bindingBeforeFirstOpen) await drainBinding(binding.bindingBeforeFirstOpen);
         binding.bindingBeforeFirstOpen = null;
-        binding.transcriptPath = opened.realPath;
-        const stat = await opened.handle.stat();
+        binding.transcriptPath = opened.file.realPath;
+        const stat = await opened.file.handle.stat();
         const resumed = await resumeStateFor(binding.glissaSessionId, binding.transcriptPath, stat.size);
         binding.committedOffsetByTranscriptPath = resumed.committedOffsetByTranscriptPath;
         binding.ingestedSubagentPaths = new Set<string>(resumed.ingestedSubagentPaths);
@@ -526,11 +557,11 @@ function createTraceWiring({
         queueSessionRecord(binding, resumed.didReset ? 'transcript smaller than the stored checkpoint' : null);
         committedOffsetBeforeRead = committedOffsetOf(binding);
       }
-      await readOnce(binding, opened.handle);
+      await readOnce(binding, opened.file.handle);
     } catch (error) {
       laneLog.warn('transcript read failed', { error: errorMessage(error) });
     } finally {
-      await opened.handle.close().catch(() => {});
+      await opened.file.handle.close().catch(() => {});
     }
     const commit = await commitPending(binding);
     if (!commit.didAppend) return;
@@ -565,13 +596,18 @@ function createTraceWiring({
     const checkpointPath = checkpointFilePath(glissaSessionId);
     if (!checkpointPath) return;
     const containedTranscript = await openContainedFile(requestedTranscriptPath, projectsRoot(), true);
-    if (!containedTranscript) {
-      laneLog.warn('transcript refused: outside the Claude projects root or not a regular file');
+    if (!containedTranscript.ok) {
+      laneLog.warnOnce(`bind:${glissaSessionId}:${containedTranscript.reason}`, 'transcript refused', {
+        session: glissaSessionId,
+        path: requestedTranscriptPath,
+        root: projectsRoot(),
+        reason: containedTranscript.reason,
+      });
       return;
     }
-    const transcriptPath = containedTranscript.realPath;
-    const transcriptStat = 'handle' in containedTranscript ? containedTranscript.stat : null;
-    if ('handle' in containedTranscript) await containedTranscript.handle.close().catch(() => {});
+    const transcriptPath = containedTranscript.file.realPath;
+    const transcriptStat = 'handle' in containedTranscript.file ? containedTranscript.file.stat : null;
+    if ('handle' in containedTranscript.file) await containedTranscript.file.handle.close().catch(() => {});
     const previous = bindingByGlissaSessionId.get(glissaSessionId);
     if (previous) {
       bindingByGlissaSessionId.delete(glissaSessionId);
@@ -591,6 +627,7 @@ function createTraceWiring({
       tailState,
       skillToolUseIds: new Set<string>(),
       ingestedSubagentPaths: new Set<string>(resumed ? resumed.ingestedSubagentPaths : []),
+      notedFileRefusals: new Set<string>(),
       committedOffsetByTranscriptPath: resumed ? resumed.committedOffsetByTranscriptPath : {},
       checkpointWriter: createJsonStateWriter({
         filePath: checkpointPath,
@@ -639,12 +676,25 @@ function createTraceWiring({
     if (binding.ingestedSubagentPaths.has(subagentPath)) return;
     const subagentRoot = path.dirname(binding.transcriptPath);
     if (!isPathInsideRoot(projectsRoot(), subagentRoot)) {
-      laneLog.warn('subagent transcript refused: the session transcript sits outside a Claude project directory');
+      laneLog.warnOnce(`subagent:${binding.glissaSessionId}:outside-root`, 'subagent transcript refused', {
+        session: binding.glissaSessionId,
+        path: subagentPath,
+        root: subagentRoot,
+        reason: 'outside-root',
+      });
       return;
     }
     const opened = await openContainedFile(subagentPath, subagentRoot);
-    if (!opened) {
-      laneLog.warn('subagent transcript refused: outside the session transcript root');
+    if (!opened.ok) {
+      laneLog.warnOnce(`subagent:${binding.glissaSessionId}:${opened.reason}`, 'subagent transcript refused', {
+        session: binding.glissaSessionId,
+        path: subagentPath,
+        root: subagentRoot,
+        reason: opened.reason,
+      });
+      if (!binding.hasOpenedTranscript) return;
+      noteRefusedFile(binding, subagentPath, opened.reason);
+      await commitPending(binding);
       return;
     }
     let mappedLineCount = 0;
@@ -652,10 +702,10 @@ function createTraceWiring({
     try {
       await drainBinding(binding);
       if (!binding.hasOpenedTranscript) return;
-      const stat = await opened.handle.stat();
+      const stat = await opened.file.handle.stat();
       const end = Math.min(stat.size, MAX_SUBAGENT_READ_BYTES);
       const buffer = Buffer.alloc(end);
-      ({ bytesRead } = await opened.handle.read(buffer, 0, end, 0));
+      ({ bytesRead } = await opened.file.handle.read(buffer, 0, end, 0));
       const agentId = typeof eventPayload.agent_id === 'string' && eventPayload.agent_id
         ? eventPayload.agent_id
         : undefined;
@@ -682,7 +732,7 @@ function createTraceWiring({
       laneLog.warn('subagent transcript read failed', { error: errorMessage(error) });
       return;
     } finally {
-      await opened.handle.close().catch(() => {});
+      await opened.file.handle.close().catch(() => {});
     }
     await commitPending(binding);
     laneLog.debugNote(
