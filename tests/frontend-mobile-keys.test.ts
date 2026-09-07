@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 
 const importCore = () => import('../public/mobile-keys.ts');
 
-test('MOBILE_KEYS: the strip carries exactly the eight touch controls, in order', async () => {
+test('MOBILE_KEYS: the strip carries exactly the seven touch controls, in order', async () => {
   const { MOBILE_KEYS } = await importCore();
   assert.deepEqual(
     MOBILE_KEYS.map((k) => k.id),
-    ['esc', 'tab', 'ctrl-c', 'up', 'down', 'paste', 'upload-image', 'upload-file'],
+    ['esc', 'tab', 'up', 'down', 'paste', 'upload-image', 'upload-file'],
   );
 });
 
@@ -15,7 +15,7 @@ test('MOBILE_KEYS: every label is a constant action name, never a state or a cou
   const { MOBILE_KEYS } = await importCore();
   assert.deepEqual(
     MOBILE_KEYS.map((k) => k.label),
-    ['Esc', 'Tab', 'Ctrl+C', 'Up', 'Down', 'Paste', 'Image', 'File'],
+    ['Esc', 'Tab', 'Up', 'Down', 'Paste', 'Image', 'File'],
   );
 });
 
@@ -23,7 +23,6 @@ test('mobileKeyBytes: sends the exact control bytes the keyboard paths send', as
   const { mobileKeyBytes } = await importCore();
   assert.equal(mobileKeyBytes('esc'), '\x1b');
   assert.equal(mobileKeyBytes('tab'), '\x09');
-  assert.equal(mobileKeyBytes('ctrl-c'), '\x03');
   assert.equal(mobileKeyBytes('up'), '\x1b[A');
   assert.equal(mobileKeyBytes('down'), '\x1b[B');
 });
@@ -54,7 +53,7 @@ test('isUploadKey: both upload entries open the file picker and nothing else doe
   assert.equal(isUploadKey(byId.get('upload-file')), true);
   assert.equal(byId.get('upload-file')?.action, UPLOAD_ACTION);
   assert.equal(isUploadKey(byId.get('paste')), false);
-  assert.equal(isUploadKey(byId.get('ctrl-c')), false);
+  assert.equal(isUploadKey(byId.get('esc')), false);
   assert.equal(isUploadKey(undefined), false);
 });
 

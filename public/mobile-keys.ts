@@ -14,7 +14,6 @@ export interface MobileKey {
 export const MOBILE_KEYS: readonly Readonly<MobileKey>[] = Object.freeze([
   Object.freeze({ id: 'esc', label: 'Esc', bytes: '\x1b', title: 'Send Escape' }),
   Object.freeze({ id: 'tab', label: 'Tab', bytes: '\x09', title: 'Send Tab' }),
-  Object.freeze({ id: 'ctrl-c', label: 'Ctrl+C', bytes: '\x03', title: 'Interrupt the running command' }),
   Object.freeze({ id: 'up', label: 'Up', bytes: '\x1b[A', title: 'Arrow up' }),
   Object.freeze({ id: 'down', label: 'Down', bytes: '\x1b[B', title: 'Arrow down' }),
   Object.freeze({ id: 'paste', label: 'Paste', bytes: null, action: CLIPBOARD_ACTION, title: 'Paste from the clipboard' }),

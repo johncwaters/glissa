@@ -17,7 +17,7 @@ The job it serves is triage, per `PRODUCT.md`: scan the board, find the session 
 | `terminal-screen.ts` | One session's full-bleed terminal: back control, name, state badge, the card's adopted action cluster, and the touch key strip |
 | `board-groups-core.ts` | Pure composition of desktop project grouping with phone attention ordering |
 | `triage-core.ts` | Pure attention-first ORDER (`orderSessionsForTriage`) only. The "needs you" rule and its readout wording are shared with the desktop rail head in `../focus-view/attention-core.ts` |
-| `mobile-key-strip.ts` | Esc / Tab / Ctrl+C / arrows / Paste, the keys a soft keyboard cannot produce (catalog in `../mobile-keys.ts`) |
+| `mobile-key-strip.ts` | Esc / Tab / arrows / Paste / Image / File, the keys and uploads a soft keyboard cannot produce (catalog in `../mobile-keys.ts`) |
 
 Review, Radar, PRs, Usage, Mill, Visions, Hooks, Trace and Settings have no phone-only module: each screen is a mount container that re-parents the real desktop panel in.
 
