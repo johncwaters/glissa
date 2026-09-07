@@ -7,6 +7,7 @@ export interface MobileKey {
   label: string;
   bytes: string | null;
   action?: string;
+  accept?: string;
   title: string;
 }
 
@@ -17,7 +18,8 @@ export const MOBILE_KEYS: readonly Readonly<MobileKey>[] = Object.freeze([
   Object.freeze({ id: 'up', label: 'Up', bytes: '\x1b[A', title: 'Arrow up' }),
   Object.freeze({ id: 'down', label: 'Down', bytes: '\x1b[B', title: 'Arrow down' }),
   Object.freeze({ id: 'paste', label: 'Paste', bytes: null, action: CLIPBOARD_ACTION, title: 'Paste from the clipboard' }),
-  Object.freeze({ id: 'upload-image', label: 'Image', bytes: null, action: UPLOAD_ACTION, title: 'Upload an image to this session' }),
+  Object.freeze({ id: 'upload-image', label: 'Image', bytes: null, action: UPLOAD_ACTION, accept: 'image/*', title: 'Upload an image to this session' }),
+  Object.freeze({ id: 'upload-file', label: 'File', bytes: null, action: UPLOAD_ACTION, title: 'Upload a file to this session' }),
 ]);
 
 export function mobileKeyBytes(id: string) {

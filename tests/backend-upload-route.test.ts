@@ -117,7 +117,7 @@ test('unknown session id is rejected 404', async () => {
   assert.deepEqual(await res.json(), { error: 'unknown session' });
 });
 
-test('a non-image content type is rejected 415 and writes nothing', async () => {
+test('a non-image content type with no upload name header is rejected 415 and writes nothing', async () => {
   attachFakePty();
   const res = await fetch(`${ctx().base}/upload/${SESSION_ID}`, {
     method: 'POST', body: 'not an image', headers: { 'content-type': 'application/pdf' },
@@ -129,11 +129,49 @@ test('a non-image content type is rejected 415 and writes nothing', async () => 
   assert.deepEqual(ptyWrites, [], 'nothing reached the terminal');
 });
 
-test('a missing content type is rejected 415', async () => {
+test('a missing content type and no upload name header is rejected 415', async () => {
   attachFakePty();
   const res = await fetch(`${ctx().base}/upload/${SESSION_ID}`, { method: 'POST', body: 'x' });
   assert.equal(res.status, 415, 'undici sends text/plain for a string body; either way it is not an image');
   assert.deepEqual(ptyWrites, []);
+});
+
+test('a named non-image upload is saved with the sanitized extension and bracket-pasted', async () => {
+  attachFakePty();
+  const bytes = Buffer.from('255044462d312e370a', 'hex');
+  const res = await fetch(`${ctx().base}/upload/${SESSION_ID}`, {
+    method: 'POST',
+    body: bytes,
+    headers: { 'content-type': 'application/pdf', 'x-glissa-upload-name': encodeURIComponent('report.pdf') },
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.ok, true);
+
+  assert.equal(path.dirname(body.path), uploadsDirFor(SESSION_ID), 'saved beside the temp config, per session');
+  assert.equal(path.extname(body.path), '.pdf');
+  assert.equal(path.basename(body.path).includes('report'), false, 'the client name never reaches the filesystem');
+  assert.deepEqual(fs.readFileSync(body.path), bytes, 'bytes land verbatim');
+
+  assert.deepEqual(ptyWrites, [`\x1b[200~${body.path} \x1b[201~`], 'exactly the bracketed paste, nothing else');
+  fs.rmSync(body.path, { force: true });
+});
+
+test('a named upload with no extension is saved with none', async () => {
+  attachFakePty();
+  const bytes = Buffer.from('all: build\n', 'utf8');
+  const res = await fetch(`${ctx().base}/upload/${SESSION_ID}`, {
+    method: 'POST',
+    body: bytes,
+    headers: { 'content-type': 'application/octet-stream', 'x-glissa-upload-name': encodeURIComponent('Makefile') },
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(path.extname(body.path), '', 'no extension is a legal upload name');
+  assert.equal(path.basename(body.path).includes('Makefile'), false, 'the client name never reaches the filesystem');
+  assert.deepEqual(fs.readFileSync(body.path), bytes);
+  assert.deepEqual(ptyWrites, [`\x1b[200~${body.path} \x1b[201~`]);
+  fs.rmSync(body.path, { force: true });
 });
 
 test('an image is saved under the config dir and its path is bracket-pasted into the PTY', async () => {
@@ -163,7 +201,11 @@ test('a body past the 15MB cap is refused and the server survives', async () => 
   await fetch(`${ctx().base}/upload/${SESSION_ID}`, {
     method: 'POST', body: big, headers: { 'content-type': 'image/png' },
   })
-    .then((res) => assert.notEqual(res.status, 200, 'oversize never yields 200'))
+    .then(async (res) => {
+      assert.notEqual(res.status, 200, 'oversize never yields 200');
+      if (res.status !== 413) return;
+      assert.deepEqual(await res.json(), { error: 'file is too large' });
+    })
     .catch(() => {  });
 
   assert.deepEqual(ptyWrites, [], 'an aborted upload never pastes');

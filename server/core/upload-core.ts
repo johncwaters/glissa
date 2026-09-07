@@ -16,6 +16,10 @@ const PASTE_END = '\x1b[201~';
 
 const SAFE_SEGMENT_RE = /^[A-Za-z0-9._-]+$/;
 
+const CLIENT_NAME_EXTENSION_RE = /\.([A-Za-z0-9]{1,16})$/;
+
+const UPLOAD_FILENAME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[0-9a-f]{8}(\.[a-z0-9]{1,16})?$/;
+
 export type UploadTypeVerdict =
   | { ok: true; extension: string }
   | { ok: false; status: number; error: string };
@@ -26,10 +30,31 @@ function extensionForImageMime(contentTypeHeader: unknown): string | null {
   return IMAGE_EXTENSION_BY_MIME[mime] || null;
 }
 
-function decideUploadType(contentTypeHeader: unknown): UploadTypeVerdict {
-  const extension = extensionForImageMime(contentTypeHeader);
-  if (!extension) return { ok: false, status: 415, error: 'unsupported image type' };
-  return { ok: true, extension };
+function decodeUploadName(uploadNameHeader: unknown): string | null {
+  if (typeof uploadNameHeader !== 'string' || uploadNameHeader.length === 0) return null;
+  try {
+    const decoded = decodeURIComponent(uploadNameHeader);
+    if (decoded.length === 0) return null;
+    return decoded;
+  } catch {
+    return null;
+  }
+}
+
+function extensionForUploadName(uploadNameHeader: unknown): string | null {
+  const clientName = decodeUploadName(uploadNameHeader);
+  if (clientName === null) return null;
+  const trailingExtension = CLIENT_NAME_EXTENSION_RE.exec(clientName);
+  if (!trailingExtension) return '';
+  return `.${trailingExtension[1].toLowerCase()}`;
+}
+
+function decideUploadType(contentTypeHeader: unknown, uploadNameHeader?: unknown): UploadTypeVerdict {
+  const imageExtension = extensionForImageMime(contentTypeHeader);
+  if (imageExtension) return { ok: true, extension: imageExtension };
+  const namedExtension = extensionForUploadName(uploadNameHeader);
+  if (namedExtension === null) return { ok: false, status: 415, error: 'unsupported upload type' };
+  return { ok: true, extension: namedExtension };
 }
 
 function exceedsUploadCap(bytesReceived: number, cap: number = MAX_UPLOAD_BYTES): boolean {
@@ -57,16 +82,15 @@ function planUploadRetention(
   { keep = UPLOAD_RETAIN_FILES, justWritten = null }: { keep?: number; justWritten?: string | null } = {},
 ): string[] {
   if (!Array.isArray(filenames) || keep <= 0) return [];
-  const uploads: string[] = filenames.filter((name): name is string => extensionIsUpload(name));
+  const uploads: string[] = filenames.filter((name): name is string => isUploadFilename(name));
   if (justWritten && !uploads.includes(justWritten)) uploads.push(justWritten);
   uploads.sort().reverse();
   return uploads.slice(keep).filter((name) => name !== justWritten);
 }
 
-function extensionIsUpload(name: unknown): boolean {
+function isUploadFilename(name: unknown): boolean {
   if (typeof name !== 'string') return false;
-  const ext = path.extname(name).toLowerCase();
-  return Object.values(IMAGE_EXTENSION_BY_MIME).some((extension) => extension === ext);
+  return UPLOAD_FILENAME_RE.test(name);
 }
 
-export { MAX_UPLOAD_BYTES, UPLOAD_RETAIN_FILES, buildUploadFilename, decideUploadType, exceedsUploadCap, extensionForImageMime, framePathPaste, isSafePathSegment, planUploadRetention };
+export { MAX_UPLOAD_BYTES, UPLOAD_RETAIN_FILES, buildUploadFilename, decideUploadType, exceedsUploadCap, extensionForImageMime, extensionForUploadName, framePathPaste, isSafePathSegment, isUploadFilename, planUploadRetention };

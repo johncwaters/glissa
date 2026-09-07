@@ -24,7 +24,7 @@ export function createMobileKeyStrip({ send, getSessionId }: { send: (data: stri
 
   function pressKey(key: Readonly<MobileKey>, btn: HTMLButtonElement) {
     if (isUploadKey(key)) {
-      openImagePicker(btn);
+      openUploadPicker(key, btn);
       return;
     }
     if (isClipboardKey(key)) {
@@ -35,20 +35,21 @@ export function createMobileKeyStrip({ send, getSessionId }: { send: (data: stri
     send(mobileKeyBytes(key.id));
   }
 
-  function openImagePicker(btn: HTMLButtonElement) {
+  function openUploadPicker(key: Readonly<MobileKey>, btn: HTMLButtonElement) {
     pickingButton = btn;
     if (!filePicker) {
       filePicker = el('input', 'phone-file-picker');
       filePicker.type = 'file';
-      filePicker.accept = 'image/*';
       filePicker.hidden = true;
-      filePicker.addEventListener('change', onImagePicked);
+      filePicker.addEventListener('change', onFilePicked);
       strip.appendChild(filePicker);
     }
+    if (key.accept) filePicker.accept = key.accept;
+    if (!key.accept) filePicker.removeAttribute('accept');
     filePicker.click();
   }
 
-  function onImagePicked() {
+  function onFilePicked() {
     const picker = filePicker;
     if (!picker) return;
     const file = picker.files ? picker.files[0] : null;
@@ -60,20 +61,22 @@ export function createMobileKeyStrip({ send, getSessionId }: { send: (data: stri
       showErrorToast('No session is open to upload to');
       return;
     }
-    uploadImage(sessionId, file, pickingButton);
+    uploadFile(sessionId, file, pickingButton);
   }
 
-  async function uploadImage(sessionId: string, file: File, btn: HTMLButtonElement | null) {
+  async function uploadFile(sessionId: string, file: File, btn: HTMLButtonElement | null) {
     if (btn) btn.disabled = true;
+    const headers: Record<string, string> = { 'x-glissa-upload-name': encodeURIComponent(file.name) };
+    if (file.type) headers['content-type'] = file.type;
     try {
       const res = await fetch(`/upload/${encodeURIComponent(sessionId)}`, {
         method: 'POST',
         body: file,
-        headers: { 'content-type': file.type },
+        headers,
       });
       if (!res.ok) showErrorToast(await uploadErrorText(res));
     } catch {
-      showErrorToast('Image upload failed');
+      showErrorToast('Upload failed');
     } finally {
       if (btn) btn.disabled = false;
     }
@@ -85,10 +88,10 @@ export function createMobileKeyStrip({ send, getSessionId }: { send: (data: stri
 async function uploadErrorText(res: Response) {
   try {
     const body = (await res.json()) as { error?: unknown } | null;
-    if (body && typeof body.error === 'string') return `Image upload failed: ${body.error}`;
+    if (body && typeof body.error === 'string') return `Upload failed: ${body.error}`;
   } catch {
   }
-  return 'Image upload failed';
+  return 'Upload failed';
 }
 
 function pasteFromClipboard(send: (data: string) => void) {

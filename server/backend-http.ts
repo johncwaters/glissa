@@ -98,7 +98,7 @@ function receiveUpload({ req, res, sess, dir, filename, savedPath }: {
   req.on('data', (chunk: Buffer) => {
     bytesReceived += chunk.length;
     if (!exceedsUploadCap(bytesReceived)) return;
-    answer(413, { error: 'image is too large' });
+    answer(413, { error: 'file is too large' });
     req.destroy();
     writeStream.destroy();
     discardPartial();
@@ -215,7 +215,7 @@ function createBackendHttpApp(dependencies: BackendHttpDependencies): Express {
       res.status(404).json({ error: 'unknown session' });
       return;
     }
-    const typeVerdict = decideUploadType(req.headers['content-type']);
+    const typeVerdict = decideUploadType(req.headers['content-type'], req.headers['x-glissa-upload-name']);
     if (!typeVerdict.ok) {
       res.status(typeVerdict.status).json({ error: typeVerdict.error });
       return;

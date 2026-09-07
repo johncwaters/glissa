@@ -136,8 +136,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - A pairing cookie is RCE as the server account, the control WS accepting any project path plus `dangerouslySkipPermissions`. Pairing URLs are single-use, short-TTL, never logged or stored in plaintext; the store fails CLOSED on corruption.
 - The `/pair/*` exemption is judged on the DECODED pathname: `express.static` resolves dot segments, so an un-normalized check served the dashboard bundle under `/pair/%2e%2e/`.
 - Remote config is unreachable from the control WS, and remote-off is fully inert: no route, no middleware, no file (`tests/backend-remote-disabled.test.ts`). Binding wider needs `GLISSA_INSECURE_BIND=1`.
-- Two HTTP write ingresses. `POST /hook/:glissaId/:event` keeps its per-session bearer token, and its RESPONSE is also an ingress, so only Glissa-authored text may be injected. `POST /upload/:sessionId` sits behind remote-auth with a type and size cap.
-- If network exposure is ever needed, add authentication to the control WebSocket first.
+- Two HTTP write ingresses. `POST /hook/:glissaId/:event` keeps its per-session bearer token, and its RESPONSE is also an ingress, so only Glissa-authored text may be injected. `POST /upload/:sessionId` sits behind remote-auth with a size cap; a non-image upload keeps only a sanitized extension from the client name, never the name itself.
 
 ### Transport and Session Identity
 
