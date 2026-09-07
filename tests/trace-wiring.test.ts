@@ -37,11 +37,15 @@ function makeWorkspace(name: string): { configDirectory: string; projectDirector
   return { configDirectory, projectDirectory };
 }
 
-function createHarness(configDirectory: string, nowMs = 10) {
+function createHarness(
+  configDirectory: string,
+  nowMs = 10,
+  logger: Pick<Console, 'log' | 'warn'> = silentLogger(),
+) {
   const timers: { fn: () => void; ms: number }[] = [];
   const wiring = createTraceWiring({
     configPath: path.join(configDirectory, 'config.json'),
-    logger: silentLogger(),
+    logger,
     nowFn: () => nowMs,
     setIntervalFn: (fn: () => void, ms: number) => {
       timers.push({ fn, ms });
@@ -107,6 +111,8 @@ function subagentStop(subagentPath: string) {
     },
   };
 }
+
+const REFUSAL_WARNING = '[trace] transcript refused: outside the Claude projects root or not a regular file';
 
 function readTrace(filePath: string) {
   return fs.readFileSync(filePath, 'utf8').trim().split('\n').map((line) => TraceRecord.parse(JSON.parse(line)));
@@ -226,19 +232,126 @@ test('a bound transcript outside the Claude projects root leaves no record and i
   fs.rmSync(strayDirectory, { recursive: true, force: true });
 });
 
+test('a transcript bound before file creation starts tracing when the file appears', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('before-create');
+  const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
+  const warnings: string[] = [];
+  const harness = createHarness(configDirectory, 10, {
+    log: () => {},
+    warn: (message) => { warnings.push(String(message)); },
+  });
+  await harness.wiring.start();
+  const session = new TestTraceSession('glissa-session-id');
+  harness.wiring.attachSession(session);
+
+  session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
+  await harness.wiring.whenIdle();
+  await harness.poll();
+  assert.equal(fs.existsSync(harness.tracePath('glissa-session-id')), false);
+  assert.deepEqual(warnings, []);
+
+  fs.writeFileSync(transcriptPath, mainPrompt('first prompt', 'prompt-one'), 'utf8');
+  await harness.poll();
+  fs.appendFileSync(transcriptPath, mainPrompt('second prompt', 'prompt-two'), 'utf8');
+  await harness.poll();
+
+  const records = readTrace(harness.tracePath('glissa-session-id'));
+  assert.deepEqual(records.map((record) => record.kind), ['session', 'prompt', 'prompt']);
+  assert.equal(records[1].kind === 'prompt' ? records[1].text : null, 'first prompt');
+  assert.equal(records[2].kind === 'prompt' ? records[2].text : null, 'second prompt');
+  assert.equal(readCheckpoint(harness.checkpointPath('glissa-session-id')).offset, fs.statSync(transcriptPath).size);
+
+  await harness.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
+test('a nonexistent transcript outside the Claude projects root is refused', async () => {
+  const configDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-trace-missing-outside-'));
+  const strayDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-trace-missing-stray-'));
+  const transcriptPath = path.join(strayDirectory, 'vendor-session.jsonl');
+  const harness = createHarness(configDirectory);
+  await harness.wiring.start();
+  const session = new TestTraceSession('glissa-session-id');
+  harness.wiring.attachSession(session);
+
+  session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
+  await harness.wiring.whenIdle();
+  fs.writeFileSync(transcriptPath, mainPrompt('secret prompt', 'prompt-id'), 'utf8');
+  await harness.poll();
+
+  assert.equal(fs.existsSync(harness.tracePath('glissa-session-id')), false);
+
+  await harness.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+  fs.rmSync(strayDirectory, { recursive: true, force: true });
+});
+
+test('a nonexistent transcript with a separator in its basename is refused', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('unsafe-basename');
+  const transcriptPath = path.join(projectDirectory, 'vendor\\session.jsonl');
+  const warnings: string[] = [];
+  const harness = createHarness(configDirectory, 10, {
+    log: () => {},
+    warn: (message) => { warnings.push(String(message)); },
+  });
+  await harness.wiring.start();
+  const session = new TestTraceSession('glissa-session-id');
+  harness.wiring.attachSession(session);
+
+  session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
+  await harness.wiring.whenIdle();
+  await harness.poll();
+
+  assert.equal(fs.existsSync(harness.tracePath('glissa-session-id')), false);
+  assert.deepEqual(warnings, ['[trace] transcript refused: outside the Claude projects root or not a regular file']);
+
+  await harness.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
 test('a named pipe under the projects root is refused without wedging the lane', { skip: process.platform === 'win32' }, async () => {
   const { configDirectory, projectDirectory } = makeWorkspace('fifo');
   const fifoPath = path.join(projectDirectory, 'vendor-session.jsonl');
   execFileSync('mkfifo', [fifoPath]);
-  const harness = createHarness(configDirectory);
+  const warnings: string[] = [];
+  const harness = createHarness(configDirectory, 10, {
+    log: () => {},
+    warn: (message) => { warnings.push(String(message)); },
+  });
   await harness.wiring.start();
   const session = new TestTraceSession('glissa-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath: fifoPath });
   await harness.wiring.whenIdle();
+  await harness.poll();
 
   assert.equal(fs.existsSync(harness.tracePath('glissa-session-id')), false);
+  assert.deepEqual(warnings, [REFUSAL_WARNING]);
+
+  await harness.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
+test('a directory at the transcript path is refused instead of left pending', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('directory-transcript');
+  const directoryPath = path.join(projectDirectory, 'vendor-session.jsonl');
+  fs.mkdirSync(directoryPath);
+  const warnings: string[] = [];
+  const harness = createHarness(configDirectory, 10, {
+    log: () => {},
+    warn: (message) => { warnings.push(String(message)); },
+  });
+  await harness.wiring.start();
+  const session = new TestTraceSession('glissa-session-id');
+  harness.wiring.attachSession(session);
+
+  session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath: directoryPath });
+  await harness.wiring.whenIdle();
+  await harness.poll();
+
+  assert.equal(fs.existsSync(harness.tracePath('glissa-session-id')), false);
+  assert.deepEqual(warnings, [REFUSAL_WARNING]);
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });
@@ -642,6 +755,147 @@ test('a rebind the validator refuses keeps the working binding', async () => {
   assert.deepEqual(records.map((record) => record.kind), ['session', 'prompt', 'prompt']);
   assert.equal(records[2].kind === 'prompt' ? records[2].text : null, 'after the refused rebind');
   assert.equal(readCheckpoint(harness.checkpointPath('glissa-session-id')).transcriptPath, transcriptPath);
+
+  await harness.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
+test('a rebind switches from the old transcript when the new transcript appears', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('pending-rebind');
+  const firstTranscript = path.join(projectDirectory, 'vendor-session.jsonl');
+  const secondTranscript = path.join(projectDirectory, 'cleared-session.jsonl');
+  fs.writeFileSync(firstTranscript, mainPrompt('first conversation', 'prompt-one'), 'utf8');
+  const harness = createHarness(configDirectory);
+  await harness.wiring.start();
+  const session = new TestTraceSession('glissa-session-id');
+  harness.wiring.attachSession(session);
+
+  session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath: firstTranscript });
+  await harness.wiring.whenIdle();
+  session.emit('claude-session-id', { id: 'cleared-session', vendor: 'claude', transcriptPath: secondTranscript });
+  await harness.wiring.whenIdle();
+  fs.appendFileSync(firstTranscript, mainPrompt('before the switch', 'prompt-two'), 'utf8');
+  fs.writeFileSync(secondTranscript, mainPrompt('after the switch', 'prompt-three'), 'utf8');
+  await harness.poll();
+
+  const records = readTrace(harness.tracePath('glissa-session-id'));
+  assert.deepEqual(
+    records.map((record) => record.kind),
+    ['session', 'prompt', 'prompt', 'session', 'prompt'],
+  );
+  assert.equal(records[2].kind === 'prompt' ? records[2].text : null, 'before the switch');
+  assert.equal(records[4].kind === 'prompt' ? records[4].text : null, 'after the switch');
+  assert.equal(readCheckpoint(harness.checkpointPath('glissa-session-id')).transcriptPath, secondTranscript);
+
+  await harness.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
+test('repeated rebinds to transcripts that do not exist keep one predecessor, not a chain', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('rebind-chain');
+  const firstTranscript = path.join(projectDirectory, 'vendor-session.jsonl');
+  const skippedTranscripts = ['second', 'third'].map((name) => path.join(projectDirectory, `${name}-session.jsonl`));
+  const lastTranscript = path.join(projectDirectory, 'fourth-session.jsonl');
+  fs.writeFileSync(firstTranscript, mainPrompt('first prompt', 'prompt-one'), 'utf8');
+  const harness = createHarness(configDirectory);
+  await harness.wiring.start();
+  const session = new TestTraceSession('glissa-session-id');
+  harness.wiring.attachSession(session);
+
+  session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath: firstTranscript });
+  await harness.wiring.whenIdle();
+  for (const [index, transcriptPath] of [...skippedTranscripts, lastTranscript].entries()) {
+    session.emit('claude-session-id', { id: `pending-session-${index}`, vendor: 'claude', transcriptPath });
+    await harness.wiring.whenIdle();
+  }
+
+  fs.appendFileSync(firstTranscript, mainPrompt('late on the first', 'prompt-two'), 'utf8');
+  for (const [index, transcriptPath] of skippedTranscripts.entries()) {
+    fs.writeFileSync(transcriptPath, mainPrompt(`from the skipped ${index}`, `skipped-${index}`), 'utf8');
+  }
+  fs.writeFileSync(lastTranscript, mainPrompt('from the last', 'prompt-three'), 'utf8');
+  await harness.poll();
+
+  const records = readTrace(harness.tracePath('glissa-session-id'));
+  assert.deepEqual(records.map((record) => record.kind), ['session', 'prompt', 'prompt', 'session', 'prompt']);
+  assert.deepEqual(
+    records.flatMap((record) => (record.kind === 'prompt' ? [record.text] : [])),
+    ['first prompt', 'late on the first', 'from the last'],
+  );
+  assert.equal(readCheckpoint(harness.checkpointPath('glissa-session-id')).transcriptPath, lastTranscript);
+
+  await harness.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
+test('a rebind keeps a predecessor whose transcript appeared since the last poll', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('rebind-late-open');
+  const firstTranscript = path.join(projectDirectory, 'first-session.jsonl');
+  const secondTranscript = path.join(projectDirectory, 'second-session.jsonl');
+  const thirdTranscript = path.join(projectDirectory, 'third-session.jsonl');
+  fs.writeFileSync(firstTranscript, mainPrompt('first prompt', 'prompt-one'), 'utf8');
+  const harness = createHarness(configDirectory);
+  await harness.wiring.start();
+  const session = new TestTraceSession('glissa-session-id');
+  harness.wiring.attachSession(session);
+
+  session.emit('claude-session-id', { id: 'first-session', vendor: 'claude', transcriptPath: firstTranscript });
+  await harness.wiring.whenIdle();
+  session.emit('claude-session-id', { id: 'second-session', vendor: 'claude', transcriptPath: secondTranscript });
+  await harness.wiring.whenIdle();
+  fs.writeFileSync(secondTranscript, mainPrompt('second prompt', 'prompt-two'), 'utf8');
+  session.emit('claude-session-id', { id: 'third-session', vendor: 'claude', transcriptPath: thirdTranscript });
+  await harness.wiring.whenIdle();
+  fs.writeFileSync(thirdTranscript, mainPrompt('third prompt', 'prompt-three'), 'utf8');
+  await harness.poll();
+
+  const records = readTrace(harness.tracePath('glissa-session-id'));
+  assert.deepEqual(
+    records.flatMap((record) => (record.kind === 'prompt' ? [record.text] : [])),
+    ['first prompt', 'second prompt', 'third prompt'],
+  );
+  assert.equal(readCheckpoint(harness.checkpointPath('glissa-session-id')).transcriptPath, thirdTranscript);
+
+  await harness.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
+test('a transcript drained during a deferred bind is not replayed when the session returns to it', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('deferred-return');
+  const firstTranscript = path.join(projectDirectory, 'vendor-session.jsonl');
+  const secondTranscript = path.join(projectDirectory, 'cleared-session.jsonl');
+  fs.writeFileSync(firstTranscript, mainPrompt('first prompt', 'prompt-one'), 'utf8');
+  const harness = createHarness(configDirectory);
+  await harness.wiring.start();
+  const session = new TestTraceSession('glissa-session-id');
+  harness.wiring.attachSession(session);
+
+  session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath: firstTranscript });
+  await harness.wiring.whenIdle();
+  session.emit('claude-session-id', { id: 'cleared-session', vendor: 'claude', transcriptPath: secondTranscript });
+  await harness.wiring.whenIdle();
+
+  fs.appendFileSync(firstTranscript, mainPrompt('second prompt', 'prompt-two'), 'utf8');
+  const paddingText = 'x'.repeat(4000);
+  const paddingPrompts = Array.from(
+    { length: 20 },
+    (_unused, index) => mainPrompt(paddingText, `padding-${index}`),
+  );
+  fs.writeFileSync(secondTranscript, paddingPrompts.join(''), 'utf8');
+  await harness.poll();
+
+  const afterTheSwitch = readCheckpoint(harness.checkpointPath('glissa-session-id'));
+  assert.equal(afterTheSwitch.transcriptPath, secondTranscript);
+  assert.equal(afterTheSwitch.offsetByTranscriptPath[firstTranscript], fs.statSync(firstTranscript).size);
+  assert.ok(fs.statSync(harness.tracePath('glissa-session-id')).size > 64 * 1024);
+
+  session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath: firstTranscript });
+  await harness.wiring.whenIdle();
+
+  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const secondPrompts = records.filter((record) => record.kind === 'prompt' && record.text === 'second prompt');
+  assert.equal(secondPrompts.length, 1);
+  assert.equal(records[records.length - 1].kind, 'session');
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });

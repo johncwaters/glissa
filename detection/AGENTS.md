@@ -69,6 +69,6 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 ### Session Trace
 
-- The trace tails the vendor transcript itself on the pure tail core and never the shared memory source, because one shared cursor and slot table leak one lane's lifecycle into the other; hook bodies are never the source, since they cap at 64 KB and carry no thinking or skill body (`server/core/trace-tail-core.ts`, `server/trace-wiring.ts`).
+- A new trace may bind before its transcript exists because Claude's first hook precedes file creation; it tails the vendor transcript itself on the pure tail core and never the shared memory source, because one shared cursor and slot table leak one lane's lifecycle into the other; hook bodies are never the source, since they cap at 64 KB and carry no thinking or skill body (`server/core/trace-tail-core.ts`, `server/trace-wiring.ts`).
 - A trace file is keyed by Glissa session UUID under `~/.glissa/traces`, never by project name, because a recording keyed by project name cannot answer what one terminal did (`server/trace-wiring.ts`).
 - Trace bodies cross any authenticated control socket only on explicit request, never as a push, because a paired remote client can already type into the terminal and read the transcript file itself, so a refusal here protects nothing (`tests/control-trace.test.ts`).

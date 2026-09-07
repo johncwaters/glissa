@@ -81,9 +81,18 @@ interface TraceBinding {
   ingestedSubagentPaths: Set<string>;
   committedOffsetByTranscriptPath: Record<string, number>;
   checkpointWriter: JsonStateWriter;
+  bindingBeforeFirstOpen: TraceBinding | null;
   isSkippingOversizedLine: boolean;
+  hasOpenedTranscript: boolean;
   hasWarnedUnreadable: boolean;
   isClosing: boolean;
+}
+
+interface TraceResumeState {
+  offset: number;
+  didReset: boolean;
+  committedOffsetByTranscriptPath: Record<string, number>;
+  ingestedSubagentPaths: string[];
 }
 
 interface LineContext {
@@ -93,6 +102,11 @@ interface LineContext {
 
 interface OpenedFile {
   handle: FileHandle;
+  realPath: string;
+  stat: fs.Stats;
+}
+
+interface MissingContainedFile {
   realPath: string;
 }
 
@@ -116,7 +130,33 @@ function projectsRoot(): string {
   return claudeProjectsDir(process.env, os.homedir());
 }
 
-async function openContainedFile(candidate: string, root: string): Promise<OpenedFile | null> {
+async function containedPathForMissingFile(
+  candidate: string,
+  root: string,
+): Promise<MissingContainedFile | null> {
+  const transcriptName = path.basename(candidate);
+  if (!isSafePathSegment(transcriptName)) return null;
+  try {
+    const realRoot = await fs.promises.realpath(root);
+    const realDirectory = await fs.promises.realpath(path.dirname(candidate));
+    if (!isPathInsideRoot(realRoot, realDirectory)) return null;
+    return { realPath: path.join(realDirectory, transcriptName) };
+  } catch {
+    return null;
+  }
+}
+
+function openContainedFile(candidate: string, root: string): Promise<OpenedFile | null>;
+function openContainedFile(
+  candidate: string,
+  root: string,
+  allowsMissingFile: true,
+): Promise<OpenedFile | MissingContainedFile | null>;
+async function openContainedFile(
+  candidate: string,
+  root: string,
+  allowsMissingFile = false,
+): Promise<OpenedFile | MissingContainedFile | null> {
   let handle: FileHandle | null = null;
   try {
     const realRoot = await fs.promises.realpath(root);
@@ -124,11 +164,14 @@ async function openContainedFile(candidate: string, root: string): Promise<Opene
     if (!isPathInsideRoot(realRoot, realCandidate)) return null;
     handle = await fs.promises.open(realCandidate, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
     const stat = await handle.stat();
-    if (stat.isFile()) return { handle, realPath: realCandidate };
-  } catch {
+    if (stat.isFile()) return { handle, realPath: realCandidate, stat };
+    await handle.close().catch(() => {});
+    return null;
+  } catch (error) {
+    if (handle) await handle.close().catch(() => {});
+    if (!allowsMissingFile || !isMissingFileError(error)) return null;
   }
-  if (handle) await handle.close().catch(() => {});
-  return null;
+  return containedPathForMissingFile(candidate, root);
 }
 
 function traceSessionIdOf(entry: string): string | null {
@@ -349,6 +392,28 @@ function createTraceWiring({
     }
   }
 
+  async function resumeStateFor(
+    glissaSessionId: string,
+    transcriptPath: string,
+    size: number,
+  ): Promise<TraceResumeState> {
+    const checkpoint = await readCheckpoint(glissaSessionId);
+    const alreadyTracedOffset = await tracedOffsetOf(
+      glissaSessionId,
+      transcriptPath,
+      checkpoint ? checkpoint.transcriptPath : null,
+    );
+    const resume = resumeOffsetFrom(checkpoint, { transcriptPath, size, alreadyTracedOffset });
+    return {
+      offset: resume.offset,
+      didReset: resume.didReset,
+      committedOffsetByTranscriptPath: checkpoint ? checkpoint.offsetByTranscriptPath : {},
+      ingestedSubagentPaths: checkpoint && checkpoint.transcriptPath === transcriptPath
+        ? checkpoint.ingestedSubagentPaths
+        : [],
+    };
+  }
+
   function queueSessionRecord(binding: TraceBinding, reason: string | null): void {
     queueRecord(binding.glissaSessionId, {
       ts: nowFn(),
@@ -426,12 +491,33 @@ function createTraceWiring({
   async function drainBinding(binding: TraceBinding): Promise<void> {
     const opened = await openContainedFile(binding.transcriptPath, projectsRoot());
     if (!opened) {
+      if (binding.bindingBeforeFirstOpen) await drainBinding(binding.bindingBeforeFirstOpen);
+      if (!binding.hasOpenedTranscript) {
+        try {
+          await fs.promises.lstat(binding.transcriptPath);
+        } catch (error) {
+          if (isMissingFileError(error)) return;
+        }
+      }
       if (!binding.hasWarnedUnreadable) warn(`transcript unreadable for ${binding.glissaSessionId}`);
       binding.hasWarnedUnreadable = true;
       return;
     }
     binding.hasWarnedUnreadable = false;
     try {
+      if (!binding.hasOpenedTranscript) {
+        if (binding.bindingBeforeFirstOpen) await drainBinding(binding.bindingBeforeFirstOpen);
+        binding.bindingBeforeFirstOpen = null;
+        binding.transcriptPath = opened.realPath;
+        const stat = await opened.handle.stat();
+        const resumed = await resumeStateFor(binding.glissaSessionId, binding.transcriptPath, stat.size);
+        binding.committedOffsetByTranscriptPath = resumed.committedOffsetByTranscriptPath;
+        binding.ingestedSubagentPaths = new Set<string>(resumed.ingestedSubagentPaths);
+        binding.tailState = createTailState(stat, { path: binding.transcriptPath });
+        binding.tailState.offset = resumed.offset;
+        binding.hasOpenedTranscript = true;
+        queueSessionRecord(binding, resumed.didReset ? 'transcript smaller than the stored checkpoint' : null);
+      }
       await readOnce(binding, opened.handle);
     } catch (error) {
       warn(`transcript read failed: ${errorMessage(error)}`);
@@ -441,18 +527,12 @@ function createTraceWiring({
     await commitPending(binding);
   }
 
-  async function validatedTranscript(
-    requestedTranscriptPath: string,
-  ): Promise<{ realPath: string; stat: fs.Stats } | null> {
-    const opened = await openContainedFile(requestedTranscriptPath, projectsRoot());
-    if (!opened) return null;
-    try {
-      return { realPath: opened.realPath, stat: await opened.handle.stat() };
-    } catch {
-      return null;
-    } finally {
-      await opened.handle.close().catch(() => {});
-    }
+  function predecessorAwaitingDrain(previous: TraceBinding | undefined): TraceBinding | null {
+    if (!previous) return null;
+    if (previous.hasOpenedTranscript) return previous;
+    const inherited = previous.bindingBeforeFirstOpen;
+    previous.bindingBeforeFirstOpen = null;
+    return inherited;
   }
 
   async function bindSession(
@@ -464,33 +544,24 @@ function createTraceWiring({
     if (hasStopped || closedSessionIds.has(glissaSessionId)) return;
     const checkpointPath = checkpointFilePath(glissaSessionId);
     if (!checkpointPath) return;
-    const validated = await validatedTranscript(requestedTranscriptPath);
-    if (!validated) {
+    const containedTranscript = await openContainedFile(requestedTranscriptPath, projectsRoot(), true);
+    if (!containedTranscript) {
       warn('transcript refused: outside the Claude projects root or not a regular file');
       return;
     }
-    const transcriptPath = validated.realPath;
+    const transcriptPath = containedTranscript.realPath;
+    const transcriptStat = 'handle' in containedTranscript ? containedTranscript.stat : null;
+    if ('handle' in containedTranscript) await containedTranscript.handle.close().catch(() => {});
     const previous = bindingByGlissaSessionId.get(glissaSessionId);
     if (previous) {
       bindingByGlissaSessionId.delete(glissaSessionId);
       await drainBinding(previous);
     }
-    const checkpoint = await readCheckpoint(glissaSessionId);
-    const alreadyTracedOffset = await tracedOffsetOf(
-      glissaSessionId,
-      transcriptPath,
-      checkpoint ? checkpoint.transcriptPath : null,
-    );
-    const resume = resumeOffsetFrom(checkpoint, {
-      transcriptPath,
-      size: validated.stat.size,
-      alreadyTracedOffset,
-    });
-    const tailState = createTailState(validated.stat, { path: transcriptPath });
-    tailState.offset = resume.offset;
-    const carriedSubagentPaths = checkpoint && checkpoint.transcriptPath === transcriptPath
-      ? checkpoint.ingestedSubagentPaths
-      : [];
+    const resumed = transcriptStat
+      ? await resumeStateFor(glissaSessionId, transcriptPath, transcriptStat.size)
+      : null;
+    const tailState = createTailState(transcriptStat, { path: transcriptPath });
+    tailState.offset = resumed ? resumed.offset : 0;
     const binding: TraceBinding = {
       glissaSessionId,
       vendorSessionId,
@@ -499,17 +570,21 @@ function createTraceWiring({
       requestedTranscriptPath,
       tailState,
       skillToolUseIds: new Set<string>(),
-      ingestedSubagentPaths: new Set<string>(carriedSubagentPaths),
-      committedOffsetByTranscriptPath: checkpoint ? checkpoint.offsetByTranscriptPath : {},
+      ingestedSubagentPaths: new Set<string>(resumed ? resumed.ingestedSubagentPaths : []),
+      committedOffsetByTranscriptPath: resumed ? resumed.committedOffsetByTranscriptPath : {},
       checkpointWriter: createJsonStateWriter({
         filePath: checkpointPath,
         warn: (error: unknown) => { warn(`checkpoint write failed: ${errorMessage(error)}`); },
       }),
+      bindingBeforeFirstOpen: transcriptStat ? null : predecessorAwaitingDrain(previous),
       isSkippingOversizedLine: false,
+      hasOpenedTranscript: transcriptStat !== null,
       hasWarnedUnreadable: false,
       isClosing: false,
     };
-    queueSessionRecord(binding, resume.didReset ? 'transcript smaller than the stored checkpoint' : null);
+    if (resumed) {
+      queueSessionRecord(binding, resumed.didReset ? 'transcript smaller than the stored checkpoint' : null);
+    }
     bindingByGlissaSessionId.set(glissaSessionId, binding);
     await drainBinding(binding);
   }
@@ -554,6 +629,7 @@ function createTraceWiring({
     }
     try {
       await drainBinding(binding);
+      if (!binding.hasOpenedTranscript) return;
       const stat = await opened.handle.stat();
       const end = Math.min(stat.size, MAX_SUBAGENT_READ_BYTES);
       const buffer = Buffer.alloc(end);
