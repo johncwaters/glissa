@@ -43,7 +43,6 @@ let _lastAggregateText: string | null = null;
 let _lastAggregateSeverity: string | null = null;
 
 const latestPackVersions = new Map<string, string>();
-let isTraceActionAvailable = true;
 
 const asText = (value: unknown) => (value == null ? '' : String(value));
 
@@ -65,19 +64,13 @@ function updateButtonVisibility(ui: SessionUi) {
 
   ui.btnRename.classList.add('visible');
   ui.btnResume.classList.add('visible');
-  ui.btnTrace.classList.toggle('visible', isTraceActionAvailable);
-  ui.btnTrace.hidden = !isTraceActionAvailable;
+  ui.btnTrace.classList.add('visible');
   ui.btnRemove.classList.add('visible');
 }
 
 function closeOverflowMenu(ui: SessionUi) {
   ui.overflowMenu.classList.remove('open');
   ui.btnOverflow.setAttribute('aria-expanded', 'false');
-}
-
-export function setSessionTraceAvailable(isAvailable: boolean) {
-  isTraceActionAvailable = isAvailable;
-  for (const ui of sessionUIs.values()) updateButtonVisibility(ui);
 }
 
 function wireCardEvents(ui: SessionUi, sessionId: string) {

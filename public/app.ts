@@ -16,7 +16,7 @@ import { applyIngestActivity, applyIngestSnapshot, applyVisionsComments, applyVi
 import { acknowledgeMillAttention, applyMillReport, mountMillView, refreshMillView, requestMillReport, setMillActivityCallback, setMillRequestSender } from './mill-panel.ts';
 import { applyDeleteHookResult, applyHooksReport, applySaveHookResult, mountHooksView, refreshHooksView, requestHooksReport, setHooksRequestSender } from './hooks-panel.ts';
 import { initNotifications, showDesktopNotification } from './notifications.ts';
-import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, isPhoneScreenActive, isPhoneShellActive, mountPhoneShell, refreshPhoneBoard, setPhoneScreenAttention, setPhoneScreenAvailable, showPhoneScreen } from './phone/phone-shell.ts';
+import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, isPhoneScreenActive, isPhoneShellActive, mountPhoneShell, refreshPhoneBoard, setPhoneScreenAttention, showPhoneScreen } from './phone/phone-shell.ts';
 import { noteKnownProjectPath } from './project-registry.ts';
 import { acknowledgePrAttention, applyPrStatus, mountPrView, setPrActivityCallback } from './pr-panel.ts';
 
@@ -24,7 +24,7 @@ import { UPDATES_ACTIONS_SETTING_ID, UPDATES_SECTION_ID, updateBannerText } from
 import { acknowledgeRadarAttention, applyHealthSnapshot as applyRadarHealth, applyInvestigationActivity, applyInvestigationFinished, applyPosthogStatus, applyPrStatus as applyRadarPrStatus, applyUpdateAvailable as applyRadarUpdate, mountRadarView, setRadarActivityCallback, setRadarNavigateToPrs } from './radar-panel.ts';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.ts';
 import { sessionUIs } from './session-card/card-registry.ts';
-import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, notePackVersion, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setLatestPackVersions, setSessionAgent, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPacks, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionTraceAvailable, setSessionUsage, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.ts';
+import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, notePackVersion, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setLatestPackVersions, setSessionAgent, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPacks, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionUsage, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.ts';
 import { openConfirmDialog } from './session-card/modal.ts';
 import { reconnectDataWs } from './session-card/terminal.ts';
 import { showErrorToast } from './session-card/toast.ts';
@@ -592,8 +592,6 @@ const VIEW_TABS = [
 ];
 
 let shouldPersistActiveView = true;
-let isTraceAvailable = true;
-
 function acknowledgeViewAttention(view: string) {
   if (view === 'radar') acknowledgeRadarAttention();
   if (view === 'prs') acknowledgePrAttention();
@@ -646,7 +644,6 @@ function activateView(view: string, { section, setting, persist = true }: Activa
 }
 
 setTraceNavigate(() => {
-  if (!isTraceAvailable) return;
   if (showPhoneScreen('trace')) return;
   activateView('trace');
 });
@@ -745,13 +742,8 @@ queryTag(document, '#btn-restart', 'button').addEventListener('click', confirmSe
 
 function applyClientTrust(trust: unknown) {
   const showShutdown = shouldShowServerAction('shutdown', trust);
-  isTraceAvailable = shouldShowServerAction('trace', trust);
   queryTag(document, '#btn-shutdown', 'button').hidden = !showShutdown;
   queryTag(document, '#menu-divider-shutdown', 'div').hidden = !showShutdown;
-  tabTrace.hidden = !isTraceAvailable;
-  setPhoneScreenAvailable('trace', isTraceAvailable);
-  setSessionTraceAvailable(isTraceAvailable);
-  if (!isTraceAvailable && !isPhoneShellActive() && getActiveView() === 'trace') activateView('focus');
 }
 
 queryTag(document, '#btn-shutdown', 'button').addEventListener('click', () => {

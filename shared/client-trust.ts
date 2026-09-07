@@ -6,5 +6,5 @@ export function normalizeClientTrust(trust: unknown): ClientTrust {
 
 export function shouldShowServerAction(actionId: string, trust: unknown): boolean {
   if (normalizeClientTrust(trust) === 'local') return true;
-  return actionId !== 'shutdown' && actionId !== 'trace';
+  return actionId !== 'shutdown';
 }

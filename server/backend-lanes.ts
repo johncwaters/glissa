@@ -219,7 +219,7 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
     })
     : null;
   const traceChangeBroadcast = traceWiring
-    ? createTraceChangeBroadcast({ source: traceWiring, broadcast: broadcastLocalControl })
+    ? createTraceChangeBroadcast({ source: traceWiring, broadcast: broadcastControl })
     : null;
   const memoryDistillSessions = new Map<string, Session>();
   const memoryDistiller = memoryStore

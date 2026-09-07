@@ -149,15 +149,15 @@ test('a cursor past the end of a shrunk or removed trace comes back with the res
   assert.deepEqual(removed?.records, []);
 });
 
-test('a remote socket is refused before any trace body is read', async () => {
+test('a remote socket is served the requested trace page', async () => {
   const { traceDirectory, readTracePage } = traceWorkspace('remote');
   fs.writeFileSync(path.join(traceDirectory, 'session-1.jsonl'), traceLine(assistantRecord('secret')));
   const connection = traceHarness(readTracePage, 'remote');
   await connection.send({ type: 'session-trace', id: 'session-1', after: 0 });
-  assert.equal(connection.sent.some((frame) => frame.type === 'session-trace-response'), false);
-  const refusal = connection.sent.find((frame) => frame.type === 'error');
-  assert.match(refusal?.message ?? '', /local connections/);
-  assert.equal(refusal?.id, 'session-1');
+  const response = connection.sent.find((frame) => frame.type === 'session-trace-response');
+  assert.equal(response?.id, 'session-1');
+  assert.deepEqual(response?.records, [assistantRecord('secret')]);
+  assert.equal(connection.sent.some((frame) => frame.type === 'error'), false);
 });
 
 test('an unknown session is refused with an error frame naming the requested session', async () => {
@@ -243,8 +243,10 @@ test('a read failure answers an error frame naming the session so the panel can 
   assert.match(failure?.message ?? '', /disk gone/);
 });
 
-test('trace changes are refreshable and append bursts coalesce by session', () => {
+test('trace changes use the all-control broadcast and append bursts coalesce by session', () => {
   assert.equal(REFRESHABLE_TYPES.has('session-trace-changed'), true);
+  const backendLanesSource = fs.readFileSync(new URL('../server/backend-lanes.ts', import.meta.url), 'utf8');
+  assert.match(backendLanesSource, /createTraceChangeBroadcast\(\{ source: traceWiring, broadcast: broadcastControl \}\)/);
   const source = new EventEmitter();
   const scheduled = new Map<NodeJS.Timeout, () => void>();
   const broadcasts: Record<string, unknown>[] = [];

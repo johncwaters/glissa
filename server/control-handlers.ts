@@ -1029,7 +1029,6 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     },
     'session-trace':    async (message: ControlRequest, ws: ControlSocket) => {
       const requestedSessionId = message.id;
-      if (ws.glissaTrust === 'remote') return sendError(ws, 'Session trace is available only on local connections', { id: requestedSessionId });
       const session = findSession(message);
       if (!session) return sendError(ws, 'Session not found', { id: requestedSessionId });
       if (!readTracePage) return sendError(ws, 'Session trace is not enabled', { id: session.id });
