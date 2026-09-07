@@ -8,7 +8,10 @@ import { EventEmitter } from 'node:events';
 import type { Session } from '../session/sessions.ts';
 import type { TraceRecord } from '../shared/contracts/trace.ts';
 import { REFRESHABLE_TYPES } from '../server/core/control-send-core.ts';
-import { MAX_SESSION_TRACE_READ_BYTES, sessionTracePageFromBytes } from '../server/core/session-trace-core.ts';
+import {
+  MAX_SESSION_TRACE_READ_BYTES,
+  sessionTracePageFromBytes,
+} from '../server/core/session-trace-core.ts';
 import { createTraceChangeBroadcast, TRACE_CHANGE_COALESCE_MS } from '../server/trace-control.ts';
 import { createTraceWiring } from '../server/trace-wiring.ts';
 import type { TracePage, TracePageRequest } from '../server/trace-wiring.ts';
@@ -46,6 +49,16 @@ function traceLine(record: TraceRecord): string {
   return `${JSON.stringify(record)}\n`;
 }
 
+function tracePageRequest(now = 7, vendorSessionId = 'vendor-session') {
+  return {
+    after: 0,
+    size: 0,
+    now,
+    vendorSessionId,
+    readBytes: async () => new Uint8Array(),
+  };
+}
+
 type TracePageReader = (glissaSessionId: string, request: TracePageRequest) => Promise<TracePage>;
 
 function traceWorkspace(name: string): { traceDirectory: string; readTracePage: TracePageReader } {
@@ -74,10 +87,73 @@ test('the byte core parses complete schema-valid lines and leaves an incomplete 
   const first = traceLine(assistantRecord('first'));
   const partial = traceLine(assistantRecord('second')).slice(0, -2);
   const afterOffset = 19;
-  const page = sessionTracePageFromBytes(afterOffset, Buffer.from(first + partial));
+  const page = sessionTracePageFromBytes(tracePageRequest(), afterOffset, Buffer.from(first + partial));
   assert.deepEqual(page.records, [assistantRecord('first')]);
   assert.equal(page.start, afterOffset);
   assert.equal(page.next, afterOffset + Buffer.byteLength(first));
+});
+
+test('a corrupt JSON line between valid records yields an unreadable notice without changing the next offset', () => {
+  const firstLine = traceLine(assistantRecord('first'));
+  const corruptLine = '{not json}\n';
+  const secondLine = traceLine(assistantRecord('second'));
+  const page = sessionTracePageFromBytes(
+    tracePageRequest(9, 'trace-vendor'),
+    0,
+    Buffer.from(firstLine + corruptLine + secondLine),
+  );
+
+  assert.deepEqual(page.records, [
+    assistantRecord('first'),
+    {
+      ts: 9,
+      uuid: null,
+      parentUuid: null,
+      vendorSessionId: 'trace-vendor',
+      kind: 'notice',
+      text: `unreadable trace record of ${Buffer.byteLength(corruptLine)} bytes`,
+    },
+    assistantRecord('second'),
+  ]);
+  assert.equal(page.next, Buffer.byteLength(firstLine + corruptLine + secondLine));
+});
+
+test('a JSON line that fails the trace schema yields an unreadable notice', () => {
+  const invalidRecordLine = `${JSON.stringify({ kind: 'assistant', text: 'missing fields' })}\n`;
+  const page = sessionTracePageFromBytes(tracePageRequest(11, 'trace-vendor'), 0, Buffer.from(invalidRecordLine));
+
+  assert.deepEqual(page.records, [{
+    ts: 11,
+    uuid: null,
+    parentUuid: null,
+    vendorSessionId: 'trace-vendor',
+    kind: 'notice',
+    text: `unreadable trace record of ${Buffer.byteLength(invalidRecordLine)} bytes`,
+  }]);
+  assert.equal(page.next, Buffer.byteLength(invalidRecordLine));
+});
+
+test('a line holding invalid UTF-8 reports its raw on-disk byte length including the newline', () => {
+  const corruptBytes = Buffer.from([0x7b, 0x80, 0x81, 0x7d, 0x0a]);
+  const page = sessionTracePageFromBytes(tracePageRequest(13, 'trace-vendor'), 0, corruptBytes);
+
+  assert.deepEqual(page.records, [{
+    ts: 13,
+    uuid: null,
+    parentUuid: null,
+    vendorSessionId: 'trace-vendor',
+    kind: 'notice',
+    text: 'unreadable trace record of 5 bytes',
+  }]);
+  assert.equal(page.next, corruptBytes.length);
+});
+
+test('a blank trace line yields no record', () => {
+  const blankLine = ' \t\n';
+  const page = sessionTracePageFromBytes(tracePageRequest(), 0, Buffer.from(blankLine));
+
+  assert.deepEqual(page.records, []);
+  assert.equal(page.next, Buffer.byteLength(blankLine));
 });
 
 test('session-trace replies from zero with the file path and continues from the returned byte offset', async () => {

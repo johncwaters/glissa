@@ -18,28 +18,48 @@ export interface SessionTracePageRequest {
   readBytes: (offset: number, byteCount: number) => Promise<Uint8Array>;
 }
 
-function parseTraceLine(line: string): TraceRecord | null {
+function unreadableRecordNotice(request: SessionTracePageRequest, lineByteCount: number): TraceRecord {
+  return {
+    ts: request.now,
+    uuid: null,
+    parentUuid: null,
+    vendorSessionId: request.vendorSessionId,
+    kind: 'notice',
+    text: `unreadable trace record of ${lineByteCount} bytes`,
+  };
+}
+
+function parseTraceLine(request: SessionTracePageRequest, line: string, lineByteCount: number): TraceRecord {
   let parsedJson: unknown;
   try {
     parsedJson = JSON.parse(line);
   } catch {
-    return null;
+    return unreadableRecordNotice(request, lineByteCount);
   }
   const parsedRecord = TraceRecordSchema.safeParse(parsedJson);
-  return parsedRecord.success ? parsedRecord.data : null;
+  if (parsedRecord.success) return parsedRecord.data;
+  return unreadableRecordNotice(request, lineByteCount);
 }
 
-export function sessionTracePageFromBytes(after: number, bytes: Uint8Array): SessionTracePage {
+export function sessionTracePageFromBytes(
+  request: SessionTracePageRequest,
+  after: number,
+  bytes: Uint8Array,
+): SessionTracePage {
   let completeByteLength = bytes.length;
   while (completeByteLength > 0 && bytes[completeByteLength - 1] !== 0x0a) completeByteLength -= 1;
   if (completeByteLength === 0) return { records: [], start: after, next: after };
 
-  const completeText = new TextDecoder().decode(bytes.subarray(0, completeByteLength));
+  const decoder = new TextDecoder();
   const records: TraceRecord[] = [];
-  for (const line of completeText.split('\n')) {
+  let lineStart = 0;
+  while (lineStart < completeByteLength) {
+    const newlineIndex = bytes.indexOf(0x0a, lineStart);
+    const lineByteCount = newlineIndex + 1 - lineStart;
+    const line = decoder.decode(bytes.subarray(lineStart, newlineIndex));
+    lineStart += lineByteCount;
     if (!line.trim()) continue;
-    const record = parseTraceLine(line);
-    if (record) records.push(record);
+    records.push(parseTraceLine(request, line, lineByteCount));
   }
   return { records, start: after, next: after + completeByteLength };
 }
@@ -73,7 +93,7 @@ async function readPageAfter(request: SessionTracePageRequest): Promise<SessionT
   if (windowByteCount <= 0) return { records: [], start: startOffset, next: startOffset };
 
   const windowBytes = await request.readBytes(startOffset, windowByteCount);
-  const page = sessionTracePageFromBytes(startOffset, windowBytes);
+  const page = sessionTracePageFromBytes(request, startOffset, windowBytes);
   if (page.next > startOffset) return page;
 
   const offsetPastRecord = await offsetAfterNextLine(request, startOffset + windowBytes.length);
@@ -112,7 +132,7 @@ async function readPageEndingAt(request: SessionTracePageRequest, endingAt: numb
   const windowBytes = await request.readBytes(windowStart, endOffset - windowStart);
   const lineStart = firstWholeLineOffset(windowStart, windowBytes);
   if (lineStart !== null) {
-    const page = sessionTracePageFromBytes(lineStart, windowBytes.subarray(lineStart - windowStart));
+    const page = sessionTracePageFromBytes(request, lineStart, windowBytes.subarray(lineStart - windowStart));
     if (page.next > lineStart || windowStart === 0) return page;
   }
   const skippedRecordStart = await previousLineStart(request, windowStart);
