@@ -11,6 +11,7 @@ jobs:
   test:
     # Windows is the development host; the ubuntu leg is what keeps the POSIX-gated paths (symlinked
     # worktree shares, file modes) from rotting, since they skip on every Windows run.
+    timeout-minutes: 30
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

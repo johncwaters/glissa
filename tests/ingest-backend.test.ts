@@ -183,8 +183,9 @@ function withBackend(
         track: (ws: WebSocket) => { sockets.push(ws); return ws; },
       });
     } finally {
-      for (const ws of sockets) ws.close();
-      backend.shutdown();
+      for (const ws of sockets) ws.terminate();
+      const settled = backend.shutdown();
+      await Promise.allSettled([...settled.reaps, ...settled.stoppers.map((entry) => entry.promise)]);
       server.closeAllConnections();
       await closeServer(server);
       if (prevEnv == null) delete process.env.GLISSA_CONFIG;

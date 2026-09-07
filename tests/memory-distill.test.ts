@@ -55,15 +55,21 @@ const START = Date.UTC(2026, 7, 23, 12, 0, 0);
 const HOUR = 3600000;
 
 const openedStores: MemoryStore[] = [];
+const fixtureDirs: string[] = [];
 
 test.afterEach(async () => {
   for (const store of openedStores.splice(0)) {
     await store.stop().catch(() => {});
   }
+  for (const dir of fixtureDirs.splice(0)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 function tempDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memory-distill-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memory-distill-'));
+  fixtureDirs.push(dir);
+  return dir;
 }
 
 function openStore(dir: string, clock: Clock): MemoryStore {
@@ -163,7 +169,6 @@ async function seed(store: MemoryStore, clock: Clock, texts: string[]): Promise<
 test('a DISTILLED run publishes the claims and rotates the fallback build to previous', async () => {
   const dir = tempDir();
   const clock = { at: START };
-  try {
     const store = openStore(dir, clock);
     const [first, second] = await seed(store, clock, ['the poller ticks every 15 minutes', 'the poller is opt in']);
     assert.equal(readProjectFiles(dir).includes('the poller ticks every 15 minutes'), true);
@@ -195,15 +200,11 @@ test('a DISTILLED run publishes the claims and rotates the fallback build to pre
     assert.equal(manifest.claimCount, 1);
     assert.equal(manifest.version, report.version);
     assert.equal(manifestOf(dir, 'previous').source, 'trivial', 'the last good build is one rotation back');
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 test('a NO_CHANGE run writes nothing at all', async () => {
   const dir = tempDir();
   const clock = { at: START };
-  try {
     const store = openStore(dir, clock);
     await seed(store, clock, ['the poller ticks every 15 minutes']);
     const before = readCurrent(dir);
@@ -217,15 +218,11 @@ test('a NO_CHANGE run writes nothing at all', async () => {
     assert.equal(readCurrent(dir), before);
     assert.equal(manifestOf(dir).version, beforeVersion);
     assert.equal(fs.existsSync(path.join(dir, 'dist', 'previous')), false);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 test('an unreadable or hallucinating result leaves the published build untouched', async () => {
   const dir = tempDir();
   const clock = { at: START };
-  try {
     const store = openStore(dir, clock);
     await seed(store, clock, ['the poller ticks every 15 minutes']);
     const before = readCurrent(dir);
@@ -246,15 +243,11 @@ test('an unreadable or hallucinating result leaves the published build untouched
     assert.match(String(report.reason), /unresolvable/);
     assert.equal(readCurrent(dir), before);
     assert.equal(manifestOf(dir).source, 'trivial');
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 test('a run past its timeout publishes nothing', async () => {
   const dir = tempDir();
   const clock = { at: START };
-  try {
     const store = openStore(dir, clock);
     await seed(store, clock, ['the poller ticks every 15 minutes']);
     const before = readCurrent(dir);
@@ -276,15 +269,11 @@ test('a run past its timeout publishes nothing', async () => {
     assert.equal(report.status, 'error');
     assert.match(String(report.reason), /timed out/);
     assert.equal(readCurrent(dir), before);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 test('an unmoved canon and a canon still being appended to both spawn nothing', async () => {
   const dir = tempDir();
   const clock = { at: START };
-  try {
     const store = openStore(dir, clock);
     const [first] = await seed(store, clock, ['the poller ticks every 15 minutes']);
     const claims = [{
@@ -302,15 +291,11 @@ test('an unmoved canon and a canon still being appended to both spawn nothing', 
     const busy = makeLane(store, clock, { result: distilledResult(claims), quietMs: 60000 });
     assert.equal((await busy.distiller.runOnce()).status, 'busy');
     assert.equal(busy.spawns.length, 0);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 test('a distilled build is not re-run before its interval has elapsed', async () => {
   const dir = tempDir();
   const clock = { at: START };
-  try {
     const store = openStore(dir, clock);
     const [first] = await seed(store, clock, ['the poller ticks every 15 minutes']);
     clock.at += 2 * HOUR;
@@ -330,15 +315,11 @@ test('a distilled build is not re-run before its interval has elapsed', async ()
     const later = makeLane(store, clock, { result: distilledResult(claims) });
     assert.equal((await later.distiller.runOnce()).status, 'published');
     assert.equal(later.spawns.length, 1);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 test('a build that would re-render a locked record is held for review, never published', async () => {
   const dir = tempDir();
   const clock = { at: START };
-  try {
     const store = openStore(dir, clock);
     const locked = requireRecord(await store.append({
       kind: 'preference',
@@ -365,15 +346,11 @@ test('a build that would re-render a locked record is held for review, never pub
     assert.equal(manifestOf(dir).source, 'trivial');
     const held = fs.readFileSync(path.join(dir, 'dist-pending', 'MEMORY.md'), 'utf8');
     assert.equal(held.includes('else statements are banned'), true);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 test('once a distilled build is published the fallback renderer stops overwriting it', async () => {
   const dir = tempDir();
   const clock = { at: START };
-  try {
     const store = openStore(dir, clock);
     const [first] = await seed(store, clock, ['the poller ticks every 15 minutes']);
     clock.at += 2 * HOUR;
@@ -390,15 +367,11 @@ test('once a distilled build is published the fallback renderer stops overwritin
     assert.equal(published.includes('one distilled claim'), true);
     assert.equal(published.includes('a raw fact nobody distilled yet'), false);
     assert.equal(manifestOf(dir).source, 'distill');
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 test('a forget forces the expunged text out of a distilled build without waiting for the next run', async () => {
   const dir = tempDir();
   const clock = { at: START };
-  try {
     const store = openStore(dir, clock);
     const [doomed] = await seed(store, clock, ['the staging passphrase is in the prompt']);
     clock.at += 2 * HOUR;
@@ -413,9 +386,6 @@ test('a forget forces the expunged text out of a distilled build without waiting
     assert.equal(result?.ok, true);
     assert.equal(`${readCurrent(dir)}${readProjectFiles(dir)}`.includes('passphrase'), false);
     assert.equal(manifestOf(dir).source, 'trivial', 'the fallback owns dist/ again until the next distill run');
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 test('the lane is inert without a store and without its own enabled flag', async () => {
@@ -429,7 +399,6 @@ test('the lane is inert without a store and without its own enabled flag', async
 test('the scratch cwd carries the prefix the ingest exclusion recognizes', async () => {
   const dir = tempDir();
   const clock = { at: START };
-  try {
     const store = openStore(dir, clock);
     const [first] = await seed(store, clock, ['the poller ticks every 15 minutes']);
     clock.at += 2 * HOUR;
@@ -452,16 +421,12 @@ test('the scratch cwd carries the prefix the ingest exclusion recognizes', async
     for (const tool of ['Read', 'Write', 'Glob', 'Grep']) {
       assert.equal(MEMORY_DISTILL_DENY_TOOLS.includes(tool), false, tool);
     }
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 test('a poisoned manifest cannot walk the read out of the published build', async () => {
   const dir = tempDir();
   const clock = { at: START };
   const warnings: string[] = [];
-  try {
     const store = createMemoryStore({
       dir,
       dbPath: path.join(dir, 'glissa.db'),
@@ -490,15 +455,11 @@ test('a poisoned manifest cannot walk the read out of the published build', asyn
     assert.equal(documents.length, plantedFiles.length - 3, 'only the contained files were read');
     for (const document of documents) assert.equal(document.includes('root:'), false);
     assert.equal(warnings.filter((line) => line.includes('outside the build')).length, 3);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 test('a run reads only the records above the cursor and moves it once the build is verified', async () => {
   const dir = tempDir();
   const clock = { at: START };
-  try {
     const store = openStore(dir, clock);
     const [first] = await seed(store, clock, ['the poller ticks every 15 minutes']);
     assert.equal(store.distillCursorSeq(), 0);
@@ -530,15 +491,11 @@ test('a run reads only the records above the cursor and moves it once the build 
     const published = readProjectFiles(dir);
     assert.equal(published.includes('the poller ticks every 15 minutes'), true, 'the unread claim survived the merge');
     assert.equal(published.includes('the poller is opt in'), true);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 test('a failed run leaves the cursor where it was and counts against the delta window', async () => {
   const dir = tempDir();
   const clock = { at: START };
-  try {
     const store = openStore(dir, clock);
     const [first] = await seed(store, clock, ['the poller ticks every 15 minutes']);
     clock.at += 2 * HOUR;
@@ -555,15 +512,11 @@ test('a failed run leaves the cursor where it was and counts against the delta w
     assert.equal((await broken.distiller.runOnce()).status, 'error');
     assert.equal(store.distillCursorSeq(), cursor, 'the delta is left to be read again');
     assert.equal(store.distillFailures(), 1);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 test('a held locked diff blocks the cursor, so the same delta is re-read once the operator has ruled', async () => {
   const dir = tempDir();
   const clock = { at: START };
-  try {
     const store = openStore(dir, clock);
     const locked = requireRecord(await store.append({
       kind: 'preference',
@@ -584,15 +537,11 @@ test('a held locked diff blocks the cursor, so the same delta is re-read once th
     assert.equal((await distiller.runOnce()).status, 'pending');
     assert.equal(store.distillCursorSeq(), 0);
     assert.equal(store.distillFailures(), 1);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 test('a NO_CHANGE verdict publishes nothing and still moves the cursor past what it read', async () => {
   const dir = tempDir();
   const clock = { at: START };
-  try {
     const store = openStore(dir, clock);
     const [first] = await seed(store, clock, ['the poller ticks every 15 minutes']);
     clock.at += 2 * HOUR;
@@ -610,15 +559,11 @@ test('a NO_CHANGE verdict publishes nothing and still moves the cursor past what
     assert.equal(report.verdict, 'NO_CHANGE');
     assert.equal(manifestOf(dir).version, version, 'nothing was republished');
     assert.equal(store.distillCursorSeq(), second.seq);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 test('a superseded record loses its claim mechanically, with nothing spawned at all', async () => {
   const dir = tempDir();
   const clock = { at: START };
-  try {
     const store = openStore(dir, clock);
     const [stale, kept] = await seed(store, clock, ['the poller ticks every 5 minutes', 'the poller is opt in']);
     clock.at += 2 * HOUR;
@@ -647,15 +592,11 @@ test('a superseded record loses its claim mechanically, with nothing spawned at 
     const published = readProjectFiles(dir);
     assert.equal(published.includes('the poller ticks every 5 minutes'), false);
     assert.equal(published.includes('the poller is opt in'), true);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 test('a project past its claim threshold is re-distilled in full, and only that project is rewritten', async () => {
   const dir = tempDir();
   const clock = { at: START };
-  try {
     const store = openStore(dir, clock);
     const big = await seed(store, clock, ['big one', 'big two', 'big three']);
     const other = requireRecord(await store.append(knowledge('a fact from another checkout', '/repos/other')));
@@ -690,15 +631,11 @@ test('a project past its claim threshold is re-distilled in full, and only that 
     assert.equal(published.includes('standing big one'), false);
     assert.equal(published.includes('a standing claim elsewhere'), true, 'every other project is untouched');
     assert.equal(store.distillCursorSeq(), cursor, 'a compaction never moves the delta cursor');
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 test('the published projection is capped in bytes, whatever the model asked to publish', async () => {
   const dir = tempDir();
   const clock = { at: START };
-  try {
     const store = openStore(dir, clock);
     const seeds = await seed(store, clock, ['one', 'two', 'three']);
     clock.at += 2 * HOUR;
@@ -717,15 +654,11 @@ test('the published projection is capped in bytes, whatever the model asked to p
     assert.equal(published.length <= 1200, true, 'the delivered bytes are the wall, not the claim count');
     assert.equal(published.includes('standing 0'), true, 'a capped project is never emptied');
     assert.equal(published.includes('standing 2'), false, 'the last claim over the line is dropped');
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 test('a compaction that does not shrink its project is refused rather than published', async () => {
   const dir = tempDir();
   const clock = { at: START };
-  try {
     const store = openStore(dir, clock);
     const seeds = await seed(store, clock, ['one', 'two', 'three']);
     clock.at += 2 * HOUR;
@@ -744,15 +677,11 @@ test('a compaction that does not shrink its project is refused rather than publi
     assert.equal(report.status, 'error');
     assert.match(String(report.reason), /no smaller than/);
     assert.equal(manifestOf(dir).version, version);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 test('a forget drops the distilled claims, so the cursor falls back and the canon is read again', async () => {
   const dir = tempDir();
   const clock = { at: START };
-  try {
     const store = openStore(dir, clock);
     const [doomed, kept] = await seed(store, clock, ['the staging passphrase is hunter2', 'the poller is opt in']);
     clock.at += 2 * HOUR;
@@ -781,7 +710,4 @@ test('a forget drops the distilled claims, so the cursor falls back and the cano
     assert.equal((await after.distiller.runOnce()).status, 'published');
     assert.equal(after.spawns[0].prompt.includes(kept.id), true, 'the canon is re-read from the start');
     assert.equal(readProjectFiles(dir).includes('hunter2'), false);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
