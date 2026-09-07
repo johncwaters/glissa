@@ -64,6 +64,7 @@ import {
   planLimitStaleNote,
   planWindowOf,
   planWindowUsedText,
+  pricingFetchedAtMs,
   pricingSourceLine,
   projectionLimitLine,
   projectionLine,
@@ -676,7 +677,7 @@ function buildPeriodCell(row: UsageWireRow, periodView: string) {
 }
 
 function buildHeatmap(daily: unknown) {
-  const { cells, max } = heatmapCells(daily);
+  const { cells, max } = heatmapCells(daily, { today: reportDayKey(_report) });
   if (cells.length === 0 || max <= 0) return null;
   const wrap = el('div', 'usage-heatmap-scroll');
   const grid = el('div', 'usage-heatmap');
@@ -1037,8 +1038,8 @@ export function applyUsageReport(msg: unknown) {
 
 export function usageStatusLines() {
   const pricing = _report?.pricing || (_sessions ? { source: _sessions.pricingSource } : null);
-  const fetchedAt = Number(pricing?.fetchedAt);
-  const agoText = Number.isFinite(fetchedAt) && fetchedAt > 0 ? formatAgo(fetchedAt) : '';
+  const fetchedAt = pricingFetchedAtMs(pricing?.fetchedAt);
+  const agoText = fetchedAt !== null && fetchedAt > 0 ? formatAgo(fetchedAt) : '';
   const lines = [pricingSourceLine(pricing, agoText)];
   const error = usageErrorLine(_report);
   if (error) lines.push(error);

@@ -171,6 +171,18 @@ test('heatmapCells: 16 week columns of Monday-to-Sunday rows, anchored on this w
   assert.equal(lastColumn[6].day, '2026-08-23');
 });
 
+test('heatmapCells: a server day key makes later browser days beyond today', async () => {
+  const { heatmapCells } = await importCore();
+  const { cells } = heatmapCells([
+    day('2026-08-19', { tokens: 100 }),
+    day('2026-08-20', { tokens: 100 }),
+  ], { today: '2026-08-19' });
+  const byDay = new Map(cells.map((cell) => [cell.day, cell]));
+
+  assert.equal(cellFor(byDay, '2026-08-19').noData, false);
+  assert.equal(cellFor(byDay, '2026-08-20').noData, true);
+});
+
 test('heatmapCells: an empty day in range is distinct from a no-data day', async () => {
   const { heatmapCells } = await importCore();
   const today = new Date(2026, 7, 19, 12);

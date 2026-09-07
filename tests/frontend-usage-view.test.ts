@@ -253,13 +253,19 @@ test('usageAttentionSignature: official plan limits drive the block bucket when 
 });
 
 test('pricing and scan lines: source, staleness, missing models and a partial pass', async () => {
-  const { pricingSourceLine, missingPricingLine, scanLine } = await importCore();
+  const { pricingFetchedAtMs, pricingSourceLine, missingPricingLine, scanLine } = await importCore();
   assert.equal(
     pricingSourceLine({ source: 'fetched' }, '1h ago'),
     'Prices fetched from the public model price table, 1h ago.',
   );
   assert.equal(pricingSourceLine({ source: 'fetched' }), 'Prices fetched from the public model price table.');
+  assert.equal(pricingSourceLine({ source: 'cache' }, '1h ago'), 'Prices from the cached public model price table, 1h ago.');
+  assert.equal(pricingSourceLine({ source: 'cache' }), 'Prices from the cached public model price table.');
   assert.equal(pricingSourceLine({ source: 'snapshot' }), 'Prices from the price table bundled with this Glissa build.');
+
+  assert.equal(pricingFetchedAtMs(1766592000000), 1766592000000);
+  assert.equal(pricingFetchedAtMs('2026-08-19T12:00:00.000Z'), Date.parse('2026-08-19T12:00:00.000Z'));
+  assert.equal(pricingFetchedAtMs('not-a-date'), null);
 
   assert.equal(
     pricingSourceLine({ source: 'unavailable' }),
@@ -706,6 +712,7 @@ test('no produced string contains an em dash, en dash or ellipsis character', as
   produced.push(core.dayLabel('2026-08-19'), core.dayLabel(''), core.dayLabel(null));
   produced.push(core.dayRangeLabel([{ day: '2026-08-12' }, { day: '2026-08-19' }]), core.dayRangeLabel([]));
   produced.push(core.pricingSourceLine({ source: 'fetched' }, '2m ago'));
+  produced.push(core.pricingSourceLine({ source: 'cache' }, '2m ago'));
   produced.push(core.pricingSourceLine({ source: 'snapshot' }), core.pricingSourceLine({ source: 'unavailable' }));
   produced.push(core.pricingSourceLine(null));
   produced.push(core.missingPricingLine(['a', 'b']), core.missingPricingLine([]));

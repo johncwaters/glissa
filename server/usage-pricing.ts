@@ -6,6 +6,7 @@ import { normalizePricingTable } from './core/usage-pricing-core.ts';
 import type { ModelPrice } from './core/usage-pricing-core.ts';
 import pricingSnapshot from './data/claude-pricing.json' with { type: 'json' };
 import { createLaneLog } from './lane-log.ts';
+import type { LaneLog } from './lane-log.ts';
 
 const LITELLM_PRICING_URL = 'https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -125,18 +126,18 @@ async function readCache(fsPromises: PricingFileSystem, cachePath: string): Prom
   }
 }
 
-async function writeCache({ fsPromises, cachePath, fetchedAt, models, logger }: {
+async function writeCache({ fsPromises, cachePath, fetchedAt, models, laneLog }: {
   fsPromises: PricingFileSystem;
   cachePath: string;
   fetchedAt: string;
   models: ModelTable;
-  logger: Pick<Console, 'warn'> | null;
+  laneLog: LaneLog;
 }): Promise<void> {
   try {
     await fsPromises.mkdir(path.dirname(cachePath), { recursive: true });
     await fsPromises.writeFile(cachePath, JSON.stringify({ fetchedAt, models }, null, 2));
   } catch (error) {
-    createLaneLog({ prefix: '[usage]', logger }).warn('pricing cache write failed', {
+    laneLog.warn('pricing cache write failed', {
       path: cachePath,
       error: errorMessage(error),
     });
@@ -162,16 +163,23 @@ async function loadPricing({
     return { table: normalizePricingTable(pricingSnapshot), source: 'snapshot', fetchedAt: null };
   }
 
+  const laneLog = createLaneLog({ prefix: '[usage]', logger });
   const cache = await readCache(fsPromises, cachePath);
   if (cache && isFresh(cache.fetchedAt, nowFn())) {
     return pricedResult(cache.models, 'cache', cache.fetchedAt);
   }
 
-  const fetched = await fetchPricing({ fetchFn, timeoutMs }).catch(() => null);
+  let fetched: ModelTable | null;
+  try {
+    fetched = await fetchPricing({ fetchFn, timeoutMs });
+  } catch (error) {
+    laneLog.warn('pricing fetch failed', { error: errorMessage(error) });
+    fetched = null;
+  }
   if (fetched) {
     const fetchedAt = nowFn();
     const cacheFetchedAt = new Date(fetchedAt).toISOString();
-    await writeCache({ fsPromises, cachePath, fetchedAt: cacheFetchedAt, models: fetched, logger });
+    await writeCache({ fsPromises, cachePath, fetchedAt: cacheFetchedAt, models: fetched, laneLog });
     return pricedResult(fetched, 'fetched', fetchedAt);
   }
   if (cache) return pricedResult(cache.models, 'cache', cache.fetchedAt);

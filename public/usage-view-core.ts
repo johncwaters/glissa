@@ -705,17 +705,23 @@ export function heatmapCells(
   const dailyRows: UsageWireRow[] = Array.isArray(daily) ? daily : [];
   const rows = dailyRows.filter((row) => DAY_KEY_RE.test(String(row?.day ?? '')));
   const byDay = new Map(rows.map((row): [string, UsageWireRow] => [String(row.day), row]));
-  const todayKey = dayKeyOfDate(today instanceof Date ? today : new Date(today));
+  const suppliedToday = today instanceof Date ? today : new Date(today);
+  const fallbackToday = Number.isFinite(suppliedToday.getTime()) ? suppliedToday : new Date();
+  const todayKey = typeof today === 'string' && DAY_KEY_RE.test(today)
+    ? today
+    : dayKeyOfDate(fallbackToday);
   const anchor = parseDayKey(weekStartKey(todayKey));
   if (!anchor) return { cells: [], max: 0, weeks: 0 };
-  const firstDay = rows.length > 0 ? rows.map((row) => String(row.day)).sort()[0] : null;
   const start = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() - (weeks - 1) * 7, 12);
   const startKey = dayKeyOfDate(start);
   const cells: HeatmapCell[] = [];
 
   let max = 0;
+  let firstDay: string | null = null;
   for (const row of rows) {
-    if (String(row.day) < startKey || String(row.day) > todayKey) continue;
+    const rowDay = String(row.day);
+    if (firstDay === null || rowDay < firstDay) firstDay = rowDay;
+    if (rowDay < startKey || rowDay > todayKey) continue;
     max = Math.max(max, finiteNumber(row.tokens) ?? 0);
   }
   for (let week = 0; week < weeks; week += 1) {
@@ -928,9 +934,22 @@ export function pricingSourceLine(pricing: { source?: unknown } | null | undefin
     if (!ago) return 'Prices fetched from the public model price table.';
     return `Prices fetched from the public model price table, ${ago}.`;
   }
+  if (source === 'cache') {
+    const ago = typeof agoText === 'string' ? agoText.trim() : '';
+    if (!ago) return 'Prices from the cached public model price table.';
+    return `Prices from the cached public model price table, ${ago}.`;
+  }
   if (source === 'snapshot') return 'Prices from the price table bundled with this Glissa build.';
   if (source === 'unavailable') return 'Model prices could not be loaded, so every cost below counts as zero.';
   return 'Pricing source not reported yet.';
+}
+
+export function pricingFetchedAtMs(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value !== 'string') return null;
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return null;
+  return parsed;
 }
 
 export function missingPricingLine(missing: unknown) {

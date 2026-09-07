@@ -107,6 +107,7 @@ test('stale cache refetches', async () => {
 });
 
 test('fetch failure falls back to stale cache, then snapshot', async () => {
+  const warnings: string[] = [];
   const staleCache = await loadPricing({
     fetchEnabled: true,
     fsPromises: fakeFs({
@@ -119,9 +120,11 @@ test('fetch failure falls back to stale cache, then snapshot', async () => {
       throw new Error('offline');
     },
     nowFn: () => Date.parse('2026-08-19T12:00:00.000Z'),
+    logger: { warn: (message) => { warnings.push(message); } },
   });
   assert.equal(staleCache.source, 'cache');
   assert.equal(priceOf(staleCache.table, 'claude-cache').input_cost_per_token, 3);
+  assert.deepEqual(warnings, ['[usage] pricing fetch failed error=offline']);
 
   const snapshot = await loadPricing({
     fetchEnabled: true,
