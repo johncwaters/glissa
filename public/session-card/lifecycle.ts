@@ -14,7 +14,7 @@ import { setRunningActivity } from './activity.ts';
 import { agentBadgeText } from './agent-core.ts';
 import { computeAggregate } from './aggregate-core.ts';
 import type { CardOptions } from './card-dom.ts';
-import { buildCardDOM, closeDebugOverlay, isRenameInProgress, openDebugOverlay, setDebugMode, startInlineRename } from './card-dom.ts';
+import { buildCardDOM, closeDebugOverlay, isDebugModeEnabled, isRenameInProgress, openDebugOverlay, setDebugMode, startInlineRename } from './card-dom.ts';
 import type { SessionUi } from './card-registry.ts';
 import { aggregateEl, container, findSessionUi, sessionIdOf, sessionUIs } from './card-registry.ts';
 import { openConfirmDialog } from './modal.ts';
@@ -64,7 +64,7 @@ function updateButtonVisibility(ui: SessionUi) {
 
   ui.btnRename.classList.add('visible');
   ui.btnResume.classList.add('visible');
-  ui.btnTrace.classList.add('visible');
+  ui.btnTrace.classList.toggle('visible', isDebugModeEnabled());
   ui.btnRemove.classList.add('visible');
 }
 
@@ -425,7 +425,7 @@ export function setSessionPostTurn(sessionId: unknown, report: unknown) {
   for (const f of findings) perRule[f.rule] = (perRule[f.rule] || 0) + (f.count || 0);
   const detail = Object.keys(perRule).map((k) => `${k}: ${perRule[k]}`).join(', ');
   const verb = kind === 'fixed' ? 'auto-fixed' : 'flagged';
-  const glyph = kind === 'fixed' ? '✓' : '⚠';
+  const glyph = kind === 'fixed' ? String.fromCharCode(0x2713) : String.fromCharCode(0x26a0);
   paintCardBadge(ui, '.post-turn-badge', 'pt', {
     on: !!kind,
     value: kind || undefined,

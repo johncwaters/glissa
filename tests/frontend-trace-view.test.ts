@@ -320,6 +320,38 @@ test('the rendered prepend path builds one page in place and preserves scroll po
   assert.match(showPrependSource, /previousScrollTop \+ scrollElement\.scrollHeight - previousScrollHeight/);
 });
 
+test('debug mode gates every trace entry point and exits hidden trace views', () => {
+  const cardDomSource = fs.readFileSync(new URL('../public/session-card/card-dom.ts', import.meta.url), 'utf8');
+  const lifecycleSource = fs.readFileSync(new URL('../public/session-card/lifecycle.ts', import.meta.url), 'utf8');
+  const appSource = fs.readFileSync(new URL('../public/app.ts', import.meta.url), 'utf8');
+  const phoneShellSource = fs.readFileSync(new URL('../public/phone/phone-shell.ts', import.meta.url), 'utf8');
+
+  assert.match(cardDomSource, /for \(const listener of debugModeListeners\) listener\(_debugMode\)/);
+  assert.match(cardDomSource, /ui\.btnTrace\.classList\.toggle\('visible', _debugMode\)/);
+  assert.match(cardDomSource, /ui\.overflowMenu\.classList\.remove\('open'\)/);
+  assert.match(lifecycleSource, /ui\.btnTrace\.classList\.toggle\('visible', isDebugModeEnabled\(\)\)/);
+  assert.match(appSource, /onDebugModeChanged\(setTraceSurfaceAvailable\)/);
+  assert.match(appSource, /tabTrace\.hidden = !isAvailable/);
+  assert.match(appSource, /setPhoneScreenAvailable\('trace', isAvailable\)/);
+  assert.match(appSource, /if \(isPhoneShellActive\(\)\) return;\s*if \(!isAvailable && getActiveView\(\) === 'trace'\) activateView\('focus'\)/);
+  assert.match(appSource, /if \(!isTraceSurfaceAvailable\) return;/);
+  assert.match(appSource, /function isViewAvailable\(view: string\) \{\s*return VIEW_TABS\.some\(\(viewTab\) => viewTab\.view === view && !viewTab\.tab\.hidden\);/);
+  assert.match(appSource, /activateView\(isViewAvailable\(restoredView\) \? restoredView : 'focus', \{ persist: shouldPersistActiveView \}\)/);
+  assert.match(phoneShellSource, /if \(!isAvailable && active && uiState\.snapshot\(\)\.phoneScreen === screenId\) showScreen\(BOARD\)/);
+});
+
+test('a saved trace view survives the startup restore and reopens once debug mode arrives', () => {
+  const appSource = fs.readFileSync(new URL('../public/app.ts', import.meta.url), 'utf8');
+  const startupRestoreSource = appSource.slice(appSource.indexOf('if (!initialSettingsTarget) {'), appSource.indexOf('mountPhoneShell({'));
+  const traceSurfaceSource = appSource.slice(appSource.indexOf('function setTraceSurfaceAvailable'), appSource.indexOf('onDebugModeChanged('));
+
+  assert.match(startupRestoreSource, /const canRestoreSavedView = isViewAvailable\(savedView\);/);
+  assert.match(startupRestoreSource, /if \(!canRestoreSavedView\) savedViewAwaitingSurface = savedView;/);
+  assert.match(startupRestoreSource, /activateView\(canRestoreSavedView \? savedView : 'focus', \{ persist: canRestoreSavedView \}\)/);
+  assert.match(traceSurfaceSource, /if \(savedViewAwaitingSurface !== 'trace'\) return;\s*activateView\('trace'\);/);
+  assert.match(appSource, /if \(persist\) savedViewAwaitingSurface = null;/);
+});
+
 test('a command-name tag left unclosed resolves without backtracking', async () => {
   const records = [record({ kind: 'expansion', text: `<command-name>${' '.repeat(100000)}` })];
   const startedAt = Date.now();

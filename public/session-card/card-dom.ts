@@ -7,12 +7,22 @@ import { findSessionUi, sessionUIs } from './card-registry.ts';
 import { showErrorToast } from './toast.ts';
 
 let _debugMode = false;
+const debugModeListeners = new Set<(isEnabled: boolean) => void>();
 
 export function setDebugMode(on: boolean) {
   _debugMode = !!on;
   updateDebugVisibility();
+  for (const listener of debugModeListeners) listener(_debugMode);
 }
 
+export function onDebugModeChanged(listener: (isEnabled: boolean) => void) {
+  debugModeListeners.add(listener);
+  return () => debugModeListeners.delete(listener);
+}
+
+export function isDebugModeEnabled() {
+  return _debugMode;
+}
 
 interface TagBadgeSpec {
   cls: string;
@@ -115,7 +125,6 @@ export function buildCardDOM(sessionId: string, sessionName: string, initialStat
 
   return { card, header, nameEl, elapsedEl, btnRename, btnRestart, btnRestartFresh, btnResume, btnTrace, btnRemove, btnDebug, btnOverflow, overflowMenu, termWrap };
 }
-
 
 const RENAME_INPUT_CLASS = 'session-rename-input';
 
@@ -362,7 +371,11 @@ export function closeDebugOverlay(ui: SessionUi) {
 function updateDebugVisibility() {
   for (const [, ui] of sessionUIs) {
     ui.btnDebug.classList.toggle('visible', _debugMode);
-    if (!_debugMode && ui.debugOpen) closeDebugOverlay(ui);
+    ui.btnTrace.classList.toggle('visible', _debugMode);
+    if (_debugMode) continue;
+    if (ui.debugOpen) closeDebugOverlay(ui);
+    ui.overflowMenu.classList.remove('open');
+    ui.btnOverflow.setAttribute('aria-expanded', 'false');
   }
 }
 

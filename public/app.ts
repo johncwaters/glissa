@@ -16,13 +16,13 @@ import { applyIngestActivity, applyIngestSnapshot, applyVisionsComments, applyVi
 import { acknowledgeMillAttention, applyMillReport, mountMillView, refreshMillView, requestMillReport, setMillActivityCallback, setMillRequestSender } from './mill-panel.ts';
 import { applyDeleteHookResult, applyHooksReport, applySaveHookResult, mountHooksView, refreshHooksView, requestHooksReport, setHooksRequestSender } from './hooks-panel.ts';
 import { initNotifications, showDesktopNotification } from './notifications.ts';
-import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, isPhoneScreenActive, isPhoneShellActive, mountPhoneShell, refreshPhoneBoard, setPhoneScreenAttention, showPhoneScreen } from './phone/phone-shell.ts';
+import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, isPhoneScreenActive, isPhoneShellActive, mountPhoneShell, refreshPhoneBoard, setPhoneScreenAttention, setPhoneScreenAvailable, showPhoneScreen } from './phone/phone-shell.ts';
 import { noteKnownProjectPath } from './project-registry.ts';
 import { acknowledgePrAttention, applyPrStatus, mountPrView, setPrActivityCallback } from './pr-panel.ts';
 
 import { UPDATES_ACTIONS_SETTING_ID, UPDATES_SECTION_ID, updateBannerText } from './radar-core.ts';
 import { acknowledgeRadarAttention, applyHealthSnapshot as applyRadarHealth, applyInvestigationActivity, applyInvestigationFinished, applyPosthogStatus, applyPrStatus as applyRadarPrStatus, applyUpdateAvailable as applyRadarUpdate, mountRadarView, setRadarActivityCallback, setRadarNavigateToPrs } from './radar-panel.ts';
-import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.ts';
+import { handleDebugStateRefresh, handleDebugStateResponse, onDebugModeChanged } from './session-card/card-dom.ts';
 import { sessionUIs } from './session-card/card-registry.ts';
 import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, notePackVersion, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setLatestPackVersions, setSessionAgent, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPacks, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionUsage, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.ts';
 import { openConfirmDialog } from './session-card/modal.ts';
@@ -591,7 +591,12 @@ const VIEW_TABS = [
   { view: 'settings', tab: tabSettings, el: viewSettingsEl },
 ];
 
+function isViewAvailable(view: string) {
+  return VIEW_TABS.some((viewTab) => viewTab.view === view && !viewTab.tab.hidden);
+}
+
 let shouldPersistActiveView = true;
+let savedViewAwaitingSurface: string | null = null;
 function acknowledgeViewAttention(view: string) {
   if (view === 'radar') acknowledgeRadarAttention();
   if (view === 'prs') acknowledgePrAttention();
@@ -610,6 +615,7 @@ function activateView(view: string, { section, setting, persist = true }: Activa
   const prev = getActiveView();
   uiState.dispatch('setActiveView', view);
   shouldPersistActiveView = persist;
+  if (persist) savedViewAwaitingSurface = null;
 
   document.body.dataset.activeView = view;
 
@@ -643,7 +649,23 @@ function activateView(view: string, { section, setting, persist = true }: Activa
   acknowledgeViewAttention(view);
 }
 
+let isTraceSurfaceAvailable = false;
+function setTraceSurfaceAvailable(isAvailable: boolean) {
+  isTraceSurfaceAvailable = isAvailable;
+  tabTrace.hidden = !isAvailable;
+  setPhoneScreenAvailable('trace', isAvailable);
+  if (isPhoneShellActive()) return;
+  if (!isAvailable && getActiveView() === 'trace') activateView('focus');
+  if (!isAvailable) return;
+  if (savedViewAwaitingSurface !== 'trace') return;
+  activateView('trace');
+}
+
+onDebugModeChanged(setTraceSurfaceAvailable);
+setTraceSurfaceAvailable(false);
+
 setTraceNavigate(() => {
+  if (!isTraceSurfaceAvailable) return;
   if (showPhoneScreen('trace')) return;
   activateView('trace');
 });
@@ -673,7 +695,11 @@ if (initialSettingsTarget) {
     persist: false,
   });
 }
-if (!initialSettingsTarget) activateView(VIEW_TABS.some((v) => v.view === savedView) ? savedView : 'focus');
+if (!initialSettingsTarget) {
+  const canRestoreSavedView = isViewAvailable(savedView);
+  if (!canRestoreSavedView) savedViewAwaitingSurface = savedView;
+  activateView(canRestoreSavedView ? savedView : 'focus', { persist: canRestoreSavedView });
+}
 
 mountPhoneShell({
   radarPanelEl: viewRadarEl,
@@ -712,7 +738,8 @@ function applyFormFactorLayout(layout: string) {
   }
   const carriedSessionId = getPhoneSessionId();
   deactivatePhoneShell();
-  activateView(getActiveView(), { persist: shouldPersistActiveView });
+  const restoredView = getActiveView();
+  activateView(isViewAvailable(restoredView) ? restoredView : 'focus', { persist: shouldPersistActiveView });
 
   if (carriedSessionId) centerSessionQuietly(carriedSessionId);
 }
