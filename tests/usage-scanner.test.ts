@@ -96,6 +96,256 @@ test('an unreadable file is skipped while other files ingest', async () => {
   assert.equal(result.files, 2);
   assert.equal(result.entries, 1);
   assert.equal(result.newEntries, 1);
+  assert.equal(result.outcome, 'io-failed');
+  assert.equal(result.ioFailures, 1);
+});
+
+test('an unreadable transcript directory yields io-failed and leaves an unchanged warehouse byte-identical', async () => {
+  const root = await makeTempRoot();
+  const projectsDir = await makeProjectsDir(root);
+  const transcriptDir = path.join(projectsDir, 'C--repo');
+  const transcript = path.join(transcriptDir, 'session-a.jsonl');
+  const warehousePath = path.join(root, '.glissa', 'usage-warehouse.json');
+  await writeLines(transcript, [usageLine({ messageId: 'message-a', requestId: 'request-a', input: 10 })]);
+  let isTranscriptDirUnreadable = false;
+  let now = Date.parse('2026-08-19T12:00:00.000Z');
+  const injectedFs = {
+    ...fs,
+    readdir: async (dir: string, options: { withFileTypes: true }) => {
+      if (isTranscriptDirUnreadable && dir === transcriptDir) throw new Error('denied');
+      return fs.readdir(dir, options);
+    },
+  };
+  const scanner = makeScanner(root, { fsPromises: injectedFs, warehousePath, nowFn: () => now });
+
+  const complete = await scanner.runPass();
+  assert.equal(complete.outcome, 'complete');
+  const beforeFailure = await fs.readFile(warehousePath);
+  now += 60_000;
+  isTranscriptDirUnreadable = true;
+
+  const failed = await scanner.runPass();
+  assert.equal(failed.outcome, 'io-failed');
+  assert.equal(failed.ioFailures, 1);
+  assert.equal(failed.partial, false);
+  assert.deepEqual(await fs.readFile(warehousePath), beforeFailure);
+});
+
+test('an incremental io-failed pass still persists what the readable files added', async () => {
+  const root = await makeTempRoot();
+  const projectsDir = await makeProjectsDir(root);
+  const readableDir = path.join(projectsDir, 'C--repo');
+  const deniedDir = path.join(projectsDir, 'C--other');
+  const warehousePath = path.join(root, '.glissa', 'usage-warehouse.json');
+  await writeLines(path.join(readableDir, 'session-a.jsonl'), [usageLine({ messageId: 'message-a', requestId: 'request-a', input: 10 })]);
+  await writeLines(path.join(deniedDir, 'session-b.jsonl'), [usageLine({ messageId: 'message-b', requestId: 'request-b', input: 20 })]);
+  let isDeniedDirUnreadable = false;
+  let now = Date.parse('2026-08-19T12:00:00.000Z');
+  const injectedFs = {
+    ...fs,
+    readdir: async (dir: string, options: { withFileTypes: true }) => {
+      if (isDeniedDirUnreadable && dir === deniedDir) throw new Error('denied');
+      return fs.readdir(dir, options);
+    },
+  };
+  const scanner = makeScanner(root, { fsPromises: injectedFs, warehousePath, nowFn: () => now });
+
+  assert.equal((await scanner.runPass()).outcome, 'complete');
+  const tokensAfterComplete = await warehouseTokens(warehousePath);
+  now += 60_000;
+  isDeniedDirUnreadable = true;
+  await fs.appendFile(
+    path.join(readableDir, 'session-a.jsonl'),
+    `${usageLine({ messageId: 'message-c', requestId: 'request-c', input: 30 })}\n`,
+  );
+
+  const failed = await scanner.runPass();
+  assert.equal(failed.outcome, 'io-failed');
+  assert.equal(failed.storeReset, false);
+  assert.equal(await warehouseTokens(warehousePath), tokensAfterComplete + 30);
+});
+
+test('a forced io-failed pass leaves the warehouse untouched rather than persisting the half-rebuilt store', async () => {
+  const root = await makeTempRoot();
+  const projectsDir = await makeProjectsDir(root);
+  const readableDir = path.join(projectsDir, 'C--repo');
+  const deniedDir = path.join(projectsDir, 'C--other');
+  const warehousePath = path.join(root, '.glissa', 'usage-warehouse.json');
+  await writeLines(path.join(readableDir, 'session-a.jsonl'), [usageLine({ messageId: 'message-a', requestId: 'request-a', input: 10 })]);
+  await writeLines(path.join(deniedDir, 'session-b.jsonl'), [usageLine({ messageId: 'message-b', requestId: 'request-b', input: 20 })]);
+  let isDeniedDirUnreadable = false;
+  let now = Date.parse('2026-08-19T12:00:00.000Z');
+  const injectedFs = {
+    ...fs,
+    readdir: async (dir: string, options: { withFileTypes: true }) => {
+      if (isDeniedDirUnreadable && dir === deniedDir) throw new Error('denied');
+      return fs.readdir(dir, options);
+    },
+  };
+  const scanner = makeScanner(root, { fsPromises: injectedFs, warehousePath, nowFn: () => now });
+
+  assert.equal((await scanner.runPass()).outcome, 'complete');
+  const beforeFailure = await fs.readFile(warehousePath);
+  now += 60_000;
+  isDeniedDirUnreadable = true;
+
+  const forced = await scanner.runPass({ force: true });
+  assert.equal(forced.outcome, 'io-failed');
+  assert.equal(forced.storeReset, true);
+  assert.deepEqual(await fs.readFile(warehousePath), beforeFailure);
+});
+
+test('a file deleted between the stat and the open is skipped, not counted as an io failure', async () => {
+  const root = await makeTempRoot();
+  const projectsDir = await makeProjectsDir(root);
+  const present = path.join(projectsDir, 'C--repo', 'session-a.jsonl');
+  const deleted = path.join(projectsDir, 'C--repo', 'session-b.jsonl');
+  await writeLines(present, [usageLine({ messageId: 'message-a', requestId: 'request-a', input: 10 })]);
+  await writeLines(deleted, [usageLine({ messageId: 'message-b', requestId: 'request-b', input: 20 })]);
+  const missing: NodeJS.ErrnoException = new Error('ENOENT simulated');
+  missing.code = 'ENOENT';
+  const injectedFs = {
+    ...fs,
+    open: async (file: string, flags: string) => {
+      if (file === deleted) throw missing;
+      return fs.open(file, flags);
+    },
+  };
+  const scanner = makeScanner(root, { fsPromises: injectedFs });
+
+  const result = await scanner.runPass();
+  assert.equal(result.files, 2);
+  assert.equal(result.entries, 1);
+  assert.equal(result.outcome, 'complete');
+  assert.equal(result.ioFailures, 0);
+});
+
+test('failing opens cost no extra pricing sweep over the entries already held', async () => {
+  const root = await makeTempRoot();
+  const projectsDir = await makeProjectsDir(root);
+  const readable = path.join(projectsDir, 'C--repo', 'session-a.jsonl');
+  await writeLines(readable, [
+    usageLine({ messageId: 'message-a', requestId: 'request-a', input: 10 }),
+    usageLine({ messageId: 'message-b', requestId: 'request-b', input: 20 }),
+    usageLine({ messageId: 'message-c', requestId: 'request-c', input: 30 }),
+  ]);
+  const unreadable = ['session-b.jsonl', 'session-c.jsonl', 'session-d.jsonl']
+    .map((name) => path.join(projectsDir, 'C--repo', name));
+  for (const file of unreadable) await writeLines(file, [usageLine({ messageId: `message-${path.basename(file)}`, requestId: 'request-x', input: 5 })]);
+  const injectedFs = {
+    ...fs,
+    open: async (file: string, flags: string) => {
+      if (unreadable.includes(file)) throw new Error('denied');
+      return fs.open(file, flags);
+    },
+  };
+  let priceLookups = 0;
+  const countingPricingTable = new Map(pricingTable);
+  const lookupPrice = countingPricingTable.get.bind(countingPricingTable);
+  countingPricingTable.get = (key: string) => {
+    priceLookups += 1;
+    return lookupPrice(key);
+  };
+  const scanner = makeScanner(root, { fsPromises: injectedFs, pricingTable: countingPricingTable });
+
+  const result = await scanner.runPass();
+  assert.equal(result.ioFailures, 3);
+  assert.equal(result.entries, 3);
+  assert.equal(priceLookups, 3, 'one lookup per ingested entry, none re-swept per failed file');
+});
+
+test('a file that vanishes between the walk and the stat is skipped, not counted as an io failure', async () => {
+  const root = await makeTempRoot();
+  const projectsDir = await makeProjectsDir(root);
+  const present = path.join(projectsDir, 'C--repo', 'session-a.jsonl');
+  const vanished = path.join(projectsDir, 'C--repo', 'session-b.jsonl');
+  await writeLines(present, [usageLine({ messageId: 'message-a', requestId: 'request-a', input: 10 })]);
+  await writeLines(vanished, [usageLine({ messageId: 'message-b', requestId: 'request-b', input: 20 })]);
+  const missing: NodeJS.ErrnoException = new Error('ENOENT simulated');
+  missing.code = 'ENOENT';
+  const injectedFs = {
+    ...fs,
+    stat: async (file: string) => {
+      if (file === vanished) throw missing;
+      return fs.stat(file);
+    },
+  };
+  const scanner = makeScanner(root, { fsPromises: injectedFs });
+
+  const result = await scanner.runPass();
+  assert.equal(result.files, 2);
+  assert.equal(result.entries, 1);
+  assert.equal(result.outcome, 'complete');
+  assert.equal(result.ioFailures, 0);
+});
+
+test('a directory that vanishes between the walk and the readdir is skipped, not counted as an io failure', async () => {
+  const root = await makeTempRoot();
+  const projectsDir = await makeProjectsDir(root);
+  const transcriptDir = path.join(projectsDir, 'C--repo');
+  await writeLines(path.join(transcriptDir, 'session-a.jsonl'), [usageLine({ messageId: 'message-a', requestId: 'request-a', input: 10 })]);
+  const missing: NodeJS.ErrnoException = new Error('ENOENT simulated');
+  missing.code = 'ENOENT';
+  const injectedFs = {
+    ...fs,
+    readdir: async (dir: string, options: { withFileTypes: true }) => {
+      if (dir === transcriptDir) throw missing;
+      return fs.readdir(dir, options);
+    },
+  };
+  const scanner = makeScanner(root, { fsPromises: injectedFs });
+
+  const result = await scanner.runPass();
+  assert.equal(result.files, 0);
+  assert.equal(result.outcome, 'complete');
+  assert.equal(result.ioFailures, 0);
+});
+
+test('an unreadable projects root is an io failure, never an empty complete pass', async () => {
+  const root = await makeTempRoot();
+  const projectsDir = await makeProjectsDir(root);
+  await writeLines(path.join(projectsDir, 'C--repo', 'session-a.jsonl'), [
+    usageLine({ messageId: 'message-a', requestId: 'request-a', input: 10 }),
+  ]);
+  const denied: NodeJS.ErrnoException = new Error('EACCES simulated');
+  denied.code = 'EACCES';
+  const injectedFs = {
+    ...fs,
+    stat: async (file: string) => {
+      if (file === projectsDir) throw denied;
+      return fs.stat(file);
+    },
+  };
+  const scanner = makeScanner(root, { fsPromises: injectedFs });
+
+  const result = await scanner.runPass();
+  assert.equal(result.files, 0);
+  assert.equal(result.outcome, 'io-failed');
+  assert.equal(result.ioFailures, 1);
+  const scan = scanner.buildReport().scan;
+  assert.equal(scan.outcome, 'io-failed');
+  assert.equal(scan.ioFailures, 1);
+});
+
+test('an unreadable vendor root is an io failure', async () => {
+  const root = await makeTempRoot();
+  await makeProjectsDir(root);
+  const codexSessions = path.join(root, '.codex', 'sessions');
+  await fs.mkdir(codexSessions, { recursive: true });
+  const denied: NodeJS.ErrnoException = new Error('EIO simulated');
+  denied.code = 'EIO';
+  const injectedFs = {
+    ...fs,
+    stat: async (file: string) => {
+      if (file === codexSessions) throw denied;
+      return fs.stat(file);
+    },
+  };
+  const scanner = makeScanner(root, { fsPromises: injectedFs });
+
+  const result = await scanner.runPass();
+  assert.equal(result.outcome, 'io-failed');
+  assert.equal(result.ioFailures, 1);
 });
 
 test('dedup across configured dirs keeps one entry', async () => {
@@ -382,7 +632,8 @@ test('prune removes entries and dedup keys so a pruned line can reingest once', 
   await scanner.runPass();
   assert.equal(scanner.buildReport().totals.tokens, 10);
   now = Date.parse('2026-08-21T13:00:00.000Z');
-  await scanner.runPass();
+  const pruned = await scanner.runPass();
+  assert.equal(pruned.newEntries, 0);
   assert.equal(scanner.buildReport().totals.tokens, 0);
 
   await fs.appendFile(transcript, `${oldLine}\n`);
@@ -493,6 +744,12 @@ function makeScanner(root: string, overrides: UsageScannerOptions = {}): Scanner
     nowFn: () => Date.parse('2026-08-19T12:00:00.000Z'),
     ...overrides,
   });
+}
+
+async function warehouseTokens(warehousePath: string): Promise<number> {
+  const parsed: unknown = JSON.parse(await fs.readFile(warehousePath, 'utf8'));
+  const records = (parsed as { records?: { tokens?: number }[] }).records || [];
+  return records.reduce((total, record) => total + (record.tokens || 0), 0);
 }
 
 async function makeTempRoot(): Promise<string> {

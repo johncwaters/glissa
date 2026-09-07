@@ -1,5 +1,8 @@
 import path from 'node:path';
+import { nextBackoffMs } from './lane-backoff.ts';
 import { stringOrNull } from './usage-number-core.ts';
+
+export type PassOutcome = 'complete' | 'byte-limited' | 'io-failed';
 
 export interface FileReadCursor {
   offset?: number;
@@ -104,6 +107,42 @@ function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values));
 }
 
+function passOutcome(
+  { byteLimited, ioFailures }: { byteLimited: boolean; ioFailures: number },
+): PassOutcome {
+  if (ioFailures > 0) return 'io-failed';
+  if (byteLimited) return 'byte-limited';
+  return 'complete';
+}
+
+function shouldPersistWarehouse(
+  { outcome, storeReset }: { outcome: PassOutcome; storeReset: boolean },
+): boolean {
+  if (outcome === 'complete') return true;
+  if (outcome === 'byte-limited') return false;
+  return !storeReset;
+}
+
+function continuationDelayMs(
+  { outcome, ioFailureStreak, partialMs }: {
+    outcome: PassOutcome;
+    ioFailureStreak: number;
+    partialMs: number;
+  },
+): number | null {
+  if (outcome === 'complete') return null;
+  if (outcome === 'byte-limited') return partialMs;
+  return nextBackoffMs({ attempt: ioFailureStreak, baseMs: 30_000, maxMs: 300_000 });
+}
+
+function shouldEvaluateDespiteIoFailures(
+  { ioFailureStreak, limit }: { ioFailureStreak: number; limit: number },
+): boolean {
+  if (!Number.isFinite(ioFailureStreak) || !Number.isFinite(limit)) return false;
+  if (limit <= 0) return false;
+  return ioFailureStreak >= limit;
+}
+
 function vendorHomes(
   env: NodeJS.ProcessEnv,
   varName: string,
@@ -173,4 +212,4 @@ function codexSessionIdFromPath(filePath: unknown): string | null {
   return base || null;
 }
 
-export { decideFileRead, projectDirCandidates, resolveProjectsDirs, splitLines, codexHomes, grokHomes, codexRootCandidates, codexFallbackRoots, grokRootCandidates, codexSessionIdFromPath, dedupeCodexFiles, isUsageFile };
+export { decideFileRead, projectDirCandidates, resolveProjectsDirs, splitLines, passOutcome, shouldPersistWarehouse, continuationDelayMs, shouldEvaluateDespiteIoFailures, codexHomes, grokHomes, codexRootCandidates, codexFallbackRoots, grokRootCandidates, codexSessionIdFromPath, dedupeCodexFiles, isUsageFile };

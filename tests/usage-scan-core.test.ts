@@ -3,11 +3,48 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  continuationDelayMs,
   decideFileRead,
+  passOutcome,
+  shouldPersistWarehouse,
   projectDirCandidates,
   resolveProjectsDirs,
+  shouldEvaluateDespiteIoFailures,
   splitLines,
 } from '../server/core/usage-scan-core.ts';
+
+test('an incremental io-failed pass still earns a warehouse write, a forced one does not', () => {
+  assert.equal(shouldPersistWarehouse({ outcome: 'complete', storeReset: true }), true);
+  assert.equal(shouldPersistWarehouse({ outcome: 'byte-limited', storeReset: false }), false);
+  assert.equal(shouldPersistWarehouse({ outcome: 'io-failed', storeReset: false }), true);
+  assert.equal(shouldPersistWarehouse({ outcome: 'io-failed', storeReset: true }), false);
+});
+
+test('passOutcome distinguishes complete and byte-limited passes with io failure precedence', () => {
+  assert.equal(passOutcome({ byteLimited: false, ioFailures: 0 }), 'complete');
+  assert.equal(passOutcome({ byteLimited: true, ioFailures: 0 }), 'byte-limited');
+  assert.equal(passOutcome({ byteLimited: false, ioFailures: 1 }), 'io-failed');
+  assert.equal(passOutcome({ byteLimited: true, ioFailures: 1 }), 'io-failed');
+});
+
+test('continuationDelayMs selects no delay, partial cadence, and capped io backoff', (context) => {
+  context.mock.method(Math, 'random', () => 1);
+  assert.equal(continuationDelayMs({ outcome: 'complete', ioFailureStreak: 0, partialMs: 15_000 }), null);
+  assert.equal(continuationDelayMs({ outcome: 'byte-limited', ioFailureStreak: 0, partialMs: 15_000 }), 15_000);
+  assert.equal(continuationDelayMs({ outcome: 'io-failed', ioFailureStreak: 1, partialMs: 15_000 }), 30_000);
+  assert.equal(continuationDelayMs({ outcome: 'io-failed', ioFailureStreak: 2, partialMs: 15_000 }), 60_000);
+  assert.equal(continuationDelayMs({ outcome: 'io-failed', ioFailureStreak: 5, partialMs: 15_000 }), 300_000);
+  assert.equal(continuationDelayMs({ outcome: 'io-failed', ioFailureStreak: 20, partialMs: 15_000 }), 300_000);
+});
+
+test('shouldEvaluateDespiteIoFailures bounds the stall at the streak limit', () => {
+  assert.equal(shouldEvaluateDespiteIoFailures({ ioFailureStreak: 0, limit: 3 }), false);
+  assert.equal(shouldEvaluateDespiteIoFailures({ ioFailureStreak: 2, limit: 3 }), false);
+  assert.equal(shouldEvaluateDespiteIoFailures({ ioFailureStreak: 3, limit: 3 }), true);
+  assert.equal(shouldEvaluateDespiteIoFailures({ ioFailureStreak: 9, limit: 3 }), true);
+  assert.equal(shouldEvaluateDespiteIoFailures({ ioFailureStreak: 9, limit: 0 }), false);
+  assert.equal(shouldEvaluateDespiteIoFailures({ ioFailureStreak: Number.NaN, limit: 3 }), false);
+});
 
 test('decideFileRead covers first read, skip, append and restart', () => {
   assert.deepEqual(decideFileRead(null, { size: 10, mtimeMs: 1 }), { action: 'restart', readFrom: 0 });

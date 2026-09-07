@@ -6,8 +6,10 @@ import { USAGE_INTEGER_RANGES } from '../shared/settings-ranges.ts';
 import { USAGE_BUDGET_KEYS, USAGE_COST_MODES, USAGE_VENDOR_KEYS } from '../shared/usage-config.ts';
 import type { UsageVendorKey } from '../shared/usage-config.ts';
 import { execFileAsync as defaultExecFileAsync } from './child-process-safe.ts';
-import { evaluateBudget, mergeFiredState, normalizeBudgetConfig } from './core/usage-budget-core.ts';
+import { evaluateBudget, markFired, mergeFiredState, normalizeBudgetConfig } from './core/usage-budget-core.ts';
 import type { BudgetAlert, BudgetConfig, BudgetFiredState } from './core/usage-budget-core.ts';
+import { continuationDelayMs, shouldEvaluateDespiteIoFailures } from './core/usage-scan-core.ts';
+import type { PassOutcome } from './core/usage-scan-core.ts';
 import { computeCacheSavings, normalizeRtkGain } from './core/usage-savings-core.ts';
 import {
   buildPlanLimitsMessage,
@@ -49,6 +51,8 @@ const NUDGE_DEBOUNCE_MS = 2000;
 
 const PARTIAL_CONTINUE_MS = 15000;
 const FORCE_PASS_MIN_INTERVAL_MS = 3000;
+const TELEGRAM_TIMEOUT_MS = 10000;
+const IO_FAILURE_EVALUATION_LIMIT = 3;
 
 const RTK_SAVINGS_TTL_MS = 60000;
 const RTK_GAIN_ARGS = Object.freeze(['gain', '--daily', '--format', 'json']);
@@ -102,6 +106,7 @@ type SessionsMessage = {
 };
 
 type RtkSavings = { available: boolean } & Record<string, unknown>;
+type PassResult = Awaited<ReturnType<UsageScannerApi['runPass']>>;
 
 interface UsageWiringOptions {
   config: WiringConfig;
@@ -112,6 +117,7 @@ interface UsageWiringOptions {
   budgetStatePath?: string | null;
   laneMap?: (() => Map<string, string>) | null;
   sendTelegram?: typeof sendTelegramMessage;
+  telegramTimeoutMs?: number;
   fsPromises?: typeof nodeFsPromises;
   createScanner?: (deps?: UsageScannerOptions) => UsageScannerApi;
   loadPricingFn?: typeof loadPricing;
@@ -122,6 +128,8 @@ interface UsageWiringOptions {
   partialContinueMs?: number;
   setIntervalFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
   clearIntervalFn?: (handle: NodeJS.Timeout) => void;
+  setTimeoutFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
+  clearTimeoutFn?: (handle: NodeJS.Timeout) => void;
   logger?: Pick<Console, 'warn' | 'log'>;
   debug?: boolean | (() => boolean);
 }
@@ -207,6 +215,7 @@ function createUsageWiring({
 
   laneMap = null,
   sendTelegram = sendTelegramMessage,
+  telegramTimeoutMs = TELEGRAM_TIMEOUT_MS,
   fsPromises = nodeFsPromises,
   createScanner = createUsageScanner,
   loadPricingFn = loadPricing,
@@ -218,6 +227,8 @@ function createUsageWiring({
   partialContinueMs = PARTIAL_CONTINUE_MS,
   setIntervalFn = (fn: () => void, ms: number) => setInterval(fn, ms),
   clearIntervalFn = clearInterval,
+  setTimeoutFn = (fn: () => void, ms: number) => setTimeout(fn, ms),
+  clearTimeoutFn = clearTimeout,
   logger = console,
   debug = false,
 }: UsageWiringOptions) {
@@ -234,14 +245,18 @@ function createUsageWiring({
   let nudgeTimer: NodeJS.Timeout | null = null;
   let continueTimer: NodeJS.Timeout | null = null;
   let restartChain: Promise<void> = Promise.resolve();
-  let lastSessionsMessage: SessionsMessage | null = null;
   let lastSessionsSignature: string | null = null;
   let lastReportMessage: Record<string, unknown> | null = null;
   let lastForcedPassMs = 0;
+  let ioFailureStreak = 0;
+  let ioFailureStreakId = 0;
 
   let planLimits: StatuslineSnapshot | null = null;
   const officialCostByClaudeId = new Map<string, number>();
-  let budgetFiredState: BudgetFiredState | Record<string, never> = {};
+  let budgetFiredState: BudgetFiredState = { daily: {}, monthly: {} };
+  let budgetEvaluationChain: Promise<void> = Promise.resolve();
+  let budgetEvaluationRunning = false;
+  let budgetEvaluationQueued: Promise<void> | null = null;
 
   const budgetStateStore = createJsonStateStore<BudgetFiredState>({
     name: 'budget state',
@@ -319,7 +334,7 @@ function createUsageWiring({
   async function runPassAndPush({ force }: { force: boolean }) {
     if (stopped || !scanner) return null;
     passInFlight = true;
-    let result: Awaited<ReturnType<ReturnType<typeof createUsageScanner>['runPass']>> | null = null;
+    let result: PassResult | null = null;
     try {
       result = await scanner.runPass({ force });
     } catch (error) {
@@ -337,33 +352,51 @@ function createUsageWiring({
           entries: result.entries,
           newEntries: result.newEntries,
           durationMs: result.durationMs,
-          outcome: result.partial ? 'partial' : 'complete',
+          outcome: result.outcome,
         }),
       );
     }
 
-    if (lastSessionsMessage === null || (result && result.newEntries > 0)) pushSessions();
+    if (result?.outcome === 'io-failed') {
+      ioFailureStreak += 1;
+      laneLog.warnOnce(
+        `scan-io:${ioFailureStreakId}`,
+        'scan pass lost files to io errors',
+        { ioFailures: result.ioFailures, files: result.files },
+      );
+    }
+    if (result?.outcome === 'complete') {
+      if (ioFailureStreak > 0) ioFailureStreakId += 1;
+      ioFailureStreak = 0;
+    }
 
-    if (result && !result.partial) await evaluateBudgets();
-    if (result?.partial) scheduleContinuation();
+    const lostTheStore = result?.outcome === 'io-failed' && result.storeReset;
+    if (result && !lostTheStore) pushSessions();
+
+    const evaluateNow = result?.outcome === 'complete'
+      || (result?.outcome === 'io-failed' && shouldEvaluateDespiteIoFailures({ ioFailureStreak, limit: IO_FAILURE_EVALUATION_LIMIT }));
+    if (evaluateNow) await evaluateBudgets();
+    if (result) scheduleContinuation(result.outcome);
     return result;
   }
 
-  function scheduleContinuation(): void {
+  function scheduleContinuation(outcome: PassOutcome): void {
+    const delayMs = continuationDelayMs({ outcome, ioFailureStreak, partialMs: partialContinueMs });
+    if (delayMs === null) return;
     if (stopped || !scanner || continueTimer) return;
-    if (controlClientCount() === 0) return;
-    continueTimer = setTimeout(() => {
+    if (outcome === 'byte-limited' && controlClientCount() === 0) return;
+    continueTimer = setTimeoutFn(() => {
       continueTimer = null;
       if (stopped || !scanner || passInFlight) return;
       void runPassAndPush({ force: false });
-    }, partialContinueMs);
+    }, delayMs);
     if (typeof continueTimer.unref === 'function') continueTimer.unref();
   }
 
   function nudgeSession(): void {
     if (stopped || !scanner) return;
-    if (nudgeTimer) clearTimeout(nudgeTimer);
-    nudgeTimer = setTimeout(() => {
+    if (nudgeTimer) clearTimeoutFn(nudgeTimer);
+    nudgeTimer = setTimeoutFn(() => {
       nudgeTimer = null;
       if (stopped || !scanner) return;
 
@@ -409,7 +442,6 @@ function createUsageWiring({
     const signature = JSON.stringify(message.sessions);
     if (signature === lastSessionsSignature) return;
     lastSessionsSignature = signature;
-    lastSessionsMessage = message;
     broadcast(message);
   }
 
@@ -459,24 +491,34 @@ function createUsageWiring({
     );
   }
 
-  function deliverBudgetTelegram(alert: BudgetAlert): void {
+  async function deliverBudgetTelegram(alert: BudgetAlert): Promise<boolean> {
     const decision = decideTelegramNotification({
       enabled: config.telegramNotifications === true,
       botToken: config.telegram?.botToken || '',
       chatId: config.telegram?.chatId || '',
       connectionCount: controlClientCount(),
     });
-    if (!decision.send) return;
+    if (!decision.send) return true;
     const telegram = config.telegram;
-    if (!telegram?.botToken || !telegram.chatId) return;
-    void Promise.resolve(sendTelegram({
+    if (!telegram?.botToken || !telegram.chatId) return true;
+    const message = {
       botToken: telegram.botToken,
       chatId: telegram.chatId,
       text: budgetAlertText(alert),
-    })).catch(() => {});
+      timeoutMs: telegramTimeoutMs,
+    };
+    try {
+      const outcome = await sendTelegram(message);
+      if (outcome.ok) return true;
+      laneLog.warn('budget telegram failed', { scope: alert.scope, period: alert.periodKey, error: outcome.error || 'delivery declined' });
+      return false;
+    } catch (error) {
+      laneLog.warn('budget telegram failed', { scope: alert.scope, period: alert.periodKey, error: errorMessage(error) });
+      return false;
+    }
   }
 
-  async function evaluateBudgets(): Promise<void> {
+  async function evaluateBudgetsOnce(): Promise<void> {
     if (stopped || !scanner || !budgetStatePath) return;
 
     if (cfg.budget.dailyUsd === null && cfg.budget.monthlyUsd === null) return;
@@ -489,18 +531,39 @@ function createUsageWiring({
       todayKey: spend.todayKey,
       monthKey: spend.monthKey,
     }, budgetFiredState);
-    budgetFiredState = firedState;
-    if (alerts.length === 0) {
-
-      await saveBudgetState();
-      return;
-    }
     for (const alert of alerts) {
-      const message = { type: 'usage-budget-alert', ...alert, text: budgetAlertText(alert), ts: nowFn() };
-      broadcast(message);
-      deliverBudgetTelegram(alert);
+      broadcast({
+        type: 'usage-budget-alert',
+        scope: alert.scope,
+        threshold: alert.threshold,
+        spentUsd: alert.spentUsd,
+        budgetUsd: alert.budgetUsd,
+        periodKey: alert.periodKey,
+        text: budgetAlertText(alert),
+        ts: nowFn(),
+      });
+      if (!await deliverBudgetTelegram(alert)) continue;
+      for (const threshold of alert.thresholds) markFired(firedState, alert.scope, alert.periodKey, threshold);
     }
+    budgetFiredState = firedState;
     await saveBudgetState();
+  }
+
+  function startBudgetEvaluation(): Promise<void> {
+    budgetEvaluationRunning = true;
+    const evaluation = evaluateBudgetsOnce();
+    budgetEvaluationChain = evaluation.catch(() => {}).then(() => { budgetEvaluationRunning = false; });
+    return evaluation;
+  }
+
+  function evaluateBudgets(): Promise<void> {
+    if (!budgetEvaluationRunning) return startBudgetEvaluation();
+    if (budgetEvaluationQueued) return budgetEvaluationQueued;
+    budgetEvaluationQueued = budgetEvaluationChain.then(() => {
+      budgetEvaluationQueued = null;
+      return startBudgetEvaluation();
+    });
+    return budgetEvaluationQueued;
   }
 
   async function fetchRtkSavings(): Promise<RtkSavings> {
@@ -583,6 +646,8 @@ function createUsageWiring({
         entries: report.scan.entries,
         lastScanMs: report.scan.lastScanMs,
         partial: report.scan.partial,
+        outcome: report.scan.outcome,
+        ioFailures: report.scan.ioFailures,
       },
 
       warning: scanStats.resolutionError || null,
@@ -598,11 +663,11 @@ function createUsageWiring({
       intervalTimer = null;
     }
     if (nudgeTimer) {
-      clearTimeout(nudgeTimer);
+      clearTimeoutFn(nudgeTimer);
       nudgeTimer = null;
     }
     if (continueTimer) {
-      clearTimeout(continueTimer);
+      clearTimeoutFn(continueTimer);
       continueTimer = null;
     }
   }
@@ -615,7 +680,6 @@ function createUsageWiring({
     startPromise = null;
     scanner = null;
     pricing = null;
-    lastSessionsMessage = null;
     lastSessionsSignature = null;
     lastReportMessage = null;
   }

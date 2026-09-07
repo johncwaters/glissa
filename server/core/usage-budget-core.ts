@@ -14,6 +14,7 @@ export type BudgetFiredState = Record<BudgetScope, Record<string, number[]>>;
 export interface BudgetAlert {
   scope: BudgetScope;
   threshold: number;
+  thresholds: number[];
   spentUsd: number;
   budgetUsd: number;
   periodKey: string;
@@ -93,12 +94,10 @@ function evaluateScope({ scope, spentUsd, budgetUsd, periodKey, firedState }: {
   const pct = pctOfBudget(spentUsd, budgetUsd);
   const crossedThresholds = BUDGET_THRESHOLDS.filter((threshold) => pct >= threshold && !hasFired(firedState, scope, periodKey, threshold));
   if (crossedThresholds.length === 0) return null;
-  const threshold = crossedThresholds[crossedThresholds.length - 1];
-
-  for (const crossed of crossedThresholds) markFired(firedState, scope, periodKey, crossed);
   return {
     scope,
-    threshold,
+    threshold: crossedThresholds[crossedThresholds.length - 1],
+    thresholds: crossedThresholds,
     spentUsd: safeNumber(spentUsd),
     budgetUsd,
     periodKey,
@@ -202,4 +201,4 @@ function positiveNumberOrNull(value: unknown): number | null {
   return number;
 }
 
-export { BUDGET_THRESHOLDS, budgetStanding, evaluateBudget, mergeFiredState, normalizeBudgetConfig };
+export { BUDGET_THRESHOLDS, budgetStanding, evaluateBudget, markFired, mergeFiredState, normalizeBudgetConfig };

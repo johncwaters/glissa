@@ -5,9 +5,18 @@ import {
   BUDGET_THRESHOLDS,
   budgetStanding,
   evaluateBudget,
+  markFired,
   mergeFiredState,
   normalizeBudgetConfig,
 } from '../server/core/usage-budget-core.ts';
+import type { BudgetAlert, BudgetFiredState } from '../server/core/usage-budget-core.ts';
+
+function stampAlerts(firedState: BudgetFiredState, alerts: BudgetAlert[]): BudgetFiredState {
+  for (const alert of alerts) {
+    for (const threshold of alert.thresholds) markFired(firedState, alert.scope, alert.periodKey, threshold);
+  }
+  return firedState;
+}
 
 test('normalizeBudgetConfig keeps finite positive numbers only', () => {
   assert.deepEqual(normalizeBudgetConfig({ dailyUsd: 10, monthlyUsd: 0 }), { dailyUsd: 10, monthlyUsd: null });
@@ -23,8 +32,9 @@ test('evaluateBudget fires when spending crosses a ladder threshold', () => {
     todayKey: '2026-08-19',
   });
   assert.deepEqual(evaluated.alerts, [
-    { scope: 'daily', threshold: 50, spentUsd: 5, budgetUsd: 10, periodKey: '2026-08-19' },
+    { scope: 'daily', threshold: 50, thresholds: [50], spentUsd: 5, budgetUsd: 10, periodKey: '2026-08-19' },
   ]);
+  assert.deepEqual(evaluated.firedState, { daily: {}, monthly: {} }, 'the returned state is pruned, never stamped');
 });
 
 test('evaluateBudget fires only the highest new threshold', () => {
@@ -34,17 +44,20 @@ test('evaluateBudget fires only the highest new threshold', () => {
     todayKey: '2026-08-19',
   });
   assert.deepEqual(evaluated.alerts.map((alert) => alert.threshold), [100]);
+  assert.deepEqual(evaluated.alerts.map((alert) => alert.thresholds), [[50, 75, 100]]);
 });
 
 test('evaluateBudget fires once per period and threshold', () => {
   const first = evaluateBudget({ budget: { dailyUsd: 10 }, todayUsd: 5, todayKey: '2026-08-19' });
-  const second = evaluateBudget({ budget: { dailyUsd: 10 }, todayUsd: 6, todayKey: '2026-08-19' }, first.firedState);
+  const stamped = stampAlerts(first.firedState, first.alerts);
+  const second = evaluateBudget({ budget: { dailyUsd: 10 }, todayUsd: 6, todayKey: '2026-08-19' }, stamped);
   assert.deepEqual(second.alerts, []);
 });
 
 test('evaluateBudget period rollover re-arms alerts', () => {
   const first = evaluateBudget({ budget: { dailyUsd: 10 }, todayUsd: 5, todayKey: '2026-08-19' });
-  const second = evaluateBudget({ budget: { dailyUsd: 10 }, todayUsd: 5, todayKey: '2026-08-20' }, first.firedState);
+  const stamped = stampAlerts(first.firedState, first.alerts);
+  const second = evaluateBudget({ budget: { dailyUsd: 10 }, todayUsd: 5, todayKey: '2026-08-20' }, stamped);
   assert.deepEqual(second.alerts.map((alert) => alert.periodKey), ['2026-08-20']);
 });
 
@@ -73,6 +86,23 @@ test('evaluateBudget ignores null budgets', () => {
   });
   assert.deepEqual(evaluated.alerts, []);
   assert.deepEqual(evaluated.firedState, { daily: {}, monthly: {} });
+});
+
+test('markFired stamps only the alerts handed to it, leaving the rest armed', () => {
+  const evaluated = evaluateBudget({
+    budget: { dailyUsd: 10, monthlyUsd: 100 },
+    todayUsd: 12,
+    monthUsd: 80,
+    todayKey: '2026-08-19',
+    monthKey: '2026-08',
+  }, { daily: { '2026-08-19': [50] }, monthly: {} });
+  assert.deepEqual(evaluated.alerts.map((alert) => alert.thresholds), [[75, 100], [50, 75]]);
+
+  const daily = evaluated.alerts.filter((alert) => alert.scope === 'daily');
+  assert.deepEqual(stampAlerts(evaluated.firedState, daily), {
+    daily: { '2026-08-19': [50, 75, 100] },
+    monthly: {},
+  });
 });
 
 test('budgetStanding reports tones', () => {

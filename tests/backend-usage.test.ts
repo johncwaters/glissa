@@ -9,6 +9,7 @@ import path from 'node:path';
 
 import { createBackend } from '../server/backend.ts';
 import { createUsageWiring } from '../server/usage-wiring.ts';
+import type { UsageWiringOptions } from '../server/usage-wiring.ts';
 import { createUsageScanner } from '../server/usage-scanner.ts';
 import { loadPricing } from '../server/usage-pricing.ts';
 import { closeSocket, dashboardClient, openRecordingSocket, waitForMessage } from './helpers/dashboard-ws.ts';
@@ -319,7 +320,11 @@ function scriptedScanner(passes: PassArgs[], passResults: PassResult[]) {
   return scanner;
 }
 
-function stubScannerWiring({ passResults, clients = 1 }: { passResults: PassResult[]; clients?: number }) {
+function stubScannerWiring({ passResults, clients = 1, setTimeoutFn }: {
+  passResults: PassResult[];
+  clients?: number;
+  setTimeoutFn?: NonNullable<UsageWiringOptions['setTimeoutFn']>;
+}) {
   const passes: PassArgs[] = [];
   const scanner = scriptedScanner(passes, passResults);
   const wiring = createUsageWiring({
@@ -329,13 +334,43 @@ function stubScannerWiring({ passResults, clients = 1 }: { passResults: PassResu
     createScanner: () => scanner,
     loadPricingFn: async () => ({ table: new Map(), source: 'snapshot', fetchedAt: null }),
     partialContinueMs: 10,
+    setTimeoutFn,
     logger: { warn: () => {}, log: () => {} },
   });
   return { wiring, passes };
 }
 
-const PARTIAL_PASS: PassResult = { files: 1, entries: 1, newEntries: 1, partial: true, durationMs: 1 };
-const COMPLETE_PASS: PassResult = { files: 1, entries: 1, newEntries: 0, partial: false, durationMs: 1 };
+const PARTIAL_PASS: PassResult = {
+  files: 1,
+  entries: 1,
+  newEntries: 1,
+  partial: true,
+  outcome: 'byte-limited',
+  ioFailures: 0,
+  storeReset: false,
+  durationMs: 1,
+};
+const COMPLETE_PASS: PassResult = {
+  files: 1,
+  entries: 1,
+  newEntries: 0,
+  partial: false,
+  outcome: 'complete',
+  ioFailures: 0,
+  storeReset: false,
+  durationMs: 1,
+};
+const IO_FAILED_PASS: PassResult = {
+  files: 1,
+  entries: 0,
+  newEntries: 0,
+  partial: false,
+  outcome: 'io-failed',
+  ioFailures: 1,
+  storeReset: false,
+  durationMs: 1,
+};
+const FORCED_IO_FAILED_PASS: PassResult = { ...IO_FAILED_PASS, storeReset: true };
 
 test('completed passes write one debug note only when usage debug is enabled', async () => {
   const debugNotes: string[] = [];
@@ -368,7 +403,48 @@ test('completed passes write one debug note only when usage debug is enabled', a
   await quietWiring.stop();
 });
 
-test('a partial pass is continued on the short timer until the scan completes', async () => {
+test('a pass with no new entries pushes its changed totals, an incremental io-failed pass still pushes, and a forced one does not', async () => {
+  const passResults: PassResult[] = [COMPLETE_PASS, IO_FAILED_PASS, FORCED_IO_FAILED_PASS];
+  const totalsByPass = [
+    { tokens: 10, costUSD: 1, lastTs: 1 },
+    { tokens: 20, costUSD: 2, lastTs: 2 },
+    { tokens: 0, costUSD: 0, lastTs: null },
+  ];
+  let passCount = 0;
+  const scanner = scriptedScanner([], passResults);
+  scanner.runPass = async () => {
+    passCount += 1;
+    return passResults[Math.min(passCount - 1, passResults.length - 1)];
+  };
+  scanner.sessionTotals = () => new Map([
+    ['resume-a', totalsByPass[Math.min(passCount - 1, totalsByPass.length - 1)]],
+  ]);
+  const pushedTokens: number[] = [];
+  const wiring = createUsageWiring({
+    config: {},
+    sessions: new Map([['card-a', { resumeSessionId: 'resume-a' }]]),
+    broadcast: (message) => {
+      if (message.type !== 'usage-sessions') return;
+      if (!Array.isArray(message.sessions)) return;
+      const firstSession: unknown = message.sessions[0];
+      if (!firstSession || typeof firstSession !== 'object') return;
+      const tokens = (firstSession as { tokens?: unknown }).tokens;
+      if (typeof tokens === 'number') pushedTokens.push(tokens);
+    },
+    createScanner: () => scanner,
+    loadPricingFn: async () => ({ table: new Map(), source: 'snapshot', fetchedAt: null }),
+    logger: { warn: () => {}, log: () => {} },
+  });
+
+  await wiring.start();
+  await wiring.requestReport({ force: true });
+  await wiring.requestReport({ force: true });
+
+  assert.deepEqual(pushedTokens, [10, 20]);
+  await wiring.stop();
+});
+
+test('a byte-limited pass is continued on the short timer until the scan completes', async () => {
   const { wiring, passes } = stubScannerWiring({ passResults: [PARTIAL_PASS, PARTIAL_PASS, COMPLETE_PASS] });
   await wiring.start();
   assert.equal(passes.length, 1, 'the boot pass');
@@ -379,6 +455,49 @@ test('a partial pass is continued on the short timer until the scan completes', 
   await wiring.stop();
 });
 
+test('io-failed passes retry with capped backoff and warn once per standing failure', async (context) => {
+  context.mock.method(Math, 'random', () => 1);
+  const passes: PassArgs[] = [];
+  const delays: number[] = [];
+  const warnings: string[] = [];
+  const scanner = scriptedScanner(passes, [
+    IO_FAILED_PASS,
+    IO_FAILED_PASS,
+    IO_FAILED_PASS,
+    COMPLETE_PASS,
+    IO_FAILED_PASS,
+    COMPLETE_PASS,
+  ]);
+  const wiring = createUsageWiring({
+    config: {},
+    sessions: new Map(),
+    controlClientCount: () => 1,
+    createScanner: () => scanner,
+    loadPricingFn: async () => ({ table: new Map(), source: 'snapshot', fetchedAt: null }),
+    setTimeoutFn: (fn, ms) => {
+      delays.push(ms);
+      const handle = setTimeout(fn, 0);
+      handle.unref();
+      return handle;
+    },
+    logger: { warn: (message: string) => { warnings.push(message); }, log: () => {} },
+  });
+
+  await wiring.start();
+  await waitUntil(() => passes.length === 4, 'three io retries followed by recovery');
+  assert.deepEqual(delays, [30_000, 60_000, 120_000]);
+  assert.deepEqual(warnings, ['[usage] scan pass lost files to io errors ioFailures=1 files=1']);
+
+  await wiring.requestReport({ force: true });
+  await waitUntil(() => passes.length === 6, 'a second io streak followed by recovery');
+  assert.deepEqual(delays, [30_000, 60_000, 120_000, 30_000]);
+  assert.deepEqual(warnings, [
+    '[usage] scan pass lost files to io errors ioFailures=1 files=1',
+    '[usage] scan pass lost files to io errors ioFailures=1 files=1',
+  ]);
+  await wiring.stop();
+});
+
 test('a partial pass is not continued while no dashboard is connected', async () => {
   const { wiring, passes } = stubScannerWiring({ passResults: [PARTIAL_PASS], clients: 0 });
   await wiring.start();
@@ -386,6 +505,25 @@ test('a partial pass is not continued while no dashboard is connected', async ()
 
   await settle(80);
   assert.equal(passes.length, 1, 'nobody is looking, so the tree is left for the next interval tick');
+  await wiring.stop();
+});
+
+test('an io-failed pass is retried with no dashboard connected', async () => {
+  const { wiring, passes } = stubScannerWiring({
+    passResults: [IO_FAILED_PASS, COMPLETE_PASS],
+    clients: 0,
+    setTimeoutFn: (fn, _ms) => {
+      const handle = setTimeout(fn, 0);
+      handle.unref();
+      return handle;
+    },
+  });
+  await wiring.start();
+  assert.equal(passes.length, 1);
+
+  await waitUntil(() => passes.length === 2, 'the io retry to run with nobody watching');
+  await settle(60);
+  assert.equal(passes.length, 2, 'the recovered pass schedules no further continuation');
   await wiring.stop();
 });
 
@@ -420,7 +558,16 @@ test('a settings restart during an in-flight start arms the NEW interval cadence
   scanner.runPass = async () => {
     counted.passes += 1;
     if (counted.passes === 1) await firstPassGate;
-    return { files: 0, entries: 0, newEntries: 0, partial: false, durationMs: 1 };
+    return {
+      files: 0,
+      entries: 0,
+      newEntries: 0,
+      partial: false,
+      outcome: 'complete',
+      ioFailures: 0,
+      storeReset: false,
+      durationMs: 1,
+    };
   };
   const config: { usage: Record<string, unknown> } = { usage: { scanIntervalMinutes: 1 } };
   const wiring = createUsageWiring({

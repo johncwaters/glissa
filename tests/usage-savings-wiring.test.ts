@@ -5,6 +5,18 @@ import {
   createUsageWiring, resolveUsageConfig, DEFAULT_USAGE_CONFIG, RTK_SAVINGS_TTL_MS,
 } from '../server/usage-wiring.ts';
 import { normalizePricingTable } from '../server/core/usage-pricing-core.ts';
+import type { UsageScannerApi } from '../server/usage-scanner.ts';
+
+const COMPLETE_PASS: Awaited<ReturnType<UsageScannerApi['runPass']>> = {
+  files: 1,
+  entries: 1,
+  newEntries: 1,
+  partial: false,
+  outcome: 'complete',
+  ioFailures: 0,
+  storeReset: false,
+  durationMs: 0,
+};
 
 const RTK_JSON = JSON.stringify({
   summary: {
@@ -100,7 +112,7 @@ function harness({
   let rtkPathCalls = 0;
   const clock = { now: 1_800_000_000_000 };
   const scanner = {
-    runPass: async () => ({ files: 1, entries: 1, newEntries: 1, partial: false, durationMs: 0 }),
+    runPass: async () => COMPLETE_PASS,
     sessionTotals: () => new Map(),
     stats: () => ({ dirs: [], files: 0, entries: 0, lastScanMs: 0, resolutionError: null }),
     budgetSpend: () => ({ todayKey: '2026-08-21', monthKey: '2026-08', todayUsd: 0, monthUsd: 0 }),
@@ -123,7 +135,7 @@ function harness({
       },
       tokenLimit: null,
       pricing: { missing: [] },
-      scan: { dirs: [], files: 0, entries: 0, lastScanMs: 0, partial: false, resolutionError: null },
+      scan: { dirs: [], files: 0, entries: 0, lastScanMs: 0, partial: false, outcome: COMPLETE_PASS.outcome, ioFailures: 0, resolutionError: null },
     }),
   };
   const wiring = createUsageWiring({

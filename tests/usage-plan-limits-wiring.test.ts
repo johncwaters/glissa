@@ -3,6 +3,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createUsageWiring, resolveUsageConfig, DEFAULT_USAGE_CONFIG } from '../server/usage-wiring.ts';
+import type { UsageScannerApi } from '../server/usage-scanner.ts';
+
+const COMPLETE_PASS: Awaited<ReturnType<UsageScannerApi['runPass']>> = {
+  files: 1,
+  entries: 1,
+  newEntries: 1,
+  partial: false,
+  outcome: 'complete',
+  ioFailures: 0,
+  storeReset: false,
+  durationMs: 0,
+};
 
 const GLISSA_ID = 'a0000000-0000-4000-8000-000000000001';
 const CLAUDE_ID = 'c1c1c1c1-2222-4333-8444-555555555555';
@@ -53,7 +65,7 @@ function harness({ usage = {} }: { usage?: Record<string, unknown> } = {}) {
   const sent: Record<string, unknown>[] = [];
   let now = 1_800_000_000_000;
   const scanner = {
-    runPass: async () => ({ files: 1, entries: 1, newEntries: 1, partial: false, durationMs: 0 }),
+    runPass: async () => COMPLETE_PASS,
     sessionTotals: () => new Map([[CLAUDE_ID, { tokens: 1200, costUSD: 0.42, lastTs: now }]]),
     buildReport: (): never => { throw new Error('this suite never builds a report'); },
     stats: () => ({ dirs: [], files: 0, entries: 0, lastScanMs: 0, resolutionError: null }),

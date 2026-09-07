@@ -8,6 +8,8 @@ import assert from 'node:assert/strict';
 import { createUsageWiring, resolveUsageConfig, budgetAlertText, DEFAULT_USAGE_CONFIG } from '../server/usage-wiring.ts';
 import type { UsageWiringOptions } from '../server/usage-wiring.ts';
 import { createReplayLog } from '../server/control-replay-core.ts';
+import { sendTelegramMessage } from '../server/telegram-transport.ts';
+import type { PassOutcome } from '../server/core/usage-scan-core.ts';
 
 type ScannerFactory = NonNullable<UsageWiringOptions['createScanner']>;
 type Scanner = ReturnType<ScannerFactory>;
@@ -20,9 +22,19 @@ const BUDGET_BLOCK = {
   rows: [{ scope: 'daily' as const, spentUsd: 12.4, budgetUsd: 16, pct: 77.5, tone: 'warn' as const }],
 };
 
-function fakeScanner({ partial = false, spend }: { partial?: boolean; spend: () => BudgetSpend }): Scanner {
+function fakeScanner({ outcome = 'complete', spend }: { outcome?: PassOutcome; spend: () => BudgetSpend }): Scanner {
+  const isByteLimited = outcome === 'byte-limited';
   return {
-    runPass: async () => ({ files: 1, entries: 1, newEntries: 1, partial, durationMs: 0 }),
+    runPass: async (args?: { force?: boolean }) => ({
+      files: 1,
+      entries: 1,
+      newEntries: 1,
+      partial: isByteLimited,
+      outcome,
+      ioFailures: outcome === 'io-failed' ? 1 : 0,
+      storeReset: args?.force === true,
+      durationMs: 0,
+    }),
     sessionTotals: () => new Map(),
     stats: () => ({ dirs: [], files: 0, entries: 0, lastScanMs: 0, resolutionError: null }),
     budgetSpend: spend,
@@ -41,7 +53,7 @@ function fakeScanner({ partial = false, spend }: { partial?: boolean; spend: () 
       budget: BUDGET_BLOCK,
       tokenLimit: null,
       pricing: { missing: [] },
-      scan: { dirs: [], files: 0, entries: 0, lastScanMs: 0, partial: false, resolutionError: null },
+      scan: { dirs: [], files: 0, entries: 0, lastScanMs: 0, partial: false, outcome: 'complete', ioFailures: 0, resolutionError: null },
     }),
   };
 }
@@ -96,16 +108,26 @@ interface HarnessOptions {
   connections?: number;
   spend?: { todayUsd: number; monthUsd: number };
   fsPromises?: typeof fs;
+  sendTelegram?: NonNullable<UsageWiringOptions['sendTelegram']>;
+  telegramTimeoutMs?: number;
+  outcome?: PassOutcome;
 }
 
-function harness({ root, usage = {}, telegram = null, telegramNotifications = false, connections = 1, spend = { todayUsd: 0, monthUsd: 0 }, fsPromises = fs }: HarnessOptions) {
+function harness({ root, usage = {}, telegram = null, telegramNotifications = false, connections = 1, spend = { todayUsd: 0, monthUsd: 0 }, fsPromises = fs, sendTelegram, telegramTimeoutMs, outcome = 'complete' }: HarnessOptions) {
   const sent: Record<string, unknown>[] = [];
   const telegrams: { text?: string; botToken?: string; chatId?: string }[] = [];
   const warnings: string[] = [];
   const state = { spend };
-  const scanner = fakeScanner({ spend: () => ({ todayKey: TODAY, monthKey: MONTH, ...state.spend }) });
+  const spendCalls = { count: 0 };
+  const scanner = fakeScanner({
+    outcome,
+    spend: () => {
+      spendCalls.count += 1;
+      return { todayKey: TODAY, monthKey: MONTH, ...state.spend };
+    },
+  });
   const config = { usage, telegramNotifications, telegram };
-  const wiring = createUsageWiring({
+  const wiringOptions: UsageWiringOptions = {
     config,
     sessions: new Map(),
     broadcast: (message) => { sent.push(message); },
@@ -118,18 +140,21 @@ function harness({ root, usage = {}, telegram = null, telegramNotifications = fa
     logger: { warn: (message) => { warnings.push(String(message)); }, log: () => {} },
     budgetStatePath: path.join(root, '.glissa', 'usage-budget-state.json'),
     fsPromises,
-    sendTelegram: async (args) => {
+    sendTelegram: sendTelegram ?? (async (args) => {
       telegrams.push(args);
       return { ok: true, error: null };
-    },
+    }),
     rtkPathFn: () => null,
-  });
+    telegramTimeoutMs,
+  };
+  const wiring = createUsageWiring(wiringOptions);
   return {
     wiring,
     sent,
     telegrams,
     state,
     warnings,
+    spendCalls,
     alerts: (): BudgetAlert[] => sent.filter(isBudgetAlert),
     statePath: path.join(root, '.glissa', 'usage-budget-state.json'),
   };
@@ -332,7 +357,7 @@ test('a partial pass never evaluates budgets', async () => {
     broadcast: (message) => { sent.push(message); },
     controlClientCount: () => 1,
     createScanner: () => fakeScanner({
-      partial: true,
+      outcome: 'byte-limited',
       spend: () => ({ todayKey: TODAY, monthKey: MONTH, todayUsd: 12.4, monthUsd: 12.4 }),
     }),
     loadPricingFn: async () => ({ table: new Map(), source: 'snapshot', fetchedAt: null }),
@@ -345,6 +370,34 @@ test('a partial pass never evaluates budgets', async () => {
   await wiring.start();
   assert.equal(sent.filter(isBudgetAlert).length, 0);
   assert.equal(await exists(path.join(root, '.glissa', 'usage-budget-state.json')), false);
+});
+
+test('an io-failed pass never evaluates budgets', async () => {
+  const root = await makeTempRoot();
+  let budgetSpendCalls = 0;
+  const wiring = createUsageWiring({
+    config: { usage: { budget: { dailyUsd: 16 } } },
+    sessions: new Map(),
+    controlClientCount: () => 0,
+    createScanner: () => fakeScanner({
+      outcome: 'io-failed',
+      spend: () => {
+        budgetSpendCalls += 1;
+        return { todayKey: TODAY, monthKey: MONTH, todayUsd: 12.4, monthUsd: 12.4 };
+      },
+    }),
+    loadPricingFn: async () => ({ table: new Map(), source: 'snapshot', fetchedAt: null }),
+    nowFn: () => 1,
+    setIntervalFn: inertInterval,
+    clearIntervalFn: (handle) => clearTimeout(handle),
+    logger: { warn: () => {}, log: () => {} },
+    budgetStatePath: path.join(root, '.glissa', 'usage-budget-state.json'),
+  });
+
+  await wiring.start();
+  assert.equal(budgetSpendCalls, 0);
+  assert.equal(await exists(path.join(root, '.glissa', 'usage-budget-state.json')), false);
+  await wiring.stop();
 });
 
 
@@ -374,6 +427,170 @@ test('telegram fires only with the channel on, credentials present, and nobody w
     assert.equal(h.telegrams[0].botToken, 'bot');
     assert.equal(h.telegrams[0].chatId, 'chat');
   }
+});
+
+test('a rejected Telegram send leaves the threshold unfired, warns, and alerts again', async () => {
+  const root = await makeTempRoot();
+  let sendAttempts = 0;
+  const h = harness({
+    root,
+    usage: { budget: { dailyUsd: 16 } },
+    spend: { todayUsd: 12.4, monthUsd: 12.4 },
+    connections: 0,
+    telegramNotifications: true,
+    telegram: { botToken: 'bot', chatId: 'chat' },
+    sendTelegram: async () => {
+      sendAttempts += 1;
+      throw new Error('offline');
+    },
+  });
+
+  await h.wiring.start();
+  assert.equal(sendAttempts, 1);
+  assert.equal(h.alerts().length, 1);
+  assert.equal((await readState(h.statePath)).fired.daily[TODAY], undefined);
+  assert.deepEqual(h.warnings, [`[usage] budget telegram failed scope=daily period=${TODAY} error=offline`]);
+
+  await h.wiring.requestReport({ force: true });
+  assert.equal(sendAttempts, 2);
+  assert.equal(h.alerts().length, 2);
+  assert.equal((await readState(h.statePath)).fired.daily[TODAY], undefined);
+});
+
+test('a resolved Telegram send stamps the threshold and the next pass stays silent', async () => {
+  const root = await makeTempRoot();
+  let sendAttempts = 0;
+  const h = harness({
+    root,
+    usage: { budget: { dailyUsd: 16 } },
+    spend: { todayUsd: 12.4, monthUsd: 12.4 },
+    connections: 0,
+    telegramNotifications: true,
+    telegram: { botToken: 'bot', chatId: 'chat' },
+    sendTelegram: async () => {
+      sendAttempts += 1;
+      return { ok: true, error: null };
+    },
+  });
+
+  await h.wiring.start();
+  await h.wiring.requestReport({ force: true });
+
+  assert.equal(sendAttempts, 1);
+  assert.equal(h.alerts().length, 1);
+  assert.deepEqual((await readState(h.statePath)).fired.daily[TODAY], [50, 75]);
+});
+
+test('a Telegram send that never answers times out inside the transport, leaving the threshold unfired', async () => {
+  const root = await makeTempRoot();
+  let sendAttempts = 0;
+  const transportWarnings: string[] = [];
+  const originalWarn = console.warn;
+  console.warn = (message: string) => { transportWarnings.push(String(message)); };
+  const h = harness({
+    root,
+    usage: { budget: { dailyUsd: 16 } },
+    spend: { todayUsd: 12.4, monthUsd: 12.4 },
+    connections: 0,
+    telegramNotifications: true,
+    telegram: { botToken: 'bot', chatId: 'chat' },
+    telegramTimeoutMs: 5,
+    sendTelegram: (options) => {
+      sendAttempts += 1;
+      return sendTelegramMessage({ ...options, transport: () => new Promise(() => {}) });
+    },
+  });
+
+  try {
+    await h.wiring.start();
+    assert.equal(sendAttempts, 1);
+    assert.equal(h.alerts().length, 1);
+    assert.equal((await readState(h.statePath)).fired.daily[TODAY], undefined);
+    assert.deepEqual(h.warnings, [`[usage] budget telegram failed scope=daily period=${TODAY} error=timeout`]);
+
+    await h.wiring.requestReport({ force: true });
+    assert.equal(sendAttempts, 2, 'an undelivered threshold is retried on the next pass');
+    assert.equal(h.alerts().length, 2);
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.deepEqual(transportWarnings, ['[telegram] timeout', '[telegram] timeout']);
+});
+
+test('a declined Telegram send logs the transport error', async () => {
+  const root = await makeTempRoot();
+  const h = harness({
+    root,
+    usage: { budget: { dailyUsd: 16 } },
+    spend: { todayUsd: 12.4, monthUsd: 12.4 },
+    connections: 0,
+    telegramNotifications: true,
+    telegram: { botToken: 'bot', chatId: 'chat' },
+    sendTelegram: async () => ({ ok: false, error: 'telegram 429' }),
+  });
+
+  await h.wiring.start();
+  assert.deepEqual(h.warnings, [`[usage] budget telegram failed scope=daily period=${TODAY} error="telegram 429"`]);
+  assert.equal((await readState(h.statePath)).fired.daily[TODAY], undefined);
+});
+
+test('evaluations queued behind an outstanding delivery coalesce into one', async () => {
+  const root = await makeTempRoot();
+  let releaseSend = () => {};
+  let markSendStarted = () => {};
+  const sendGate = new Promise<void>((resolve) => { releaseSend = resolve; });
+  const sendStarted = new Promise<void>((resolve) => { markSendStarted = resolve; });
+  const h = harness({
+    root,
+    usage: { budget: { dailyUsd: 16 } },
+    spend: { todayUsd: 0, monthUsd: 0 },
+    connections: 0,
+    telegramNotifications: true,
+    telegram: { botToken: 'bot', chatId: 'chat' },
+    sendTelegram: async () => {
+      markSendStarted();
+      await sendGate;
+      return { ok: true, error: null };
+    },
+  });
+
+  await h.wiring.start();
+  assert.equal(h.spendCalls.count, 1, 'the boot evaluation');
+  h.state.spend = { todayUsd: 12.4, monthUsd: 12.4 };
+
+  const alerting = h.wiring.requestReport({ force: true });
+  await sendStarted;
+  const queued = [
+    h.wiring.requestReport({ force: true }),
+    h.wiring.requestReport({ force: true }),
+    h.wiring.requestReport({ force: true }),
+  ];
+  releaseSend();
+  await Promise.all([alerting, ...queued]);
+
+  assert.equal(h.spendCalls.count, 3, 'three passes behind the outstanding send collapse to one evaluation');
+  assert.equal(h.alerts().length, 1);
+  assert.deepEqual((await readState(h.statePath)).fired.daily[TODAY], [50, 75]);
+});
+
+test('a standing io failure evaluates budgets once the streak passes its bound, and never before', async () => {
+  const root = await makeTempRoot();
+  const h = harness({
+    root,
+    usage: { budget: { dailyUsd: 16 } },
+    spend: { todayUsd: 12.4, monthUsd: 12.4 },
+    outcome: 'io-failed',
+  });
+
+  await h.wiring.start();
+  assert.equal(h.spendCalls.count, 0, 'the first io-failed pass evaluates nothing');
+  await h.wiring.requestReport({ force: true });
+  assert.equal(h.spendCalls.count, 0, 'nor the second');
+
+  await h.wiring.requestReport({ force: true });
+  assert.equal(h.spendCalls.count, 1, 'the third breaks the stall');
+  assert.equal(h.alerts().length, 1, 'an undercount can only delay an alert, never fabricate one');
+  await h.wiring.stop();
 });
 
 test('budgetAlertText: the one wording, plain and dash free', () => {

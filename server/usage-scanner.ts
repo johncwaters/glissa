@@ -34,11 +34,13 @@ import {
   grokHomes,
   grokRootCandidates,
   isUsageFile,
+  passOutcome,
   projectDirCandidates,
   resolveProjectsDirs,
+  shouldPersistWarehouse,
   splitLines,
 } from './core/usage-scan-core.ts';
-import type { VendorRoot } from './core/usage-scan-core.ts';
+import type { PassOutcome, VendorRoot } from './core/usage-scan-core.ts';
 import {
   mergeWarehouse,
   pruneWarehouse,
@@ -144,6 +146,9 @@ interface PassResult {
   entries: number;
   newEntries: number;
   partial: boolean;
+  outcome: PassOutcome;
+  ioFailures: number;
+  storeReset: boolean;
   durationMs: number;
 }
 
@@ -151,6 +156,12 @@ type StoredWarehouseRecords = NonNullable<Parameters<typeof pruneWarehouse>[0]>;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isAbsentPathError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (!('code' in error)) return false;
+  return error.code === 'ENOENT' || error.code === 'ENOTDIR';
 }
 
 function yieldNow(): Promise<void> {
@@ -267,15 +278,18 @@ async function resolveProjectsDirsAsync(
     homeDir: string;
     laneLog: LaneLog;
   },
-): Promise<{ dirs: string[]; error: string | null }> {
+): Promise<{ dirs: string[]; error: string | null; ioFailures: number }> {
   const candidates = projectDirCandidates(env, extraProjectsDirs, homeDir);
   const existing = new Set<string>();
+  let ioFailures = 0;
   await Promise.all(candidates.map(async (candidate) => {
     try {
       const stat = await fsPromises.stat(candidate);
       if (stat.isDirectory()) existing.add(candidate);
-    } catch {
-      return null;
+    } catch (error) {
+      if (isAbsentPathError(error)) return null;
+      ioFailures += 1;
+      laneLog.warn('project dir probe failed', { path: candidate, error: errorMessage(error) });
     }
     return null;
   }));
@@ -283,45 +297,58 @@ async function resolveProjectsDirsAsync(
     return {
       dirs: resolveProjectsDirs(env, extraProjectsDirs, (candidate) => existing.has(candidate), homeDir),
       error: null,
+      ioFailures,
     };
   } catch (error) {
     laneLog.warn('project dir resolution failed', { error: errorMessage(error) });
-    return { dirs: [], error: errorMessage(error) };
+    return { dirs: [], error: errorMessage(error), ioFailures };
   }
 }
 
-async function existingRoots(candidates: VendorRoot[], fsPromises: ScannerFileSystem): Promise<VendorRoot[]> {
+async function existingRoots(
+  candidates: VendorRoot[],
+  fsPromises: ScannerFileSystem,
+  laneLog: LaneLog,
+): Promise<{ roots: VendorRoot[]; ioFailures: number }> {
+  let ioFailures = 0;
   const checks = await Promise.all(candidates.map(async (candidate) => {
     try {
       const stat = await fsPromises.stat(candidate.dir);
       return stat.isDirectory() ? candidate : null;
-    } catch {
+    } catch (error) {
+      if (isAbsentPathError(error)) return null;
+      ioFailures += 1;
+      laneLog.warn('vendor root probe failed', { path: candidate.dir, error: errorMessage(error) });
       return null;
     }
   }));
-  return checks.filter((candidate): candidate is VendorRoot => candidate !== null);
+  return { roots: checks.filter((candidate): candidate is VendorRoot => candidate !== null), ioFailures };
 }
 
 async function resolveVendorRootsAsync(
-  { fsPromises, env, homeDir, vendors }: {
+  { fsPromises, env, homeDir, vendors, laneLog }: {
     fsPromises: ScannerFileSystem;
     env: NodeJS.ProcessEnv;
     homeDir: string;
     vendors: { codex?: boolean; grok?: boolean } | null | undefined;
+    laneLog: LaneLog;
   },
-): Promise<ScanRoot[]> {
+): Promise<{ roots: ScanRoot[]; ioFailures: number }> {
   const roots: ScanRoot[] = [];
+  let ioFailures = 0;
   if (vendors?.codex !== false) {
     const homes = codexHomes(env, homeDir);
-    const surviving = await existingRoots(codexRootCandidates(homes), fsPromises);
-    const fallback = await existingRoots(codexFallbackRoots(homes, surviving), fsPromises);
-    for (const root of [...surviving, ...fallback]) roots.push({ vendor: 'codex', dir: root.dir, kind: root.kind });
+    const surviving = await existingRoots(codexRootCandidates(homes), fsPromises, laneLog);
+    const fallback = await existingRoots(codexFallbackRoots(homes, surviving.roots), fsPromises, laneLog);
+    ioFailures += surviving.ioFailures + fallback.ioFailures;
+    for (const root of [...surviving.roots, ...fallback.roots]) roots.push({ vendor: 'codex', dir: root.dir, kind: root.kind });
   }
   if (vendors?.grok !== false) {
-    const surviving = await existingRoots(grokRootCandidates(grokHomes(env, homeDir)), fsPromises);
-    for (const root of surviving) roots.push({ vendor: 'grok', dir: root.dir, kind: root.kind });
+    const surviving = await existingRoots(grokRootCandidates(grokHomes(env, homeDir)), fsPromises, laneLog);
+    ioFailures += surviving.ioFailures;
+    for (const root of surviving.roots) roots.push({ vendor: 'grok', dir: root.dir, kind: root.kind });
   }
-  return roots;
+  return { roots, ioFailures };
 }
 
 async function walkDir(
@@ -330,40 +357,47 @@ async function walkDir(
   fsPromises: ScannerFileSystem,
   files: string[],
   laneLog: LaneLog,
-): Promise<void> {
+): Promise<number> {
   let entries: Dirent[];
   try {
     entries = await fsPromises.readdir(dir, { withFileTypes: true });
   } catch (error) {
+    if (isAbsentPathError(error)) return 0;
     laneLog.warn('readdir failed', { path: dir, error: errorMessage(error) });
-    return;
+    return 1;
   }
+  let ioFailures = 0;
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      await walkDir(fullPath, vendor, fsPromises, files, laneLog);
+      ioFailures += await walkDir(fullPath, vendor, fsPromises, files, laneLog);
       continue;
     }
     if (!entry.isFile()) continue;
     if (!isUsageFile(vendor, entry.name)) continue;
     files.push(fullPath);
   }
+  return ioFailures;
 }
 
 async function walkSourceFiles(
   roots: ScanRoot[],
   fsPromises: ScannerFileSystem,
   laneLog: LaneLog,
-): Promise<SourceFile[]> {
+): Promise<{ files: SourceFile[]; ioFailures: number }> {
   const files: SourceFile[] = [];
+  let ioFailures = 0;
   for (const root of roots) {
     const found: string[] = [];
-    await walkDir(root.dir, root.vendor, fsPromises, found, laneLog);
+    ioFailures += await walkDir(root.dir, root.vendor, fsPromises, found, laneLog);
     for (const file of found) files.push({ file, vendor: root.vendor, kind: root.kind });
   }
   const codexFiles = dedupeCodexFiles(files.filter((entry) => entry.vendor === 'codex'));
   const others = files.filter((entry) => entry.vendor !== 'codex');
-  return [...others, ...codexFiles].sort((left, right) => left.file.localeCompare(right.file));
+  return {
+    files: [...others, ...codexFiles].sort((left, right) => left.file.localeCompare(right.file)),
+    ioFailures,
+  };
 }
 
 function createUsageScanner(deps: UsageScannerOptions = {}) {
@@ -401,6 +435,8 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
   let lastFileCount = 0;
   let lastScanMs: number | null = null;
   let lastPartial = false;
+  let lastOutcome: PassOutcome | null = null;
+  let lastIoFailures = 0;
   let activePass: Promise<PassResult> | null = null;
   let pendingForce = false;
   let isReportDirty = true;
@@ -473,8 +509,8 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     markDirty();
   }
 
-  function rollbackCurrentFile(): void {
-    if (!currentFileJournal) return;
+  function rollbackCurrentFile(): boolean {
+    if (!currentFileJournal || currentFileJournal.length === 0) return false;
     for (let index = currentFileJournal.length - 1; index >= 0; index -= 1) {
       const action = currentFileJournal[index];
       if (action.type === 'insert') {
@@ -485,8 +521,8 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
       entries[action.index] = action.oldEntry;
       reindexReplacement(action.index, action.newKeys, action.oldKeys, action.oldEntry);
     }
-    rebuildMissingModels();
     markDirty();
+    return true;
   }
 
   function priceEntry(entry: StoredEntry): StoredEntry {
@@ -575,19 +611,20 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
       onLine: (line: string, lineOrdinal: number, vendorState: CodexUsageState | null) => void;
       shouldYieldAfterLine: () => boolean;
     },
-  ): Promise<{ bytesRead: number; partial: boolean; failed?: boolean }> {
+  ): Promise<{ bytesRead: number; partial: boolean; failed: boolean }> {
     let stat: ScannerFileStat;
     try {
       stat = await fsPromises.stat(file);
     } catch (error) {
+      if (isAbsentPathError(error)) return { bytesRead: 0, partial: false, failed: false };
       laneLog.warn('stat failed', { path: file, error: errorMessage(error) });
-      return { bytesRead: 0, partial: false };
+      return { bytesRead: 0, partial: false, failed: true };
     }
 
     const prior = force ? null : fileStates.get(file) ?? null;
     const hadPrior = fileStates.has(file);
     const decision = decideFileRead(prior, { size: stat.size, mtimeMs: stat.mtimeMs });
-    if (decision.action === 'skip') return { bytesRead: 0, partial: false };
+    if (decision.action === 'skip') return { bytesRead: 0, partial: false, failed: false };
 
     const state: FileState = decision.action === 'restart'
       ? { size: stat.size, mtimeMs: stat.mtimeMs, offset: 0, carry: '', lineOrdinal: 0, vendorState: createVendorState(vendor) }
@@ -649,6 +686,7 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     } catch (error) {
       if (hadPrior) fileStates.set(file, priorSnapshot);
       if (!hadPrior) fileStates.delete(file);
+      if (isAbsentPathError(error)) return { bytesRead, partial: false, failed: false };
       laneLog.warn('read failed', { path: file, error: errorMessage(error) });
       return { bytesRead, partial: false, failed: true };
     } finally {
@@ -827,7 +865,16 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
       byLane: buildLaneRows(reportRetainDays, now),
       tokenLimit: blockSummary.tokenLimit,
       pricing: { missing: Array.from(missingModels).sort() },
-      scan: { dirs: dirs.slice(), files: lastFileCount, entries: entries.length, lastScanMs, partial: lastPartial, resolutionError },
+      scan: {
+        dirs: dirs.slice(),
+        files: lastFileCount,
+        entries: entries.length,
+        lastScanMs,
+        partial: lastPartial,
+        outcome: lastOutcome,
+        ioFailures: lastIoFailures,
+        resolutionError,
+      },
     };
   }
 
@@ -856,18 +903,24 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
     let parsedLineCount = 0;
     let newEntryCount = 0;
     let partial = false;
+    let ioFailures = 0;
     let bytesReadThisPass = 0;
+    let didRollBackAnyFile = false;
     if (force) resetStore();
     const resolved = await resolveProjectsDirsAsync({ fsPromises, env, extraProjectsDirs, homeDir, laneLog });
     claudeDirs = resolved.dirs;
     resolutionError = resolved.error;
-    const vendorRoots = await resolveVendorRootsAsync({ fsPromises, env, homeDir, vendors });
+    ioFailures += resolved.ioFailures;
+    const vendorRoots = await resolveVendorRootsAsync({ fsPromises, env, homeDir, vendors, laneLog });
+    ioFailures += vendorRoots.ioFailures;
     const roots: ScanRoot[] = [
       ...claudeDirs.map((dir) => ({ vendor: 'claude', dir, kind: 'active' })),
-      ...vendorRoots,
+      ...vendorRoots.roots,
     ];
     dirs = roots.map((root) => root.dir);
-    const files = await walkSourceFiles(roots, fsPromises, laneLog);
+    const walked = await walkSourceFiles(roots, fsPromises, laneLog);
+    const files = walked.files;
+    ioFailures += walked.ioFailures;
     lastFileCount = files.length;
 
     for (const file of files) {
@@ -888,7 +941,10 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
         },
         shouldYieldAfterLine: () => parsedLineCount % LINE_YIELD_INTERVAL === 0,
       });
-      if (fileResult.failed) rollbackCurrentFile();
+      if (fileResult.failed) {
+        ioFailures += 1;
+        didRollBackAnyFile = rollbackCurrentFile() || didRollBackAnyFile;
+      }
       if (!fileResult.failed) newEntryCount += fileNewEntryCount;
       currentFileJournal = null;
       bytesReadThisPass += fileResult.bytesRead;
@@ -897,16 +953,23 @@ function createUsageScanner(deps: UsageScannerOptions = {}) {
       if (partial) break;
     }
 
+    if (didRollBackAnyFile) rebuildMissingModels();
     pruneStoredEntries();
     lastScanMs = nowFn();
     lastPartial = partial;
     if (newEntryCount > 0) markDirty();
-    if (!partial) await persistWarehouse();
+    const outcome = passOutcome({ byteLimited: partial, ioFailures });
+    lastOutcome = outcome;
+    lastIoFailures = ioFailures;
+    if (shouldPersistWarehouse({ outcome, storeReset: force })) await persistWarehouse();
     return {
       files: lastFileCount,
       entries: entries.length,
       newEntries: newEntryCount,
       partial,
+      outcome,
+      ioFailures,
+      storeReset: force,
       durationMs: nowFn() - startedAt,
     };
   }
