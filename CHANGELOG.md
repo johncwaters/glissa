@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.3] - 2026-09-07
+
+### Added
+
+- **Session Trace**: every terminal records its Claude Code transcript as normalized records under `~/.glissa/traces` (prompt, skill expansion, thinking, tool call, tool result, assistant) with a checkpoint sidecar so a restart resumes instead of replaying. A Trace tab on the desktop and the phone shows a terminal's trace as turns headed by their prompt, collapsed to one line and expandable, with Load earlier paging back to a 5000-row ceiling. The surfaces follow `debugMode`; capture is on by default behind the file-only `trace.enabled` key.
+- **Server updates from Settings**: a machine-updates section shows Installed, Latest and Last checked with a Channel select (release tags or the checked-out branch), and Check for updates, Update and Restart actions. An update is staged in a detached worktree, built there, and handed off at restart by a fast-forward plus renames, so nothing live changes until the build is proven; a dependency-free recovery shim restores a backup after a crash between renames.
+- **Phone key strip uploads any file**, not only images; only a strictly matched trailing extension from the client name reaches disk.
+- **Lane log seam**: `createLaneLog` renders structured `key=value` fields, suppresses a repeated warning once per key, and builds debug lines lazily. The trace and usage lanes log through it with one prefix each (`[trace]`, `[usage]`), refusal and failure lines name the session, path and reason, and both lanes emit debug-gated heartbeats under `debugMode` so a healthy lane can be told from a dead one. A boundary test fences the lane modules onto the seam.
+- **Visions**: scope means the configured projects; each review focuses on the lines edited since the last one; comments and diagnostics carry through edits and a late dispatch result is carried across the edits made meanwhile; every dispatch is sized in the journal; a comment whose anchor was just delivered is not re-remembered; a repeated word is flagged only across a whitespace gap.
+
+### Fixed
+
+- **Trace**: a subagent that kept working after its first stop lost every later record, and a transcript past 8 MiB lost its tail; subagents are now tailed by a checkpointed per-path offset, committed only at complete lines. A lost checkpoint replayed a whole transcript into the trace; recovery now fails closed at the transcript end with a notice. A refused transcript said "outside the root" for a missing file, an unreadable one and a non-regular file alike; it now names the reason and leaves a notice in the trace. Every record body is capped so the page reader never drops one, signature-only empty thinking rows are dropped, a tool result paged in before its call is relabeled once the call arrives, a skill expansion keeps its link across a restart, an unreadable record shows as a notice instead of a silent gap, and a new conversation is traced from its first line even though Claude names the transcript before creating it.
+- **Usage**: a scan pass that lost a file to an io error counted as complete, so the warehouse stored the undercount and budgets evaluated on it; a pass now reports complete, byte-limited or io-failed, only a complete or an incremental io-failed pass writes the warehouse, budgets wait for a complete pass or three consecutive io-failed ones, and the report shows the outcome. A corrupt `usage-lanes.json`, `usage-warehouse.json` or budget state file was rewritten from empty; it is now quarantined beside the original as `.corrupt-<ms>` and an unreadable one is never overwritten. A budget alert stamped its threshold fired before a fire-and-forget Telegram send whose failure was swallowed; the threshold is stamped only after delivery, the send is bounded by a transport timeout, and the failure is logged. Card chips refresh on replacement and prune, the dashboard names a cached price table with its age, a failed price fetch is warned, and the heatmap uses the server's day.
+- **Branch cleanup** deletes remote branches with `--no-verify`, so a slow pre-push hook in a managed repo no longer stalls the single git queue for a minute after a restart.
+
+### Changed
+
+- The phone key strip drops the unused Ctrl+C key.
+- Dead exports and single-caller wrappers were removed across the server, session, detection, notification, dashboard and shared trees; no feature, config key, route or wire message changed.
+
 ## [0.24.2] - 2026-09-04
 
 ### Added
