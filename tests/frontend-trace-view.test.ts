@@ -329,7 +329,7 @@ test('an expansion is relabeled when its call arrives on an earlier page', async
     record({ kind: 'expansion', toolUseId: 'bash-1', text: 'expanded command' }),
   ]);
 
-  assert.equal(grouping.turns[0].rows[0].label, 'Expansion: Skill');
+  assert.equal(grouping.turns[0].rows[0].label, 'Expansion: expansion');
   const prepend = prependTraceRecords(grouping, [
     record({ kind: 'tool_call', toolUseId: 'bash-1', name: 'Bash', input: { command: 'npm test' } }),
   ]);

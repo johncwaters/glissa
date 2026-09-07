@@ -68,6 +68,7 @@ export const TraceCheckpoint = z.object({
   offset: z.number().int().nonnegative(),
   ingestedSubagentPaths: z.array(z.string().min(1)),
   offsetByTranscriptPath: z.record(z.string().min(1), z.number().int().nonnegative()).default({}),
+  subagentOffsetByPath: z.record(z.string().min(1), z.number().int().nonnegative()).default({}),
 });
 
 export type TraceCheckpoint = z.infer<typeof TraceCheckpoint>;

@@ -5,7 +5,7 @@ import path from 'node:path';
 import {
   MAX_REMEMBERED_TRANSCRIPTS,
   MAX_TRANSCRIPT_READ_BYTES,
-  committedOffsetFromTraceTail,
+  committedOffsetFromTraceTailOrNull,
   completeLineBytes,
   containmentRefusalReason,
   isOversizedPartialLine,
@@ -56,21 +56,22 @@ test('the complete-line boundary is the byte after the last break', () => {
   assert.equal(completeLineBytes(Buffer.from('one\ntwo\nhalf')), 8);
   assert.equal(completeLineBytes(Buffer.from('no break at all')), 0);
   assert.equal(completeLineBytes(Buffer.alloc(0)), 0);
+  assert.equal(completeLineBytes(Buffer.from('only\n', 'utf8')), 5);
 });
 
 test('a checkpoint resumes only for its own transcript and resets when the file shrank', () => {
   const checkpoint = { transcriptPath: '/projects/a/session.jsonl', offset: 500 };
   assert.deepEqual(resumeOffsetFrom(checkpoint, { transcriptPath: '/projects/a/session.jsonl', size: 900 }), {
-    offset: 500, didReset: false,
+    offset: 500, didReset: false, didFallbackToTranscriptEnd: false,
   });
   assert.deepEqual(resumeOffsetFrom(checkpoint, { transcriptPath: '/projects/a/session.jsonl', size: 120 }), {
-    offset: 0, didReset: true,
+    offset: 0, didReset: true, didFallbackToTranscriptEnd: false,
   });
   assert.deepEqual(resumeOffsetFrom(checkpoint, { transcriptPath: '/projects/a/other.jsonl', size: 900 }), {
-    offset: 0, didReset: false,
+    offset: 0, didReset: false, didFallbackToTranscriptEnd: false,
   });
   assert.deepEqual(resumeOffsetFrom(null, { transcriptPath: '/projects/a/session.jsonl', size: 900 }), {
-    offset: 0, didReset: false,
+    offset: 0, didReset: false, didFallbackToTranscriptEnd: false,
   });
 });
 
@@ -87,6 +88,12 @@ test('a partial line is oversized only past the byte bound', () => {
   assert.equal(isOversizedPartialLine('x'.repeat(9), { maxPartialLineBytes: 8 }), true);
 });
 
+test('a partial line held as raw bytes is measured by its byte length', () => {
+  assert.equal(isOversizedPartialLine(Buffer.alloc(8), { maxPartialLineBytes: 8 }), false);
+  assert.equal(isOversizedPartialLine(Buffer.alloc(9), { maxPartialLineBytes: 8 }), true);
+  assert.equal(isOversizedPartialLine(Buffer.from('x'.repeat(9), 'utf8'), { maxPartialLineBytes: 8 }), true);
+});
+
 test('a checkpoint resumes a transcript it traced before returning to the newest one', () => {
   const checkpoint = {
     transcriptPath: '/projects/a/second.jsonl',
@@ -95,10 +102,10 @@ test('a checkpoint resumes a transcript it traced before returning to the newest
   };
 
   assert.deepEqual(resumeOffsetFrom(checkpoint, { transcriptPath: '/projects/a/first.jsonl', size: 1200 }), {
-    offset: 900, didReset: false,
+    offset: 900, didReset: false, didFallbackToTranscriptEnd: false,
   });
   assert.deepEqual(resumeOffsetFrom(checkpoint, { transcriptPath: '/projects/a/first.jsonl', size: 400 }), {
-    offset: 0, didReset: true,
+    offset: 0, didReset: true, didFallbackToTranscriptEnd: false,
   });
 });
 
@@ -107,11 +114,41 @@ test('a batch appended past the checkpoint moves the resume point forward', () =
 
   assert.deepEqual(
     resumeOffsetFrom(checkpoint, { transcriptPath: '/projects/a/session.jsonl', size: 4000, alreadyTracedOffset: 3000 }),
-    { offset: 3000, didReset: false },
+    { offset: 3000, didReset: false, didFallbackToTranscriptEnd: false },
   );
   assert.deepEqual(
     resumeOffsetFrom(checkpoint, { transcriptPath: '/projects/a/session.jsonl', size: 4000, alreadyTracedOffset: 120 }),
-    { offset: 500, didReset: false },
+    { offset: 500, didReset: false, didFallbackToTranscriptEnd: false },
+  );
+});
+
+test('a lost checkpoint whose run the trace tail cannot establish resumes at the transcript end', () => {
+  assert.deepEqual(
+    resumeOffsetFrom(null, {
+      transcriptPath: '/projects/a/session.jsonl',
+      size: 900,
+      alreadyTracedOffset: null,
+      traceSize: 64 * 1024,
+    }),
+    { offset: 900, didReset: false, didFallbackToTranscriptEnd: true },
+  );
+  assert.deepEqual(
+    resumeOffsetFrom(null, {
+      transcriptPath: '/projects/a/session.jsonl',
+      size: 900,
+      alreadyTracedOffset: null,
+      traceSize: 0,
+    }),
+    { offset: 0, didReset: false, didFallbackToTranscriptEnd: false },
+  );
+  assert.deepEqual(
+    resumeOffsetFrom({ transcriptPath: '/projects/a/session.jsonl', offset: 500 }, {
+      transcriptPath: '/projects/a/session.jsonl',
+      size: 900,
+      alreadyTracedOffset: null,
+      traceSize: 64 * 1024,
+    }),
+    { offset: 500, didReset: false, didFallbackToTranscriptEnd: false },
   );
 });
 
@@ -124,28 +161,40 @@ test('the trace tail reports the offset appended for the transcript being bound'
     '',
   ].join('\n');
 
-  assert.equal(committedOffsetFromTraceTail(tail, { transcriptPath: '/projects/a/first.jsonl', isWholeFile: true }), 400);
-  assert.equal(committedOffsetFromTraceTail(tail, { transcriptPath: '/projects/a/second.jsonl', isWholeFile: true }), 90);
-  assert.equal(committedOffsetFromTraceTail(tail, { transcriptPath: '/projects/a/third.jsonl', isWholeFile: true }), 0);
+  assert.equal(committedOffsetFromTraceTailOrNull(tail, { transcriptPath: '/projects/a/first.jsonl', isWholeFile: true }), 400);
+  assert.equal(committedOffsetFromTraceTailOrNull(tail, { transcriptPath: '/projects/a/second.jsonl', isWholeFile: true }), 90);
+  assert.equal(committedOffsetFromTraceTailOrNull(tail, { transcriptPath: '/projects/a/third.jsonl', isWholeFile: true }), null);
+});
+
+test('a run marked with no records of its own resumes at zero, not as an unknown run', () => {
+  const tail = [
+    JSON.stringify({ kind: 'session', transcriptPath: '/projects/a/first.jsonl' }),
+    JSON.stringify({ kind: 'session', transcriptPath: '/projects/a/second.jsonl' }),
+    JSON.stringify({ kind: 'prompt', transcriptOffset: 90 }),
+  ].join('\n');
+
+  assert.equal(committedOffsetFromTraceTailOrNull(tail, { transcriptPath: '/projects/a/first.jsonl', isWholeFile: true }), 0);
+  assert.equal(committedOffsetFromTraceTailOrNull(tail, { transcriptPath: '/projects/a/second.jsonl', isWholeFile: true }), 90);
+  assert.equal(committedOffsetFromTraceTailOrNull(tail, { transcriptPath: '/projects/a/third.jsonl', isWholeFile: true }), null);
 });
 
 test('a window opening mid-file drops its partial line and trusts the path only from the checkpoint', () => {
   const tail = ['e": 12}', JSON.stringify({ kind: 'prompt', transcriptOffset: 700 })].join('\n');
 
   assert.equal(
-    committedOffsetFromTraceTail(tail, {
+    committedOffsetFromTraceTailOrNull(tail, {
       transcriptPath: '/projects/a/session.jsonl',
       pathBeforeWindow: '/projects/a/session.jsonl',
     }),
     700,
   );
-  assert.equal(committedOffsetFromTraceTail(tail, { transcriptPath: '/projects/a/session.jsonl' }), 0);
+  assert.equal(committedOffsetFromTraceTailOrNull(tail, { transcriptPath: '/projects/a/session.jsonl' }), null);
   assert.equal(
-    committedOffsetFromTraceTail(tail, {
+    committedOffsetFromTraceTailOrNull(tail, {
       transcriptPath: '/projects/a/session.jsonl',
       pathBeforeWindow: '/projects/a/other.jsonl',
     }),
-    0,
+    null,
   );
 });
 
@@ -157,7 +206,7 @@ test('a record before the first session record of the window is never attributed
   ].join('\n');
 
   assert.equal(
-    committedOffsetFromTraceTail(tail, {
+    committedOffsetFromTraceTailOrNull(tail, {
       transcriptPath: '/projects/a/second.jsonl',
       pathBeforeWindow: '/projects/a/second.jsonl',
       isWholeFile: true,
@@ -182,4 +231,16 @@ test('remembered offsets keep the newest transcripts and refresh a path in place
   assert.equal(Object.keys(bounded).length, MAX_REMEMBERED_TRANSCRIPTS);
   assert.equal(bounded['/projects/a/3.jsonl'], undefined);
   assert.equal(bounded['/projects/a/4.jsonl'], 4);
+});
+
+test('remembered offsets evict the oldest path at a custom cap', () => {
+  let bounded: Record<string, number> = {};
+  for (let index = 0; index < 4; index += 1) {
+    bounded = withCommittedOffset(bounded, `/projects/a/${index}.jsonl`, index, { maxRemembered: 2 });
+  }
+
+  assert.deepEqual(bounded, {
+    '/projects/a/2.jsonl': 2,
+    '/projects/a/3.jsonl': 3,
+  });
 });

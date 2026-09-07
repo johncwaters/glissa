@@ -8,7 +8,11 @@ import { EventEmitter } from 'node:events';
 
 import { TraceCheckpoint, TraceRecord } from '../shared/contracts/trace.ts';
 import { createTraceWiring, pruneTraceFiles } from '../server/trace-wiring.ts';
-import { MAX_SUBAGENT_READ_BYTES } from '../server/core/trace-tail-core.ts';
+import {
+  MAX_PARTIAL_LINE_BYTES,
+  MAX_REMEMBERED_SUBAGENTS,
+  MAX_TRANSCRIPT_READ_BYTES,
+} from '../server/core/trace-tail-core.ts';
 
 const claudeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-trace-home-'));
 process.env.CLAUDE_CONFIG_DIR = claudeHome;
@@ -90,10 +94,34 @@ function mainPrompt(text: string, uuid: string): string {
   });
 }
 
-function subagentAnswer(text: string): string {
+function skillToolCall(toolUseId: string): string {
   return transcriptLine({
     type: 'assistant',
-    uuid: 'subagent-answer',
+    uuid: 'skill-call',
+    parentUuid: null,
+    sessionId: 'vendor-session',
+    timestamp: '2026-08-22T18:47:28.724Z',
+    message: { content: [{ type: 'tool_use', id: toolUseId, name: 'Skill', input: { skill: 'release' } }] },
+  });
+}
+
+function skillExpansion(toolUseId: string): string {
+  return transcriptLine({
+    type: 'user',
+    uuid: 'skill-expansion',
+    parentUuid: null,
+    sessionId: 'vendor-session',
+    timestamp: '2026-08-22T18:47:29.724Z',
+    isMeta: true,
+    sourceToolUseID: toolUseId,
+    message: { content: 'skill body' },
+  });
+}
+
+function subagentAnswer(text: string, uuid = 'subagent-answer'): string {
+  return transcriptLine({
+    type: 'assistant',
+    uuid,
     parentUuid: null,
     sessionId: 'vendor-session',
     agentId: 'a1',
@@ -158,6 +186,7 @@ test('main and subagent transcript records append under the Glissa session id', 
   const checkpoint = readCheckpoint(harness.checkpointPath('glissa-session-id'));
   assert.equal(checkpoint.offset, fs.statSync(transcriptPath).size);
   assert.deepEqual(checkpoint.ingestedSubagentPaths, [subagentPath]);
+  assert.equal(checkpoint.subagentOffsetByPath[subagentPath], fs.statSync(subagentPath).size);
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });
@@ -195,7 +224,7 @@ test('a draining poll logs debug details only when it appends transcript records
   fs.rmSync(configDirectory, { recursive: true, force: true });
 });
 
-test('a repeated SubagentStop appends the sidechain once, after the main records it followed', async () => {
+test('a second SubagentStop appends only records added since the first stop', async () => {
   const { configDirectory, projectDirectory } = makeWorkspace('order');
   const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
   fs.writeFileSync(transcriptPath, '', 'utf8');
@@ -209,12 +238,356 @@ test('a repeated SubagentStop appends the sidechain once, after the main records
   await harness.wiring.whenIdle();
   fs.appendFileSync(transcriptPath, mainPrompt('launched an agent', 'prompt-id'), 'utf8');
   session.emit('hook-event', subagentStop(subagentPath));
+  await harness.wiring.whenIdle();
+  fs.appendFileSync(subagentPath, subagentAnswer('continued answer', 'subagent-answer-two'), 'utf8');
   session.emit('hook-event', subagentStop(subagentPath));
   await harness.wiring.whenIdle();
 
   const records = readTrace(harness.tracePath('glissa-session-id'));
-  assert.deepEqual(records.map((record) => record.kind), ['session', 'prompt', 'assistant']);
+  assert.deepEqual(records.map((record) => record.kind), ['session', 'prompt', 'assistant', 'assistant']);
   assert.equal(records[1].kind === 'prompt' ? records[1].text : null, 'launched an agent');
+  assert.deepEqual(records.slice(2).map((record) => record.uuid), ['subagent-answer', 'subagent-answer-two']);
+  assert.equal(new Set(records.map((record) => record.uuid).filter(Boolean)).size, 3);
+
+  await harness.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
+test('a subagent transcript larger than one chunk reaches EOF in one stop', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('multi-chunk-subagent');
+  const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
+  fs.writeFileSync(transcriptPath, '', 'utf8');
+  const subagentPath = path.join(projectDirectory, 'agent-a1.jsonl');
+  const lineCount = 7000;
+  const transcript = Array.from(
+    { length: lineCount },
+    (_value, index) => subagentAnswer(`answer ${index}`, `subagent-answer-${index}`),
+  ).join('');
+  assert.ok(Buffer.byteLength(transcript) > MAX_TRANSCRIPT_READ_BYTES);
+  fs.writeFileSync(subagentPath, transcript, 'utf8');
+  const harness = createHarness(configDirectory);
+  await harness.wiring.start();
+  const session = new TestTraceSession('glissa-session-id');
+  harness.wiring.attachSession(session);
+
+  session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
+  session.emit('hook-event', subagentStop(subagentPath));
+  await harness.wiring.whenIdle();
+
+  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const assistantRecords = records.filter((record) => record.kind === 'assistant');
+  assert.equal(assistantRecords.length, lineCount);
+  assert.equal(new Set(assistantRecords.map((record) => record.uuid)).size, lineCount);
+  assert.equal(readCheckpoint(harness.checkpointPath('glissa-session-id')).subagentOffsetByPath[subagentPath], Buffer.byteLength(transcript));
+
+  await harness.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
+test('a subagent line half-written at one stop is traced once when the next stop finds it complete', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('half-written-subagent');
+  const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
+  fs.writeFileSync(transcriptPath, '', 'utf8');
+  const subagentPath = path.join(projectDirectory, 'agent-a1.jsonl');
+  const settledLine = subagentAnswer('settled answer', 'subagent-answer-settled');
+  const flushingLine = subagentAnswer('answer completed between stops', 'subagent-answer-flushing');
+  const halfway = Math.floor(flushingLine.length / 2);
+  fs.writeFileSync(subagentPath, `${settledLine}${flushingLine.slice(0, halfway)}`, 'utf8');
+  const harness = createHarness(configDirectory);
+  await harness.wiring.start();
+  const session = new TestTraceSession('glissa-session-id');
+  harness.wiring.attachSession(session);
+
+  session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
+  session.emit('hook-event', subagentStop(subagentPath));
+  await harness.wiring.whenIdle();
+
+  assert.deepEqual(
+    readTrace(harness.tracePath('glissa-session-id')).map((record) => record.kind),
+    ['session', 'assistant'],
+  );
+  assert.equal(
+    readCheckpoint(harness.checkpointPath('glissa-session-id')).subagentOffsetByPath[subagentPath],
+    Buffer.byteLength(settledLine),
+  );
+
+  fs.appendFileSync(subagentPath, flushingLine.slice(halfway), 'utf8');
+  session.emit('hook-event', subagentStop(subagentPath));
+  await harness.wiring.whenIdle();
+
+  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const assistantRecords = records.filter((record) => record.kind === 'assistant');
+  assert.deepEqual(
+    assistantRecords.map((record) => record.uuid),
+    ['subagent-answer-settled', 'subagent-answer-flushing'],
+  );
+  const flushed = assistantRecords[1];
+  assert.equal(flushed && flushed.kind === 'assistant' ? flushed.text : null, 'answer completed between stops');
+  assert.equal(records.some((record) => record.kind === 'raw'), false);
+  assert.equal(
+    readCheckpoint(harness.checkpointPath('glissa-session-id')).subagentOffsetByPath[subagentPath],
+    fs.statSync(subagentPath).size,
+  );
+
+  await harness.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
+test('a multibyte character spanning a subagent chunk boundary is traced intact', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('multibyte-subagent');
+  const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
+  fs.writeFileSync(transcriptPath, '', 'utf8');
+  const subagentPath = path.join(projectDirectory, 'agent-a1.jsonl');
+  const accentedText = `caf${String.fromCharCode(233)} answer`;
+  const accentedLine = subagentAnswer(accentedText, 'subagent-answer-accented');
+  const accentByteOffset = Buffer.from(accentedLine, 'utf8').indexOf(0xc3);
+  const paddingOverhead = Buffer.byteLength(subagentAnswer('', 'subagent-answer-padding'), 'utf8');
+  const paddingLine = subagentAnswer(
+    'x'.repeat(MAX_TRANSCRIPT_READ_BYTES - 1 - accentByteOffset - paddingOverhead),
+    'subagent-answer-padding',
+  );
+  assert.equal(Buffer.byteLength(paddingLine, 'utf8') + accentByteOffset, MAX_TRANSCRIPT_READ_BYTES - 1);
+  fs.writeFileSync(subagentPath, `${paddingLine}${accentedLine}`, 'utf8');
+  const harness = createHarness(configDirectory);
+  await harness.wiring.start();
+  const session = new TestTraceSession('glissa-session-id');
+  harness.wiring.attachSession(session);
+
+  session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
+  session.emit('hook-event', subagentStop(subagentPath));
+  await harness.wiring.whenIdle();
+
+  const assistantRecords = readTrace(harness.tracePath('glissa-session-id'))
+    .filter((record) => record.kind === 'assistant');
+  assert.deepEqual(
+    assistantRecords.map((record) => record.uuid),
+    ['subagent-answer-padding', 'subagent-answer-accented'],
+  );
+  const accented = assistantRecords[1];
+  assert.equal(accented && accented.kind === 'assistant' ? accented.text : null, accentedText);
+
+  await harness.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
+test('a skipped oversized subagent line is not re-read as a fragment on the next stop', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('oversized-subagent-skip');
+  const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
+  fs.writeFileSync(transcriptPath, '', 'utf8');
+  const subagentPath = path.join(projectDirectory, 'agent-a1.jsonl');
+  const skippedBytes = MAX_PARTIAL_LINE_BYTES + MAX_TRANSCRIPT_READ_BYTES;
+  const answerAfterTheSkip = subagentAnswer('answer after the skip', 'subagent-answer-after');
+  fs.writeFileSync(subagentPath, `${'x'.repeat(skippedBytes + 1)}\n${answerAfterTheSkip}`, 'utf8');
+  const harness = createHarness(configDirectory);
+  await harness.wiring.start();
+  const session = new TestTraceSession('glissa-session-id');
+  harness.wiring.attachSession(session);
+
+  session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
+  session.emit('hook-event', subagentStop(subagentPath));
+  await harness.wiring.whenIdle();
+
+  const firstRecords = readTrace(harness.tracePath('glissa-session-id'));
+  assert.deepEqual(firstRecords.map((record) => record.kind), ['session', 'notice', 'assistant']);
+  assert.equal(
+    firstRecords[1] && firstRecords[1].kind === 'notice' ? firstRecords[1].text : null,
+    `skipped ${skippedBytes} bytes of agent-a1.jsonl`,
+  );
+  assert.equal(
+    readCheckpoint(harness.checkpointPath('glissa-session-id')).subagentOffsetByPath[subagentPath],
+    fs.statSync(subagentPath).size,
+  );
+
+  fs.appendFileSync(subagentPath, subagentAnswer('answer after the stop', 'subagent-answer-later'), 'utf8');
+  session.emit('hook-event', subagentStop(subagentPath));
+  await harness.wiring.whenIdle();
+
+  const records = readTrace(harness.tracePath('glissa-session-id'));
+  assert.deepEqual(records.map((record) => record.kind), ['session', 'notice', 'assistant', 'assistant']);
+  assert.deepEqual(
+    records.filter((record) => record.kind === 'assistant').map((record) => record.uuid),
+    ['subagent-answer-after', 'subagent-answer-later'],
+  );
+
+  await harness.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
+test('an oversized subagent line still unterminated at the stop end never resumes mid-line', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('oversized-subagent-unterminated');
+  const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
+  fs.writeFileSync(transcriptPath, '', 'utf8');
+  const subagentPath = path.join(projectDirectory, 'agent-a1.jsonl');
+  const skippedBytes = MAX_PARTIAL_LINE_BYTES + MAX_TRANSCRIPT_READ_BYTES;
+  fs.writeFileSync(subagentPath, 'x'.repeat(skippedBytes + 1), 'utf8');
+  const harness = createHarness(configDirectory);
+  await harness.wiring.start();
+  const session = new TestTraceSession('glissa-session-id');
+  harness.wiring.attachSession(session);
+
+  session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
+  session.emit('hook-event', subagentStop(subagentPath));
+  await harness.wiring.whenIdle();
+
+  assert.deepEqual(
+    readTrace(harness.tracePath('glissa-session-id')).map((record) => record.kind),
+    ['session', 'notice'],
+  );
+
+  const answerAfterTheSkip = subagentAnswer('answer after the oversized line', 'subagent-answer-after');
+  fs.appendFileSync(subagentPath, `xxxx\n${answerAfterTheSkip}`, 'utf8');
+  session.emit('hook-event', subagentStop(subagentPath));
+  await harness.wiring.whenIdle();
+
+  const records = readTrace(harness.tracePath('glissa-session-id'));
+  assert.equal(records.some((record) => record.kind === 'raw'), false);
+  assert.deepEqual(
+    records.filter((record) => record.kind === 'assistant').map((record) => record.uuid),
+    ['subagent-answer-after'],
+  );
+  assert.equal(
+    readCheckpoint(harness.checkpointPath('glissa-session-id')).subagentOffsetByPath[subagentPath],
+    fs.statSync(subagentPath).size,
+  );
+
+  await harness.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
+test('a subagent transcript truncated to zero is read from the start once it regrows', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('truncated-subagent');
+  const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
+  fs.writeFileSync(transcriptPath, '', 'utf8');
+  const subagentPath = path.join(projectDirectory, 'agent-a1.jsonl');
+  fs.writeFileSync(subagentPath, subagentAnswer('answer one', 'subagent-answer-one'), 'utf8');
+  const sizeBeforeTruncation = fs.statSync(subagentPath).size;
+  const harness = createHarness(configDirectory);
+  await harness.wiring.start();
+  const session = new TestTraceSession('glissa-session-id');
+  harness.wiring.attachSession(session);
+
+  session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
+  session.emit('hook-event', subagentStop(subagentPath));
+  await harness.wiring.whenIdle();
+
+  assert.equal(
+    readCheckpoint(harness.checkpointPath('glissa-session-id')).subagentOffsetByPath[subagentPath],
+    sizeBeforeTruncation,
+  );
+
+  fs.writeFileSync(subagentPath, '', 'utf8');
+  session.emit('hook-event', subagentStop(subagentPath));
+  await harness.wiring.whenIdle();
+
+  assert.equal(readCheckpoint(harness.checkpointPath('glissa-session-id')).subagentOffsetByPath[subagentPath], 0);
+
+  fs.writeFileSync(subagentPath, subagentAnswer('answer two', 'subagent-answer-two'), 'utf8');
+  assert.equal(fs.statSync(subagentPath).size, sizeBeforeTruncation);
+  session.emit('hook-event', subagentStop(subagentPath));
+  await harness.wiring.whenIdle();
+
+  assert.deepEqual(
+    readTrace(harness.tracePath('glissa-session-id'))
+      .filter((record) => record.kind === 'assistant')
+      .map((record) => record.uuid),
+    ['subagent-answer-one', 'subagent-answer-two'],
+  );
+
+  await harness.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
+test('a legacy checkpoint skips retained subagent lines and tails later additions', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('legacy-subagent-checkpoint');
+  const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
+  fs.writeFileSync(transcriptPath, '', 'utf8');
+  const subagentPath = writeSubagentTranscript(projectDirectory, 'retained answer');
+  const first = createHarness(configDirectory);
+  await first.wiring.start();
+  const firstSession = new TestTraceSession('glissa-session-id');
+  first.wiring.attachSession(firstSession);
+  firstSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
+  await first.wiring.whenIdle();
+  await first.wiring.stop();
+
+  const checkpoint = readCheckpoint(first.checkpointPath('glissa-session-id'));
+  const legacyCheckpoint = {
+    transcriptPath: checkpoint.transcriptPath,
+    vendorSessionId: checkpoint.vendorSessionId,
+    offset: checkpoint.offset,
+    ingestedSubagentPaths: [subagentPath],
+    offsetByTranscriptPath: checkpoint.offsetByTranscriptPath,
+  };
+  fs.writeFileSync(first.checkpointPath('glissa-session-id'), JSON.stringify(legacyCheckpoint), 'utf8');
+
+  const second = createHarness(configDirectory);
+  await second.wiring.start();
+  const secondSession = new TestTraceSession('glissa-session-id');
+  second.wiring.attachSession(secondSession);
+  secondSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
+  await second.wiring.whenIdle();
+  secondSession.emit('hook-event', subagentStop(subagentPath));
+  await second.wiring.whenIdle();
+  assert.equal(readTrace(second.tracePath('glissa-session-id')).filter((record) => record.kind === 'assistant').length, 0);
+
+  fs.appendFileSync(subagentPath, subagentAnswer('new answer', 'subagent-answer-new'), 'utf8');
+  secondSession.emit('hook-event', subagentStop(subagentPath));
+  await second.wiring.whenIdle();
+
+  const assistantRecords = readTrace(second.tracePath('glissa-session-id'))
+    .filter((record) => record.kind === 'assistant');
+  assert.deepEqual(assistantRecords.map((record) => record.uuid), ['subagent-answer-new']);
+  assert.equal(
+    readCheckpoint(second.checkpointPath('glissa-session-id')).subagentOffsetByPath[subagentPath],
+    fs.statSync(subagentPath).size,
+  );
+
+  await second.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
+test('a subagent path evicted from the remembered offsets is tailed again instead of skipped', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('subagent-eviction');
+  const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
+  fs.writeFileSync(transcriptPath, '', 'utf8');
+  const crowdingPaths = Array.from(
+    { length: MAX_REMEMBERED_SUBAGENTS },
+    (_unused, index) => path.join(projectDirectory, `agent-crowding-${index}.jsonl`),
+  );
+  const harness = createHarness(configDirectory);
+  await harness.wiring.start();
+  const session = new TestTraceSession('glissa-session-id');
+  harness.wiring.attachSession(session);
+
+  session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
+  for (const [index, crowdingPath] of crowdingPaths.entries()) {
+    fs.writeFileSync(crowdingPath, subagentAnswer(`answer ${index}`, `subagent-answer-${index}`), 'utf8');
+    session.emit('hook-event', subagentStop(crowdingPath));
+  }
+  await harness.wiring.whenIdle();
+
+  const [oldestPath, evictedPath] = crowdingPaths;
+  assert.ok(oldestPath && evictedPath);
+  session.emit('hook-event', subagentStop(oldestPath));
+  const newcomerPath = path.join(projectDirectory, 'agent-newcomer.jsonl');
+  fs.writeFileSync(newcomerPath, subagentAnswer('newcomer answer', 'subagent-answer-newcomer'), 'utf8');
+  session.emit('hook-event', subagentStop(newcomerPath));
+  await harness.wiring.whenIdle();
+
+  const afterCrowding = readCheckpoint(harness.checkpointPath('glissa-session-id'));
+  assert.equal(afterCrowding.subagentOffsetByPath[evictedPath], undefined);
+  assert.deepEqual(afterCrowding.ingestedSubagentPaths, Object.keys(afterCrowding.subagentOffsetByPath));
+  assert.equal(afterCrowding.ingestedSubagentPaths.length, MAX_REMEMBERED_SUBAGENTS);
+
+  fs.appendFileSync(evictedPath, subagentAnswer('answer after the eviction', 'subagent-answer-after'), 'utf8');
+  session.emit('hook-event', subagentStop(evictedPath));
+  await harness.wiring.whenIdle();
+
+  const uuids = readTrace(harness.tracePath('glissa-session-id')).map((record) => record.uuid);
+  assert.equal(uuids.includes('subagent-answer-after'), true);
+  const afterReturn = readCheckpoint(harness.checkpointPath('glissa-session-id'));
+  assert.equal(afterReturn.subagentOffsetByPath[evictedPath], fs.statSync(evictedPath).size);
+  assert.deepEqual(afterReturn.ingestedSubagentPaths, Object.keys(afterReturn.subagentOffsetByPath));
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });
@@ -491,6 +864,35 @@ test('a restart resumes at the checkpoint instead of replaying retained history'
 
   const records = readTrace(first.tracePath('glissa-session-id'));
   assert.deepEqual(records.map((record) => record.kind), ['session', 'prompt', 'session']);
+
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
+test('a skill expansion appended after restart retains the checkpointed call id', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('skill-expansion-restart');
+  const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
+  const toolUseId = 'toolu_skill';
+  fs.writeFileSync(transcriptPath, skillToolCall(toolUseId), 'utf8');
+  const first = createHarness(configDirectory);
+  await first.wiring.start();
+  const firstSession = new TestTraceSession('glissa-session-id');
+  first.wiring.attachSession(firstSession);
+  firstSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
+  await first.wiring.whenIdle();
+  await first.wiring.stop();
+
+  fs.appendFileSync(transcriptPath, skillExpansion(toolUseId), 'utf8');
+  const second = createHarness(configDirectory);
+  await second.wiring.start();
+  const secondSession = new TestTraceSession('glissa-session-id');
+  second.wiring.attachSession(secondSession);
+  secondSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
+  await second.wiring.whenIdle();
+  await second.wiring.stop();
+
+  const expansion = readTrace(second.tracePath('glissa-session-id')).find((record) => record.kind === 'expansion');
+  assert.equal(expansion?.kind, 'expansion');
+  assert.equal(expansion?.kind === 'expansion' ? expansion.toolUseId : null, toolUseId);
 
   fs.rmSync(configDirectory, { recursive: true, force: true });
 });
@@ -772,6 +1174,107 @@ test('a batch appended without its checkpoint is not replayed on the next start'
     readTrace(first.tracePath('glissa-session-id')).map((record) => record.kind),
     ['session', 'prompt', 'session'],
   );
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
+test('a recovery without a checkpoint skips a transcript when its trace marker is outside the scan window', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('lost-checkpoint-tail');
+  const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
+  const paddingText = 'x'.repeat(4000);
+  fs.writeFileSync(
+    transcriptPath,
+    Array.from({ length: 20 }, (_unused, index) => mainPrompt(paddingText, `prompt-${index}`)).join(''),
+    'utf8',
+  );
+  const first = createHarness(configDirectory);
+  await first.wiring.start();
+  const firstSession = new TestTraceSession('glissa-session-id');
+  first.wiring.attachSession(firstSession);
+  firstSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
+  await first.wiring.whenIdle();
+  await first.wiring.stop();
+  fs.rmSync(first.checkpointPath('glissa-session-id'));
+
+  const warnings: string[] = [];
+  const second = createHarness(configDirectory, 10, {
+    log: () => {},
+    warn: (message) => { warnings.push(String(message)); },
+  });
+  await second.wiring.start();
+  const secondSession = new TestTraceSession('glissa-session-id');
+  second.wiring.attachSession(secondSession);
+  secondSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
+  await second.wiring.whenIdle();
+
+  const records = readTrace(first.tracePath('glissa-session-id'));
+  assert.equal(records.filter((record) => record.kind === 'prompt').length, 20);
+  assert.equal(
+    records.filter((record) => record.kind === 'notice' && record.text === 'recovery could not establish the run, resuming at the transcript end').length,
+    1,
+  );
+  assert.equal(warnings.filter((warning) => warning.startsWith('[trace] trace recovery fell back to the transcript end')).length, 1);
+
+  await second.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
+test('a recovery on a transcript that appears after the bind notices the fallback to its end', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('deferred-recovery');
+  const tracedTranscript = path.join(projectDirectory, 'vendor-session.jsonl');
+  const laterTranscript = path.join(projectDirectory, 'later-session.jsonl');
+  fs.writeFileSync(tracedTranscript, mainPrompt('traced before the checkpoint was lost', 'prompt-one'), 'utf8');
+  const first = createHarness(configDirectory);
+  await first.wiring.start();
+  const firstSession = new TestTraceSession('glissa-session-id');
+  first.wiring.attachSession(firstSession);
+  firstSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath: tracedTranscript });
+  await first.wiring.whenIdle();
+  await first.wiring.stop();
+  fs.rmSync(first.checkpointPath('glissa-session-id'));
+
+  const warnings: string[] = [];
+  const second = createHarness(configDirectory, 10, {
+    log: () => {},
+    warn: (message) => { warnings.push(String(message)); },
+  });
+  await second.wiring.start();
+  const secondSession = new TestTraceSession('glissa-session-id');
+  second.wiring.attachSession(secondSession);
+  secondSession.emit('claude-session-id', { id: 'later-session', vendor: 'claude', transcriptPath: laterTranscript });
+  await second.wiring.whenIdle();
+
+  fs.writeFileSync(laterTranscript, mainPrompt('retained before the first open', 'prompt-two'), 'utf8');
+  await second.poll();
+
+  const records = readTrace(second.tracePath('glissa-session-id'));
+  assert.equal(
+    records.filter((record) => record.kind === 'notice' && record.text === 'recovery could not establish the run, resuming at the transcript end').length,
+    1,
+  );
+  assert.equal(warnings.filter((warning) => warning.startsWith('[trace] trace recovery fell back to the transcript end')).length, 1);
+  assert.equal(records.some((record) => record.kind === 'prompt' && record.text === 'retained before the first open'), false);
+
+  await second.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
+test('an empty trace file starts at the transcript beginning', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('empty-trace-recovery');
+  const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
+  fs.writeFileSync(transcriptPath, mainPrompt('first prompt', 'prompt-one'), 'utf8');
+  const harness = createHarness(configDirectory);
+  fs.mkdirSync(path.dirname(harness.tracePath('glissa-session-id')), { recursive: true });
+  fs.writeFileSync(harness.tracePath('glissa-session-id'), '', 'utf8');
+  await harness.wiring.start();
+  const session = new TestTraceSession('glissa-session-id');
+  harness.wiring.attachSession(session);
+  session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
+  await harness.wiring.whenIdle();
+
+  assert.deepEqual(readTrace(harness.tracePath('glissa-session-id')).map((record) => record.kind), ['session', 'prompt']);
+  assert.equal(readCheckpoint(harness.checkpointPath('glissa-session-id')).offset, fs.statSync(transcriptPath).size);
+
+  await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });
 });
 
@@ -1195,7 +1698,7 @@ test('a subagent transcript past the read bound leaves a notice, not a raw line'
   const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
   fs.writeFileSync(transcriptPath, '', 'utf8');
   const subagentPath = path.join(projectDirectory, 'agent-a1.jsonl');
-  fs.writeFileSync(subagentPath, 'x'.repeat(MAX_SUBAGENT_READ_BYTES + 1), 'utf8');
+  fs.writeFileSync(subagentPath, 'x'.repeat(MAX_PARTIAL_LINE_BYTES + 1), 'utf8');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
   const session = new TestTraceSession('glissa-session-id');
@@ -1207,7 +1710,7 @@ test('a subagent transcript past the read bound leaves a notice, not a raw line'
 
   const records = readTrace(harness.tracePath('glissa-session-id'));
   assert.deepEqual(records.map((record) => record.kind), ['session', 'notice']);
-  assert.equal(records[1].kind === 'notice' ? records[1].text : null, 'skipped 1 bytes of agent-a1.jsonl');
+  assert.equal(records[1].kind === 'notice' ? records[1].text : null, 'skipped 8388609 bytes of agent-a1.jsonl');
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });

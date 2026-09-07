@@ -11,7 +11,7 @@ import { toolDetailLine } from '../shared/tool-detail.ts';
 
 const fixturePath = path.join(import.meta.dirname, 'fixtures', 'trace', 'claude-records.jsonl');
 const fixtureLines = fs.readFileSync(fixturePath, 'utf8').trim().split('\n');
-const context = { vendorSessionId: 'vendor-session', now: 1, skillToolUseIds: new Set<string>() };
+const context = { vendorSessionId: 'vendor-session', now: 1 };
 
 function traceTextLength(record: TraceRecordType | undefined): number | null {
   if (!record) return null;
@@ -20,13 +20,7 @@ function traceTextLength(record: TraceRecordType | undefined): number | null {
 }
 
 test('real Claude transcript shapes map to normalized trace records', () => {
-  const records = fixtureLines.flatMap((line) => {
-    const mapped = traceRecordsFromTranscriptLine(line, context);
-    for (const record of mapped) {
-      if (record.kind === 'tool_call' && record.name === 'Skill') context.skillToolUseIds.add(record.toolUseId);
-    }
-    return mapped;
-  });
+  const records = fixtureLines.flatMap((line) => traceRecordsFromTranscriptLine(line, context));
 
   assert.deepEqual(records.map((record) => record.kind), [
     'prompt', 'thinking', 'assistant', 'tool_call', 'tool_result', 'expansion', 'expansion', 'expansion',
@@ -39,7 +33,7 @@ test('real Claude transcript shapes map to normalized trace records', () => {
   assert.equal(records[4]?.kind === 'tool_result' ? records[4].toolUseId : null, 'toolu_skill');
   assert.equal(records[5]?.kind === 'expansion' ? records[5].toolUseId : null, 'toolu_skill');
   assert.equal(records[6]?.kind === 'expansion' ? records[6].text : null, 'short injected context');
-  assert.equal(records[6]?.kind === 'expansion' ? records[6].toolUseId : 'absent', undefined);
+  assert.equal(records[6]?.kind === 'expansion' ? records[6].toolUseId : 'absent', 'toolu_unrelated');
   assert.equal(records[7]?.kind === 'expansion' ? records[7].toolUseId : 'absent', undefined);
   for (const record of records) assert.equal(TraceRecord.safeParse(record).success, true);
 });
@@ -49,7 +43,6 @@ test('an assistant line with thinking, text and a tool call keeps every block', 
   const records = traceRecordsFromTranscriptLine(mixedLine, {
     vendorSessionId: 'vendor-session',
     now: 1,
-    skillToolUseIds: new Set<string>(),
   });
 
   assert.deepEqual(records.map((record) => record.kind), ['thinking', 'assistant', 'tool_call']);

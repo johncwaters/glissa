@@ -14,10 +14,12 @@ import { applyRead, createTailState } from './core/ingest-tail-core.ts';
 import type { TailState } from './core/ingest-tail-core.ts';
 import { traceRecordsFromTranscriptLine } from './core/trace-core.ts';
 import {
-  MAX_SUBAGENT_READ_BYTES,
+  LINE_BREAK,
+  MAX_REMEMBERED_SUBAGENTS,
+  MAX_SUBAGENT_CHUNKS_PER_STOP,
   MAX_TRANSCRIPT_READ_BYTES,
   TRACE_TAIL_SCAN_BYTES,
-  committedOffsetFromTraceTail,
+  committedOffsetFromTraceTailOrNull,
   completeLineBytes,
   containmentRefusalReason,
   isOversizedPartialLine,
@@ -37,11 +39,11 @@ import { configSiblingPath } from './pairings-store.ts';
 const TRACE_RETAIN_DAYS = 7;
 const PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const POLL_INTERVAL_MS = 2000;
-const MAX_REMEMBERED_SUBAGENTS = 512;
 const MAX_REMEMBERED_FILE_REFUSALS = 64;
 const MAX_REMEMBERED_CLOSED_SESSIONS = 512;
 const TRACE_SUFFIX = '.jsonl';
 const CHECKPOINT_SUFFIX = '.checkpoint.json';
+const NO_BYTES = Buffer.alloc(0);
 
 export interface TracePageRequest {
   after: number;
@@ -82,8 +84,8 @@ interface TraceBinding {
   transcriptPath: string;
   requestedTranscriptPath: string;
   tailState: TailState;
-  skillToolUseIds: Set<string>;
-  ingestedSubagentPaths: Set<string>;
+  subagentPathsWithoutOffset: Set<string>;
+  subagentOffsetByPath: Record<string, number>;
   notedFileRefusals: Set<string>;
   committedOffsetByTranscriptPath: Record<string, number>;
   checkpointWriter: JsonStateWriter;
@@ -97,8 +99,11 @@ interface TraceBinding {
 interface TraceResumeState {
   offset: number;
   didReset: boolean;
+  didFallbackToTranscriptEnd: boolean;
+  scannedBytes: number;
   committedOffsetByTranscriptPath: Record<string, number>;
-  ingestedSubagentPaths: string[];
+  subagentPathsWithoutOffset: string[];
+  subagentOffsetByPath: Record<string, number>;
 }
 
 interface LineContext {
@@ -127,6 +132,14 @@ type ContainedFileResult<File extends OpenedFile | MissingContainedFile> =
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function isResumePointMidLine(handle: FileHandle, offset: number): Promise<boolean> {
+  if (offset <= 0) return false;
+  const byteBeforeOffset = Buffer.alloc(1);
+  const { bytesRead } = await handle.read(byteBeforeOffset, 0, 1, offset - 1);
+  if (bytesRead <= 0) return false;
+  return byteBeforeOffset[0] !== LINE_BREAK;
 }
 
 function trimOldest(entries: Set<string>, limit: number): void {
@@ -362,8 +375,12 @@ function createTraceWiring({
       transcriptPath: binding.transcriptPath,
       vendorSessionId: binding.vendorSessionId,
       offset,
-      ingestedSubagentPaths: [...binding.ingestedSubagentPaths],
+      ingestedSubagentPaths: [
+        ...Object.keys(binding.subagentOffsetByPath),
+        ...binding.subagentPathsWithoutOffset,
+      ],
       offsetByTranscriptPath: binding.committedOffsetByTranscriptPath,
+      subagentOffsetByPath: binding.subagentOffsetByPath,
     };
     await binding.checkpointWriter.write(checkpoint, () => JSON.stringify(checkpoint));
   }
@@ -390,9 +407,9 @@ function createTraceWiring({
     glissaSessionId: string,
     transcriptPath: string,
     pathBeforeWindow: string | null,
-  ): Promise<number> {
+  ): Promise<{ offset: number | null; scannedBytes: number; traceSize: number }> {
     const filePath = traceFilePath(glissaSessionId);
-    if (!filePath) return 0;
+    if (!filePath) return { offset: 0, scannedBytes: 0, traceSize: 0 };
     let handle: FileHandle | null = null;
     try {
       handle = await fs.promises.open(filePath, 'r');
@@ -400,13 +417,17 @@ function createTraceWiring({
       const start = Math.max(0, stat.size - TRACE_TAIL_SCAN_BYTES);
       const buffer = Buffer.alloc(stat.size - start);
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, start);
-      return committedOffsetFromTraceTail(buffer.subarray(0, bytesRead).toString('utf8'), {
+      return {
+        offset: committedOffsetFromTraceTailOrNull(buffer.subarray(0, bytesRead).toString('utf8'), {
         transcriptPath,
         pathBeforeWindow,
         isWholeFile: start === 0,
-      });
+        }),
+        scannedBytes: bytesRead,
+        traceSize: stat.size,
+      };
     } catch {
-      return 0;
+      return { offset: 0, scannedBytes: 0, traceSize: 0 };
     } finally {
       if (handle) await handle.close().catch(() => {});
     }
@@ -418,19 +439,29 @@ function createTraceWiring({
     size: number,
   ): Promise<TraceResumeState> {
     const checkpoint = await readCheckpoint(glissaSessionId);
-    const alreadyTracedOffset = await tracedOffsetOf(
+    const traceTail = await tracedOffsetOf(
       glissaSessionId,
       transcriptPath,
       checkpoint ? checkpoint.transcriptPath : null,
     );
-    const resume = resumeOffsetFrom(checkpoint, { transcriptPath, size, alreadyTracedOffset });
+    const resume = resumeOffsetFrom(checkpoint, {
+      transcriptPath,
+      size,
+      alreadyTracedOffset: traceTail.offset,
+      traceSize: traceTail.traceSize,
+    });
+    const subagentOffsetByPath = checkpoint ? checkpoint.subagentOffsetByPath : {};
+    const subagentPathsWithoutOffset = checkpoint
+      ? checkpoint.ingestedSubagentPaths.filter((subagentPath) => !(subagentPath in subagentOffsetByPath))
+      : [];
     return {
       offset: resume.offset,
       didReset: resume.didReset,
+      didFallbackToTranscriptEnd: resume.didFallbackToTranscriptEnd,
+      scannedBytes: traceTail.scannedBytes,
       committedOffsetByTranscriptPath: checkpoint ? checkpoint.offsetByTranscriptPath : {},
-      ingestedSubagentPaths: checkpoint && checkpoint.transcriptPath === transcriptPath
-        ? checkpoint.ingestedSubagentPaths
-        : [],
+      subagentPathsWithoutOffset: subagentPathsWithoutOffset.slice(-MAX_REMEMBERED_SUBAGENTS),
+      subagentOffsetByPath,
     };
   }
 
@@ -473,15 +504,35 @@ function createTraceWiring({
     });
   }
 
+  function noteRecoveryFallback(binding: TraceBinding): void {
+    queueRecord(binding.glissaSessionId, {
+      ts: nowFn(),
+      uuid: null,
+      parentUuid: null,
+      vendorSessionId: binding.vendorSessionId,
+      kind: 'notice',
+      text: 'recovery could not establish the run, resuming at the transcript end',
+    });
+  }
+
+  function noteResumeOutcome(binding: TraceBinding, resumed: TraceResumeState): void {
+    queueSessionRecord(binding, resumed.didReset ? 'transcript smaller than the stored checkpoint' : null);
+    if (!resumed.didFallbackToTranscriptEnd) return;
+    noteRecoveryFallback(binding);
+    laneLog.warn('trace recovery fell back to the transcript end', {
+      session: binding.glissaSessionId,
+      path: binding.transcriptPath,
+      scannedBytes: resumed.scannedBytes,
+    });
+  }
+
   function mapAndAppend(rawLine: string, binding: TraceBinding, context: LineContext = {}): void {
     const records = traceRecordsFromTranscriptLine(rawLine, {
       vendorSessionId: binding.vendorSessionId,
       now: nowFn(),
-      skillToolUseIds: binding.skillToolUseIds,
       ...context,
     });
     for (const record of records) {
-      if (record.kind === 'tool_call' && record.name === 'Skill') binding.skillToolUseIds.add(record.toolUseId);
       queueRecord(binding.glissaSessionId, record);
     }
   }
@@ -550,11 +601,12 @@ function createTraceWiring({
         const stat = await opened.file.handle.stat();
         const resumed = await resumeStateFor(binding.glissaSessionId, binding.transcriptPath, stat.size);
         binding.committedOffsetByTranscriptPath = resumed.committedOffsetByTranscriptPath;
-        binding.ingestedSubagentPaths = new Set<string>(resumed.ingestedSubagentPaths);
+        binding.subagentPathsWithoutOffset = new Set<string>(resumed.subagentPathsWithoutOffset);
+        binding.subagentOffsetByPath = resumed.subagentOffsetByPath;
         binding.tailState = createTailState(stat, { path: binding.transcriptPath });
         binding.tailState.offset = resumed.offset;
         binding.hasOpenedTranscript = true;
-        queueSessionRecord(binding, resumed.didReset ? 'transcript smaller than the stored checkpoint' : null);
+        noteResumeOutcome(binding, resumed);
         committedOffsetBeforeRead = committedOffsetOf(binding);
       }
       await readOnce(binding, opened.file.handle);
@@ -625,8 +677,8 @@ function createTraceWiring({
       transcriptPath,
       requestedTranscriptPath,
       tailState,
-      skillToolUseIds: new Set<string>(),
-      ingestedSubagentPaths: new Set<string>(resumed ? resumed.ingestedSubagentPaths : []),
+      subagentPathsWithoutOffset: new Set<string>(resumed ? resumed.subagentPathsWithoutOffset : []),
+      subagentOffsetByPath: resumed ? resumed.subagentOffsetByPath : {},
       notedFileRefusals: new Set<string>(),
       committedOffsetByTranscriptPath: resumed ? resumed.committedOffsetByTranscriptPath : {},
       checkpointWriter: createJsonStateWriter({
@@ -639,9 +691,7 @@ function createTraceWiring({
       hasWarnedUnreadable: false,
       isClosing: false,
     };
-    if (resumed) {
-      queueSessionRecord(binding, resumed.didReset ? 'transcript smaller than the stored checkpoint' : null);
-    }
+    if (resumed) noteResumeOutcome(binding, resumed);
     bindingByGlissaSessionId.set(glissaSessionId, binding);
     await drainBinding(binding);
   }
@@ -673,7 +723,6 @@ function createTraceWiring({
       : '';
     if (!rawPath) return;
     const subagentPath = path.resolve(rawPath);
-    if (binding.ingestedSubagentPaths.has(subagentPath)) return;
     const subagentRoot = path.dirname(binding.transcriptPath);
     if (!isPathInsideRoot(projectsRoot(), subagentRoot)) {
       laneLog.warnOnce(`subagent:${binding.glissaSessionId}:outside-root`, 'subagent transcript refused', {
@@ -703,9 +752,6 @@ function createTraceWiring({
       await drainBinding(binding);
       if (!binding.hasOpenedTranscript) return;
       const stat = await opened.file.handle.stat();
-      const end = Math.min(stat.size, MAX_SUBAGENT_READ_BYTES);
-      const buffer = Buffer.alloc(end);
-      ({ bytesRead } = await opened.file.handle.read(buffer, 0, end, 0));
       const agentId = typeof eventPayload.agent_id === 'string' && eventPayload.agent_id
         ? eventPayload.agent_id
         : undefined;
@@ -717,17 +763,56 @@ function createTraceWiring({
         ...(agentType ? { agentType } : {}),
       };
       const sidechainState = createTailState(stat, { path: subagentPath });
-      sidechainState.offset = 0;
-      const lines = applyRead(sidechainState, {
-        text: buffer.subarray(0, bytesRead).toString('utf8'),
-        end: bytesRead,
-        stat,
-      });
-      mappedLineCount = lines.length;
-      for (const line of lines) mapAndAppend(line, binding, context);
-      if (stat.size > end) noteSkippedBytes(binding, subagentPath, stat.size - end);
-      binding.ingestedSubagentPaths.add(subagentPath);
-      trimOldest(binding.ingestedSubagentPaths, MAX_REMEMBERED_SUBAGENTS);
+      const rememberedOffset = binding.subagentOffsetByPath[subagentPath];
+      sidechainState.offset = rememberedOffset
+        ?? (binding.subagentPathsWithoutOffset.has(subagentPath) ? stat.size : 0);
+      let isSkippingOversizedLine = await isResumePointMidLine(opened.file.handle, sidechainState.offset);
+      let partialLineBytes = NO_BYTES;
+      let committedOffset = sidechainState.offset;
+      for (let chunkIndex = 0; chunkIndex < MAX_SUBAGENT_CHUNKS_PER_STOP; chunkIndex += 1) {
+        const plan = planContiguousRead(sidechainState, stat, { maxReadBytes: MAX_TRANSCRIPT_READ_BYTES });
+        if (plan.reset) {
+          sidechainState.offset = 0;
+          sidechainState.carry = '';
+          partialLineBytes = NO_BYTES;
+          isSkippingOversizedLine = false;
+          committedOffset = 0;
+        }
+        if (plan.action === 'skip') break;
+        const buffer = Buffer.alloc(plan.end - plan.start);
+        const read = await opened.file.handle.read(buffer, 0, buffer.length, plan.start);
+        if (read.bytesRead <= 0) break;
+        bytesRead += read.bytesRead;
+        const carriedBytes = plan.reset ? NO_BYTES : partialLineBytes;
+        const readBytes = buffer.subarray(0, read.bytesRead);
+        const chunk = carriedBytes.length > 0 ? Buffer.concat([carriedBytes, readBytes]) : readBytes;
+        const wholeLineBytes = completeLineBytes(chunk);
+        const readEnd = plan.start + read.bytesRead;
+        const lines = applyRead(sidechainState, {
+          text: chunk.subarray(0, wholeLineBytes).toString('utf8'),
+          end: readEnd,
+          stat,
+          reset: plan.reset,
+          dropPartial: isSkippingOversizedLine,
+        });
+        isSkippingOversizedLine = isSkippingOversizedLine && wholeLineBytes === 0;
+        partialLineBytes = isSkippingOversizedLine ? NO_BYTES : chunk.subarray(wholeLineBytes);
+        committedOffset = readEnd - partialLineBytes.length;
+        mappedLineCount += lines.length;
+        for (const line of lines) mapAndAppend(line, binding, context);
+        if (!isOversizedPartialLine(partialLineBytes)) continue;
+        noteSkippedBytes(binding, subagentPath, partialLineBytes.length);
+        partialLineBytes = NO_BYTES;
+        committedOffset = readEnd;
+        isSkippingOversizedLine = true;
+      }
+      binding.subagentOffsetByPath = withCommittedOffset(
+        binding.subagentOffsetByPath,
+        subagentPath,
+        committedOffset,
+        { maxRemembered: MAX_REMEMBERED_SUBAGENTS },
+      );
+      binding.subagentPathsWithoutOffset.delete(subagentPath);
     } catch (error) {
       laneLog.warn('subagent transcript read failed', { error: errorMessage(error) });
       return;

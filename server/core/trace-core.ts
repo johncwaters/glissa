@@ -25,7 +25,6 @@ interface TraceLineContext {
   now: number;
   agentId?: string;
   agentType?: string;
-  skillToolUseIds?: ReadonlySet<string>;
 }
 
 interface TranscriptContentBlock {
@@ -195,11 +194,8 @@ function mapUserLine(
   if (line.isMeta === true) {
     if (!text) return [rawRecord(rawLine, line, context)];
     const sourceToolUseId = nonEmptyString(line.sourceToolUseID);
-    const launchingSkillToolUseId = sourceToolUseId && context.skillToolUseIds?.has(sourceToolUseId)
-      ? sourceToolUseId
-      : null;
-    if (!launchingSkillToolUseId) return [{ ...base, kind: 'expansion', ...boundedTextFields(text) }];
-    return [{ ...base, kind: 'expansion', toolUseId: launchingSkillToolUseId, ...boundedTextFields(text) }];
+    if (!sourceToolUseId) return [{ ...base, kind: 'expansion', ...boundedTextFields(text) }];
+    return [{ ...base, kind: 'expansion', toolUseId: sourceToolUseId, ...boundedTextFields(text) }];
   }
   if (!text) return [rawRecord(rawLine, line, context)];
   if (typeof content === 'string' && /<command-name>[\s\S]*?<\/command-name>/.test(content)) {

@@ -51,7 +51,7 @@ function commandName(text: string): string | null {
 function expansionName(record: ExpansionRecord, toolCallByUseId: ReadonlyMap<string, ToolCallRecord>): string {
   if (!record.toolUseId) return commandName(record.text) ?? 'context';
   const toolCall = toolCallByUseId.get(record.toolUseId);
-  if (!toolCall) return 'Skill';
+  if (!toolCall) return 'expansion';
   return toolDetailLine(toolCall.name, toolCall.input) || toolCall.name;
 }
 
