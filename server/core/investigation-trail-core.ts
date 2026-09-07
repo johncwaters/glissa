@@ -1,3 +1,5 @@
+import { TOOL_DETAIL_MAX_CHARS, toolDetailLine } from '../../shared/tool-detail.ts';
+
 export interface TrailStep {
   at: number;
   tool: string;
@@ -10,38 +12,14 @@ export interface InvestigationTrail {
 }
 
 export const TRAIL_MAX_STEPS = 80;
-export const TRAIL_DETAIL_MAX_CHARS = 160;
+export const TRAIL_DETAIL_MAX_CHARS = TOOL_DETAIL_MAX_CHARS;
 export const TRAIL_TOOL_MAX_CHARS = 64;
-
-const DETAIL_FIELD_BY_TOOL: Record<string, string> = {
-  Bash: 'command',
-  Read: 'file_path',
-  Edit: 'file_path',
-  MultiEdit: 'file_path',
-  Write: 'file_path',
-  NotebookEdit: 'notebook_path',
-  Grep: 'pattern',
-  Glob: 'pattern',
-  WebFetch: 'url',
-  WebSearch: 'query',
-  Task: 'description',
-  Agent: 'description',
-  Skill: 'skill',
-};
-
-function firstLineOf(value: unknown): string {
-  if (typeof value !== 'string') return '';
-  return value.split(/\r?\n/, 1)[0].trim().slice(0, TRAIL_DETAIL_MAX_CHARS);
-}
 
 export function describeToolStep(toolName: unknown, toolInput: unknown): { tool: string; detail: string } | null {
   const trimmed = typeof toolName === 'string' ? toolName.trim() : '';
   if (!trimmed) return null;
   const tool = trimmed.slice(0, TRAIL_TOOL_MAX_CHARS);
-  const input = toolInput && typeof toolInput === 'object' ? toolInput as Record<string, unknown> : {};
-  const field = DETAIL_FIELD_BY_TOOL[tool];
-  if (!field) return { tool, detail: '' };
-  return { tool, detail: firstLineOf(input[field]) };
+  return { tool, detail: toolDetailLine(tool, toolInput) };
 }
 
 export function trailStepFromHook(event: string, payload: Record<string, unknown>): { tool: string; detail: string } | null {

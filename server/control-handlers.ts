@@ -57,6 +57,7 @@ import { USAGE_VENDOR_KEYS, USAGE_BUDGET_KEYS } from '../shared/usage-config.ts'
 import type { UpdateJournal } from '../shared/contracts/update-journal.ts';
 import type { UpdateStatus } from './backend-update.ts';
 import type { UpdateApplyOutcome } from './update-apply.ts';
+import type { TracePage, TracePageRequest } from './trace-wiring.ts';
 
 interface ControlRequest {
   type: string;
@@ -77,6 +78,8 @@ interface ControlRequest {
   force?: unknown;
   fresh?: unknown;
   focused?: boolean;
+  after?: number;
+  endingAt?: number | 'tail';
   pack?: string;
   deliver?: boolean;
   hook?: Record<string, unknown>;
@@ -134,6 +137,7 @@ interface ControlHandlerDeps {
   conversationFs?: typeof fs;
   conversationGit?: (args: string[], cwd: string) => Promise<string>;
   conversationProjectsDir?: string;
+  readTracePage?: ((glissaSessionId: string, request: TracePageRequest) => Promise<TracePage>) | null;
 }
 
 function errorCode(error: unknown): string | undefined {
@@ -272,8 +276,13 @@ async function runGitForConversationHistory(args: string[], cwd: string): Promis
   return stdout;
 }
 
-function sendError(ws: ControlSocket, message: string, { type = 'error', requestId }: { type?: string; requestId?: string | null } = {}): void {
-  const payload = requestId !== undefined ? { type, requestId, message } : { type, message };
+function sendError(ws: ControlSocket, message: string, { type = 'error', requestId, id }: { type?: string; requestId?: string | null; id?: string } = {}): void {
+  const payload = {
+    type,
+    ...(requestId !== undefined ? { requestId } : {}),
+    ...(id ? { id } : {}),
+    message,
+  };
   ws.send(JSON.stringify(payload));
 }
 
@@ -304,6 +313,7 @@ function requestValidationErrorReply(msg: Record<string, unknown> | null | undef
     'request-branch-sync',
     'resync-branch',
     'debug-state',
+    'session-trace',
     'request-health-snapshot',
   ]);
   if (genericErrorRequests.has(requestType)) return { type: 'error', message };
@@ -369,6 +379,7 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     conversationFs = fs,
     conversationGit = runGitForConversationHistory,
     conversationProjectsDir = claudeProjectsDir(process.env, os.homedir()),
+    readTracePage = null,
   } = deps;
 
   function buildSettingsPayload() {
@@ -1015,6 +1026,20 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
       const s = findSession(msg);
       if (!s) { sendError(ws, 'Session not found'); return; }
       ws.send(JSON.stringify({ type: 'debug-state-response', id: s.id, payload: s.getDebugState() }));
+    },
+    'session-trace':    async (message: ControlRequest, ws: ControlSocket) => {
+      const requestedSessionId = message.id;
+      if (ws.glissaTrust === 'remote') return sendError(ws, 'Session trace is available only on local connections', { id: requestedSessionId });
+      const session = findSession(message);
+      if (!session) return sendError(ws, 'Session not found', { id: requestedSessionId });
+      if (!readTracePage) return sendError(ws, 'Session trace is not enabled', { id: session.id });
+      const endingAt = message.endingAt === 'tail' || typeof message.endingAt === 'number' ? message.endingAt : undefined;
+      try {
+        const page = await readTracePage(session.id, { after: message.after ?? 0, ...(endingAt !== undefined ? { endingAt } : {}) });
+        ws.send(JSON.stringify({ type: 'session-trace-response', id: session.id, ...page }));
+      } catch (error) {
+        sendError(ws, `Session trace read failed: ${errorMessage(error)}`, { id: session.id });
+      }
     },
     'shutdown':         handleShutdown,
     'restart-server':   handleRestart,

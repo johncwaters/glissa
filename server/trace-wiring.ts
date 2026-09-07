@@ -25,6 +25,7 @@ import {
   resumeOffsetFrom,
   withCommittedOffset,
 } from './core/trace-tail-core.ts';
+import { readSessionTracePage } from './core/session-trace-core.ts';
 import { isSafePathSegment } from './core/upload-core.ts';
 import { appendJsonLines, createJsonStateWriter } from './json-file.ts';
 import type { JsonStateWriter } from './json-file.ts';
@@ -37,6 +38,24 @@ const MAX_REMEMBERED_SUBAGENTS = 512;
 const MAX_REMEMBERED_CLOSED_SESSIONS = 512;
 const TRACE_SUFFIX = '.jsonl';
 const CHECKPOINT_SUFFIX = '.checkpoint.json';
+
+export interface TracePageRequest {
+  after: number;
+  endingAt?: number | 'tail';
+}
+
+export interface TracePage {
+  records: TraceRecord[];
+  start: number;
+  next: number;
+  reset: boolean;
+  path: string;
+}
+
+function isRewoundCursor(request: TracePageRequest, next: number): boolean {
+  if (request.endingAt !== undefined) return false;
+  return next < request.after;
+}
 
 interface TraceSession {
   id: string;
@@ -79,6 +98,10 @@ interface OpenedFile {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return error instanceof Error && (error as NodeJS.ErrnoException).code === 'ENOENT';
 }
 
 function trimOldest(entries: Set<string>, limit: number): void {
@@ -181,6 +204,35 @@ function createTraceWiring({
   function traceFilePath(glissaSessionId: string): string | null {
     if (!isSafePathSegment(glissaSessionId)) return null;
     return path.join(traceDirectory, `${glissaSessionId}${TRACE_SUFFIX}`);
+  }
+
+  async function readTracePage(glissaSessionId: string, request: TracePageRequest): Promise<TracePage> {
+    const filePath = traceFilePath(glissaSessionId);
+    if (!filePath) return { records: [], start: 0, next: 0, reset: isRewoundCursor(request, 0), path: '' };
+    let handle: FileHandle | null = null;
+    try {
+      handle = await fs.promises.open(filePath, 'r');
+      const openHandle = handle;
+      const stat = await openHandle.stat();
+      const page = await readSessionTracePage({
+        after: request.after,
+        ...(request.endingAt !== undefined ? { endingAt: request.endingAt } : {}),
+        size: stat.size,
+        now: nowFn(),
+        vendorSessionId: bindingByGlissaSessionId.get(glissaSessionId)?.vendorSessionId ?? 'unknown',
+        readBytes: async (offset: number, byteCount: number) => {
+          const buffer = Buffer.alloc(byteCount);
+          const { bytesRead } = await openHandle.read(buffer, 0, byteCount, offset);
+          return buffer.subarray(0, bytesRead);
+        },
+      });
+      return { ...page, reset: isRewoundCursor(request, page.next), path: filePath };
+    } catch (error) {
+      if (isMissingFileError(error)) return { records: [], start: 0, next: 0, reset: isRewoundCursor(request, 0), path: filePath };
+      throw error;
+    } finally {
+      if (handle) await handle.close().catch(() => {});
+    }
   }
 
   function queueRecord(glissaSessionId: string, record: TraceRecord): void {
@@ -639,10 +691,10 @@ function createTraceWiring({
   return {
     attachSession,
     on: emitter.on.bind(emitter),
+    readTracePage,
     start,
     stop,
     whenIdle,
-    get traceDirectory() { return traceDirectory; },
   };
 }
 

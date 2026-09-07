@@ -188,6 +188,7 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     recordLane,
     spawnGate,
     tapIngestForSession,
+    traceChangeBroadcast,
     traceWiring,
     usage,
     visionsSessions,
@@ -311,6 +312,7 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     memoryDistiller,
     memoryStore,
     traceWiring,
+    traceChangeBroadcast,
     millMetricsIdle: () => laneAssembly.millMetrics.whenIdle(),
     millMetricsPort: laneAssembly.millMetrics.port,
     telegramOutbox,
@@ -358,6 +360,7 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     packService,
     usage,
     mill,
+    readTracePage: traceWiring?.readTracePage ?? null,
     serverBuild: () => serverBuild,
     logger: console,
   });

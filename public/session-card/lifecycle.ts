@@ -7,6 +7,7 @@ import { setHealthMonitorVisible } from '../health-monitor.ts';
 import { seedReviewMergeStatus, setReviewDiff, setReviewMergeStatus } from '../sidebar/review-sidebar.ts';
 import { setSelectedId } from '../sidebar/selection.ts';
 import { getSoundId, isSoundEnabled } from '../ui-prefs.ts';
+import { openTraceForSession } from '../trace-panel.ts';
 import type { UsageSessionUsage } from '../usage-view-core.ts';
 import { sessionChipText, sessionChipTitle } from '../usage-view-core.ts';
 import { setRunningActivity } from './activity.ts';
@@ -42,6 +43,7 @@ let _lastAggregateText: string | null = null;
 let _lastAggregateSeverity: string | null = null;
 
 const latestPackVersions = new Map<string, string>();
+let isTraceActionAvailable = true;
 
 const asText = (value: unknown) => (value == null ? '' : String(value));
 
@@ -63,12 +65,19 @@ function updateButtonVisibility(ui: SessionUi) {
 
   ui.btnRename.classList.add('visible');
   ui.btnResume.classList.add('visible');
+  ui.btnTrace.classList.toggle('visible', isTraceActionAvailable);
+  ui.btnTrace.hidden = !isTraceActionAvailable;
   ui.btnRemove.classList.add('visible');
 }
 
 function closeOverflowMenu(ui: SessionUi) {
   ui.overflowMenu.classList.remove('open');
   ui.btnOverflow.setAttribute('aria-expanded', 'false');
+}
+
+export function setSessionTraceAvailable(isAvailable: boolean) {
+  isTraceActionAvailable = isAvailable;
+  for (const ui of sessionUIs.values()) updateButtonVisibility(ui);
 }
 
 function wireCardEvents(ui: SessionUi, sessionId: string) {
@@ -102,6 +111,11 @@ function wireCardEvents(ui: SessionUi, sessionId: string) {
   ui.btnResume.addEventListener('click', () => {
     ui.overflowMenu.classList.remove('open');
     openResumeDialog(sessionId, { currentState: ui.currentState });
+  });
+
+  ui.btnTrace.addEventListener('click', () => {
+    closeOverflowMenu(ui);
+    openTraceForSession(sessionId);
   });
 
   ui.btnRemove.addEventListener('click', () => {
@@ -242,6 +256,7 @@ export function createSessionCard(sessionId: unknown, sessionName: unknown, init
     btnRestart: dom.btnRestart,
     btnRestartFresh: dom.btnRestartFresh,
     btnResume: dom.btnResume,
+    btnTrace: dom.btnTrace,
     btnRemove: dom.btnRemove,
     debugOverlay: null,
     debugOpen: false,

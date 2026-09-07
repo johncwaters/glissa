@@ -21,8 +21,9 @@ test('shouldShowServerAction: a local client is offered every action', () => {
   assert.equal(shouldShowServerAction('shutdown', undefined), true);
 });
 
-test('shouldShowServerAction: a remote client loses shutdown and keeps restart', () => {
+test('shouldShowServerAction: a remote client loses local-only actions and keeps restart', () => {
   assert.equal(shouldShowServerAction('shutdown', 'remote'), false);
+  assert.equal(shouldShowServerAction('trace', 'remote'), false);
   assert.equal(shouldShowServerAction('restart-server', 'remote'), true);
   assert.equal(shouldShowServerAction('settings', 'remote'), true);
 });

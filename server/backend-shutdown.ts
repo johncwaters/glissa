@@ -41,6 +41,7 @@ interface BackendShutdownDependencies {
   memoryDistiller: Stoppable | null;
   memoryStore: Stoppable | null;
   traceWiring?: Stoppable | null;
+  traceChangeBroadcast?: Stoppable | null;
   millMetricsIdle?: (() => Promise<void>) | null;
   millMetricsPort?: ShutdownMillMetricsPort | null;
   telegramOutbox: { idle: () => unknown };
@@ -108,6 +109,7 @@ function createBackendShutdown(dependencies: BackendShutdownDependencies): () =>
     const memoryStore = dependencies.memoryStore;
     if (memoryStore) stoppers.add('memory-store', () => memoryStore.stop());
     const traceWiring = dependencies.traceWiring;
+    if (dependencies.traceChangeBroadcast) dependencies.traceChangeBroadcast.stop();
     if (traceWiring) {
       stoppers.add('trace', async () => {
         await Promise.allSettled([...pendingReaps]);

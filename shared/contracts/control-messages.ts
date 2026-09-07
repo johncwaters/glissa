@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PendingWakeup, SessionSnapshot, SessionState } from './session.ts';
+import { TraceRecord } from './trace.ts';
 import { UpdateChannel, UpdateJournal, UpdateJournalSummary } from './update-journal.ts';
 
 const requestId = z.string().nullable().optional();
@@ -78,6 +79,7 @@ export const CLIENT_MESSAGE_TYPES = Object.freeze([
   'request-branch-sync',
   'resync-branch',
   'debug-state',
+  'session-trace',
   'shutdown',
   'restart-server',
   'focus-change',
@@ -119,6 +121,11 @@ const clientVariants = [
   loose('request-health-snapshot'),
   loose('update-check'),
   loose('update-apply'),
+  loose('session-trace', {
+    id: sessionId,
+    after: z.number().int().nonnegative().default(0),
+    endingAt: z.union([z.number().int().nonnegative(), z.literal('tail')]).optional(),
+  }),
   ...idOnlyClientTypes.map((type) => loose(type, { id: sessionId, force: z.unknown().optional() })),
 ] as const;
 
@@ -154,6 +161,8 @@ export const SERVER_MESSAGE_TYPES = Object.freeze([
   'session-changed',
   'post-turn-result',
   'debug-state-response',
+  'session-trace-response',
+  'session-trace-changed',
   'notify',
   'update-status',
   'update-progress',
@@ -329,6 +338,15 @@ const serverVariants = [
     timestamp,
   }),
   loose('debug-state-response', { id: sessionId, payload: opaqueObject }),
+  loose('session-trace-response', {
+    id: sessionId,
+    records: z.array(TraceRecord),
+    start: z.number().int().nonnegative(),
+    next: z.number().int().nonnegative(),
+    reset: z.boolean(),
+    path: z.string(),
+  }),
+  loose('session-trace-changed', { id: sessionId }),
   loose('notify', {
     session: z.string(),
     category: z.string(),

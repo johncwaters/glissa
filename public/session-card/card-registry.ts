@@ -24,6 +24,7 @@ export interface SessionUi {
   btnRestart: HTMLButtonElement;
   btnRestartFresh: HTMLButtonElement;
   btnResume: HTMLButtonElement;
+  btnTrace: HTMLButtonElement;
   btnRemove: HTMLButtonElement;
   debugOverlay: HTMLDivElement | null;
   debugOpen: boolean;

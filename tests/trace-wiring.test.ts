@@ -763,3 +763,32 @@ test('a subagent transcript past the read bound leaves a notice, not a raw line'
 after(() => {
   fs.rmSync(claudeHome, { recursive: true, force: true });
 });
+
+test('the lane serves a byte page of its own trace file and refuses an unsafe session id', async () => {
+  const { configDirectory } = makeWorkspace('read-page');
+  const harness = createHarness(configDirectory);
+  const traceDirectory = path.join(configDirectory, 'traces');
+  fs.mkdirSync(traceDirectory, { recursive: true });
+  const record = {
+    ts: 1,
+    uuid: null,
+    parentUuid: null,
+    vendorSessionId: 'vendor-session',
+    kind: 'assistant',
+    text: 'answer',
+  };
+  const line = `${JSON.stringify(record)}\n`;
+  fs.writeFileSync(harness.tracePath('glissa-session-id'), line, 'utf8');
+
+  const page = await harness.wiring.readTracePage('glissa-session-id', { after: 0 });
+  assert.deepEqual(page.records, [TraceRecord.parse(record)]);
+  assert.equal(page.next, Buffer.byteLength(line));
+  assert.equal(page.reset, false);
+  assert.equal(page.path, harness.tracePath('glissa-session-id'));
+
+  const refused = await harness.wiring.readTracePage('../escape', { after: 0 });
+  assert.deepEqual(refused, { records: [], start: 0, next: 0, reset: false, path: '' });
+
+  await harness.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});

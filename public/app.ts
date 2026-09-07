@@ -16,7 +16,7 @@ import { applyIngestActivity, applyIngestSnapshot, applyVisionsComments, applyVi
 import { acknowledgeMillAttention, applyMillReport, mountMillView, refreshMillView, requestMillReport, setMillActivityCallback, setMillRequestSender } from './mill-panel.ts';
 import { applyDeleteHookResult, applyHooksReport, applySaveHookResult, mountHooksView, refreshHooksView, requestHooksReport, setHooksRequestSender } from './hooks-panel.ts';
 import { initNotifications, showDesktopNotification } from './notifications.ts';
-import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, isPhoneScreenActive, isPhoneShellActive, mountPhoneShell, refreshPhoneBoard, setPhoneScreenAttention, showPhoneScreen } from './phone/phone-shell.ts';
+import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, isPhoneScreenActive, isPhoneShellActive, mountPhoneShell, refreshPhoneBoard, setPhoneScreenAttention, setPhoneScreenAvailable, showPhoneScreen } from './phone/phone-shell.ts';
 import { noteKnownProjectPath } from './project-registry.ts';
 import { acknowledgePrAttention, applyPrStatus, mountPrView, setPrActivityCallback } from './pr-panel.ts';
 
@@ -24,7 +24,7 @@ import { UPDATES_ACTIONS_SETTING_ID, UPDATES_SECTION_ID, updateBannerText } from
 import { acknowledgeRadarAttention, applyHealthSnapshot as applyRadarHealth, applyInvestigationActivity, applyInvestigationFinished, applyPosthogStatus, applyPrStatus as applyRadarPrStatus, applyUpdateAvailable as applyRadarUpdate, mountRadarView, setRadarActivityCallback, setRadarNavigateToPrs } from './radar-panel.ts';
 import { handleDebugStateRefresh, handleDebugStateResponse } from './session-card/card-dom.ts';
 import { sessionUIs } from './session-card/card-registry.ts';
-import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, notePackVersion, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setLatestPackVersions, setSessionAgent, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPacks, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionUsage, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.ts';
+import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, notePackVersion, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setLatestPackVersions, setSessionAgent, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPacks, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionTraceAvailable, setSessionUsage, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.ts';
 import { openConfirmDialog } from './session-card/modal.ts';
 import { reconnectDataWs } from './session-card/terminal.ts';
 import { showErrorToast } from './session-card/toast.ts';
@@ -33,6 +33,7 @@ import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWo
 import { decideReloadOnBuild } from './server-build-core.ts';
 import { createSettingsLink } from './settings-link.ts';
 import { applyTheme } from './theme.ts';
+import { applyTraceChanged, applyTraceConnectionState, applyTraceError, applyTraceResponse, mountTraceView, refreshTraceView, setTraceNavigate, setTraceRequestSender, setTraceSessions } from './trace-panel.ts';
 import { getActiveView as getSavedActiveView, getDismissedUpdate, getThemeId, isSoundEnabled, setActiveView, setDismissedUpdate, setSoundEnabled } from './ui-prefs.ts';
 import { getActiveView, uiState } from './ui-state-core.ts';
 import { updateBannerMode } from './updates-view-core.ts';
@@ -97,6 +98,7 @@ function showShutdownOverlay(message?: string) {
 setConnectionStateCallback((state, label) => {
   connectionEl.dataset.state = state;
   connectionLabel.textContent = label;
+  applyTraceConnectionState(state === 'connected');
 
   if (state === 'connected') {
     if (shutdownScreen.classList.contains('active')) {
@@ -177,6 +179,14 @@ function handleSnapshot(sessions: unknown, packVersions: unknown) {
   if (isFocusActive()) { refreshFocusRoster(); restoreFocusedSession(); }
 
   refreshPhoneBoard();
+  syncTraceSessionsFromCards();
+}
+
+function syncTraceSessionsFromCards() {
+  setTraceSessions([...sessionUIs].map(([id, sessionUi]) => ({
+    id,
+    name: sessionUi.card.dataset.session || sessionUi.nameEl.textContent || id,
+  })));
 }
 
 function handleStateChange(msg: ServerMessage) {
@@ -245,6 +255,7 @@ function restoreUsageChip(sessionId: unknown) {
 setUsageRequestSender(sendControlMsg);
 setMillRequestSender(sendControlMsg);
 setHooksRequestSender(sendControlMsg);
+setTraceRequestSender(sendControlMsg);
 
 function isHooksSurfaceVisible() {
   if (isPhoneShellActive()) return isPhoneScreenActive('hooks');
@@ -297,10 +308,10 @@ const messageHandlers = {
 
   'session-packs':      (msg) => setSessionPacks(msg.id, msg.packs),
   'state-change':       (msg) => handleStateChange(msg),
-  'session-added':      (msg) => { if (!msg.ephemeral) noteKnownProjectPath(msg.path); if (!hasSession(msg.id)) { createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId, stateSince: msg.stateSince }); restoreUsageChip(msg.id); } refreshFavicon(sessionUIs); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
-  'session-removed':    (msg) => { removeSessionCard(msg.id); forgetReviewSession(msg.id); refreshFavicon(sessionUIs); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
-  'session-renamed':    (msg) => { renameSessionCard(msg.id, msg.newName); refreshPhoneBoard(); },
-  'session-modified':   (msg) => { if (!msg.ephemeral) noteKnownProjectPath(msg.path); removeSessionCard(msg.id); forgetReviewSession(msg.id); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId, stateSince: msg.stateSince }); restoreUsageChip(msg.id); refreshFavicon(sessionUIs); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); },
+  'session-added':      (msg) => { if (!msg.ephemeral) noteKnownProjectPath(msg.path); if (!hasSession(msg.id)) { createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId, stateSince: msg.stateSince }); restoreUsageChip(msg.id); } refreshFavicon(sessionUIs); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); syncTraceSessionsFromCards(); },
+  'session-removed':    (msg) => { removeSessionCard(msg.id); forgetReviewSession(msg.id); refreshFavicon(sessionUIs); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); syncTraceSessionsFromCards(); },
+  'session-renamed':    (msg) => { renameSessionCard(msg.id, msg.newName); refreshPhoneBoard(); syncTraceSessionsFromCards(); },
+  'session-modified':   (msg) => { if (!msg.ephemeral) noteKnownProjectPath(msg.path); removeSessionCard(msg.id); forgetReviewSession(msg.id); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId, stateSince: msg.stateSince }); restoreUsageChip(msg.id); refreshFavicon(sessionUIs); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); syncTraceSessionsFromCards(); },
   'session-git':        (msg) => setSessionWorktree(msg.id, !!msg.worktree),
   'session-resume':     (msg) => setSessionResume(msg.id, msg.resumeSessionId),
 
@@ -316,11 +327,13 @@ const messageHandlers = {
   'session-changed':    (msg) => notifyWorktreeChanged(msg.id),
   'post-turn-result':   (msg) => setSessionPostTurn(msg.id, msg),
   'debug-state-response': (msg) => handleDebugStateResponse(msg),
+  'session-trace-response': (msg) => applyTraceResponse(msg),
+  'session-trace-changed': (msg) => applyTraceChanged(msg),
 
   'notify':             (msg) => { showDesktopNotification(msg); handleDebugStateRefresh(msg.session); },
   'update-status':      (msg) => { showUpdateBanner(msg); applyRadarUpdate(msg); applySettingsUpdateStatus(msg); },
   'update-progress':    (msg) => applySettingsUpdateProgress(msg.journal),
-  'error':              (msg) => { clearSettingsUpdateRequest(); showErrorToast(msg.message, { persist: true }); },
+  'error':              (msg) => { clearSettingsUpdateRequest(); applyTraceError(msg); showErrorToast(msg.message, { persist: true }); },
   'session-error':      (msg) => showErrorToast(`${msg.session}: ${msg.message}`, { persist: true }),
   'settings-updated':   (msg) => { if (msg.settings) { applyTerminalSettings(msg.settings); applySettingsBroadcast(msg.settings); applyVisionsSettings(msg.settings); } },
   'health-snapshot':    (msg) => { if (msg.stats) { applyHealthSnapshot(msg.stats as HealthSnapshot); applyRadarHealth(msg.stats as HealthSnapshot); } },
@@ -495,6 +508,7 @@ const viewUsageEl = queryTag(document, '#view-usage', 'section');
 const viewMillEl = queryTag(document, '#view-mill', 'section');
 const viewVisionsEl = queryTag(document, '#view-visions', 'section');
 const viewHooksEl = queryTag(document, '#view-hooks', 'section');
+const viewTraceEl = queryTag(document, '#view-trace', 'section');
 const viewSettingsEl = queryTag(document, '#view-settings', 'section');
 const tabFocus = queryTag(document, '#tab-focus', 'button');
 const tabRadar = queryTag(document, '#tab-radar', 'button');
@@ -503,6 +517,7 @@ const tabUsage = queryTag(document, '#tab-usage', 'button');
 const tabMill = queryTag(document, '#tab-mill', 'button');
 const tabVisions = queryTag(document, '#tab-visions', 'button');
 const tabHooks = queryTag(document, '#tab-hooks', 'button');
+const tabTrace = queryTag(document, '#tab-trace', 'button');
 const tabSettings = queryTag(document, '#tab-settings', 'button');
 const tabRadarActivityEl = queryTag(document, '#tab-radar-activity', 'span');
 const tabPrsActivityEl = queryTag(document, '#tab-prs-activity', 'span');
@@ -560,6 +575,8 @@ mountVisionsView(viewVisionsEl);
 
 mountHooksView(viewHooksEl);
 
+mountTraceView(viewTraceEl);
+
 mountSettingsView(viewSettingsEl, { onRestart: confirmServerRestart });
 
 const VIEW_TABS = [
@@ -570,10 +587,12 @@ const VIEW_TABS = [
   { view: 'mill', tab: tabMill, el: viewMillEl },
   { view: 'visions', tab: tabVisions, el: viewVisionsEl },
   { view: 'hooks', tab: tabHooks, el: viewHooksEl },
+  { view: 'trace', tab: tabTrace, el: viewTraceEl },
   { view: 'settings', tab: tabSettings, el: viewSettingsEl },
 ];
 
 let shouldPersistActiveView = true;
+let isTraceAvailable = true;
 
 function acknowledgeViewAttention(view: string) {
   if (view === 'radar') acknowledgeRadarAttention();
@@ -620,10 +639,17 @@ function activateView(view: string, { section, setting, persist = true }: Activa
     refreshHooksView();
     requestHooksReport();
   }
+  if (view === 'trace') refreshTraceView();
   if (prev === 'settings' && view !== 'settings') clearSettingsHash();
   if (view === 'settings' && section) activateSettingsSection(section, setting ?? null);
   acknowledgeViewAttention(view);
 }
+
+setTraceNavigate(() => {
+  if (!isTraceAvailable) return;
+  if (showPhoneScreen('trace')) return;
+  activateView('trace');
+});
 
 for (let i = 0; i < VIEW_TABS.length; i++) {
   const { view, tab } = VIEW_TABS[i];
@@ -632,9 +658,11 @@ for (let i = 0; i < VIEW_TABS.length; i++) {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
     e.preventDefault();
     const dir = e.key === 'ArrowRight' ? 1 : -1;
-    const next = (i + dir + VIEW_TABS.length) % VIEW_TABS.length;
-    activateView(VIEW_TABS[next].view);
-    VIEW_TABS[next].tab.focus();
+    const availableTabs = VIEW_TABS.filter((viewTab) => !viewTab.tab.hidden);
+    const availableIndex = availableTabs.findIndex((viewTab) => viewTab.tab === tab);
+    const next = (availableIndex + dir + availableTabs.length) % availableTabs.length;
+    activateView(availableTabs[next].view);
+    availableTabs[next].tab.focus();
   });
 }
 
@@ -657,12 +685,14 @@ mountPhoneShell({
   millPanelEl: viewMillEl,
   visionsPanelEl: viewVisionsEl,
   hooksPanelEl: viewHooksEl,
+  tracePanelEl: viewTraceEl,
   settingsPanelEl: viewSettingsEl,
 
   onScreenShown: (screenId: string) => {
     if (screenId === 'usage') { refreshUsageView(); requestUsageReport(); }
     if (screenId === 'mill') { refreshMillView(); requestMillReport(); }
     if (screenId === 'hooks') { refreshHooksView(); requestHooksReport(); }
+    if (screenId === 'trace') refreshTraceView();
     if (screenId !== 'settings') clearSettingsHash();
     if (screenId === 'settings' && !location.hash.startsWith('#settings/')) activateSettingsSection();
     acknowledgeViewAttention(screenId);
@@ -715,8 +745,13 @@ queryTag(document, '#btn-restart', 'button').addEventListener('click', confirmSe
 
 function applyClientTrust(trust: unknown) {
   const showShutdown = shouldShowServerAction('shutdown', trust);
+  isTraceAvailable = shouldShowServerAction('trace', trust);
   queryTag(document, '#btn-shutdown', 'button').hidden = !showShutdown;
   queryTag(document, '#menu-divider-shutdown', 'div').hidden = !showShutdown;
+  tabTrace.hidden = !isTraceAvailable;
+  setPhoneScreenAvailable('trace', isTraceAvailable);
+  setSessionTraceAvailable(isTraceAvailable);
+  if (!isTraceAvailable && !isPhoneShellActive() && getActiveView() === 'trace') activateView('focus');
 }
 
 queryTag(document, '#btn-shutdown', 'button').addEventListener('click', () => {

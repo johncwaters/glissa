@@ -29,6 +29,7 @@ import { createSpawnGate } from './spawn-gate.ts';
 import { createUsageWiring, resolveUsageConfig } from './usage-wiring.ts';
 import { createLaneLedger } from './usage-lane-ledger.ts';
 import { createTraceWiring } from './trace-wiring.ts';
+import { createTraceChangeBroadcast } from './trace-control.ts';
 import { createVisionsDispatcher, createVisionsSpawn } from './visions-dispatch.ts';
 import { createVisionsSetup } from './visions-setup.ts';
 import { createVisionsWiring } from './visions-wiring.ts';
@@ -216,6 +217,9 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
       configPath: configStore.configPath,
       logger,
     })
+    : null;
+  const traceChangeBroadcast = traceWiring
+    ? createTraceChangeBroadcast({ source: traceWiring, broadcast: broadcastLocalControl })
     : null;
   const memoryDistillSessions = new Map<string, Session>();
   const memoryDistiller = memoryStore
@@ -503,6 +507,7 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
     startRuntimeLanes,
     tapIngestForSession,
     traceWiring,
+    traceChangeBroadcast,
     usage,
     visionsSessions,
     visionsSetup,

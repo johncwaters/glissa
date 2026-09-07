@@ -30,6 +30,7 @@ export interface PhoneShellHooks {
   millPanelEl?: HTMLElement | null;
   visionsPanelEl?: HTMLElement | null;
   hooksPanelEl?: HTMLElement | null;
+  tracePanelEl?: HTMLElement | null;
   settingsPanelEl?: HTMLElement | null;
   onScreenShown?: (screenId: string) => void;
 }
@@ -44,6 +45,7 @@ const SCREENS: readonly PhoneScreenSpec[] = Object.freeze([
   { id: 'mill', label: 'Mill', glyph: '▦', nested: true },
   { id: 'visions', label: 'Visions', glyph: '◇', nested: true },
   { id: 'hooks', label: 'Hooks', glyph: '◈', nested: true },
+  { id: 'trace', label: 'Trace', glyph: 'T', nested: true },
   { id: 'settings', label: 'Settings', glyph: '@', nested: true },
 ]);
 let shellEl: HTMLDivElement | null = null;
@@ -65,11 +67,14 @@ let visionsMountEl: HTMLDivElement | null = null;
 let hooksMountEl: HTMLDivElement | null = null;
 let visionsPanelEl: AdoptableElement | null = null;
 let hooksPanelEl: AdoptableElement | null = null;
+let traceMountEl: HTMLDivElement | null = null;
+let tracePanelEl: AdoptableElement | null = null;
 let settingsMountEl: HTMLDivElement | null = null;
 let settingsPanelEl: AdoptableElement | null = null;
 let moreButtonEl: HTMLButtonElement | null = null;
 let moreMenuEl: HTMLDivElement | null = null;
 const menuButtonById = new Map<string, HTMLButtonElement>();
+const unavailableScreenIds = new Set<string>();
 let hooks: PhoneShellHooks = {};
 let active = false;
 const SOFT_KEYBOARD_OPEN_DELTA_PX = 120;
@@ -142,6 +147,7 @@ function syncMoreAttention() {
   const nestedLevels: (string | boolean)[] = [];
   for (const screen of SCREENS) {
     if (!screen.nested) continue;
+    if (unavailableScreenIds.has(screen.id)) continue;
     const attention = screenAttentionById.get(screen.id) || false;
     nestedLevels.push(attention);
     applyDotAttention(dotOf(menuButtonById.get(screen.id)), attention);
@@ -156,6 +162,7 @@ function buildMoreMenu() {
     if (!screen.nested) continue;
     const btn = buildNavButton(screen.label, screen.glyph, 'phone-nav-menu-item', 'phone-nav-dot phone-nav-menu-dot');
     btn.dataset.screen = screen.id;
+    btn.hidden = unavailableScreenIds.has(screen.id);
     btn.addEventListener('click', () => {
       setMoreMenuOpen(false);
       showScreen(screen.id);
@@ -218,6 +225,7 @@ function build() {
   millMountEl = el('div', 'phone-mill');
   visionsMountEl = el('div', 'phone-visions');
   hooksMountEl = el('div', 'phone-hooks');
+  traceMountEl = el('div', 'phone-trace');
   settingsMountEl = el('div', 'phone-settings');
 
   const screens = el('div', 'phone-screens');
@@ -231,6 +239,7 @@ function build() {
     mill: millMountEl,
     visions: visionsMountEl,
     hooks: hooksMountEl,
+    trace: traceMountEl,
     settings: settingsMountEl,
   };
   for (const screen of SCREENS) {
@@ -289,7 +298,7 @@ function pushHistoryFor(screenId: string) {
 
 function adoptInheritedHistory() {
   const inherited = screenIdFromHistoryState(history.state);
-  if (inherited && screenElById.has(inherited)) {
+  if (inherited && screenElById.has(inherited) && !unavailableScreenIds.has(inherited)) {
     pushedHistoryEntry = true;
     return inherited;
   }
@@ -313,7 +322,7 @@ function onPopState(event: PopStateEvent) {
   if (!active) return;
   const target = screenIdFromHistoryState(event.state);
   pushedHistoryEntry = !!target;
-  applyScreen(target && screenElById.has(target) ? target : BOARD);
+  applyScreen(target && screenElById.has(target) && !unavailableScreenIds.has(target) ? target : BOARD);
 }
 
 function syncCurrent(buttonById: Map<string, HTMLElement>, screenId: string) {
@@ -348,6 +357,7 @@ function applyScreen(screenId: string) {
 
 function showScreen(screenId: string) {
   if (!shellEl || !screenElById.has(screenId)) return;
+  if (unavailableScreenIds.has(screenId)) return;
   if (screenId !== uiState.snapshot().phoneScreen) pushHistoryFor(screenId);
   applyScreen(screenId);
 }
@@ -360,6 +370,7 @@ export function mountPhoneShell(options?: PhoneShellHooks) {
   millPanelEl = hooks.millPanelEl || null;
   visionsPanelEl = hooks.visionsPanelEl || null;
   hooksPanelEl = hooks.hooksPanelEl || null;
+  tracePanelEl = hooks.tracePanelEl || null;
   settingsPanelEl = hooks.settingsPanelEl || null;
 }
 
@@ -383,6 +394,8 @@ export function activatePhoneShell({ sessionId }: { sessionId?: string } = {}) {
   if (visionsPanelEl) visionsPanelEl.hidden = false;
   adoptElement(hooksPanelEl, hooksMountEl);
   if (hooksPanelEl) hooksPanelEl.hidden = false;
+  adoptElement(tracePanelEl, traceMountEl);
+  if (tracePanelEl) tracePanelEl.hidden = false;
   adoptElement(settingsPanelEl, settingsMountEl);
   if (settingsPanelEl) settingsPanelEl.hidden = false;
   syncVisualViewport();
@@ -405,6 +418,7 @@ export function deactivatePhoneShell() {
   if (millPanelEl) releaseElement(millPanelEl);
   if (visionsPanelEl) releaseElement(visionsPanelEl);
   if (hooksPanelEl) releaseElement(hooksPanelEl);
+  if (tracePanelEl) releaseElement(tracePanelEl);
   if (settingsPanelEl) releaseElement(settingsPanelEl);
   for (const control of (hooks.headerControls || [])) releaseElement(control);
   setMoreMenuOpen(false);
@@ -440,8 +454,20 @@ export function refreshPhoneBoard() {
 export function showPhoneScreen(screenId: string) {
   if (!active) return false;
   if (!screenElById.has(screenId)) return false;
+  if (unavailableScreenIds.has(screenId)) return false;
   showScreen(screenId);
   return true;
+}
+
+export function setPhoneScreenAvailable(screenId: string, isAvailable: boolean) {
+  if (isAvailable) unavailableScreenIds.delete(screenId);
+  if (!isAvailable) unavailableScreenIds.add(screenId);
+  const menuButton = menuButtonById.get(screenId);
+  if (menuButton) menuButton.hidden = !isAvailable;
+  const section = screenElById.get(screenId);
+  if (section && !isAvailable) section.hidden = true;
+  syncMoreAttention();
+  if (!isAvailable && active && uiState.snapshot().phoneScreen === screenId) showScreen(BOARD);
 }
 
 export function setPhoneScreenAttention(screenId: string, attention: string | boolean | null) {

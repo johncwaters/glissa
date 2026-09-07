@@ -107,6 +107,8 @@ const REAL_SERVER_PAYLOADS: ServerPayload[] = [
   { type: 'session-changed', id: 'session-1', sig: 'sha' },
   { type: 'post-turn-result', id: 'session-1', session: 'glissa', mode: 'fix', skipped: null, filesFixed: 1, findings: [{ file: 'a.js', rule: 'finalNewline', count: 1 }], timestamp: NOW },
   { type: 'debug-state-response', id: 'session-1', payload: { state: STATES.RUNNING } },
+  { type: 'session-trace-response', id: 'session-1', records: [], start: 0, next: 0, reset: false, path: '/traces/session-1.jsonl' },
+  { type: 'session-trace-changed', id: 'session-1' },
   { type: 'notify', session: 'session-1', category: 'complete', message: 'finished', escalationCount: 0 },
   {
     type: 'update-status', updateAvailable: true, current: '0.23.1', latest: '0.24.0', currentSha: null,
@@ -208,6 +210,18 @@ test('server variants read by the browser validate more than their type name', (
 test('id-only client variants reject the removed session-name fallback', () => {
   assert.equal(ClientMessage.safeParse({ type: 'kill', session: 'glissa' }).success, false);
   assert.equal(ClientMessage.safeParse({ type: 'kill', id: 'session-1' }).success, true);
+});
+
+test('a session-trace request carries either a forward cursor or a page-ending cursor', () => {
+  assert.equal(ClientMessage.parse({ type: 'session-trace', id: 'session-1' }).type, 'session-trace');
+  const forward = ClientMessage.parse({ type: 'session-trace', id: 'session-1', after: 512 });
+  assert.deepEqual(forward, { type: 'session-trace', id: 'session-1', after: 512 });
+  const tail = ClientMessage.parse({ type: 'session-trace', id: 'session-1', endingAt: 'tail' });
+  assert.deepEqual(tail, { type: 'session-trace', id: 'session-1', after: 0, endingAt: 'tail' });
+  const earlier = ClientMessage.parse({ type: 'session-trace', id: 'session-1', endingAt: 4096 });
+  assert.deepEqual(earlier, { type: 'session-trace', id: 'session-1', after: 0, endingAt: 4096 });
+  assert.equal(ClientMessage.safeParse({ type: 'session-trace', id: 'session-1', endingAt: 'head' }).success, false);
+  assert.equal(ClientMessage.safeParse({ type: 'session-trace', id: 'session-1', endingAt: -1 }).success, false);
 });
 
 test('update requests carry only their type beside the request envelope', () => {

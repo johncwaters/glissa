@@ -24,6 +24,7 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 | `health-monitor.ts` | Footer panel rendering server memory/leak telemetry from `health-snapshot` messages |
 | `usage-panel.ts` | Usage tab DOM shell fed by `usage-sessions` pushes and `request-usage-report` replies |
 | `hooks-panel.ts` / `hooks-view-core.ts` | Hooks tab: operator Claude Code hooks (`request-hooks-report`, `save-hook`, `delete-hook`) over a pure core owning every string and draft rule |
+| `trace-panel.ts` / `trace-view-core.ts` | Trace tab: one session's recorded trace paged over `session-trace`, over a pure core owning turn grouping and row labels |
 | `usage-view-core.ts` | Pure Usage tab formatting, sorting, caveat text, warning text, and per-card chip text |
 | `theme.ts` | Theme definitions applied as CSS custom properties; terminal theme derived at runtime |
 | `ui-prefs.ts` / `local-store.ts` | THE localStorage home for UI state (sound, theme, active view, rail and sidebar widths), over quota-safe wrappers. Each key is declared once in `ui-prefs.ts`'s `PREFS` table with its default and normalizer; the accessors are one line each. The review sidebar's width keeps its own storage key so an existing install's saved width survives |
@@ -44,7 +45,7 @@ The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR 
 |-----------|---------|
 | `session-card/` | Session card modules: terminal, lifecycle, DOM, naming, WebGL pool (see `session-card/AGENTS.md`) |
 | `focus-view/` | Focus view: roster rail + centered card, attention queue (see `focus-view/AGENTS.md`) |
-| `phone/` | Phone layout: ten screens + bottom nav, rendered only under `[data-layout="phone"]` (see `phone/AGENTS.md`) |
+| `phone/` | Phone layout: eleven screens + bottom nav, rendered only under `[data-layout="phone"]` (see `phone/AGENTS.md`) |
 | `sidebar/` | Review sidebar: diff rendering, selection, merge actions (see `sidebar/AGENTS.md`) |
 | `components/` | Static HTML fragments imported `?raw` (see `components/AGENTS.md`) |
 | `audio/` | Notification sound files (OGG) |
