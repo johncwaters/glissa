@@ -221,6 +221,8 @@ const HOOK_CASES: [string, HookPayload, string | null, string | null, string | n
   ['TaskCompleted', {}, 'task-completed', null, null],
   ['TeammateIdle', {}, 'teammate-idle', null, null],
   ['PermissionRequest', {}, 'awaiting-input', null, 'permission'],
+  ['PermissionRequest', { tool_name: 'ExitPlanMode' }, 'awaiting-input', null, 'plan'],
+  ['PermissionRequest', { tool_name: 'Bash' }, 'awaiting-input', null, 'permission'],
   ['PostToolUse', { tool_name: 'ScheduleWakeup' }, 'wakeup-scheduled', null, null],
   ['PostToolUse', { tool_name: 'CronCreate' }, 'cron-created', null, null],
   ['PostToolUse', { tool_name: 'CronDelete' }, 'cron-deleted', null, null],

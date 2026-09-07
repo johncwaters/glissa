@@ -5,6 +5,7 @@ import type { UserHook } from '../session/core/user-hooks-core.ts';
 import { createRecorder } from '../session/session-recorder.ts';
 import type { GitWorkspace } from '../session/session-worktree-lifecycle.ts';
 import { Session } from '../session/sessions.ts';
+import type { SessionPlanReviewPort } from '../session/sessions.ts';
 import { DEFAULT_CONFIG } from './config-store.ts';
 import type { GlissaConfig, ProjectEntry } from './config-store.ts';
 import { configuredIntegrationBranch } from './core/integration-branch-core.ts';
@@ -20,6 +21,7 @@ interface SessionFactoryDependencies {
   getHookPort: () => number | null;
   getGitWorkspace: () => GitWorkspace | null;
   getMillMetricsPort: () => MillMetricsPort | null;
+  getPlanReviewPort: () => SessionPlanReviewPort | null;
   rtkPathForConfig: (config: GlissaConfig) => string | null;
   getUserHooks: (projectId: string) => UserHook[];
   listPackNames: () => string[];
@@ -57,6 +59,7 @@ function createSessionFactory(dependencies: SessionFactoryDependencies) {
       packs: () => (isMillEnabled(dependencies.getConfig()) ? dependencies.listPackNames() : []),
       packVariantSlug: projectVariantSlug(project.path),
       millMetricsPort: dependencies.getMillMetricsPort(),
+      planReviewPort: dependencies.getPlanReviewPort(),
       planLimits: planLimitsEnabled(config),
       getUserHooks: () => dependencies.getUserHooks(project.id),
     });

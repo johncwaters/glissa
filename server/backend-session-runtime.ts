@@ -2,6 +2,7 @@ import type { Server } from 'node:http';
 import { HookRouter } from '../detection/hook-source.ts';
 import { sweepOrphans } from '../detection/settings-injector.ts';
 import { hooksForProject } from '../session/core/user-hooks-core.ts';
+import type { SessionPlanReviewPort } from '../session/sessions.ts';
 import type { GitWorkspace } from '../session/session-worktree-lifecycle.ts';
 import type { ControlBroadcast } from './backend-websockets.ts';
 import type { MillMetricsPort } from './mill-metrics-wiring.ts';
@@ -18,6 +19,7 @@ interface BackendSessionRuntimeDependencies {
   configStore: ConfigStore;
   getGitWorkspace: () => GitWorkspace | null;
   getMillMetricsPort?: () => MillMetricsPort | null;
+  getPlanReviewPort?: () => SessionPlanReviewPort | null;
   getBroadcastControl: () => ControlBroadcast | null;
   logger: Pick<Console, 'warn'>;
 }
@@ -64,6 +66,7 @@ function createBackendSessionRuntime(dependencies: BackendSessionRuntimeDependen
     getHookPort,
     getGitWorkspace: dependencies.getGitWorkspace,
     getMillMetricsPort: dependencies.getMillMetricsPort || (() => null),
+    getPlanReviewPort: dependencies.getPlanReviewPort || (() => null),
     rtkPathForConfig,
     getUserHooks: (projectId: string) => hooksForProject(dependencies.config.hooks, projectId),
     listPackNames: () => listPackSpecNamesSync(),

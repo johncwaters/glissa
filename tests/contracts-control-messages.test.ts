@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import { ClientMessage, ServerMessage } from '../shared/contracts/index.ts';
 import { STATES } from '../shared/states.ts';
+import { REFRESHABLE_TYPES } from '../server/core/control-send-core.ts';
 import { connectControl, controlDeps, createControlServer } from './helpers/control-harness.ts';
 
 interface ServerPayload {
@@ -59,6 +60,14 @@ const UPDATE_JOURNAL = {
   startedAt: NOW,
   finishedAt: NOW + 2,
 };
+const PLAN_REVIEW = {
+  agentId: 'agent-9',
+  agentType: 'general-purpose',
+  revisions: [{ revision: 1, receivedAt: NOW, chars: 6271, title: 'First cut' }],
+  state: 'decided' as const,
+  openRevision: null,
+  approvedRevision: 1,
+};
 const SESSION = {
   id: 'session-1',
   name: 'glissa',
@@ -75,6 +84,7 @@ const SESSION = {
   packs: [{ name: 'rules', version: 'abc123' }],
   pendingWakeup: null,
   pendingPromptKind: null,
+  hasPlan: false,
   mergeStatus: 'none',
   mergeReason: null,
   worktreeNotice: null,
@@ -109,6 +119,8 @@ const REAL_SERVER_PAYLOADS: ServerPayload[] = [
   { type: 'debug-state-response', id: 'session-1', payload: { state: STATES.RUNNING } },
   { type: 'session-trace-response', id: 'session-1', records: [], start: 0, next: 0, reset: false, path: '/traces/session-1.jsonl' },
   { type: 'session-trace-changed', id: 'session-1' },
+  { type: 'session-plan-changed', id: 'session-1', agentId: null, agentType: null, revision: 2, receivedAt: NOW, state: 'open', chars: 8454, title: 'Shrink the large owned files', hasPlan: true },
+  { type: 'session-plan-response', id: 'session-1', reviews: [PLAN_REVIEW], body: { agentId: 'agent-9', revision: 2, plan: '# Shrink the large owned files', planFilePath: '/home/u/.claude/plans/a.md', receivedAt: NOW } },
   { type: 'notify', session: 'session-1', category: 'complete', message: 'finished', escalationCount: 0 },
   {
     type: 'update-status', updateAvailable: true, current: '0.23.1', latest: '0.24.0', currentSha: null,
@@ -205,6 +217,42 @@ test('server variants read by the browser validate more than their type name', (
     if (intentionallyOpaque.has(type)) continue;
     assert.ok(Object.keys(option.shape).length > 1, type);
   }
+});
+
+test('a plan request carries the agent the review belongs to', () => {
+  assert.deepEqual(
+    ClientMessage.parse({ type: 'session-plan', id: 'session-1', agentId: null }),
+    { type: 'session-plan', id: 'session-1', agentId: null },
+  );
+  assert.deepEqual(
+    ClientMessage.parse({ type: 'session-plan', id: 'session-1', agentId: 'agent-9', revision: 3 }),
+    { type: 'session-plan', id: 'session-1', agentId: 'agent-9', revision: 3 },
+  );
+  assert.equal(ClientMessage.safeParse({ type: 'session-plan', id: 'session-1' }).success, false);
+  assert.equal(ClientMessage.safeParse({ type: 'session-plan', id: 'session-1', agentId: null, revision: 0 }).success, false);
+});
+
+test('a plan summary push never carries the plan body but does carry who wrote it and when', () => {
+  const summaryArm = ServerMessage.options.find((option) => option.shape.type.value === 'session-plan-changed');
+  assert.ok(summaryArm);
+  assert.deepEqual(Object.keys(summaryArm.shape).includes('plan'), false);
+  assert.equal(REFRESHABLE_TYPES.has('session-plan-changed'), true);
+  const summary = { type: 'session-plan-changed', id: 'session-1', agentId: 'agent-9', agentType: 'Explore', revision: 1, receivedAt: NOW, state: 'open', chars: 12, title: 'Explore', hasPlan: true };
+  assert.deepEqual(ServerMessage.parse(summary), summary);
+  const { agentType: _agentType, ...withoutAgentType } = summary;
+  assert.equal(ServerMessage.safeParse(withoutAgentType).success, false);
+  const { receivedAt: _receivedAt, ...withoutReceivedAt } = summary;
+  assert.equal(ServerMessage.safeParse(withoutReceivedAt).success, false);
+});
+
+test('a plan response carries the whole review index, and its body is present or explicitly absent', () => {
+  const index = { type: 'session-plan-response', id: 'session-1', reviews: [PLAN_REVIEW], body: null };
+  assert.deepEqual(ServerMessage.parse(index), index);
+  assert.equal(ServerMessage.safeParse({ type: 'session-plan-response', id: 'session-1', reviews: [PLAN_REVIEW] }).success, false);
+  assert.equal(ServerMessage.safeParse({
+    type: 'session-plan-response', id: 'session-1', reviews: [PLAN_REVIEW],
+    body: { agentId: null, revision: 1, plan: '# Ship it', receivedAt: NOW },
+  }).success, false);
 });
 
 test('id-only client variants reject the removed session-name fallback', () => {

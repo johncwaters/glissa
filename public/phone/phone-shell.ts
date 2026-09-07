@@ -5,6 +5,7 @@ import type { AdoptableElement } from '../dom-helpers.ts';
 import { adoptElement, el, releaseElement } from '../dom-helpers.ts';
 import { pickStrongestAttention } from '../focus-view/attention-core.ts';
 import { sessionUIs } from '../session-card/card-registry.ts';
+import { showSessionPlanFace } from '../session-card/lifecycle.ts';
 import { reparentReviewPanel } from '../sidebar/review-sidebar.ts';
 import { setSelectedId } from '../sidebar/selection.ts';
 import { uiState } from '../ui-state-core.ts';
@@ -426,6 +427,13 @@ export function deactivatePhoneShell() {
   shellEl.removeAttribute('data-keyboard');
   resetSoftKeyboardBaseline();
   surrenderHistoryEntry();
+}
+
+export function showPhonePlan(sessionId: string) {
+  if (!active || !boardScreen || !terminalScreen) return false;
+  if (!sessionUIs.has(sessionId)) return false;
+  openSession(sessionId);
+  return showSessionPlanFace(sessionId);
 }
 
 export function isPhoneShellActive() {

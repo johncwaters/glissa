@@ -479,7 +479,7 @@ test('debug mode gates every trace entry point and exits hidden trace views', ()
 
 test('a saved trace view survives the startup restore and reopens once debug mode arrives', () => {
   const appSource = fs.readFileSync(new URL('../public/app.ts', import.meta.url), 'utf8');
-  const startupRestoreSource = appSource.slice(appSource.indexOf('if (!initialSettingsTarget) {'), appSource.indexOf('mountPhoneShell({'));
+  const startupRestoreSource = appSource.slice(appSource.indexOf('if (!initialSettingsTarget && !initialPlanTarget) {'), appSource.indexOf('mountPhoneShell({'));
   const traceSurfaceSource = appSource.slice(appSource.indexOf('function setTraceSurfaceAvailable'), appSource.indexOf('onDebugModeChanged('));
 
   assert.match(startupRestoreSource, /const canRestoreSavedView = isViewAvailable\(savedView\);/);

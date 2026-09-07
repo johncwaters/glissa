@@ -23,6 +23,7 @@ import {
   createDistillSpawn,
   createPackDistiller,
 } from './pack-distiller.ts';
+import { createPlanReviewWiring } from './plan-review-wiring.ts';
 import { createPosthogWiring } from './posthog-wiring.ts';
 import { createPrReviewWiring } from './pr-review-wiring.ts';
 import { createSpawnGate } from './spawn-gate.ts';
@@ -222,6 +223,16 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
   const traceChangeBroadcast = traceWiring
     ? createTraceChangeBroadcast({ source: traceWiring, broadcast: broadcastControl })
     : null;
+  const isPlanReviewEnabled = config.planReview?.enabled ?? DEFAULT_CONFIG.planReview.enabled;
+  const planReview = isPlanReviewEnabled
+    ? createPlanReviewWiring({
+      configPath: configStore.configPath,
+      logger,
+    })
+    : null;
+  planReview?.on('plan-changed', (summary: Record<string, unknown>) => {
+    broadcastControl({ type: 'session-plan-changed', ...summary });
+  });
   const memoryDistillSessions = new Map<string, Session>();
   const memoryDistiller = memoryStore
     ? createMemoryDistiller({
@@ -423,6 +434,7 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
     'memory-distill': memoryDistiller,
     'memory-store': memoryStore,
     trace: traceWiring,
+    'plan-review': planReview,
   };
   const fixedLanes = new Map<string, unknown>(Object.entries(fixedLaneEntries));
   type LaneMap = typeof fixedLaneEntries & { ingest: typeof ingestLane; visions: typeof visionsLane };
@@ -458,6 +470,7 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
       },
       () => packDistiller.start().catch((error: unknown) => logger.warn(`[distill] failed to start: ${errorMessage(error)}`)),
       () => traceWiring?.start().catch((error: unknown) => logger.warn(`[trace] start failed: ${errorMessage(error)}`)),
+      () => planReview?.start().catch((error: unknown) => logger.warn(`[plan-review] start failed: ${errorMessage(error)}`)),
     ];
     for (const start of startSteps) start();
   }
@@ -499,6 +512,7 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
     millMetrics,
     packDistiller,
     packService,
+    planReview,
     posthog,
     prReview,
     recordLane,

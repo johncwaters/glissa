@@ -29,6 +29,7 @@ Session card modules, decomposed from the old monolithic session-card.js. Each s
 ### Working In This Directory
 - The data path is a dumb pipe: `activity.ts` may use byte-arrival TIMING, never byte CONTENT. Do not parse terminal output here.
 - One xterm per session; the Focus view re-parents the card node, so never assume a fixed parent container.
+- The plan is the card's second face and release always restores the terminal, so a grid tile never owns review UI (`tests/frontend-plan-face.test.ts`).
 - WebGL contexts are a scarce resource: always acquire through `webgl-pool.ts`.
 - No per-session `setInterval`: ride `session-tick.ts`.
 - State is applied via `applyState` + `[data-state]` CSS; do not hand-toggle state classes.

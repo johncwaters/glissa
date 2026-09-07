@@ -3,10 +3,13 @@ import { EventEmitter } from 'node:events';
 import { NOTIFICATION_STATES as NS, NOTIFICATION_TRANSITIONS } from '../shared/notification-states.ts';
 import type { NotificationState } from '../shared/notification-states.ts';
 
+export type NotificationKind = 'plan';
+
 export interface NotificationContext {
   escalationCount: number;
   timestamp: number;
   phoneEscalation?: boolean;
+  kind?: NotificationKind;
 }
 
 export type NotificationChannelFn = (
@@ -27,6 +30,7 @@ interface NotificationEntry {
   state: NotificationState;
   category: string | null;
   message: string | null;
+  kind: NotificationKind | null;
   timer: NodeJS.Timeout | null;
   escalationCount: number;
   phoneTimer: NodeJS.Timeout | null;
@@ -84,7 +88,7 @@ class NotificationManager extends EventEmitter {
     }
   }
 
-  trigger(sessionName: string, category: string, message: string): boolean {
+  trigger(sessionName: string, category: string, message: string, kind: NotificationKind | null = null): boolean {
     this._ensureEntry(sessionName);
     const entry = this._entries.get(sessionName);
     if (!entry) return false;
@@ -92,6 +96,7 @@ class NotificationManager extends EventEmitter {
     if (!stateTransitions || !('trigger' in stateTransitions)) return false;
     entry.category = category;
     entry.message = message;
+    entry.kind = kind;
     entry.escalationCount = 0;
     return this._transition(sessionName, 'trigger');
   }
@@ -126,6 +131,7 @@ class NotificationManager extends EventEmitter {
         state: NS.IDLE,
         category: null,
         message: null,
+        kind: null,
         timer: null,
         escalationCount: 0,
         phoneTimer: null,
@@ -259,6 +265,7 @@ class NotificationManager extends EventEmitter {
     const context = {
       escalationCount: entry.escalationCount,
       timestamp: Date.now(),
+      ...(entry.kind ? { kind: entry.kind } : {}),
       ...(extraContext || {}),
     };
     for (const channel of this._channels) {

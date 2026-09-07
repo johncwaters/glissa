@@ -16,6 +16,7 @@ test('DEFAULT_CONFIG satisfies the persisted Config contract', () => {
   assert.equal(DEFAULT_CONFIG.updateChannel, 'release');
   assert.equal(Config.shape.integrationBranch.safeParse(null).success, true);
   assert.equal(DEFAULT_CONFIG.trace.enabled, true);
+  assert.equal(DEFAULT_CONFIG.planReview.enabled, true);
 });
 
 test('trace.enabled is a boolean file-only setting with a default-on projection', () => {
@@ -23,6 +24,15 @@ test('trace.enabled is a boolean file-only setting with a default-on projection'
   assert.equal(Config.safeParse({ ...DEFAULT_CONFIG, trace: { enabled: 'false' } }).success, false);
   assert.equal('trace' in ConfigUpdate.shape, false);
   assert.equal('trace' in BrowserConfig.shape, false);
+});
+
+test('planReview.enabled is a boolean file-only setting that defaults on', () => {
+  assert.equal(Config.safeParse({ ...DEFAULT_CONFIG, planReview: { enabled: false } }).success, true);
+  const refused = Config.safeParse({ ...DEFAULT_CONFIG, planReview: { enabled: 'false' } });
+  assert.equal(refused.success, false);
+  assert.equal(refused.success === false && configIssueMessage(refused.error), 'planReview.enabled must be a boolean');
+  assert.equal('planReview' in ConfigUpdate.shape, false);
+  assert.equal('planReview' in BrowserConfig.shape, false);
 });
 
 test('updateChannel accepts release and main across config boundaries', () => {

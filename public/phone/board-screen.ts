@@ -131,18 +131,20 @@ export function createBoardScreen({ onSelectSession }: { onSelectSession?: (id: 
     if (!rowDetails) return;
     const { ui, state, unseen } = entry;
     const { glyph, label } = stateChip(state);
+    const statusLabel = ui.pendingPromptKind === 'plan' ? 'Plan ready' : label;
     const name = entry.name;
     row.dataset.state = state;
+    row.dataset.prompt = ui.pendingPromptKind ?? '';
     row.toggleAttribute('data-unseen', unseen);
     rowDetails.refs.glyph.textContent = glyph;
     rowDetails.refs.name.textContent = name;
-    rowDetails.refs.badge.textContent = label;
+    rowDetails.refs.badge.textContent = statusLabel;
 
     const merge = ui.card?.dataset.merge || '';
     row.dataset.merge = merge;
     rowDetails.refs.merge.textContent = MERGE_TAGS[merge] || '';
     rowDetails.refs.elapsed.textContent = sessionElapsedText(ui);
-    row.setAttribute('aria-label', `${name}, ${label}`);
+    row.setAttribute('aria-label', `${name}, ${statusLabel}`);
   }
 
   function paintGroup(section: HTMLElement, group: RosterGroup<BoardRow>) {

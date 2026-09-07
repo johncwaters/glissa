@@ -1,7 +1,6 @@
 import { adoptElement, releaseElement } from './dom-helpers.ts';
 import type { SessionUi } from './session-card/card-registry.ts';
 import { container, sessionUIs } from './session-card/card-registry.ts';
-import { activateTerminalViewer } from './session-card/terminal.ts';
 import { uiState } from './ui-state-core.ts';
 
 export function getBorrowedCardId() {
@@ -21,7 +20,9 @@ export function borrowCard(ui: SessionUi | null | undefined, sessionId: string, 
   adoptElement(card, slotEl);
   uiState.dispatch('borrowCard', sessionId);
 
-  activateTerminalViewer(ui, sessionId);
+  ui._activateTerminalViewer?.();
+  ui._setBorrowed?.(true);
+  ui._showPreferredFace?.();
 }
 
 export function releaseCard() {
@@ -31,6 +32,8 @@ export function releaseCard() {
 
   const ui = sessionUIs.get(releasedId);
 
+  ui?._showTerminalFace?.();
+  ui?._setBorrowed?.(false);
   ui?._unviewTerminal?.();
   const card = ui?.card;
   if (!card) return releasedId;

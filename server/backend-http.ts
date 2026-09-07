@@ -19,9 +19,25 @@ import {
   planUploadRetention,
 } from './core/upload-core.ts';
 
+const HOOK_BODY_CAP_BYTES = 64 * 1024;
+
 interface HookRouterOutput {
   status: number;
   reason: string;
+}
+
+interface PlanReviewHookPort {
+  hookBodyCapBytes(event: string): number;
+  onHookEvent(event: {
+    glissaId: string;
+    event: string;
+    payload: Record<string, unknown>;
+    accepted: boolean;
+  }): Promise<Record<string, unknown> | null> | null;
+}
+
+function hookBodyCapBytes(event: string, planReview: PlanReviewHookPort | null): number {
+  return Math.max(HOOK_BODY_CAP_BYTES, planReview?.hookBodyCapBytes(event) ?? 0);
 }
 
 interface BackendHttpDependencies {
@@ -35,6 +51,8 @@ interface BackendHttpDependencies {
   hookRouter: { handle: (input: Record<string, unknown>) => HookRouterOutput };
   getSession: (id: string) => Session | null;
   getUsage: () => { ingestStatusline: (payload: object) => void };
+  getPlanReview?: () => PlanReviewHookPort | null;
+  logger?: Pick<Console, 'warn'>;
 }
 
 function isPackNoticeHookEvent(event: unknown, session: Session | null): boolean {
@@ -136,6 +154,8 @@ function createBackendHttpApp(dependencies: BackendHttpDependencies): Express {
     hookRouter,
     getSession,
     getUsage,
+    getPlanReview = () => null,
+    logger = console,
   } = dependencies;
   const app = express();
 
@@ -168,17 +188,23 @@ function createBackendHttpApp(dependencies: BackendHttpDependencies): Express {
       res.status(403).end();
       return;
     }
-    let body = '';
+    const bodyChunks: Buffer[] = [];
     let aborted = false;
+    let receivedBytes = 0;
+    const bodyCapBytes = hookBodyCapBytes(req.params.event, getPlanReview());
     req.on('error', () => { aborted = true; });
     req.on('data', (chunk: Buffer) => {
-      body += chunk;
-      if (body.length <= 65536) return;
+      receivedBytes += chunk.length;
+      bodyChunks.push(chunk);
+      if (receivedBytes <= bodyCapBytes) return;
       aborted = true;
+      const declaredBytes = req.headers['content-length'] || `at least ${receivedBytes}`;
+      logger.warn(`[hook] ${req.params.event} body of ${declaredBytes} bytes is over the ${bodyCapBytes} byte cap and was refused`);
       req.destroy();
     });
     req.on('end', () => {
       if (aborted) return;
+      const body = Buffer.concat(bodyChunks).toString('utf8');
       let payload: Record<string, unknown> = {};
       try {
         payload = body ? JSON.parse(body) : {};
@@ -204,7 +230,21 @@ function createBackendHttpApp(dependencies: BackendHttpDependencies): Express {
           additionalContext: packNotice,
         };
       }
-      res.status(output.status).json(reply);
+      const answer = (decision: Record<string, unknown> | null) => {
+        if (res.headersSent) return;
+        res.status(output.status).json(decision ? { ...reply, ...decision } : reply);
+      };
+      const planDecision = getPlanReview()?.onHookEvent({
+        glissaId: req.params.glissaId,
+        event: req.params.event,
+        payload,
+        accepted: output.status === 200,
+      }) || null;
+      if (!planDecision) {
+        answer(null);
+        return;
+      }
+      planDecision.then(answer, () => { answer(null); });
     });
   });
 

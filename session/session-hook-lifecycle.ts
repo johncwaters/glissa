@@ -44,6 +44,7 @@ interface SessionHookOptions {
   enableProjectMcp: boolean;
   rtkPath: string | null;
   planLimits: boolean;
+  planReview: boolean;
   getUserHooks?: (() => UserHook[]) | null;
   bypassHookTrust: boolean;
   effectiveCwd: () => string;
@@ -226,6 +227,7 @@ function createSessionHookLifecycle(options: SessionHookOptions): SessionHookLif
         enableProjectMcp: options.enableProjectMcp,
         rtkPath: options.rtkPath,
         planLimits: options.planLimits,
+        planReview: options.planReview,
         userHooks: typeof options.getUserHooks === "function" ? options.getUserHooks() : [],
       });
       settingsHandle = nextSettingsHandle;

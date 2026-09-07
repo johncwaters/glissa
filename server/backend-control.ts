@@ -8,6 +8,7 @@ import type { ReplayLog } from './control-replay-core.ts';
 import type { UpdateJournal } from '../shared/contracts/update-journal.ts';
 import type { UpdateApplyOutcome } from './update-apply.ts';
 import type { UpdateStatus } from './backend-update.ts';
+import type { PlanReadResult } from './plan-review-wiring.ts';
 import type { TracePage, TracePageRequest } from './trace-wiring.ts';
 
 interface SnapshotLane {
@@ -70,6 +71,10 @@ interface BackendControlDependencies {
   usage: UsageControl;
   mill: MillControl;
   readTracePage: ((glissaSessionId: string, request: TracePageRequest) => Promise<TracePage>) | null;
+  readPlanRevision: ((
+    sessionId: string,
+    request: { agentId?: string | null; revision?: number | null },
+  ) => Promise<PlanReadResult | null>) | null;
   serverBuild: () => string;
   logger: Pick<Console, 'warn'>;
 }
@@ -125,6 +130,7 @@ function createBackendControl(dependencies: BackendControlDependencies): void {
     getPlanLimits: () => usage.getPlanLimitsMessage(),
     millReport: mill,
     readTracePage: dependencies.readTracePage,
+    readPlanRevision: dependencies.readPlanRevision,
   });
 
   const sendLaneSnapshotOnConnect = (

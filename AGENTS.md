@@ -72,7 +72,7 @@ Each subsystem states its own rules beside its code, so a rule is loaded when th
 | Agent Adapters | `session/adapters/AGENTS.md` |
 | Session Spawning, Auto-Resume and Shutdown | `session/AGENTS.md` |
 | Notifications | `notifications/AGENTS.md` |
-| Worktree Auto-Rebase, Remote Branch GC, GitHub PR Auto-Review, Radar / PostHog Auto-Fix, Usage Tracking, Mill Measurement, Long-Term Memory, Ephemeral Lane Write Boundaries, Security: Trust Boundary, Transport and Session Identity | `server/AGENTS.md` |
+| Worktree Auto-Rebase, Remote Branch GC, GitHub PR Auto-Review, Radar / PostHog Auto-Fix, Usage Tracking, Mill Measurement, Long-Term Memory, Ephemeral Lane Write Boundaries, Plan Review, Security: Trust Boundary, Transport and Session Identity | `server/AGENTS.md` |
 | Context Packs | `packs/AGENTS.md` |
 | Dashboard Layouts | `public/AGENTS.md` |
 

@@ -57,6 +57,7 @@ import { USAGE_VENDOR_KEYS, USAGE_BUDGET_KEYS } from '../shared/usage-config.ts'
 import type { UpdateJournal } from '../shared/contracts/update-journal.ts';
 import type { UpdateStatus } from './backend-update.ts';
 import type { UpdateApplyOutcome } from './update-apply.ts';
+import type { PlanReadResult } from './plan-review-wiring.ts';
 import type { TracePage, TracePageRequest } from './trace-wiring.ts';
 
 interface ControlRequest {
@@ -138,6 +139,10 @@ interface ControlHandlerDeps {
   conversationGit?: (args: string[], cwd: string) => Promise<string>;
   conversationProjectsDir?: string;
   readTracePage?: ((glissaSessionId: string, request: TracePageRequest) => Promise<TracePage>) | null;
+  readPlanRevision?: ((
+    sessionId: string,
+    request: { agentId?: string | null; revision?: number | null },
+  ) => Promise<PlanReadResult | null>) | null;
 }
 
 function errorCode(error: unknown): string | undefined {
@@ -314,6 +319,7 @@ function requestValidationErrorReply(msg: Record<string, unknown> | null | undef
     'resync-branch',
     'debug-state',
     'session-trace',
+    'session-plan',
     'request-health-snapshot',
   ]);
   if (genericErrorRequests.has(requestType)) return { type: 'error', message };
@@ -380,6 +386,7 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     conversationGit = runGitForConversationHistory,
     conversationProjectsDir = claudeProjectsDir(process.env, os.homedir()),
     readTracePage = null,
+    readPlanRevision = null,
   } = deps;
 
   function buildSettingsPayload() {
@@ -863,6 +870,7 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
       detectScheduledWakeups: config.detectScheduledWakeups !== false,
       detectPackReads: true,
       rtkPath: config.rtk ? resolveRtkPath() : null,
+      planReview: config.planReview?.enabled !== false,
     });
   }
 
@@ -1038,6 +1046,19 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
         ws.send(JSON.stringify({ type: 'session-trace-response', id: session.id, ...page }));
       } catch (error) {
         sendError(ws, `Session trace read failed: ${errorMessage(error)}`, { id: session.id });
+      }
+    },
+    'session-plan':     async (message: ControlRequest, ws: ControlSocket) => {
+      const requestedSessionId = String(message.id || '');
+      if (!readPlanRevision) return sendError(ws, 'Plan review is not enabled', { id: requestedSessionId });
+      const agentId = typeof message.agentId === 'string' ? message.agentId : null;
+      const revision = typeof message.revision === 'number' ? message.revision : null;
+      try {
+        const result = await readPlanRevision(requestedSessionId, { agentId, revision });
+        if (!result) return sendError(ws, 'Plan revision not found', { id: requestedSessionId });
+        ws.send(JSON.stringify({ type: 'session-plan-response', id: requestedSessionId, ...result }));
+      } catch (error) {
+        sendError(ws, `Plan read failed: ${errorMessage(error)}`, { id: requestedSessionId });
       }
     },
     'shutdown':         handleShutdown,

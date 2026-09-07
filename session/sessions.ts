@@ -60,6 +60,10 @@ interface SessionMillMetricsPort {
   onHookEvent: (sessionId: string, event: string, payload: Record<string, unknown>) => void;
 }
 
+interface SessionPlanReviewPort {
+  hasPlan: (sessionId: string) => boolean;
+}
+
 type TimerField = "_killPollTimer" | "_killReapTimer" | "_sleepKillTimer" | "_titleQuietFallbackTimer";
 
 interface SessionRecorderPort {
@@ -135,6 +139,7 @@ interface SessionOptions {
   packsBuiltRoot?: string | null;
   packVariantSlug?: string | null;
   millMetricsPort?: SessionMillMetricsPort | null;
+  planReviewPort?: SessionPlanReviewPort | null;
   planLimits?: boolean;
   getUserHooks?: (() => UserHook[]) | null;
   ptySpawn?: PtySpawn | null;
@@ -200,6 +205,7 @@ class Session extends EventEmitter {
   _rtkPath: string | null;
   _packDelivery: ReturnType<typeof createSessionPackDelivery>;
   _planLimits: boolean;
+  _planReviewPort: SessionPlanReviewPort | null;
   _hooks: ReturnType<typeof createSessionHookLifecycle>;
   _ptySpawn: PtySpawn;
   _killProc: KillProc;
@@ -267,6 +273,7 @@ class Session extends EventEmitter {
 
     packVariantSlug = null,
     millMetricsPort = null,
+    planReviewPort = null,
 
     planLimits = false,
 
@@ -391,6 +398,7 @@ class Session extends EventEmitter {
       recordDecision: (entry) => this._recordDecision(entry),
     });
     this._planLimits = planLimits === true && this._can("statusLine");
+    this._planReviewPort = planReviewPort;
     this._hooks = createSessionHookLifecycle({
       id: this.id,
       name: this.name,
@@ -408,6 +416,7 @@ class Session extends EventEmitter {
       enableProjectMcp: !!enableProjectMcp,
       rtkPath: this._rtkPath,
       planLimits: this._planLimits,
+      planReview: planReviewPort !== null,
       getUserHooks,
       bypassHookTrust: this.bypassHookTrust,
       effectiveCwd: () => this.effectiveCwd(),
@@ -831,6 +840,7 @@ class Session extends EventEmitter {
       packs: this._packDelivery.delivered(),
       pendingWakeup: this.backgroundTracking.pendingWakeup(),
       pendingPromptKind: this._pendingPromptKind,
+      hasPlan: this._planReviewPort?.hasPlan(this.id) === true,
       mergeStatus: this.mergeStatus,
       mergeReason: this.mergeReason,
       worktreeNotice: this.worktreeNotice,
@@ -1492,4 +1502,4 @@ function claudeCommand(): ResolvedCommand {
 }
 
 export { Session, claudeCommand };
-export type { SessionOptions, SessionPty, SessionRecorderPort };
+export type { SessionOptions, SessionPlanReviewPort, SessionPty, SessionRecorderPort };

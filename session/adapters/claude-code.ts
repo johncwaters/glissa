@@ -7,6 +7,7 @@ import type { AgentEnvOptions, AgentEnvProfile, SpawnEnv } from "../core/spawn-e
 import type { PackDelivery } from "../core/pack-pointer-core.ts";
 import { execSync } from "../../server/child-process-safe.ts";
 import type { AgentAdapterShape, AgentArgsOptions, AgentHookProfile, AgentSpawnCommandOptions } from "./index.ts";
+import { PLAN_TOOL_NAME } from "../../shared/contracts/index.ts";
 import type { HookPayload } from "../../shared/contracts/index.ts";
 
 const ID = "claude-code";
@@ -64,7 +65,10 @@ function mapHookConfidence(event: string, payload?: HookPayload): string | null 
 
 function mapHookPromptKind(event: string, payload?: HookPayload): string | null {
   const e = String(event || "").toLowerCase();
-  if (e === "permissionrequest") return "permission";
+  if (e === "permissionrequest") {
+    if (String(payload?.tool_name || "") === PLAN_TOOL_NAME) return "plan";
+    return "permission";
+  }
   if (e === "notification") {
     const t = notificationType(payload);
     if (t === "permission_prompt") return "permission";

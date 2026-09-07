@@ -4,6 +4,7 @@ import { sendControlMsg } from '../control-ws.ts';
 import { el, MERGE_TAGS, query, stateChip } from '../dom-helpers.ts';
 import { emptyProjectKeys, forgetProject } from '../project-registry.ts';
 import { quickAddSession, requestSessionRemoval } from '../session-actions.ts';
+import { showSessionPlanFace } from '../session-card/lifecycle.ts';
 import type { ActivityRenderKind } from '../session-card/activity.ts';
 import { setActivityRenderer } from '../session-card/activity.ts';
 import type { SessionUi } from '../session-card/card-registry.ts';
@@ -542,6 +543,12 @@ export function setFocusMergeStatus(id: unknown, mergeStatus: unknown) {
 export function centerSessionQuietly(id: string) {
   if (!active || !sessionUIs.has(id)) return;
   focusSession(id);
+}
+
+export function openPlanInFocus(id: string) {
+  if (!active || !sessionUIs.has(id)) return false;
+  focusSession(id);
+  return showSessionPlanFace(id);
 }
 
 export function focusNthInRail(n: number) {

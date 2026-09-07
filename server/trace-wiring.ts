@@ -35,6 +35,7 @@ import { appendJsonLines, createJsonStateWriter } from './json-file.ts';
 import type { JsonStateWriter } from './json-file.ts';
 import { createLaneLog } from './lane-log.ts';
 import { configSiblingPath } from './pairings-store.ts';
+import { pruneAgedFiles } from './prune-files.ts';
 
 const TRACE_RETAIN_DAYS = 7;
 const PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -210,12 +211,6 @@ async function openContainedFile(
   }
 }
 
-function traceSessionIdOf(entry: string): string | null {
-  if (entry.endsWith(CHECKPOINT_SUFFIX)) return entry.slice(0, -CHECKPOINT_SUFFIX.length);
-  if (entry.endsWith(TRACE_SUFFIX)) return entry.slice(0, -TRACE_SUFFIX.length);
-  return null;
-}
-
 async function pruneTraceFiles({
   traceDirectory,
   now = Date.now(),
@@ -225,27 +220,14 @@ async function pruneTraceFiles({
   now?: number;
   isBoundSessionId?: (glissaSessionId: string) => boolean;
 }): Promise<number> {
-  let entries: string[];
-  try {
-    entries = await fs.promises.readdir(traceDirectory);
-  } catch {
-    return 0;
-  }
-  const cutoff = now - (TRACE_RETAIN_DAYS * 24 * 60 * 60 * 1000);
-  let removed = 0;
-  for (const entry of entries) {
-    const glissaSessionId = traceSessionIdOf(entry);
-    if (!glissaSessionId || isBoundSessionId(glissaSessionId)) continue;
-    const filePath = path.join(traceDirectory, entry);
-    try {
-      const stat = await fs.promises.stat(filePath);
-      if (stat.mtimeMs >= cutoff) continue;
-      await fs.promises.unlink(filePath);
-      removed += 1;
-    } catch {
-    }
-  }
-  return removed;
+  const removed = await pruneAgedFiles({
+    directory: traceDirectory,
+    suffixes: [CHECKPOINT_SUFFIX, TRACE_SUFFIX],
+    retainDays: TRACE_RETAIN_DAYS,
+    now,
+    isRetainedId: isBoundSessionId,
+  });
+  return removed.length;
 }
 
 function createTraceWiring({

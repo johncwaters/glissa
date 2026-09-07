@@ -47,7 +47,6 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 ### Worktree Auto-Rebase
 
-- Initial creation and fresh restart sync the integration branch fast-forward-only and never block spawn (`tests/git-workspace-integration-sync.test.ts`, `tests/sessions-worktree.test.ts`).
 - It rides the existing change funnel (no timer) and runs BEFORE the signature dedup, since a moved integration branch leaves the signature byte-identical. Every guard is pure in `session/core/rebase-gate.ts`, and the guard ORDER is stated only by `tests/rebase-gate.test.ts`.
 - WAITING is the load-bearing exclusion: it is a permission prompt PAUSING a turn, and the agent resumes into the files an unattended rebase would have rewritten under it.
 - `rebaseOnly` never stashes and merges nothing back: it runs unattended under a live agent, so a dirty tree is a hard refusal.
@@ -58,12 +57,10 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 ### Worktree Base Branch
 
-- The base is the configured integration branch, or each repo's default branch when unset. Origin is the source of truth: initial creation and fresh restart sync it fast-forward-only without blocking spawn, merge-back syncs it before landing and pushes it after, and a diverged base is never touched automatically (`tests/git-workspace-integration-sync.test.ts`, `tests/git-workspace-session.test.ts`, `tests/sessions-worktree.test.ts`).
 - A worktree's fork-base marker pins its base across restarts. With no configured branch, a marker whose branch the detected default already absorbed, or whose branch is gone, migrates to that default, so an abandoned staging branch stops showing landed commits as pending review; a marker holding commits the default lacks is kept (`tests/git-workspace-session.test.ts`).
 
 ### Remote Branch GC
 
-- Cleanup is default-on and touches only the file-only `branchGc.prefixes` allowlist (default `glissa/session/` and `worktree-agent-`); live-session protection is `glissa/session/` only (`tests/branch-gc-core.test.ts`).
 - Deletion needs ancestry or tree-containment proof (`server/core/merge-proof-core.ts`) or staleness, any probe failure keeps it, and the push is a leased qualified refspec on that listed tip, so cleanup cannot lose a branch; `dryRun` traces would-delete (`tests/branch-gc-poller.test.ts`).
 
 ### GitHub PR Auto-Review (opt-in)
@@ -71,7 +68,6 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - Inert unless both `config.prReview.enabled` and `config.telegram` are set. A clean PR is reviewed IN PLACE (diff only) so it coexists with a live session in the repo; a conflicting one gets a worktree, discarded on every exit path.
 - Only the POLLER merges; the agent never does. The verdict travels via a result file, since `gh pr review` 422s on your own PR, and a missing one reads as ERROR, never a false clean.
 - Every merge gate fails CLOSED: reviewed head must equal current head, checks must be green (no checks is never green), and a `gh` error on the workflow-files query defers a tick (`server/core/pr-review-core.ts`).
-- All `gh` and `git` go through `child-process-safe` and `git-workspace` (`tests/no-direct-child-process.test.ts`, `tests/no-direct-git-worktree.test.ts`).
 
 ### Radar / PostHog Auto-Fix (opt-in)
 
@@ -123,6 +119,14 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - No lane may deny bare `Read`, `Write`, `Glob` or `Grep`: a bare `Read` deny refuses the Write tool, mutually exclusive with a result-file contract.
 - The mode is set in the lane's managed settings file, overriding the operator's own, or `defaultMode: auto` leaves a classifier deciding these writes instead of a rule.
 - A lane prompt is written in its throwaway cwd and invoked by a constant bootstrap argument, since a Windows `.cmd` shim re-parses argv through `cmd.exe` (`server/visions-dispatch.ts`, `server/pack-distiller.ts`).
+
+### Plan Review (plan: `docs/plan-plan-review.md`)
+
+- The plan endpoint is a SECOND URL, never a second entry on the shared one: hooks run in parallel and a `PermissionRequest` payload carries no tool-use id, so two entries on one URL arrive as indistinguishable posts. The unmatched entry stays byte-identical (`tests/settings-injector-user-hooks.test.ts`).
+- Every path fails OPEN: a refused parse, a refused hook, a failed append or a stopped lane all answer as the route answers today, and the terminal dialog decides.
+- The in-memory index holds offsets, chars and titles and never a body, so a summary push carries no plan and a body crosses an authenticated socket only on request (`tests/control-plan-review.test.ts`).
+- Revisions are numbered PER REVIEW, one review per agent, or two concurrent subagent plans collapse into one summary and one action bar.
+- Only this route's body cap rises to 512 KB, and an oversized body is logged with its size: a dropped body destroys the request silently.
 
 ### Security: Trust Boundary
 

@@ -21,6 +21,7 @@ function factory(listPackNames: () => string[], liveConfig: GlissaConfig) {
     getHookPort: () => null,
     getGitWorkspace: () => null,
     getMillMetricsPort: () => null,
+    getPlanReviewPort: () => null,
     rtkPathForConfig: () => null,
     getUserHooks: () => [],
     listPackNames,

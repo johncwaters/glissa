@@ -24,6 +24,7 @@ export const SessionSnapshot = z.object({
   packs: z.array(z.object({ name: z.string(), version: z.string() })),
   pendingWakeup: PendingWakeup.nullable(),
   pendingPromptKind: z.string().nullable(),
+  hasPlan: z.boolean().default(false),
   mergeStatus: z.string().nullable(),
   mergeReason: z.string().nullable(),
   worktreeNotice: z.string().nullable(),

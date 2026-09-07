@@ -42,6 +42,7 @@ interface BackendShutdownDependencies {
   memoryStore: Stoppable | null;
   traceWiring?: Stoppable | null;
   traceChangeBroadcast?: Stoppable | null;
+  planReview?: Stoppable | null;
   millMetricsIdle?: (() => Promise<void>) | null;
   millMetricsPort?: ShutdownMillMetricsPort | null;
   telegramOutbox: { idle: () => unknown };
@@ -116,6 +117,9 @@ function createBackendShutdown(dependencies: BackendShutdownDependencies): () =>
         return traceWiring.stop();
       });
     }
+
+    const planReview = dependencies.planReview;
+    if (planReview) stoppers.add('plan-review', () => planReview.stop());
 
     const millMetricsIdle = dependencies.millMetricsIdle;
     if (millMetricsIdle) stoppers.add('mill-metrics', () => millMetricsIdle());

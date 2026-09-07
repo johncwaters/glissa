@@ -19,6 +19,7 @@ function snapshotSource() {
     packs: [{ name: "rules", version: "v1", dir: "/private/rules" }],
     pendingWakeup: null,
     pendingPromptKind: null,
+    hasPlan: false,
     mergeStatus: "pending-review",
     mergeReason: null,
     worktreeNotice: null,

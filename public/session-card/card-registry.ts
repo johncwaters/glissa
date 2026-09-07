@@ -1,9 +1,14 @@
 import type { FitAddon } from '@xterm/addon-fit';
 import type { WebglAddon } from '@xterm/addon-webgl';
 import type { Terminal } from '@xterm/xterm';
+import type { PlanReviewState } from '#shared/contracts/plan-review.ts';
+import type { createPlanFace } from '../plan/plan-face.ts';
+import type { SessionCardFace } from './face-core.ts';
 import type { DeliveredPack } from './pack-stale-core.ts';
 
 export type SessionCardElement = HTMLDivElement & { _cardHostClass?: string };
+
+export type PlanFaceController = ReturnType<typeof createPlanFace>;
 
 export interface SessionUi {
   term: Terminal | null;
@@ -25,11 +30,19 @@ export interface SessionUi {
   btnRestartFresh: HTMLButtonElement;
   btnResume: HTMLButtonElement;
   btnTrace: HTMLButtonElement;
+  btnPlan: HTMLButtonElement;
+  btnOverflowPlan: HTMLButtonElement;
   btnRemove: HTMLButtonElement;
   debugOverlay: HTMLDivElement | null;
   debugOpen: boolean;
   abortController: AbortController;
   currentState: string;
+  face: SessionCardFace;
+  isBorrowed: boolean;
+  hasPlan: boolean;
+  pendingPromptKind: string | null;
+  planReviewState: PlanReviewState;
+  planFace: PlanFaceController;
   effectiveBase?: string;
   activeAgents?: number;
   packs?: DeliveredPack[];
@@ -48,6 +61,10 @@ export interface SessionUi {
   _resetResizeCache?: () => void;
   _unviewTerminal?: () => void;
   _resetSoftKeyboardBuffer?: () => void;
+  _activateTerminalViewer?: () => void;
+  _setBorrowed?: (isBorrowed: boolean) => void;
+  _showPreferredFace?: () => void;
+  _showTerminalFace?: () => void;
 }
 
 export const sessionUIs = new Map<string, SessionUi>();

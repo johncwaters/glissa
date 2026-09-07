@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildHookSettings, describeBuiltinHooks } from '../detection/settings-injector.ts';
+import { PLAN_HOOK_TIMEOUT_SEC, buildHookSettings, describeBuiltinHooks } from '../detection/settings-injector.ts';
 
 const base = { port: 3000, glissaId: 'g1', token: 'tok' };
 
@@ -62,6 +62,8 @@ test('describeBuiltinHooks rows are exactly the entries buildHookSettings writes
     { observeToolCalls: true },
     { observeToolCalls: true, rtkPath: '/usr/bin/rtk' },
     { detectScheduledWakeups: false, detectPackReads: true, rtkPath: '/usr/bin/rtk' },
+    { planReview: true },
+    { planReview: true, detectPackReads: true, rtkPath: '/usr/bin/rtk' },
   ]) {
     const settings = buildHookSettings({ ...base, ...options });
     const written: { event: string; matcher: string | null }[] = [];
@@ -87,3 +89,39 @@ test('an operator PostToolUse hook stays after both built-in matchers', () => {
 function byRow(a: { event: string; matcher: string | null }, b: { event: string; matcher: string | null }) {
   return `${a.event}${a.matcher}`.localeCompare(`${b.event}${b.matcher}`);
 }
+
+test('the plan entry sits beside an unmatched PermissionRequest entry that stays byte-identical', () => {
+  const without = buildHookSettings(base);
+  const withPlan = buildHookSettings({ ...base, planReview: true });
+  assert.equal(
+    JSON.stringify(withPlan.hooks.PermissionRequest[0]),
+    JSON.stringify(without.hooks.PermissionRequest[0]),
+    'the status signal path must not move when plan review is on',
+  );
+  assert.equal(withPlan.hooks.PermissionRequest.length, 2);
+  assert.deepEqual(withPlan.hooks.PermissionRequest[1], {
+    matcher: 'ExitPlanMode',
+    hooks: [{ type: 'http', url: 'http://127.0.0.1:3000/hook/g1/permissionrequest-plan?t=tok', timeout: PLAN_HOOK_TIMEOUT_SEC }],
+  });
+});
+
+test('the plan endpoint is a second URL, so two entries can never arrive as indistinguishable posts', () => {
+  const settings = buildHookSettings({ ...base, planReview: true });
+  const urls = settings.hooks.PermissionRequest.map((entry) => entry.hooks[0].url);
+  assert.equal(new Set(urls).size, 2);
+});
+
+test('ExitPlanMode joins the PostToolUse matchers without displacing the wakeup entry', () => {
+  const settings = buildHookSettings({ ...base, planReview: true });
+  assert.deepEqual(
+    settings.hooks.PostToolUse.map((entry) => entry.matcher),
+    ['ScheduleWakeup|CronCreate|CronDelete', 'ExitPlanMode'],
+  );
+});
+
+test('plan review off leaves the settings byte-identical', () => {
+  assert.equal(
+    JSON.stringify(buildHookSettings({ ...base, planReview: false })),
+    JSON.stringify(buildHookSettings(base)),
+  );
+});

@@ -14,6 +14,7 @@ interface SnapshotSource {
   packs: { name: string; version: string }[];
   pendingWakeup: Record<string, unknown> | null;
   pendingPromptKind: string | null;
+  hasPlan: boolean;
   mergeStatus: string;
   mergeReason: string | null;
   worktreeNotice: string | null;
@@ -40,6 +41,7 @@ function projectSessionSnapshots(source: SnapshotSource) {
     packs: source.packs.map(({ name, version }) => ({ name, version })),
     pendingWakeup: source.pendingWakeup,
     pendingPromptKind: source.pendingPromptKind,
+    hasPlan: source.hasPlan,
     mergeStatus: source.mergeStatus,
     mergeReason: source.mergeReason,
     worktreeNotice: source.worktreeNotice,

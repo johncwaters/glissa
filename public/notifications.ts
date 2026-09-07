@@ -1,4 +1,5 @@
 import { claimKey, claimNotification } from './notify-dedupe-core.ts';
+import { createPlanHash } from './plan/plan-link.ts';
 import { isNotificationsEnabled } from './ui-prefs.ts';
 
 function getNotificationApi() {
@@ -39,8 +40,9 @@ export function showDesktopNotification({
   session,
   category,
   message,
+  kind,
   ignoreFocus = false,
-}: { session?: unknown; category?: unknown; message?: unknown; ignoreFocus?: unknown; [key: string]: unknown } = {}) {
+}: { session?: unknown; category?: unknown; message?: unknown; kind?: unknown; ignoreFocus?: unknown; [key: string]: unknown } = {}) {
   const notificationApi = getNotificationApi();
   if (!notificationApi || !isNotificationsEnabled()) return;
   if (notificationApi.permission !== 'granted') return;
@@ -57,6 +59,9 @@ export function showDesktopNotification({
     const n = new notificationApi('Glissa', options);
     n.onclick = () => {
       window.focus();
+      if (kind === 'plan' && typeof session === 'string') {
+        window.location.hash = createPlanHash(session);
+      }
       n.close();
     };
   } catch {

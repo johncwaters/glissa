@@ -154,6 +154,10 @@ const TraceSettings = z.object({
   enabled: optionalBoolean('trace.enabled'),
 }, { error: 'trace must be an object' }).optional();
 
+const PlanReviewSettings = z.object({
+  enabled: optionalBoolean('planReview.enabled'),
+}, { error: 'planReview must be an object' }).optional();
+
 const BROWSER_CONFIG_SHAPE = {
   port: z.number().int().min(0).max(65535).optional(),
   autoRecoverSeconds: z.number().finite().nonnegative().optional(),
@@ -223,6 +227,7 @@ const FILE_CONFIG_SHAPE = {
   memory: optionalLooseObject('memory'),
   ingest: optionalLooseObject('ingest'),
   trace: TraceSettings,
+  planReview: PlanReviewSettings,
 };
 export const Config = z.object({
   ...FILE_CONFIG_SHAPE,

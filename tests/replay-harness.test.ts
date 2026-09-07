@@ -5,6 +5,8 @@ import path from 'node:path';
 
 import { parseRecording, replayDetection, summarize } from '../detection/replay.ts';
 import { createOscTitleSource } from '../detection/osc-title-source.ts';
+import claudeCode from '../session/adapters/claude-code.ts';
+import { parseExitPlanModeHookPayload } from '../shared/contracts/plan-review.ts';
 
 const FIX = path.join(import.meta.dirname, 'fixtures');
 const FAST = { stabilizationMs: 40, conflictWindowMs: 20, dedupWindowMs: 10 };
@@ -30,6 +32,20 @@ test('v2 fixture (waiting via permission Notification): emits working + awaiting
   assert.ok(c.working >= 1, 'expected working');
   assert.ok(c['awaiting-input'] >= 1, 'expected awaiting-input');
   assert.equal(c.ready || 0, 0, 'no false COMPLETE');
+});
+
+test('v2 fixture (ExitPlanMode request): awaiting-input reaches the card as a plan prompt', async () => {
+  const { records } = load('v2-waiting-plan.jsonl');
+  const { signals } = await replayDetection(records, FAST);
+  const counts = summarize(signals);
+  assert.ok(counts.working >= 1, 'expected working');
+  assert.ok(counts['awaiting-input'] >= 1, 'the plan request must reach the card');
+  assert.equal(counts.ready || 0, 0, 'a plan request is never a completion');
+
+  const request = records.find((record) => record.type === 'hook');
+  assert.equal(claudeCode.hooks.mapSignal(String(request?.event), request?.payload), 'awaiting-input');
+  assert.equal(claudeCode.hooks.mapPromptKind(String(request?.event), request?.payload), 'plan');
+  assert.ok(parseExitPlanModeHookPayload(request?.payload), 'the recorded payload survives the fail-closed parse');
 });
 
 test('v2 fixture (conflict Stop+permission): awaiting-input dominates, no ready', async () => {

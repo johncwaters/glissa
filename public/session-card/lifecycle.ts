@@ -4,6 +4,11 @@ import { playAlertSound } from '../alert-sound.ts';
 import { sendControlMsg } from '../control-ws.ts';
 import { el } from '../dom-helpers.ts';
 import { setHealthMonitorVisible } from '../health-monitor.ts';
+import { createPlanFace, dropPlanBodyCache } from '../plan/plan-face.ts';
+import type { PlanResponse } from '../plan/plan-face.ts';
+import { createPlanHash } from '../plan/plan-link.ts';
+import { mergePlanChanged } from '../plan/plan-view-core.ts';
+import type { PlanChangedMessage } from '../plan/plan-view-core.ts';
 import { seedReviewMergeStatus, setReviewDiff, setReviewMergeStatus } from '../sidebar/review-sidebar.ts';
 import { setSelectedId } from '../sidebar/selection.ts';
 import { getSoundId, isSoundEnabled } from '../ui-prefs.ts';
@@ -17,6 +22,8 @@ import type { CardOptions } from './card-dom.ts';
 import { buildCardDOM, closeDebugOverlay, isDebugModeEnabled, isRenameInProgress, openDebugOverlay, setDebugMode, startInlineRename } from './card-dom.ts';
 import type { SessionUi } from './card-registry.ts';
 import { aggregateEl, container, findSessionUi, sessionIdOf, sessionUIs } from './card-registry.ts';
+import { preferredBorrowedFace } from './face-core.ts';
+import type { SessionCardFace } from './face-core.ts';
 import { openConfirmDialog } from './modal.ts';
 import type { DeliveredPack } from './pack-stale-core.ts';
 import { stalePackNames } from './pack-stale-core.ts';
@@ -24,6 +31,7 @@ import { openResumeDialog } from './resume-dialog.ts';
 
 import { refreshElapsed } from './session-tick.ts';
 import {
+  activateTerminalViewer,
   cancelTerminalRepaint,
   ensureTerminalSetup,
   setTerminalCursorBlink,
@@ -65,6 +73,8 @@ function updateButtonVisibility(ui: SessionUi) {
   ui.btnRename.classList.add('visible');
   ui.btnResume.classList.add('visible');
   ui.btnTrace.classList.toggle('visible', isDebugModeEnabled());
+  ui.btnPlan.classList.toggle('visible', ui.isBorrowed && ui.hasPlan && ui.face === 'terminal');
+  ui.btnOverflowPlan.classList.toggle('visible', ui.hasPlan);
   ui.btnRemove.classList.add('visible');
 }
 
@@ -109,6 +119,13 @@ function wireCardEvents(ui: SessionUi, sessionId: string) {
   ui.btnTrace.addEventListener('click', () => {
     closeOverflowMenu(ui);
     openTraceForSession(sessionId);
+  });
+
+  ui.btnPlan.addEventListener('click', () => showSessionPlanFace(sessionId));
+
+  ui.btnOverflowPlan.addEventListener('click', () => {
+    closeOverflowMenu(ui);
+    location.hash = createPlanHash(sessionId);
   });
 
   ui.btnRemove.addEventListener('click', () => {
@@ -228,7 +245,20 @@ export function createSessionCard(sessionId: unknown, sessionName: unknown, init
 
   container.appendChild(dom.card);
 
-  const ui: SessionUi = {
+  let sessionUi: SessionUi;
+  function showTerminalFace() {
+    sessionUi.face = 'terminal';
+    sessionUi.card.dataset.face = 'terminal';
+    sessionUi.termWrap.hidden = false;
+    sessionUi.planFace.hide();
+    updateButtonVisibility(sessionUi);
+    activateTerminalViewer(sessionUi, id);
+  }
+  const planFace = createPlanFace({
+    requestPlan: (requestedId, agentId, revision) => sendControlMsg({ type: 'session-plan', id: requestedId, agentId, revision }),
+    showTerminal: showTerminalFace,
+  });
+  sessionUi = {
     term: null,
     fitAddon: null,
     webglAddon: null,
@@ -250,26 +280,111 @@ export function createSessionCard(sessionId: unknown, sessionName: unknown, init
     btnRestartFresh: dom.btnRestartFresh,
     btnResume: dom.btnResume,
     btnTrace: dom.btnTrace,
+    btnPlan: dom.btnPlan,
+    btnOverflowPlan: dom.btnOverflowPlan,
     btnRemove: dom.btnRemove,
     debugOverlay: null,
     debugOpen: false,
     abortController: new AbortController(),
     currentState: state,
+    face: 'terminal',
+    isBorrowed: false,
+    hasPlan: false,
+    pendingPromptKind: null,
+    planReviewState: { reviews: [] },
+    planFace,
   };
-  sessionUIs.set(id, ui);
+  sessionUi._activateTerminalViewer = () => activateTerminalViewer(sessionUi, id);
+  sessionUi._showTerminalFace = showTerminalFace;
+  sessionUi._showPreferredFace = () => {
+    if (preferredFaceFor(sessionUi) === 'plan') {
+      showSessionPlanFace(id);
+      return;
+    }
+    showTerminalFace();
+  };
+  sessionUi._setBorrowed = (isBorrowed) => {
+    sessionUi.isBorrowed = isBorrowed;
+    updateButtonVisibility(sessionUi);
+  };
+  dom.card.append(planFace.el);
+  sessionUIs.set(id, sessionUi);
 
-  wireCardEvents(ui, id);
-  updateButtonVisibility(ui);
+  wireCardEvents(sessionUi, id);
+  updateButtonVisibility(sessionUi);
 
-  if (state === STATES.RUNNING) setRunningActivity(ui, true);
+  if (state === STATES.RUNNING) setRunningActivity(sessionUi, true);
 
   if (!isDormant) {
-    setupTerminal(dom.termWrap, ui);
-    wireTerminalIO(ui, id);
+    setupTerminal(dom.termWrap, sessionUi);
+    wireTerminalIO(sessionUi, id);
   }
 
   updateAggregateStatus();
-  return ui;
+  return sessionUi;
+}
+
+export type SessionPlanChangedMessage = PlanChangedMessage;
+
+function preferredFaceFor(ui: SessionUi): SessionCardFace {
+  const hasOpenReview = ui.planReviewState.reviews.some((review) => review.state === 'open');
+  return preferredBorrowedFace({ hasPlan: ui.hasPlan, pendingPromptKind: ui.pendingPromptKind, hasOpenReview });
+}
+
+function showPlanFaceWhenPreferred(sessionId: unknown) {
+  const ui = findSessionUi(sessionId);
+  if (!ui || !ui.isBorrowed) return false;
+  if (preferredFaceFor(ui) !== 'plan') return false;
+  return showSessionPlanFace(sessionId);
+}
+
+export function showSessionPlanFace(sessionId: unknown) {
+  const ui = findSessionUi(sessionId);
+  if (!ui || !ui.isBorrowed || !ui.hasPlan) return false;
+  ui.face = 'plan';
+  ui.card.dataset.face = 'plan';
+  ui.termWrap.hidden = true;
+  ui.planFace.show(sessionIdOf(sessionId));
+  updateButtonVisibility(ui);
+  return true;
+}
+
+export function setSessionHasPlan(sessionId: unknown, hasPlan: unknown) {
+  const ui = findSessionUi(sessionId);
+  if (!ui) return;
+  ui.hasPlan = hasPlan === true;
+  updateButtonVisibility(ui);
+  showPlanFaceWhenPreferred(sessionId);
+}
+
+export function applySessionPlanChanged(message: SessionPlanChangedMessage) {
+  const ui = findSessionUi(message.id);
+  if (!ui) return;
+  ui.planReviewState = mergePlanChanged(ui.planReviewState, message);
+  ui.hasPlan = message.hasPlan;
+  ui.planFace.update({ state: ui.planReviewState });
+  updateButtonVisibility(ui);
+  showPlanFaceWhenPreferred(message.id);
+}
+
+export function applySessionPlanResponse(response: PlanResponse) {
+  const ui = findSessionUi(response.id);
+  if (!ui) return;
+  ui.planReviewState = { reviews: response.reviews };
+  ui.hasPlan = true;
+  ui.planFace.update({ response });
+  updateButtonVisibility(ui);
+}
+
+export function applySessionPlanError(message: unknown) {
+  const sessionId = (message as { id?: unknown } | null)?.id;
+  const ui = findSessionUi(sessionId);
+  if (!ui) return;
+  ui.planFace.update({ requestFailed: true });
+}
+
+export function applyPlanConnectionState(isConnected: boolean) {
+  for (const [, ui] of sessionUIs) ui.planFace.update({ isConnected });
 }
 
 export function setSessionEffectiveBase(sessionId: unknown, base: unknown) {
@@ -376,11 +491,13 @@ export function setSessionUsage(sessionId: unknown, usage: UsageSessionUsage | n
 export function setSessionPrompt(sessionId: unknown, kind: unknown) {
   const ui = findSessionUi(sessionId);
   if (!ui) return;
+  ui.pendingPromptKind = typeof kind === 'string' ? kind : null;
   paintCardBadge(ui, '.prompt-badge', 'prompt', {
     on: !!kind,
     value: asText(kind),
-    text: kind === 'permission' ? 'permission' : 'input',
+    text: kind === 'plan' ? 'Plan ready' : kind === 'permission' ? 'permission' : 'input',
   });
+  showPlanFaceWhenPreferred(sessionId);
 }
 
 function formatWakeupChip(at: unknown) {
@@ -472,6 +589,7 @@ export function removeSessionCard(sessionId: unknown) {
 
   closeDebugOverlay(ui);
   sessionUIs.delete(sessionIdOf(sessionId));
+  dropPlanBodyCache(sessionIdOf(sessionId));
 
   if (ui.resizeObserver) ui.resizeObserver.disconnect();
   if (ui.abortController) ui.abortController.abort();

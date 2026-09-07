@@ -7,10 +7,12 @@ import { relayPath } from '../server/runtime-paths.ts';
 import { buildRtkHookEntry } from '../session/core/rtk-command.ts';
 import { appendUserHooks } from '../session/core/user-hooks-core.ts';
 import type { UserHook } from '../session/core/user-hooks-core.ts';
+import { PLAN_HOOK_EVENT, PLAN_TOOL_NAME } from '../shared/contracts/plan-review.ts';
 import { safePathSegment } from '../shared/paths.ts';
 
 const DEFAULT_BASE_DIR = path.join(os.tmpdir(), 'glissa-hooks');
 const DEFAULT_TIMEOUT_SEC = 5;
+const PLAN_HOOK_TIMEOUT_SEC = DEFAULT_TIMEOUT_SEC;
 
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
@@ -51,6 +53,7 @@ export interface BuildHookSettingsOptions {
   enableProjectMcp?: boolean;
   rtkPath?: string | null;
   planLimits?: boolean;
+  planReview?: boolean;
   userSettingsPath?: string | null;
   relayPath?: string;
   userHooks?: UserHook[];
@@ -78,6 +81,7 @@ const HOOK_EVENTS = ['SessionStart', 'SessionEnd', 'UserPromptSubmit', 'Stop', '
 
 const WAKEUP_TOOL_MATCHER = 'ScheduleWakeup|CronCreate|CronDelete';
 const PACK_READ_TOOL_MATCHER = 'Read';
+const PLAN_TOOL_MATCHER = PLAN_TOOL_NAME;
 
 const RELAY_PATH = relayPath('statusline-relay');
 const NO_CHAIN = '-';
@@ -117,7 +121,7 @@ function buildStatuslineCommand(
   return `node ${shellQuote(toForwardSlashes(relayPath))} ${shellQuote(postUrl)} ${shellQuote(encoded)}`;
 }
 
-function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, detectPackReads = false, observeToolCalls = false, enableProjectMcp = false, rtkPath = null, planLimits = false, userSettingsPath = null, relayPath = RELAY_PATH, userHooks = [] }: BuildHookSettingsOptions): HookSettings {
+function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, detectPackReads = false, observeToolCalls = false, enableProjectMcp = false, rtkPath = null, planLimits = false, planReview = false, userSettingsPath = null, relayPath = RELAY_PATH, userHooks = [] }: BuildHookSettingsOptions): HookSettings {
   if (!port || !glissaId || !token) {
     throw new Error('buildHookSettings requires port, glissaId, token');
   }
@@ -127,9 +131,17 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
   for (const event of HOOK_EVENTS) {
     hooks[event] = [{ hooks: [{ type: 'http', url: hookUrl(event), timeout: timeoutSec }] }];
   }
+  const permissionRequestEntries = hooks.PermissionRequest;
+  if (planReview && permissionRequestEntries) {
+    permissionRequestEntries.push({
+      matcher: PLAN_TOOL_MATCHER,
+      hooks: [{ type: 'http', url: hookUrl(PLAN_HOOK_EVENT), timeout: PLAN_HOOK_TIMEOUT_SEC }],
+    });
+  }
   const postToolUse: string[] = [];
   if (detectScheduledWakeups) postToolUse.push(WAKEUP_TOOL_MATCHER);
   if (detectPackReads) postToolUse.push(PACK_READ_TOOL_MATCHER);
+  if (planReview) postToolUse.push(PLAN_TOOL_MATCHER);
   if (postToolUse.length > 0) {
     const url = hookUrl('PostToolUse');
     hooks.PostToolUse = postToolUse.map((matcher) => ({ matcher, hooks: [{ type: 'http', url, timeout: timeoutSec }] }));
@@ -169,12 +181,14 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
 }
 
 function describeBuiltinHooks(
-  { detectScheduledWakeups = true, detectPackReads = false, observeToolCalls = false, rtkPath = null }:
-    { detectScheduledWakeups?: boolean; detectPackReads?: boolean; observeToolCalls?: boolean; rtkPath?: string | null } = {},
+  { detectScheduledWakeups = true, detectPackReads = false, observeToolCalls = false, rtkPath = null, planReview = false }:
+    { detectScheduledWakeups?: boolean; detectPackReads?: boolean; observeToolCalls?: boolean; rtkPath?: string | null; planReview?: boolean } = {},
 ): { event: string; matcher: string | null; purpose: string }[] {
   const rows = HOOK_EVENTS.map((event) => ({ event, matcher: null as string | null, purpose: 'Status detection: POST to the Glissa hook router' }));
+  if (planReview) rows.push({ event: 'PermissionRequest', matcher: PLAN_TOOL_MATCHER, purpose: 'Plan review: POST the plan to the Glissa plan endpoint' });
   if (detectScheduledWakeups) rows.push({ event: 'PostToolUse', matcher: WAKEUP_TOOL_MATCHER, purpose: 'Scheduled wakeup tracking' });
   if (detectPackReads) rows.push({ event: 'PostToolUse', matcher: PACK_READ_TOOL_MATCHER, purpose: 'Pack read tracking' });
+  if (planReview) rows.push({ event: 'PostToolUse', matcher: PLAN_TOOL_MATCHER, purpose: 'Plan review: record the approved plan' });
   if (observeToolCalls) rows.push({ event: 'PreToolUse', matcher: null, purpose: 'Investigation trail: POST every tool call to the Glissa hook router' });
   if (rtkPath) rows.push({ event: 'PreToolUse', matcher: buildRtkHookEntry(rtkPath).matcher, purpose: 'rtk command rewriting' });
   return rows;
@@ -263,6 +277,8 @@ export {
   settingsDetectPackReads,
   DEFAULT_BASE_DIR,
   DEFAULT_TIMEOUT_SEC,
+  PLAN_HOOK_TIMEOUT_SEC,
+  PLAN_TOOL_MATCHER,
   DIR_MODE,
   FILE_MODE,
   RELAY_PATH,

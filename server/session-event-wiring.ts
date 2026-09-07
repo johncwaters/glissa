@@ -37,18 +37,28 @@ interface SessionEventDependencies {
   telegramChannel: { noteStateChange: (id: string) => void; recheck: (id: string) => void };
   notificationManager: {
     acknowledge: (id: string) => void;
-    trigger: (id: string, category: string, message: string) => void;
+    trigger: (id: string, category: string, message: string, kind?: 'plan' | null) => void;
   };
   getIngestLane: () => WiringIngestLane | null;
   tapIngestForSession: (session: Session) => void;
   closeSessionDataClients: (id: string) => void;
   millMetricsPort?: MillMetricsPort | null;
   traceWiring?: { attachSession: (session: Session) => void } | null;
+  planReview?: {
+    attachSession: (session: Session) => void;
+    latestPlanTitle: (sessionId: string) => string | null;
+  } | null;
   logger: Pick<Console, 'error' | 'log' | 'warn'>;
 }
 
-const NOTIFY_MESSAGES: Record<string, (name: string) => string> = {
-  waiting: (name) => `${name} needs your input`,
+interface NotifyCopyContext {
+  planTitle: string | null;
+}
+
+const NOTIFY_MESSAGES: Record<string, (name: string, context: NotifyCopyContext) => string> = {
+  waiting: (name, context) => (context.planTitle
+    ? `${name}: Plan ready for review: ${context.planTitle}`
+    : `${name} needs your input`),
   complete: (name) => `${name} finished working`,
   failed: (name) => `${name} failed`,
 };
@@ -77,7 +87,9 @@ function persistSessionField(
 function createSessionEventWiring(dependencies: SessionEventDependencies): (session: Session) => void {
   return function wireSessionEvents(session: Session): void {
     dependencies.traceWiring?.attachSession(session);
+    dependencies.planReview?.attachSession(session);
     let postTurnDebounce: NodeJS.Timeout | null = null;
+    let pendingPromptKind: string | null = null;
     const notifyGate = createNotifyGate();
     let lastPersistedWasActive: boolean | null = null;
     const persistProjectField = (field: string, value: unknown) => {
@@ -187,7 +199,15 @@ function createSessionEventWiring(dependencies: SessionEventDependencies): (sess
       if (!category) return;
       const message = NOTIFY_MESSAGES[category];
       if (!message) return;
-      dependencies.notificationManager.trigger(session.id, category, message(session.name));
+      const planTitleForCopy = pendingPromptKind === 'plan'
+        ? (dependencies.planReview?.latestPlanTitle(session.id) ?? null)
+        : null;
+      dependencies.notificationManager.trigger(
+        session.id,
+        category,
+        message(session.name, { planTitle: planTitleForCopy }),
+        planTitleForCopy === null ? null : 'plan',
+      );
     });
 
     const ingestLaneAtWiring = dependencies.getIngestLane();
@@ -203,6 +223,9 @@ function createSessionEventWiring(dependencies: SessionEventDependencies): (sess
     session.on('user-prompt', (payload: PromptSubmittedPayload) => {
       notifyGate.reset();
       if (dependencies.millMetricsPort) dependencies.millMetricsPort.onPromptSubmitted(session.id, payload);
+    });
+    session.on('prompt-kind-change', ({ pendingPromptKind: nextKind }: { pendingPromptKind: string | null }) => {
+      pendingPromptKind = nextKind;
     });
     const relay = (event: string, type: string) => session.on(event, (payload: Record<string, unknown> | undefined) => dependencies.broadcastControl({
       ...payload,

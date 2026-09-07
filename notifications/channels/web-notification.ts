@@ -4,11 +4,17 @@ export type NotifyBroadcast = {
   category: string;
   message: string;
   escalationCount: number;
+  kind?: 'plan';
 };
 
 function createWebNotificationChannel(
   broadcast: (msg: NotifyBroadcast) => void,
-): (sessionName: string, category: string, message: string, context?: { escalationCount?: number } | null) => void {
+): (
+  sessionName: string,
+  category: string,
+  message: string,
+  context?: { escalationCount?: number; kind?: 'plan' } | null,
+) => void {
   return function webNotificationChannel(sessionName, category, message, context) {
     broadcast({
       type: 'notify',
@@ -16,6 +22,7 @@ function createWebNotificationChannel(
       category,
       message,
       escalationCount: context?.escalationCount ?? 0,
+      ...(context?.kind ? { kind: context.kind } : {}),
     });
   };
 }

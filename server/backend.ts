@@ -77,6 +77,7 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     configStore,
     getGitWorkspace: () => gitWorkspace,
     getMillMetricsPort: () => laneAssembly.millMetrics.port,
+    getPlanReviewPort: () => laneAssembly.planReview?.port ?? null,
     getBroadcastControl: () => broadcastControl,
     logger: console,
   });
@@ -96,6 +97,8 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     hookRouter,
     getSession: getSessionAny,
     getUsage: () => usage,
+    getPlanReview: () => laneAssembly.planReview,
+    logger: console,
   });
 
   const webSockets = createBackendWebSockets({
@@ -208,6 +211,7 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     getIngestLane: getCurrentIngestLane,
     tapIngestForSession,
     traceWiring,
+    planReview: laneAssembly.planReview,
     closeSessionDataClients,
     logger: console,
   });
@@ -313,6 +317,7 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     memoryStore,
     traceWiring,
     traceChangeBroadcast,
+    planReview: laneAssembly.planReview,
     millMetricsIdle: () => laneAssembly.millMetrics.whenIdle(),
     millMetricsPort: laneAssembly.millMetrics.port,
     telegramOutbox,
@@ -361,6 +366,7 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     usage,
     mill,
     readTracePage: traceWiring?.readTracePage ?? null,
+    readPlanRevision: laneAssembly.planReview?.readPlanRevision ?? null,
     serverBuild: () => serverBuild,
     logger: console,
   });

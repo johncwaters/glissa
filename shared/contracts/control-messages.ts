@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PlanChangedPush, PlanResponseFrame } from './plan-review.ts';
 import { PendingWakeup, SessionSnapshot, SessionState } from './session.ts';
 import { TraceRecord } from './trace.ts';
 import { UpdateChannel, UpdateJournal, UpdateJournalSummary } from './update-journal.ts';
@@ -13,6 +14,7 @@ const optionalTimestamp = timestamp.optional();
 const optionalError = nullableString.optional();
 const opaqueObject = openObject();
 const opaqueArray = z.array(z.unknown());
+const planRevisionNumber = z.number().int().positive();
 const trailSteps = z.array(openObject({ at: timestamp, tool: z.string(), detail: z.string() }));
 
 export const UpdateApplyRefusal = z.object({ reason: z.string(), message: z.string() });
@@ -80,6 +82,7 @@ export const CLIENT_MESSAGE_TYPES = Object.freeze([
   'resync-branch',
   'debug-state',
   'session-trace',
+  'session-plan',
   'shutdown',
   'restart-server',
   'focus-change',
@@ -126,6 +129,11 @@ const clientVariants = [
     after: z.number().int().nonnegative().default(0),
     endingAt: z.union([z.number().int().nonnegative(), z.literal('tail')]).optional(),
   }),
+  loose('session-plan', {
+    id: sessionId,
+    agentId: nullableString,
+    revision: planRevisionNumber.optional(),
+  }),
   ...idOnlyClientTypes.map((type) => loose(type, { id: sessionId, force: z.unknown().optional() })),
 ] as const;
 
@@ -163,6 +171,8 @@ export const SERVER_MESSAGE_TYPES = Object.freeze([
   'debug-state-response',
   'session-trace-response',
   'session-trace-changed',
+  'session-plan-changed',
+  'session-plan-response',
   'notify',
   'update-status',
   'update-progress',
@@ -347,11 +357,14 @@ const serverVariants = [
     path: z.string(),
   }),
   loose('session-trace-changed', { id: sessionId }),
+  loose('session-plan-changed', PlanChangedPush.shape),
+  loose('session-plan-response', PlanResponseFrame.shape),
   loose('notify', {
     session: z.string(),
     category: z.string(),
     message: z.string(),
     escalationCount: z.number().int().nonnegative(),
+    kind: z.literal('plan').optional(),
   }),
   loose('update-status', updateStatusShape),
   loose('update-progress', { journal: UpdateJournal }),

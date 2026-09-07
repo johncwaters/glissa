@@ -102,17 +102,23 @@ export function buildCardDOM(sessionId: string, sessionName: string, initialStat
   btnResume.setAttribute('role', 'menuitem');
   const btnTrace = el('button', 'overflow-item overflow-trace', 'Trace');
   btnTrace.setAttribute('role', 'menuitem');
+  const btnOverflowPlan = el('button', 'overflow-item overflow-plan', 'Plan');
+  btnOverflowPlan.setAttribute('role', 'menuitem');
 
   const btnRemove = el('button', 'overflow-item overflow-remove', 'Remove');
   btnRemove.setAttribute('role', 'menuitem');
-  overflowMenu.append(btnRename, btnRestart, btnRestartFresh, btnResume, btnTrace, btnRemove);
+  overflowMenu.append(btnRename, btnRestart, btnRestartFresh, btnResume, btnTrace, btnOverflowPlan, btnRemove);
   overflow.append(btnOverflow, overflowMenu);
 
   const btnDebug = el('button', 'btn-action btn-debug', '\u2699');
   btnDebug.title = 'Debug state';
   btnDebug.setAttribute('aria-label', 'Debug session state');
 
-  actions.append(btnDebug, overflow);
+  const btnPlan = el('button', 'btn-action btn-face-plan', 'Plan');
+  btnPlan.type = 'button';
+  btnPlan.title = 'Show plan';
+
+  actions.append(btnPlan, btnDebug, overflow);
   const tags = el('div', 'session-card-tags');
   const tagChildren = TAG_BADGES.map((spec) => buildTagBadge(spec));
   if (permsBadge) tagChildren.push(permsBadge);
@@ -123,7 +129,7 @@ export function buildCardDOM(sessionId: string, sessionName: string, initialStat
 
   card.append(header, termWrap);
 
-  return { card, header, nameEl, elapsedEl, btnRename, btnRestart, btnRestartFresh, btnResume, btnTrace, btnRemove, btnDebug, btnOverflow, overflowMenu, termWrap };
+  return { card, header, nameEl, elapsedEl, btnRename, btnRestart, btnRestartFresh, btnResume, btnTrace, btnOverflowPlan, btnRemove, btnPlan, btnDebug, btnOverflow, overflowMenu, termWrap };
 }
 
 const RENAME_INPUT_CLASS = 'session-rename-input';

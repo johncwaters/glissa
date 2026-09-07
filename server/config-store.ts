@@ -43,6 +43,10 @@ const DEFAULT_CONFIG = {
     enabled: true,
   },
 
+  planReview: {
+    enabled: true,
+  },
+
   checkForUpdates: true,
   updateChannel: 'release' as const,
 

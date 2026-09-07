@@ -8,7 +8,7 @@ import { checkControlLiveness, connectControl, onControlMessage, sendControlMsg,
 import { createAddSessionDialog } from './dialogs.ts';
 import { observeHeaderHeight, queryTag, writeClipboardText } from './dom-helpers.ts';
 import { refreshFavicon } from './favicon.ts';
-import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, getFocusedSessionId, isFocusActive, mountFocusView, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.ts';
+import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdjacentInRail, focusNextAttention, focusNthInRail, getFocusedSessionId, isFocusActive, mountFocusView, openPlanInFocus, refreshFocusRoster, restoreFocusedSession, setFocusMergeStatus } from './focus-view/focus-view.ts';
 import { initFormFactor, isPhoneLayout, onLayoutChange } from './form-factor.ts';
 import type { HealthSnapshot } from './health-monitor.ts';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.ts';
@@ -16,7 +16,7 @@ import { applyIngestActivity, applyIngestSnapshot, applyVisionsComments, applyVi
 import { acknowledgeMillAttention, applyMillReport, mountMillView, refreshMillView, requestMillReport, setMillActivityCallback, setMillRequestSender } from './mill-panel.ts';
 import { applyDeleteHookResult, applyHooksReport, applySaveHookResult, mountHooksView, refreshHooksView, requestHooksReport, setHooksRequestSender } from './hooks-panel.ts';
 import { initNotifications, showDesktopNotification } from './notifications.ts';
-import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, isPhoneScreenActive, isPhoneShellActive, mountPhoneShell, refreshPhoneBoard, setPhoneScreenAttention, setPhoneScreenAvailable, showPhoneScreen } from './phone/phone-shell.ts';
+import { activatePhoneShell, deactivatePhoneShell, getPhoneSessionId, isPhoneScreenActive, isPhoneShellActive, mountPhoneShell, refreshPhoneBoard, setPhoneScreenAttention, setPhoneScreenAvailable, showPhonePlan, showPhoneScreen } from './phone/phone-shell.ts';
 import { noteKnownProjectPath } from './project-registry.ts';
 import { acknowledgePrAttention, applyPrStatus, mountPrView, setPrActivityCallback } from './pr-panel.ts';
 
@@ -24,7 +24,10 @@ import { UPDATES_ACTIONS_SETTING_ID, UPDATES_SECTION_ID, updateBannerText } from
 import { acknowledgeRadarAttention, applyHealthSnapshot as applyRadarHealth, applyInvestigationActivity, applyInvestigationFinished, applyPosthogStatus, applyPrStatus as applyRadarPrStatus, applyUpdateAvailable as applyRadarUpdate, mountRadarView, setRadarActivityCallback, setRadarNavigateToPrs } from './radar-panel.ts';
 import { handleDebugStateRefresh, handleDebugStateResponse, onDebugModeChanged } from './session-card/card-dom.ts';
 import { sessionUIs } from './session-card/card-registry.ts';
-import { applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, notePackVersion, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setLatestPackVersions, setSessionAgent, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionMergeStatus, setSessionPacks, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionUsage, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.ts';
+import type { PlanResponse } from './plan/plan-face.ts';
+import type { SessionPlanChangedMessage } from './session-card/lifecycle.ts';
+import { applyPlanConnectionState, applySessionPlanChanged, applySessionPlanError, applySessionPlanResponse, applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, notePackVersion, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setLatestPackVersions, setSessionAgent, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionHasPlan, setSessionMergeStatus, setSessionPacks, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionUsage, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.ts';
+import { resolvePlanTarget } from './plan/plan-link.ts';
 import { openConfirmDialog } from './session-card/modal.ts';
 import { reconnectDataWs } from './session-card/terminal.ts';
 import { showErrorToast } from './session-card/toast.ts';
@@ -81,6 +84,7 @@ interface SnapshotSession {
   activeAgents?: number;
   pendingWakeup?: unknown;
   pendingPromptKind?: unknown;
+  hasPlan?: unknown;
   packs?: unknown;
 }
 
@@ -99,6 +103,7 @@ setConnectionStateCallback((state, label) => {
   connectionEl.dataset.state = state;
   connectionLabel.textContent = label;
   applyTraceConnectionState(state === 'connected');
+  applyPlanConnectionState(state === 'connected');
 
   if (state === 'connected') {
     if (shutdownScreen.classList.contains('active')) {
@@ -169,6 +174,8 @@ function handleSnapshot(sessions: unknown, packVersions: unknown) {
 
     setSessionPrompt(s.id, s.pendingPromptKind);
 
+    setSessionHasPlan(s.id, s.hasPlan);
+
     setSessionPacks(s.id, s.packs);
 
     restoreUsageChip(s.id);
@@ -180,6 +187,7 @@ function handleSnapshot(sessions: unknown, packVersions: unknown) {
 
   refreshPhoneBoard();
   syncTraceSessionsFromCards();
+  activatePlanHash();
 }
 
 function syncTraceSessionsFromCards() {
@@ -197,6 +205,8 @@ function handleStateChange(msg: ServerMessage) {
   }
 
   if (msg.to === STATES.DORMANT && msg.from !== STATES.DORMANT) {
+    const previousUi = sessionUIs.get(String(msg.id));
+    const hadPlan = previousUi?.hasPlan === true;
     const matchedCard = document.querySelector(`.session-card[data-id="${CSS.escape(String(msg.id))}"]`);
     const card = matchedCard instanceof HTMLElement ? matchedCard : null;
     const skipPerms = card ? card.dataset.skipPerms !== undefined : false;
@@ -204,6 +214,7 @@ function handleStateChange(msg: ServerMessage) {
     const path = card ? card.dataset.path : undefined;
     removeSessionCard(msg.id);
     createSessionCard(msg.id, msg.session, STATES.DORMANT, { skipPerms, path, stateSince: msg.timestamp });
+    setSessionHasPlan(msg.id, hadPlan);
     restoreUsageChip(msg.id);
     if (isFocusActive()) refreshFocusRoster();
     refreshPhoneBoard();
@@ -311,13 +322,25 @@ const messageHandlers = {
   'session-added':      (msg) => { if (!msg.ephemeral) noteKnownProjectPath(msg.path); if (!hasSession(msg.id)) { createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId, stateSince: msg.stateSince }); restoreUsageChip(msg.id); } refreshFavicon(sessionUIs); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); syncTraceSessionsFromCards(); },
   'session-removed':    (msg) => { removeSessionCard(msg.id); forgetReviewSession(msg.id); refreshFavicon(sessionUIs); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); syncTraceSessionsFromCards(); },
   'session-renamed':    (msg) => { renameSessionCard(msg.id, msg.newName); refreshPhoneBoard(); syncTraceSessionsFromCards(); },
-  'session-modified':   (msg) => { if (!msg.ephemeral) noteKnownProjectPath(msg.path); removeSessionCard(msg.id); forgetReviewSession(msg.id); createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId, stateSince: msg.stateSince }); restoreUsageChip(msg.id); refreshFavicon(sessionUIs); if (isFocusActive()) refreshFocusRoster(); refreshPhoneBoard(); syncTraceSessionsFromCards(); },
+  'session-modified':   (msg) => {
+    if (!msg.ephemeral) noteKnownProjectPath(msg.path);
+    const hadPlan = sessionUIs.get(String(msg.id))?.hasPlan === true;
+    removeSessionCard(msg.id);
+    forgetReviewSession(msg.id);
+    createSessionCard(msg.id, msg.session, msg.state, { skipPerms: !!msg.skipPerms, worktree: !!msg.worktree, path: msg.path, resume: !!msg.resumeSessionId, stateSince: msg.stateSince });
+    setSessionHasPlan(msg.id, hadPlan);
+    restoreUsageChip(msg.id);
+    refreshFavicon(sessionUIs);
+    if (isFocusActive()) refreshFocusRoster();
+    refreshPhoneBoard();
+    syncTraceSessionsFromCards();
+  },
   'session-git':        (msg) => setSessionWorktree(msg.id, !!msg.worktree),
   'session-resume':     (msg) => setSessionResume(msg.id, msg.resumeSessionId),
 
   'session-agents':     (msg) => { setSessionAgents(msg.id, msg.activeAgents); handleDebugStateRefresh(msg.id); },
   'session-wakeup':     (msg) => setSessionWakeup(msg.id, msg.pendingWakeup),
-  'session-prompt':     (msg) => setSessionPrompt(msg.id, msg.pendingPromptKind),
+  'session-prompt':     (msg) => { setSessionPrompt(msg.id, msg.pendingPromptKind); refreshPhoneBoard(); },
   'session-merge-status': (msg) => { setSessionMergeStatus(msg.id, msg.mergeStatus, msg.reason); setFocusMergeStatus(msg.id, msg.mergeStatus); refreshPhoneBoard(); },
   'session-worktree-blocked': (msg) => { showErrorToast(`${msg.session}: ${msg.notice || 'integration branch not found'}`, { persist: true }); },
   'session-worktree-warning': (msg) => { showErrorToast(`${msg.session}: ${msg.notice || 'base branch warning'}`); },
@@ -329,11 +352,13 @@ const messageHandlers = {
   'debug-state-response': (msg) => handleDebugStateResponse(msg),
   'session-trace-response': (msg) => applyTraceResponse(msg),
   'session-trace-changed': (msg) => applyTraceChanged(msg),
+  'session-plan-changed': (msg) => { applySessionPlanChanged(msg as ServerMessage & SessionPlanChangedMessage); refreshPhoneBoard(); },
+  'session-plan-response': (msg) => { applySessionPlanResponse(msg as ServerMessage & PlanResponse); },
 
   'notify':             (msg) => { showDesktopNotification(msg); handleDebugStateRefresh(msg.session); },
   'update-status':      (msg) => { showUpdateBanner(msg); applyRadarUpdate(msg); applySettingsUpdateStatus(msg); },
   'update-progress':    (msg) => applySettingsUpdateProgress(msg.journal),
-  'error':              (msg) => { clearSettingsUpdateRequest(); applyTraceError(msg); showErrorToast(msg.message, { persist: true }); },
+  'error':              (msg) => { clearSettingsUpdateRequest(); applyTraceError(msg); applySessionPlanError(msg); showErrorToast(msg.message, { persist: true }); },
   'session-error':      (msg) => showErrorToast(`${msg.session}: ${msg.message}`, { persist: true }),
   'settings-updated':   (msg) => { if (msg.settings) { applyTerminalSettings(msg.settings); applySettingsBroadcast(msg.settings); applyVisionsSettings(msg.settings); } },
   'health-snapshot':    (msg) => { if (msg.stats) { applyHealthSnapshot(msg.stats as HealthSnapshot); applyRadarHealth(msg.stats as HealthSnapshot); } },
@@ -489,6 +514,25 @@ function activateSettingsTarget(target: { sectionId: string; settingId: string |
 function activateSettingsHash() {
   const target = resolveSettingsTarget(location.hash);
   return activateSettingsTarget(target);
+}
+
+function activatePlanHash() {
+  const sessionId = resolvePlanTarget(location.hash);
+  if (!sessionId) return false;
+  if (!hasSession(sessionId)) return true;
+  history.replaceState(history.state, '', `${location.pathname}${location.search}`);
+  if (isPhoneShellActive()) {
+    if (!showPhonePlan(sessionId)) showErrorToast('No plan is stored for this session yet');
+    return true;
+  }
+  activateView('focus', { persist: false });
+  openPlanInFocus(sessionId);
+  return true;
+}
+
+function activateLocationHash() {
+  if (activatePlanHash()) return true;
+  return activateSettingsHash();
 }
 
 queryTag(document, '#btn-settings', 'button').addEventListener('click', () => {
@@ -687,6 +731,7 @@ for (let i = 0; i < VIEW_TABS.length; i++) {
 
 const savedView = getSavedActiveView();
 const initialSettingsTarget = resolveSettingsTarget(location.hash);
+const initialPlanTarget = resolvePlanTarget(location.hash);
 if (initialSettingsTarget) {
   shouldResolveSettingsHashOnMillReport = false;
   activateView('settings', {
@@ -695,7 +740,8 @@ if (initialSettingsTarget) {
     persist: false,
   });
 }
-if (!initialSettingsTarget) {
+if (initialPlanTarget) activateView('focus', { persist: false });
+if (!initialSettingsTarget && !initialPlanTarget) {
   const canRestoreSavedView = isViewAvailable(savedView);
   if (!canRestoreSavedView) savedViewAwaitingSurface = savedView;
   activateView(canRestoreSavedView ? savedView : 'focus', { persist: canRestoreSavedView });
@@ -746,7 +792,7 @@ function applyFormFactorLayout(layout: string) {
 
 if (isPhoneLayout()) applyFormFactorLayout('phone');
 onLayoutChange(applyFormFactorLayout);
-window.addEventListener('hashchange', activateSettingsHash);
+window.addEventListener('hashchange', activateLocationHash);
 
 function confirmServerRestart() {
   headerMenu.classList.remove('open');

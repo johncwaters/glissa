@@ -18,6 +18,7 @@ const REFRESHABLE_TYPES = new Set([
   'posthog-status',
   'posthog-investigation-activity',
   'session-trace-changed',
+  'session-plan-changed',
 ]);
 
 const DEFAULT_HIGH_WATER_MARK = 1 * 1024 * 1024;
