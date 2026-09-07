@@ -425,17 +425,13 @@ function applyPrependToRenderedTurns(prepend: TracePrepend): void {
 function showPrependedRecords(records: readonly TraceRecord[]): void {
   if (!selectedTrace) return;
   const prepend = prependTraceRecords(selectedTrace.grouping, records);
-  const canPrependInPlace = isTraceVisible() && !isRenderedTraceStale && !!turnsElement;
-  if (!canPrependInPlace) {
-    dropOldestRows();
-    renderPanel();
-    return;
-  }
+  const canPrependInPlace = isTraceVisible() && !isRenderedTraceStale && !!turnsElement && !prepend.needsRerender;
   const scrollElement = rootElement?.parentElement ?? null;
   const previousScrollHeight = scrollElement?.scrollHeight ?? 0;
   const previousScrollTop = scrollElement?.scrollTop ?? 0;
-  applyPrependToRenderedTurns(prepend);
+  if (canPrependInPlace) applyPrependToRenderedTurns(prepend);
   dropOldestRows();
+  if (!canPrependInPlace) renderPanel();
   if (scrollElement) scrollElement.scrollTop = previousScrollTop + scrollElement.scrollHeight - previousScrollHeight;
 }
 

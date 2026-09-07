@@ -271,6 +271,72 @@ test('prepending preserves resident turn objects and reports only newly built tu
   assert.equal(grouping.turns[1], residentTurn);
 });
 
+test('a page beginning with a tool result is relabeled when its Bash call arrives earlier', async () => {
+  const { appendTraceRecords, createTraceGrouping, prependTraceRecords } = await importCore();
+  const grouping = createTraceGrouping();
+  appendTraceRecords(grouping, [
+    record({ kind: 'tool_result', toolUseId: 'bash-1', content: 'ok', isError: false, truncated: false }),
+  ]);
+
+  assert.equal(grouping.turns[0].rows[0].label, 'Tool result: 2 bytes');
+  const prepend = prependTraceRecords(grouping, [
+    record({ kind: 'tool_call', toolUseId: 'bash-1', name: 'Bash', input: { command: 'npm test' } }),
+  ]);
+  assert.equal(prepend.needsRerender, true);
+  assert.equal(grouping.turns[0].rows[1].label, 'Bash result: 2 bytes');
+  assert.equal(grouping.unresolvedToolUseCounts.size, 0);
+});
+
+test('a tool result stays relabelable when its call arrives two pages later', async () => {
+  const { appendTraceRecords, createTraceGrouping, prependTraceRecords } = await importCore();
+  const grouping = createTraceGrouping();
+  appendTraceRecords(grouping, [record({ kind: 'assistant', text: 'resident answer' })]);
+
+  const firstPrepend = prependTraceRecords(grouping, [
+    record({ kind: 'tool_result', toolUseId: 'bash-1', content: 'ok', isError: false, truncated: false }),
+  ]);
+  assert.equal(firstPrepend.needsRerender, false);
+  assert.equal(grouping.unresolvedToolUseCounts.has('bash-1'), true);
+
+  const secondPrepend = prependTraceRecords(grouping, [
+    record({ kind: 'tool_call', toolUseId: 'bash-1', name: 'Bash', input: { command: 'npm test' } }),
+  ]);
+  assert.equal(secondPrepend.needsRerender, true);
+  assert.deepEqual(grouping.turns[0].rows.map((row) => row.label), [
+    'Bash: npm test',
+    'Bash result: 2 bytes',
+    'Assistant: resident answer',
+  ]);
+});
+
+test('prepending a page without an unresolved call does not need a rerender', async () => {
+  const { appendTraceRecords, createTraceGrouping, prependTraceRecords } = await importCore();
+  const grouping = createTraceGrouping();
+  appendTraceRecords(grouping, [
+    record({ kind: 'tool_result', toolUseId: 'bash-1', content: 'ok', isError: false, truncated: false }),
+  ]);
+
+  const prepend = prependTraceRecords(grouping, [
+    record({ kind: 'tool_call', toolUseId: 'write-1', name: 'Write', input: { file_path: '/repo/file.ts', content: 'ok' } }),
+  ]);
+  assert.equal(prepend.needsRerender, false);
+});
+
+test('an expansion is relabeled when its call arrives on an earlier page', async () => {
+  const { appendTraceRecords, createTraceGrouping, prependTraceRecords } = await importCore();
+  const grouping = createTraceGrouping();
+  appendTraceRecords(grouping, [
+    record({ kind: 'expansion', toolUseId: 'bash-1', text: 'expanded command' }),
+  ]);
+
+  assert.equal(grouping.turns[0].rows[0].label, 'Expansion: Skill');
+  const prepend = prependTraceRecords(grouping, [
+    record({ kind: 'tool_call', toolUseId: 'bash-1', name: 'Bash', input: { command: 'npm test' } }),
+  ]);
+  assert.equal(prepend.needsRerender, true);
+  assert.equal(grouping.turns[0].rows[1].label, 'Expansion: npm test');
+});
+
 test('the resident window drops its oldest turns once the row ceiling is passed', async () => {
   const { appendTraceRecords, createTraceGrouping, trimTraceGrouping } = await importCore();
   const grouping = createTraceGrouping();
@@ -292,6 +358,50 @@ test('the resident window drops its oldest turns once the row ceiling is passed'
   assert.equal(grouping.turns[0].head?.label, 'Prompt: prompt 3');
   assert.equal(grouping.turns[0].rows.length, 0);
   assert.equal(grouping.turns[0].hasTrimmedRows, true);
+});
+
+test('trimming forgets the pending ids of dropped turns and dropped rows', async () => {
+  const { appendTraceRecords, createTraceGrouping, trimTraceGrouping } = await importCore();
+  const grouping = createTraceGrouping();
+  appendTraceRecords(grouping, [
+    record({ kind: 'prompt', text: 'first prompt' }),
+    record({ kind: 'tool_result', toolUseId: 'bash-1', content: 'ok', isError: false, truncated: false }),
+    record({ kind: 'prompt', text: 'second prompt' }),
+    record({ kind: 'tool_result', toolUseId: 'bash-2', content: 'ok', isError: false, truncated: false }),
+    record({ kind: 'assistant', text: 'second answer' }),
+  ]);
+  assert.deepEqual([...grouping.unresolvedToolUseCounts.keys()], ['bash-1', 'bash-2']);
+
+  assert.deepEqual(trimTraceGrouping(grouping, 3), { droppedTurnCount: 1, droppedRowCount: 0 });
+  assert.equal(grouping.unresolvedToolUseCounts.has('bash-1'), false);
+  assert.deepEqual(trimTraceGrouping(grouping, 1), { droppedTurnCount: 0, droppedRowCount: 2 });
+  assert.equal(grouping.unresolvedToolUseCounts.size, 0);
+});
+
+test('a surviving row keeps its pending id when a second row referencing it is trimmed', async () => {
+  const { appendTraceRecords, createTraceGrouping, prependTraceRecords, trimTraceGrouping } = await importCore();
+  const grouping = createTraceGrouping();
+  appendTraceRecords(grouping, [
+    record({ kind: 'prompt', text: 'run the skill' }),
+    record({ kind: 'expansion', toolUseId: 'skill-1', text: 'expanded skill' }),
+    record({ kind: 'tool_result', toolUseId: 'skill-1', content: 'ok', isError: false, truncated: false }),
+    record({ kind: 'assistant', text: 'skill answer' }),
+  ]);
+  assert.equal(grouping.unresolvedToolUseCounts.get('skill-1'), 2);
+
+  assert.deepEqual(trimTraceGrouping(grouping, 3), { droppedTurnCount: 0, droppedRowCount: 1 });
+  assert.equal(grouping.unresolvedToolUseCounts.get('skill-1'), 1);
+
+  const prepend = prependTraceRecords(grouping, [
+    record({ kind: 'tool_call', toolUseId: 'skill-1', name: 'Skill', input: { skill: 'code-review' } }),
+  ]);
+  assert.equal(prepend.needsRerender, true);
+  assert.equal(grouping.unresolvedToolUseCounts.size, 0);
+  assert.deepEqual(grouping.turns[0].rows.map((row) => row.label), ['Skill: code-review']);
+  assert.deepEqual(grouping.turns[1].rows.map((row) => row.label), [
+    'Skill result: 2 bytes',
+    'Assistant: skill answer',
+  ]);
 });
 
 test('a single oversized turn keeps its heading and newest rows within the ceiling', async () => {
@@ -343,6 +453,8 @@ test('the rendered prepend path builds one page in place and preserves scroll po
   assert.match(prependSource, /turnsElement\.prepend\(newTurnsFragment\)/);
   assert.match(prependSource, /turnRowsElements\.unshift\(\.\.\.newRowsElements\)/);
   assert.match(showPrependSource, /previousScrollTop \+ scrollElement\.scrollHeight - previousScrollHeight/);
+  assert.match(showPrependSource, /prepend\.needsRerender/);
+  assert.ok(showPrependSource.indexOf('renderPanel();') < showPrependSource.indexOf('previousScrollTop + scrollElement.scrollHeight'));
 });
 
 test('debug mode gates every trace entry point and exits hidden trace views', () => {

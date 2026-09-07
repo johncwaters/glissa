@@ -31,6 +31,7 @@ export interface TraceTurn {
 export interface TraceGrouping {
   turns: TraceTurn[];
   toolCallByUseId: Map<string, ToolCallRecord>;
+  unresolvedToolUseCounts: Map<string, number>;
 }
 
 export interface TraceTurnAppend {
@@ -113,8 +114,44 @@ function traceViewRow(record: TraceRecord, toolCallByUseId: ReadonlyMap<string, 
   };
 }
 
+function referencedToolUseId(record: TraceRecord): string | null {
+  if (record.kind !== 'tool_result' && record.kind !== 'expansion') return null;
+  return record.toolUseId || null;
+}
+
+function unresolvedToolUseId(record: TraceRecord, toolCallByUseId: ReadonlyMap<string, ToolCallRecord>): string | null {
+  const toolUseId = referencedToolUseId(record);
+  if (!toolUseId || toolCallByUseId.has(toolUseId)) return null;
+  return toolUseId;
+}
+
+function retainUnresolvedToolUseId(unresolvedToolUseCounts: Map<string, number>, toolUseId: string, referencingRowCount = 1): void {
+  unresolvedToolUseCounts.set(toolUseId, (unresolvedToolUseCounts.get(toolUseId) ?? 0) + referencingRowCount);
+}
+
+function releaseUnresolvedToolUseId(unresolvedToolUseCounts: Map<string, number>, toolUseId: string): void {
+  const remainingReferencingRowCount = (unresolvedToolUseCounts.get(toolUseId) ?? 0) - 1;
+  if (remainingReferencingRowCount > 0) {
+    unresolvedToolUseCounts.set(toolUseId, remainingReferencingRowCount);
+    return;
+  }
+  unresolvedToolUseCounts.delete(toolUseId);
+}
+
+function relabelRowsOfToolUseIds(grouping: TraceGrouping, toolUseIds: ReadonlySet<string>): void {
+  if (toolUseIds.size === 0) return;
+  for (const turn of grouping.turns) {
+    for (let rowIndex = 0; rowIndex < turn.rows.length; rowIndex += 1) {
+      const row = turn.rows[rowIndex];
+      const toolUseId = referencedToolUseId(row.record);
+      if (!toolUseId || !toolUseIds.has(toolUseId)) continue;
+      turn.rows[rowIndex] = traceViewRow(row.record, grouping.toolCallByUseId);
+    }
+  }
+}
+
 export function createTraceGrouping(): TraceGrouping {
-  return { turns: [], toolCallByUseId: new Map<string, ToolCallRecord>() };
+  return { turns: [], toolCallByUseId: new Map<string, ToolCallRecord>(), unresolvedToolUseCounts: new Map<string, number>() };
 }
 
 export function appendTraceRecords(grouping: TraceGrouping, records: readonly TraceRecord[]): TraceTurnAppend[] {
@@ -125,6 +162,8 @@ export function appendTraceRecords(grouping: TraceGrouping, records: readonly Tr
   const appends: TraceTurnAppend[] = [];
   let currentTurn = grouping.turns[grouping.turns.length - 1] ?? null;
   for (const record of records) {
+    const unresolvedToolUseIdValue = unresolvedToolUseId(record, grouping.toolCallByUseId);
+    if (unresolvedToolUseIdValue) retainUnresolvedToolUseId(grouping.unresolvedToolUseCounts, unresolvedToolUseIdValue);
     const row = traceViewRow(record, grouping.toolCallByUseId);
     if (startsTurn(record)) {
       currentTurn = { head: row, rows: [], hasTrimmedRows: false };
@@ -153,13 +192,26 @@ export interface TracePrepend {
   newTurns: TraceTurn[];
   mergedHead: TraceViewRow | null;
   mergedRows: TraceViewRow[];
+  needsRerender: boolean;
 }
 
 export function prependTraceRecords(grouping: TraceGrouping, records: readonly TraceRecord[]): TracePrepend {
   const earlier = createTraceGrouping();
   appendTraceRecords(earlier, records);
+  const newlyMergedToolUseIds = new Set<string>();
   for (const [toolUseId, toolCall] of earlier.toolCallByUseId) {
-    if (!grouping.toolCallByUseId.has(toolUseId)) grouping.toolCallByUseId.set(toolUseId, toolCall);
+    if (grouping.toolCallByUseId.has(toolUseId)) continue;
+    grouping.toolCallByUseId.set(toolUseId, toolCall);
+    newlyMergedToolUseIds.add(toolUseId);
+  }
+  const newlyResolvedToolUseIds = new Set<string>();
+  for (const toolUseId of newlyMergedToolUseIds) {
+    if (!grouping.unresolvedToolUseCounts.delete(toolUseId)) continue;
+    newlyResolvedToolUseIds.add(toolUseId);
+  }
+  for (const [toolUseId, referencingRowCount] of earlier.unresolvedToolUseCounts) {
+    if (grouping.toolCallByUseId.has(toolUseId)) continue;
+    retainUnresolvedToolUseId(grouping.unresolvedToolUseCounts, toolUseId, referencingRowCount);
   }
   const lastEarlierTurn = earlier.turns[earlier.turns.length - 1];
   const firstResidentTurn = grouping.turns[0];
@@ -172,7 +224,8 @@ export function prependTraceRecords(grouping: TraceGrouping, records: readonly T
     firstResidentTurn.rows = [...mergedRows, ...firstResidentTurn.rows];
   }
   grouping.turns = [...earlier.turns, ...grouping.turns];
-  return { newTurns: earlier.turns, mergedHead, mergedRows };
+  relabelRowsOfToolUseIds(grouping, newlyResolvedToolUseIds);
+  return { newTurns: earlier.turns, mergedHead, mergedRows, needsRerender: newlyResolvedToolUseIds.size > 0 };
 }
 
 function turnRowCount(turn: TraceTurn): number {
@@ -187,7 +240,12 @@ export function traceResidentRowCount(grouping: TraceGrouping): number {
 
 function forgetRowToolCalls(grouping: TraceGrouping, rows: readonly TraceViewRow[]): void {
   for (const row of rows) {
-    if (row.record.kind === 'tool_call') grouping.toolCallByUseId.delete(row.record.toolUseId);
+    if (row.record.kind === 'tool_call') {
+      grouping.toolCallByUseId.delete(row.record.toolUseId);
+      continue;
+    }
+    const toolUseId = referencedToolUseId(row.record);
+    if (toolUseId) releaseUnresolvedToolUseId(grouping.unresolvedToolUseCounts, toolUseId);
   }
 }
 
