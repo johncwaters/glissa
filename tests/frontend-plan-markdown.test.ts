@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parsePlanMarkdown, planInlineText } from '../public/plan/plan-markdown-core.ts';
+import { parsePlanMarkdown, planInlineText, splitPlanSections } from '../public/plan/plan-markdown-core.ts';
 
 class FakeText {
   readonly textContent: string;
@@ -206,4 +206,45 @@ test('a table divider is recognized in linear time, whatever padding and alignme
   parsePlanMarkdown(adversarial);
   const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
   assert.ok(elapsedMs < 200, `a divider-shaped line must not backtrack, took ${elapsedMs} ms`);
+});
+
+test('every heading opens a section, and what stands before the first one is the preamble', () => {
+  const sections = splitPlanSections(parsePlanMarkdown([
+    'A sentence before any heading.',
+    '',
+    '# Ship it',
+    '',
+    'the shipping story',
+    '',
+    '## Rollout',
+    '',
+    'stage it',
+  ].join('\n')));
+
+  assert.deepEqual(sections.map((section) => [section.heading, section.level, section.blocks.length]), [
+    [null, 0, 1],
+    ['Ship it', 1, 2],
+    ['Rollout', 2, 2],
+  ]);
+  assert.equal(sections[0].id, null, 'the preamble hangs under no heading');
+  assert.equal(sections[1].blocks[0].type, 'heading', 'a section carries the heading it opens');
+  assert.equal(sections[1].id, sections[1].blocks[0].type === 'heading' ? sections[1].blocks[0].id : null);
+});
+
+test('a plan with no headings is one whole-plan section, and an empty plan has none', () => {
+  const single = splitPlanSections(parsePlanMarkdown('just a paragraph\n\nand another'));
+  assert.deepEqual(single.map((section) => section.heading), [null]);
+  assert.equal(single[0].blocks.length, 2);
+  assert.deepEqual(splitPlanSections(parsePlanMarkdown('')), []);
+  assert.deepEqual(splitPlanSections(parsePlanMarkdown('\n\n   \n')), []);
+});
+
+test('a plan that opens on its heading has no preamble section', () => {
+  const sections = splitPlanSections(parsePlanMarkdown('# Ship it\n\nbody'));
+  assert.deepEqual(sections.map((section) => section.heading), ['Ship it']);
+});
+
+test('the section heading is the heading text a comment quotes back, never its markup', () => {
+  const sections = splitPlanSections(parsePlanMarkdown('## Ship `now`, not **later**\n\nbody'));
+  assert.equal(sections[0].heading, 'Ship now, not later');
 });

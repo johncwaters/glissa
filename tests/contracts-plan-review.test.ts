@@ -6,7 +6,11 @@ import path from 'node:path';
 import {
   ExitPlanModeInput,
   parseExitPlanModeHookPayload,
+  PLAN_BODY_CAP_BYTES,
+  PLAN_COMMENT_MAX_CHARS,
+  PLAN_COMMENTS_MAX,
   PLAN_DECISION_KINDS,
+  PLAN_DRAFT_REVISION,
   PLAN_FEEDBACK_MAX_CHARS,
   PLAN_REVIEW_STATE_VALUES,
   PLAN_TITLE_MAX_CHARS,
@@ -14,6 +18,8 @@ import {
   PlanReview,
   PlanReviewState,
   PlanRevision,
+  PlanRevisionBody,
+  PlanSectionComment,
   planTitle,
 } from '../shared/contracts/plan-review.ts';
 
@@ -154,5 +160,78 @@ test('a decision names one revision of one review and one of the four kinds', ()
     PlanDecision.safeParse({ id: 'session-1', agentId: null, revision: 2, decision: 'revise', feedback: 'x'.repeat(PLAN_FEEDBACK_MAX_CHARS + 1) }).success,
     false,
     'feedback is capped at the boundary, not truncated inside the lane',
+  );
+});
+
+test('a section comment names the heading it hangs under, or none for the whole plan', () => {
+  assert.deepEqual(
+    PlanSectionComment.parse({ heading: 'Rollout', comment: 'stage it' }),
+    { heading: 'Rollout', comment: 'stage it' },
+  );
+  assert.equal(PlanSectionComment.safeParse({ heading: null, comment: 'no rollback story' }).success, true);
+  assert.equal(PlanSectionComment.safeParse({ heading: 'Rollout', comment: '' }).success, false);
+  assert.equal(PlanSectionComment.safeParse({ comment: 'stage it' }).success, false, 'a missing heading is not a null one');
+  assert.equal(
+    PlanSectionComment.safeParse({ heading: null, comment: 'x'.repeat(PLAN_COMMENT_MAX_CHARS + 1) }).success,
+    false,
+    'a comment is capped at the boundary, not truncated inside the lane',
+  );
+});
+
+test('a decision carries section comments and an edited plan, both capped where they cross the wire', () => {
+  const decided = PlanDecision.parse({
+    id: 'session-1',
+    agentId: null,
+    revision: 2,
+    decision: 'revise',
+    feedback: 'too long',
+    comments: [{ heading: 'Rollout', comment: 'stage it' }],
+  });
+  assert.deepEqual(decided.comments, [{ heading: 'Rollout', comment: 'stage it' }]);
+
+  const edited = PlanDecision.parse({
+    id: 'session-1', agentId: null, revision: 2, decision: 'approve', plan: '# Ship it',
+  });
+  assert.equal(edited.plan, '# Ship it');
+
+  const tooManyComments = Array.from({ length: PLAN_COMMENTS_MAX + 1 }, () => ({ heading: null, comment: 'x' }));
+  assert.equal(
+    PlanDecision.safeParse({ id: 'session-1', agentId: null, revision: 2, decision: 'revise', comments: tooManyComments }).success,
+    false,
+  );
+  assert.equal(
+    PlanDecision.safeParse({ id: 'session-1', agentId: null, revision: 2, decision: 'approve', plan: 'x'.repeat(PLAN_BODY_CAP_BYTES + 1) }).success,
+    false,
+  );
+  assert.equal(
+    PlanDecision.safeParse({ id: 'session-1', agentId: null, revision: 2, decision: 'approve', plan: '' }).success,
+    false,
+    'an empty edit is a mistake, never an approval of nothing',
+  );
+});
+
+test('revision zero is what marks a body as a draft, and no stored revision may claim it', () => {
+  assert.equal(PLAN_DRAFT_REVISION, 0);
+  const draft = PlanRevisionBody.parse({
+    agentId: null,
+    revision: PLAN_DRAFT_REVISION,
+    plan: '# Ship it',
+    planFilePath: '/home/u/.claude/plans/a.md',
+    receivedAt: 1_777_000_000_000,
+  });
+  assert.equal(draft.revision, 0);
+  assert.equal(PlanRevisionBody.safeParse({ ...draft, revision: -1 }).success, false);
+  assert.equal(
+    PlanRevision.safeParse({
+      sessionId: 'session-1',
+      revision: PLAN_DRAFT_REVISION,
+      plan: '# Ship it',
+      planFilePath: '/home/u/.claude/plans/a.md',
+      receivedAt: 1_777_000_000_000,
+      agentId: null,
+      agentType: null,
+    }).success,
+    false,
+    'a draft is never appended to the revision store',
   );
 });

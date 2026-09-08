@@ -1,25 +1,26 @@
-import { PLAN_FEEDBACK_MAX_CHARS } from '#shared/contracts/plan-review.ts';
 import { el } from '../dom-helpers.ts';
 import { buildDialogShell } from '../session-card/modal.ts';
+import type { PlanCommentRequest } from './plan-face.ts';
 
-export function openPlanFeedbackDialog(onSubmit: (feedback: string) => void) {
-  const { dialog, close, actions, btnCancel } = buildDialogShell({ title: 'Send feedback' });
+export function openPlanFeedbackDialog({ title, value, maxChars }: PlanCommentRequest, onSubmit: (text: string) => void) {
+  const { dialog, close, actions, btnCancel } = buildDialogShell({ title });
 
   const field = el('textarea', 'dialog-input plan-feedback-input');
   field.rows = 8;
-  field.maxLength = PLAN_FEEDBACK_MAX_CHARS;
-  field.placeholder = 'What should change in this plan?';
-  field.setAttribute('aria-label', 'Feedback on this plan');
+  field.maxLength = maxChars;
+  field.placeholder = 'What should change?';
+  field.value = value;
+  field.setAttribute('aria-label', title);
 
-  const btnSend = el('button', 'btn-dialog btn-dialog-confirm', 'Send feedback');
+  const btnSend = el('button', 'btn-dialog btn-dialog-confirm', 'Save');
   actions.append(btnSend);
   dialog.append(field, actions);
 
   btnCancel.addEventListener('click', close);
   btnSend.addEventListener('click', () => {
-    const feedback = field.value;
+    const text = field.value;
     close();
-    onSubmit(feedback);
+    onSubmit(text);
   });
 
   field.focus();

@@ -3,8 +3,17 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { z } from 'zod';
+
 import { ClientMessage, ServerMessage } from '../shared/contracts/index.ts';
-import { PLAN_FEEDBACK_MAX_CHARS, PlanDecision } from '../shared/contracts/plan-review.ts';
+import { CONTROL_FRAME_MAX_BYTES } from '../shared/contracts/control-messages.ts';
+import {
+  PLAN_BODY_CAP_BYTES,
+  PLAN_COMMENTS_MAX,
+  PLAN_COMMENT_MAX_CHARS,
+  PLAN_FEEDBACK_MAX_CHARS,
+  PlanDecision,
+} from '../shared/contracts/plan-review.ts';
 import { STATES } from '../shared/states.ts';
 import { REFRESHABLE_TYPES } from '../server/core/control-send-core.ts';
 import { connectControl, controlDeps, createControlServer } from './helpers/control-harness.ts';
@@ -122,6 +131,7 @@ const REAL_SERVER_PAYLOADS: ServerPayload[] = [
   { type: 'session-trace-response', id: 'session-1', records: [], start: 0, next: 0, reset: false, path: '/traces/session-1.jsonl' },
   { type: 'session-trace-changed', id: 'session-1' },
   { type: 'session-plan-changed', id: 'session-1', agentId: null, agentType: null, revision: 2, receivedAt: NOW, state: 'open', lastDecision: null, approvedRevision: null, chars: 8454, title: 'Shrink the large owned files', hasPlan: true },
+  { type: 'session-plan-draft', id: 'session-1', agentId: null, planFilePath: '/home/u/.claude/plans/a.md', changedAt: NOW },
   { type: 'session-plan-response', id: 'session-1', reviews: [PLAN_REVIEW], body: { agentId: 'agent-9', revision: 2, plan: '# Shrink the large owned files', planFilePath: '/home/u/.claude/plans/a.md', receivedAt: NOW } },
   { type: 'notify', session: 'session-1', category: 'complete', message: 'finished', escalationCount: 0 },
   {
@@ -232,6 +242,32 @@ test('a plan request carries the agent the review belongs to', () => {
   );
   assert.equal(ClientMessage.safeParse({ type: 'session-plan', id: 'session-1' }).success, false);
   assert.equal(ClientMessage.safeParse({ type: 'session-plan', id: 'session-1', agentId: null, revision: 0 }).success, false);
+  assert.deepEqual(
+    ClientMessage.parse({ type: 'session-plan', id: 'session-1', agentId: null, draft: true }),
+    { type: 'session-plan', id: 'session-1', agentId: null, draft: true },
+  );
+  assert.equal(ClientMessage.safeParse({ type: 'session-plan', id: 'session-1', agentId: null, draft: 'yes' }).success, false);
+});
+
+test('a plan draft notice carries where the draft lives and when it changed, never the draft itself', () => {
+  const notice = {
+    type: 'session-plan-draft',
+    id: 'session-1',
+    agentId: null,
+    planFilePath: '/home/u/.claude/plans/a.md',
+    changedAt: NOW,
+  };
+  assert.deepEqual(ServerMessage.parse(notice), notice);
+  const draftArm = ServerMessage.options.find((option) => option.shape.type.value === 'session-plan-draft');
+  assert.ok(draftArm);
+  assert.equal(Object.keys(draftArm.shape).includes('plan'), false, 'a notice is a nudge to ask, never a body');
+  assert.equal(
+    REFRESHABLE_TYPES.has('session-plan-draft'),
+    false,
+    'no snapshot or pull carries draft-change state, so dropping the notice loses the chip until the next write',
+  );
+  const { changedAt: _changedAt, ...withoutChangedAt } = notice;
+  assert.equal(ServerMessage.safeParse(withoutChangedAt).success, false);
 });
 
 test('a plan summary push never carries the plan body but does carry who wrote it and when', () => {
@@ -263,15 +299,6 @@ test('the plan decision wire shape is the lane schema, so one edit cannot leave 
   const { type: _type, ...wireShape } = decisionArm.shape;
   assert.deepEqual(Object.keys(wireShape).sort(), Object.keys(PlanDecision.shape).sort());
   assert.equal(ClientMessage.safeParse({ type: 'plan-decision', id: 'session-1', agentId: null, revision: 1, decision: 'approve' }).success, true);
-  assert.equal(ClientMessage.safeParse({ type: 'plan-decision', id: 'session-1', agentId: null, revision: 0, decision: 'approve' }).success, false);
-  assert.equal(ClientMessage.safeParse({
-    type: 'plan-decision',
-    id: 'session-1',
-    agentId: null,
-    revision: 1,
-    decision: 'revise',
-    feedback: 'x'.repeat(PLAN_FEEDBACK_MAX_CHARS + 1),
-  }).success, false);
 });
 
 test('both error frames declare the scope and the id the plan face keys on', () => {
@@ -328,4 +355,48 @@ test('a malformed request receives its typed error reply with the Zod message', 
   assert.equal(reply.type, 'mill-report');
   assert.match(String(reply.error), /string/);
   assert.equal(ServerMessage.safeParse(reply).success, true);
+});
+
+test('the control socket takes the largest plan decision the caps allow, so approving an edit never closes it', () => {
+  const decision = {
+    type: 'plan-decision',
+    id: 'session-1',
+    agentId: 'agent-9',
+    revision: 3,
+    decision: 'revise',
+    plan: 'y'.repeat(PLAN_BODY_CAP_BYTES),
+    feedback: 'f'.repeat(PLAN_FEEDBACK_MAX_CHARS),
+    comments: Array.from({ length: PLAN_COMMENTS_MAX }, (_entry, index) => ({
+      heading: `h${index}`.padEnd(PLAN_COMMENT_MAX_CHARS, 'h'),
+      comment: 'c'.repeat(PLAN_COMMENT_MAX_CHARS),
+    })),
+  };
+  assert.equal(PlanDecision.safeParse(decision).success, true);
+  const frameBytes = Buffer.byteLength(JSON.stringify(decision), 'utf8');
+  assert.ok(frameBytes > 16 * 1024, 'the 16 KB default this budget replaced could not carry one edited plan');
+  assert.ok(
+    frameBytes <= CONTROL_FRAME_MAX_BYTES,
+    `a maximal plan decision is ${frameBytes} bytes, over the ${CONTROL_FRAME_MAX_BYTES} byte control frame budget`,
+  );
+});
+
+test('the control WebSocket server is built with that budget, never a hand-written number', async () => {
+  const { createBackendWebSockets } = await import('../server/backend-websockets.ts');
+  const sockets = createBackendWebSockets({
+    remote: { enabled: false, allowedOrigins: [] },
+    remoteAuth: null,
+    remoteListenerPort: null,
+    allowedHosts: [],
+    listenerPortsFor: () => [],
+    tokenMatches: () => true,
+    getSession: () => null,
+    getVisionsLane: () => null,
+    logger: { warn: () => {} },
+  });
+  const controlOptions: unknown = Reflect.get(sockets.controlWss, 'options');
+  const parsed = z.object({ maxPayload: z.number() }).safeParse(controlOptions);
+  assert.equal(parsed.success, true);
+  assert.equal(parsed.data?.maxPayload, CONTROL_FRAME_MAX_BYTES);
+  sockets.controlWss.close();
+  sockets.dataWss.close();
 });

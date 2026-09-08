@@ -366,3 +366,34 @@ function parseBlocks(lines: readonly string[], context: ParseContext, depth: num
 export function parsePlanMarkdown(markdown: string): PlanBlock[] {
   return parseBlocks(markdown.replace(/\r\n?/g, '\n').split('\n'), { slugCounts: new Map() }, 0);
 }
+
+export interface PlanSection {
+  heading: string | null;
+  id: string | null;
+  level: number;
+  blocks: PlanBlock[];
+}
+
+export function splitPlanSections(blocks: readonly PlanBlock[]): PlanSection[] {
+  const sections: PlanSection[] = [];
+  let current: PlanSection = { heading: null, id: null, level: 0, blocks: [] };
+  const closeCurrent = () => {
+    if (current.heading === null && current.blocks.length === 0) return;
+    sections.push(current);
+  };
+  for (const block of blocks) {
+    if (block.type !== 'heading') {
+      current.blocks.push(block);
+      continue;
+    }
+    closeCurrent();
+    current = {
+      heading: planInlineText(block.children),
+      id: block.id,
+      level: block.level,
+      blocks: [block],
+    };
+  }
+  closeCurrent();
+  return sections;
+}

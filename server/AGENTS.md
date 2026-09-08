@@ -123,10 +123,9 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 - The plan endpoint is a SECOND URL, never a second entry on the shared one: hooks run in parallel and a `PermissionRequest` payload carries no tool-use id, so two entries on one URL arrive as indistinguishable posts. The unmatched entry stays byte-identical (`tests/settings-injector-user-hooks.test.ts`).
 - Every path fails OPEN and the held reply is written AT MOST ONCE, never after the socket closed: a fired hook timeout destroys the socket in silence, so a late write is a no-op.
-- EVERY way a review can end writes that one reply and lands on `released` or `decided`, since a hold nobody answers is an agent hung forever; `PostToolUse` counts, because the terminal can answer without cancelling the hook (`tests/backend-plan-hold.test.ts`).
-- An allow echoes the plan bytes AS RECEIVED, never a re-read of `planFilePath`, or whatever the file holds then becomes the approved plan.
-- The in-memory index holds offsets, chars and titles and never a body, so a summary push carries no plan and a body crosses an authenticated socket only on request (`tests/control-plan-review.test.ts`).
-- Revisions are numbered PER REVIEW, one review per agent, or two concurrent subagent plans collapse into one summary and one action bar.
+- EVERY way a review can end writes that one reply and leaves `open` behind, since a hold nobody answers is an agent hung forever; `PostToolUse` counts, because the terminal can answer without cancelling the hook (`tests/backend-plan-hold.test.ts`).
+- An allow echoes the plan bytes AS RECEIVED, never a re-read of `planFilePath`, or whatever the file holds then becomes the approved plan; only an operator EDIT on the open revision replaces them.
+- The in-memory index holds offsets, chars and titles and never a body, so a summary push carries no plan and a body crosses an authenticated socket only on request; a DRAFT body comes from the hook's own path, never a client's (`tests/backend-plan-draft.test.ts`).
 - Only a plan segment raises the body cap, the RESULT one twice, as it repeats the plan it approves.
 
 ### Security: Trust Boundary

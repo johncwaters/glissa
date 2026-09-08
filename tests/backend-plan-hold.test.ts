@@ -12,6 +12,7 @@ import type { PlanReviewWiringOptions } from '../server/plan-review-wiring.ts';
 import { PLAN_HOLD_RELEASE_MS } from '../detection/settings-injector.ts';
 import type { PlanReview } from '../shared/contracts/plan-review.ts';
 import { boundPort, closeServer, listenOnLoopback } from './helpers/http-server.ts';
+import { manualTimers } from './helpers/manual-timers.ts';
 
 type PlanLane = ReturnType<typeof createPlanReviewWiring>;
 type HeldReply = Promise<Record<string, unknown> | null> | null;
@@ -129,7 +130,7 @@ test('each dashboard decision writes the exact hook reply the spike measured, an
           hookEventName: 'PermissionRequest',
           decision: {
             behavior: 'deny',
-            message: 'Operator feedback on revision 1:\n\nstep 2 must print the file\n\nRevise the plan and present it again.',
+            message: 'Feedback on plan revision 1:\n\nstep 2 must print the file\n\nRevise the plan and present it again.',
           },
         },
       },
@@ -339,20 +340,17 @@ test('a plan request arriving after the lane stopped is answered at once and nev
 });
 
 test('the lane writes its own empty reply a minute before the hook timeout would fire', async () => {
-  const timers: { fn: () => void; ms: number }[] = [];
+  const timers = manualTimers();
   const lane = laneWorkspace('early-release', {
-    setTimeoutFn: (fn, ms) => {
-      timers.push({ fn, ms });
-      return setTimeout(() => {}, 0);
-    },
-    clearTimeoutFn: clearTimeout,
+    setTimeoutFn: timers.setTimeoutFn,
+    clearTimeoutFn: timers.clearTimeoutFn,
   });
   const held = await openHold(lane, {});
-  assert.equal(timers.length, 1);
-  assert.equal(timers[0].ms, PLAN_HOLD_RELEASE_MS);
+  assert.equal(timers.pending.length, 1);
+  assert.equal(timers.pending[0].ms, PLAN_HOLD_RELEASE_MS);
   assert.equal(PLAN_HOLD_RELEASE_MS, (86400 - 60) * 1000);
 
-  timers[0].fn();
+  timers.fireAll();
   await flush();
   assert.equal(held.isSettled, true, 'the release runs through the tested empty reply, never the hook timeout');
   assert.deepEqual(held.reply, {});

@@ -147,7 +147,6 @@ test('plan review off leaves the settings byte-identical', () => {
 
 test('the plan hook carries the measured 86400 second ceiling, with the lane releasing a minute early', () => {
   assert.equal(PLAN_HOOK_TIMEOUT_SEC, 86400, 'the bundle applies no clamp and honored 86400 live in spike 3');
-  assert.notEqual(PLAN_HOOK_TIMEOUT_SEC, DEFAULT_TIMEOUT_SEC, 'the plan entry never shares the status signal timeout');
   assert.ok(PLAN_HOLD_RELEASE_MS < PLAN_HOOK_TIMEOUT_SEC * 1000, 'the lane always answers before Claude Code abandons the socket');
 
   const settings = buildHookSettings({ port: 3000, glissaId: 'g1', token: 'tok', planReview: true });

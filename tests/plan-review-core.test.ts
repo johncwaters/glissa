@@ -2,14 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  EDITED_PLAN_TOO_LARGE,
   NO_OPEN_REVIEW,
   PASS_THROUGH_REPLY,
   agentIdsIn,
   agentKey,
   closedProgress,
-  composeDenyMessage,
   decisionRefusal,
   decisionReply,
+  editedPlanRefusal,
   entriesForAgent,
   indexEntryFor,
   isPlanHookEvent,
@@ -27,7 +28,8 @@ import {
   selectEntry,
 } from '../server/core/plan-review-core.ts';
 import type { PlanReviewProgress, PlanRevisionIndexEntry } from '../server/core/plan-review-core.ts';
-import { PlanReview as PlanReviewSchema } from '../shared/contracts/plan-review.ts';
+import { composePlanFeedback } from '../server/core/plan-feedback-core.ts';
+import { PLAN_BODY_CAP_BYTES, PlanReview as PlanReviewSchema } from '../shared/contracts/plan-review.ts';
 
 function entry(overrides: Partial<PlanRevisionIndexEntry> = {}): PlanRevisionIndexEntry {
   return {
@@ -39,6 +41,7 @@ function entry(overrides: Partial<PlanRevisionIndexEntry> = {}): PlanRevisionInd
     length: 10,
     chars: 5,
     title: 'Plan',
+    planFilePath: '/plans/a.md',
     ...overrides,
   };
 }
@@ -87,6 +90,7 @@ test('an index entry carries the title and char count but never the body', () =>
     length: 120,
     chars: '# Ship it\n\nbody'.length,
     title: 'Ship it',
+    planFilePath: '/plans/a.md',
   });
   assert.equal('plan' in indexed, false);
 });
@@ -262,13 +266,13 @@ test('a decision is refused unless it names the revision of an open review', () 
 
 test('each decision composes the hook reply the spike measured, echoing the bytes as received', () => {
   const held = { plan: '# Ship it\n', planFilePath: '/plans/a.md', revision: 2 };
-  assert.deepEqual(decisionReply('approve', held, ''), {
+  assert.deepEqual(decisionReply('approve', held, {}), {
     hookSpecificOutput: {
       hookEventName: 'PermissionRequest',
       decision: { behavior: 'allow', updatedInput: { plan: '# Ship it\n', planFilePath: '/plans/a.md' } },
     },
   });
-  assert.deepEqual(decisionReply('approve-accept-edits', held, ''), {
+  assert.deepEqual(decisionReply('approve-accept-edits', held, {}), {
     hookSpecificOutput: {
       hookEventName: 'PermissionRequest',
       decision: {
@@ -278,21 +282,44 @@ test('each decision composes the hook reply the spike measured, echoing the byte
       },
     },
   });
-  assert.deepEqual(decisionReply('revise', held, 'drop step 2'), {
+  assert.deepEqual(decisionReply('revise', held, { feedback: 'drop step 2' }), {
     hookSpecificOutput: {
       hookEventName: 'PermissionRequest',
-      decision: { behavior: 'deny', message: composeDenyMessage({ revision: 2, feedback: 'drop step 2' }) },
+      decision: { behavior: 'deny', message: composePlanFeedback({ revision: 2, feedback: 'drop step 2' }) },
     },
   });
-  assert.deepEqual(decisionReply('terminal', held, ''), PASS_THROUGH_REPLY);
+  assert.deepEqual(decisionReply('terminal', held, {}), PASS_THROUGH_REPLY);
   assert.deepEqual(PASS_THROUGH_REPLY, {});
 });
 
-test('the deny message names the revision and carries the operator text verbatim', () => {
-  const message = composeDenyMessage({ revision: 3, feedback: '  step 2 must print the file  ' });
-  assert.equal(message, 'Operator feedback on revision 3:\n\nstep 2 must print the file\n\nRevise the plan and present it again.');
-  assert.equal(
-    composeDenyMessage({ revision: 1, feedback: '   ' }),
-    'Operator feedback on revision 1:\n\nNo detail was given.\n\nRevise the plan and present it again.',
-  );
+test('an approve carrying an edited plan echoes the edit, and an unedited one echoes the received bytes', () => {
+  const held = { plan: '# Ship it\n', planFilePath: '/plans/a.md', revision: 2 };
+  const edited = decisionReply('approve', held, { plan: '# Ship it later\n' });
+  assert.deepEqual(edited, {
+    hookSpecificOutput: {
+      hookEventName: 'PermissionRequest',
+      decision: { behavior: 'allow', updatedInput: { plan: '# Ship it later\n', planFilePath: '/plans/a.md' } },
+    },
+  });
+  const acceptingEdits = decisionReply('approve-accept-edits', held, { plan: '# Ship it later\n' });
+  assert.deepEqual(acceptingEdits, {
+    hookSpecificOutput: {
+      hookEventName: 'PermissionRequest',
+      decision: {
+        behavior: 'allow',
+        updatedInput: { plan: '# Ship it later\n', planFilePath: '/plans/a.md' },
+        updatedPermissions: [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }],
+      },
+    },
+  });
+  assert.equal(decisionReply('revise', held, { plan: '# ignored\n', feedback: 'no' }).hookSpecificOutput !== undefined, true);
+});
+
+test('an edited plan over the hook body cap is refused rather than written into the reply', () => {
+  assert.equal(editedPlanRefusal(null), null);
+  assert.equal(editedPlanRefusal('# Ship it'), null);
+  assert.equal(editedPlanRefusal('x'.repeat(PLAN_BODY_CAP_BYTES)), null);
+  assert.equal(editedPlanRefusal('x'.repeat(PLAN_BODY_CAP_BYTES + 1)), EDITED_PLAN_TOO_LARGE);
+  const multibyte = String.fromCharCode(0x4e2d).repeat(PLAN_BODY_CAP_BYTES / 2);
+  assert.equal(editedPlanRefusal(multibyte), EDITED_PLAN_TOO_LARGE, 'the cap counts bytes, never characters');
 });

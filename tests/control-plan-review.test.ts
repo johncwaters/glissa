@@ -5,12 +5,17 @@ import os from 'node:os';
 import path from 'node:path';
 
 import type { Session } from '../session/sessions.ts';
+import { PLAN_BODY_CAP_BYTES } from '../shared/contracts/plan-review.ts';
+import { composePlanFeedback } from '../server/core/plan-feedback-core.ts';
 import { createPlanReviewWiring } from '../server/plan-review-wiring.ts';
 import type { PlanReadResult } from '../server/plan-review-wiring.ts';
 import { plainSession } from './helpers/fake-session.ts';
 import { connectControl, controlDeps, createControlServer } from './helpers/control-harness.ts';
 
-const temporaryDirectories: string[] = [];
+const claudeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-control-plan-claude-'));
+process.env.CLAUDE_CONFIG_DIR = claudeHome;
+
+const temporaryDirectories: string[] = [claudeHome];
 after(() => {
   for (const directory of temporaryDirectories) fs.rmSync(directory, { recursive: true, force: true });
 });
@@ -52,7 +57,7 @@ async function openPlan(lane: PlanLane, event: Parameters<PlanLane['onHookEvent'
 const heldReplies: (Promise<Record<string, unknown> | null> | null)[] = [];
 
 function planWorkspace(name: string) {
-  const configDirectory = fs.mkdtempSync(path.join(os.tmpdir(), `glissa-control-plan-${name}-`));
+  const configDirectory = fs.mkdtempSync(path.join(claudeHome, `${name}-`));
   temporaryDirectories.push(configDirectory);
   return createPlanReviewWiring({
     configPath: path.join(configDirectory, 'config.json'),
@@ -415,4 +420,151 @@ test('deciding one subagent review leaves the other actionable', async () => {
   assert.equal(reviewOf(index, 'sub-2')?.state, 'open');
   assert.equal(index?.body?.plan, '# sub-2 plan');
   await lane.stop();
+});
+
+interface HeldReply {
+  reply: Promise<Record<string, unknown> | null>;
+}
+
+async function openHeld(lane: PlanLane, plan = '# Ship it'): Promise<HeldReply> {
+  const held = lane.onHookEvent({
+    glissaId: 'session-1',
+    event: 'permissionrequest-plan',
+    payload: planRequest(plan),
+    accepted: true,
+  });
+  assert.ok(held, 'the lane held the reply');
+  await lane.whenIdle();
+  return { reply: held };
+}
+
+test('the deny message the hook reply carries is the text the section comments composed', async () => {
+  const lane = planWorkspace('composed-deny');
+  const { reply: held } = await openHeld(lane);
+  const connection = planHarness(lane.readPlanRevision, lane.decide);
+  const comments = [
+    { heading: 'Rollout', comment: 'stage it behind the flag' },
+    { heading: null, comment: 'no rollback story anywhere' },
+  ];
+  await connection.send({
+    type: 'plan-decision',
+    id: 'session-1',
+    agentId: null,
+    revision: 1,
+    decision: 'revise',
+    feedback: 'the whole thing is too long',
+    comments,
+  });
+
+  assert.deepEqual(await held, {
+    hookSpecificOutput: {
+      hookEventName: 'PermissionRequest',
+      decision: {
+        behavior: 'deny',
+        message: composePlanFeedback({ revision: 1, comments, feedback: 'the whole thing is too long' }),
+      },
+    },
+  });
+  assert.equal(connection.sent.filter((frame) => frame.type === 'session-error').length, 0);
+  await lane.stop();
+});
+
+test('an approve carrying an edited plan puts the edit in updatedInput, and the path stays the one received', async () => {
+  const lane = planWorkspace('edited-approve');
+  const { reply: held } = await openHeld(lane);
+  const connection = planHarness(lane.readPlanRevision, lane.decide);
+  await connection.send({
+    type: 'plan-decision',
+    id: 'session-1',
+    agentId: null,
+    revision: 1,
+    decision: 'approve-accept-edits',
+    plan: '# Ship it\n\nwith the operator step',
+  });
+
+  assert.deepEqual(await held, {
+    hookSpecificOutput: {
+      hookEventName: 'PermissionRequest',
+      decision: {
+        behavior: 'allow',
+        updatedInput: { plan: '# Ship it\n\nwith the operator step', planFilePath: '/plans/a.md' },
+        updatedPermissions: [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }],
+      },
+    },
+  });
+  await lane.stop();
+});
+
+test('an edited plan over the byte cap is refused and the review stays open for a smaller one', async () => {
+  const lane = planWorkspace('edited-cap');
+  const { reply: held } = await openHeld(lane);
+  const connection = planHarness(lane.readPlanRevision, lane.decide);
+  const overCap = String.fromCharCode(0x4e2d).repeat(PLAN_BODY_CAP_BYTES / 2);
+  assert.ok(overCap.length <= PLAN_BODY_CAP_BYTES, 'the edit is inside the character cap the wire enforces');
+  await connection.send({
+    type: 'plan-decision', id: 'session-1', agentId: null, revision: 1, decision: 'approve', plan: overCap,
+  });
+
+  const refusal = connection.sent.at(-1);
+  assert.equal(refusal?.type, 'session-error');
+  assert.match(String(refusal?.message), /larger than the plan hook carries/);
+  assert.equal(reviewOf(await lane.readPlanRevision('session-1', {}))?.state, 'open');
+
+  await connection.send({
+    type: 'plan-decision', id: 'session-1', agentId: null, revision: 1, decision: 'approve', plan: '# Small',
+  });
+  assert.deepEqual(await held, {
+    hookSpecificOutput: {
+      hookEventName: 'PermissionRequest',
+      decision: { behavior: 'allow', updatedInput: { plan: '# Small', planFilePath: '/plans/a.md' } },
+    },
+  });
+  await lane.stop();
+});
+
+test('an edit naming a revision the review has moved past is refused before it reaches the reply', async () => {
+  const lane = planWorkspace('edited-stale');
+  await openHeld(lane, '# First');
+  const { reply: second } = await openHeld(lane, '# Second');
+  const connection = planHarness(lane.readPlanRevision, lane.decide);
+  await connection.send({
+    type: 'plan-decision', id: 'session-1', agentId: null, revision: 1, decision: 'approve', plan: '# Edited first',
+  });
+  assert.match(String(connection.sent.at(-1)?.message), /names revision 1, but revision 2 is open/);
+
+  await connection.send({ type: 'plan-decision', id: 'session-1', agentId: null, revision: 2, decision: 'terminal' });
+  assert.deepEqual(await second, {});
+  await lane.stop();
+});
+
+test('a draft body crosses the socket only when the client asks for one', async () => {
+  const lane = planWorkspace('draft-request');
+  const plansDirectory = path.join(claudeHome, 'plans');
+  fs.mkdirSync(plansDirectory, { recursive: true });
+  const planFilePath = path.join(plansDirectory, 'draft.md');
+  fs.writeFileSync(planFilePath, '# Ship it');
+  lane.onHookEvent({
+    glissaId: 'session-1',
+    event: 'permissionrequest-plan',
+    payload: { tool_name: 'ExitPlanMode', tool_input: { plan: '# Ship it', planFilePath } },
+    accepted: true,
+  });
+  await lane.whenIdle();
+  fs.writeFileSync(planFilePath, '# Ship it\n\nthe draft the agent is writing');
+
+  const connection = planHarness(lane.readPlanRevision);
+  await connection.send({ type: 'session-plan', id: 'session-1', agentId: null });
+  await connection.send({ type: 'session-plan', id: 'session-1', agentId: null, draft: true });
+  const responses = connection.sent.filter((frame) => frame.type === 'session-plan-response');
+  assert.equal(responses[0].body?.plan, '# Ship it');
+  assert.equal(responses[0].body?.revision, 1);
+  assert.equal(responses[1].body?.plan, '# Ship it\n\nthe draft the agent is writing');
+  assert.equal(responses[1].body?.revision, 0, 'the draft is marked by revision zero');
+  await lane.stop();
+});
+
+test('every plan draft notice reaches every control client', () => {
+  const lanesSource = fs.readFileSync(new URL('../server/backend-lanes.ts', import.meta.url), 'utf8');
+  assert.match(lanesSource, /planReview\?\.on\('plan-draft'/);
+  assert.match(lanesSource, /broadcastControl\(\{ type: 'session-plan-draft', \.\.\.notice \}\)/);
 });

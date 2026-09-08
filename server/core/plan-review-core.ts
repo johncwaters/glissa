@@ -1,4 +1,4 @@
-import { PLAN_HOOK_EVENT, PLAN_TOOL_NAME, planTitle } from '../../shared/contracts/plan-review.ts';
+import { PLAN_BODY_CAP_BYTES, PLAN_HOOK_EVENT, PLAN_TOOL_NAME, planTitle } from '../../shared/contracts/plan-review.ts';
 import type {
   ExitPlanModeRequest,
   PlanChangedPush,
@@ -7,7 +7,9 @@ import type {
   PlanReviewStateValue,
   PlanRevision,
   PlanRevisionSummary,
+  PlanSectionComment,
 } from '../../shared/contracts/plan-review.ts';
+import { composePlanFeedback } from './plan-feedback-core.ts';
 
 const MAIN_AGENT_KEY = '';
 
@@ -22,6 +24,7 @@ interface PlanRevisionIndexEntry {
   length: number;
   chars: number;
   title: string;
+  planFilePath: string;
 }
 
 interface PlanReviewProgress {
@@ -107,6 +110,7 @@ function indexEntryFor(
     length,
     chars: revision.plan.length,
     title: planTitle(revision.plan),
+    planFilePath: revision.planFilePath,
   };
 }
 
@@ -188,6 +192,13 @@ function progressAfterDecision(progress: PlanReviewProgress, decision: PlanDecis
 }
 
 const NO_OPEN_REVIEW = 'This plan review is no longer open';
+const EDITED_PLAN_TOO_LARGE = 'This edited plan is larger than the plan hook carries';
+
+function editedPlanRefusal(plan: string | null): string | null {
+  if (plan === null) return null;
+  if (Buffer.byteLength(plan, 'utf8') <= PLAN_BODY_CAP_BYTES) return null;
+  return EDITED_PLAN_TOO_LARGE;
+}
 
 function decisionRefusal(progress: PlanReviewProgress | null, revision: number): string | null {
   if (!progress || progress.state !== 'open' || !progress.openRevision) return NO_OPEN_REVIEW;
@@ -250,36 +261,37 @@ function denyReply(message: string): Record<string, unknown> {
   return hookDecisionReply({ behavior: 'deny', message });
 }
 
-function composeDenyMessage({ revision, feedback }: { revision: number; feedback: string }): string {
-  const trimmed = feedback.trim();
-  const header = `Operator feedback on revision ${revision}:`;
-  const tail = 'Revise the plan and present it again.';
-  if (trimmed.length === 0) return `${header}\n\nNo detail was given.\n\n${tail}`;
-  return `${header}\n\n${trimmed}\n\n${tail}`;
+interface OperatorDecisionText {
+  feedback?: string;
+  comments?: readonly PlanSectionComment[];
+  plan?: string;
 }
 
 function decisionReply(
   decision: PlanDecisionKind,
   held: { plan: string; planFilePath: string; revision: number },
-  feedback: string,
+  { feedback, comments, plan }: OperatorDecisionText,
 ): Record<string, unknown> {
   if (decision === 'terminal') return PASS_THROUGH_REPLY;
-  if (decision === 'revise') return denyReply(composeDenyMessage({ revision: held.revision, feedback }));
+  if (decision === 'revise') {
+    return denyReply(composePlanFeedback({ revision: held.revision, comments, feedback }));
+  }
   return allowReply({
-    plan: held.plan,
+    plan: plan ?? held.plan,
     planFilePath: held.planFilePath,
     acceptsEdits: decision === 'approve-accept-edits',
   });
 }
 
 export {
+  EDITED_PLAN_TOO_LARGE,
   NO_OPEN_REVIEW,
   PASS_THROUGH_REPLY,
   agentIdsIn,
   agentKey,
   closedProgress,
-  composeDenyMessage,
   decisionRefusal,
+  editedPlanRefusal,
   decisionReply,
   entriesForAgent,
   indexEntryFor,
@@ -297,4 +309,4 @@ export {
   revisionRecord,
   selectEntry,
 };
-export type { PlanChangedPayload, PlanReviewEvent, PlanReviewProgress, PlanRevisionIndexEntry };
+export type { OperatorDecisionText, PlanChangedPayload, PlanReviewEvent, PlanReviewProgress, PlanRevisionIndexEntry };

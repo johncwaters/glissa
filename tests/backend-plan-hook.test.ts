@@ -8,7 +8,8 @@ import type { Server } from 'node:http';
 
 import { createBackend } from '../server/backend.ts';
 import { createBackendHttpApp } from '../server/backend-http.ts';
-import { PLAN_HOOK_BODY_CAP_BYTES, PLAN_RESULT_BODY_CAP_BYTES, carriesPlanBody } from '../server/plan-review-wiring.ts';
+import { PLAN_BODY_CAP_BYTES } from '../shared/contracts/plan-review.ts';
+import { PLAN_RESULT_BODY_CAP_BYTES, carriesPlanBody } from '../server/plan-review-wiring.ts';
 import type { Session } from '../session/sessions.ts';
 import { boundPort, closeServer, listenOnLoopback } from './helpers/http-server.ts';
 import type { Backend } from './helpers/lanes.ts';
@@ -214,7 +215,7 @@ test('an event that carries no plan keeps the 64 KB cap', async () => {
 });
 
 test('the raised cap belongs to the plan lane and covers only the segments that carry a plan', () => {
-  assert.equal(PLAN_HOOK_BODY_CAP_BYTES, 512 * 1024);
+  assert.equal(PLAN_BODY_CAP_BYTES, 512 * 1024);
   assert.equal(carriesPlanBody('permissionrequest-plan'), true);
   assert.equal(carriesPlanBody('posttooluse-plan'), true, 'the approved plan arrives twice in one plan result body');
   assert.equal(carriesPlanBody('PermissionRequest'), true);
@@ -222,7 +223,7 @@ test('the raised cap belongs to the plan lane and covers only the segments that 
   assert.equal(carriesPlanBody('stop'), false);
   assert.equal(
     PLAN_RESULT_BODY_CAP_BYTES,
-    2 * PLAN_HOOK_BODY_CAP_BYTES,
+    2 * PLAN_BODY_CAP_BYTES,
     'the result segment carries the plan in tool_input and in tool_response',
   );
 });
@@ -235,27 +236,19 @@ test('a plan the request cap accepted still clears the result cap once the resul
     tool_response: { plan },
   });
   assert.ok(
-    Buffer.byteLength(body) > PLAN_HOOK_BODY_CAP_BYTES,
+    Buffer.byteLength(body) > PLAN_BODY_CAP_BYTES,
     'the doubled result of an accepted plan is over the request cap',
   );
   const approved = await postHook('posttooluse-plan', body);
   assert.equal(approved.status, 200, 'a terminal approval of an accepted plan always reaches the lane');
 });
 
-test('the shared PostToolUse route keeps the 64 KB cap that only the plan segment raises', async () => {
+test('the shared PostToolUse route keeps the 64 KB cap the plan segment raises', async () => {
   const sharedRouteOutcome: number | string = await postHook('PostToolUse', {
     tool_name: 'Read',
     tool_response: { content: 'q'.repeat(100 * 1024) },
   }).then((response) => response.status).catch(() => 'destroyed');
   assert.notEqual(sharedRouteOutcome, 200, 'a wakeup or pack read body over 64 KB is still refused');
-
-  const plan = `# Big plan\n${'y'.repeat(200 * 1024)}`;
-  const approved = await postHook('posttooluse-plan', {
-    tool_name: 'ExitPlanMode',
-    tool_input: { plan, planFilePath: '/plans/session.md' },
-    tool_response: { plan },
-  });
-  assert.equal(approved.status, 200, 'the plan segment carries the plan the shared route no longer may');
 });
 
 test('a disabled plan lane leaves the 64 KB cap on the permission request route', async () => {

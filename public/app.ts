@@ -25,8 +25,8 @@ import { acknowledgeRadarAttention, applyHealthSnapshot as applyRadarHealth, app
 import { handleDebugStateRefresh, handleDebugStateResponse, onDebugModeChanged } from './session-card/card-dom.ts';
 import { sessionUIs } from './session-card/card-registry.ts';
 import type { PlanResponse } from './plan/plan-face.ts';
-import type { SessionPlanChangedMessage } from './session-card/lifecycle.ts';
-import { applyPlanConnectionState, applySessionPlanChanged, applySessionPlanError, applySessionPlanResponse, applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, notePackVersion, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setLatestPackVersions, setSessionAgent, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionHasPlan, setSessionMergeStatus, setSessionPacks, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionUsage, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.ts';
+import type { SessionPlanChangedMessage, SessionPlanDraftMessage } from './session-card/lifecycle.ts';
+import { applyPlanConnectionState, applySessionPlanChanged, applySessionPlanDraft, applySessionPlanError, applySessionPlanResponse, applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, notePackVersion, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setLatestPackVersions, setSessionAgent, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionHasPlan, setSessionMergeStatus, setSessionPacks, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionUsage, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.ts';
 import { resolvePlanTarget } from './plan/plan-link.ts';
 import { openConfirmDialog } from './session-card/modal.ts';
 import { reconnectDataWs } from './session-card/terminal.ts';
@@ -353,6 +353,7 @@ const messageHandlers = {
   'session-trace-response': (msg) => applyTraceResponse(msg),
   'session-trace-changed': (msg) => applyTraceChanged(msg),
   'session-plan-changed': (msg) => { applySessionPlanChanged(msg as ServerMessage & SessionPlanChangedMessage); refreshPhoneBoard(); },
+  'session-plan-draft': (msg) => { applySessionPlanDraft(msg as ServerMessage & SessionPlanDraftMessage); },
   'session-plan-response': (msg) => { applySessionPlanResponse(msg as ServerMessage & PlanResponse); },
 
   'notify':             (msg) => { showDesktopNotification(msg); handleDebugStateRefresh(msg.session); },

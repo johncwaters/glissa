@@ -233,6 +233,9 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
   planReview?.on('plan-changed', (summary: Record<string, unknown>) => {
     broadcastControl({ type: 'session-plan-changed', ...summary });
   });
+  planReview?.on('plan-draft', (notice: Record<string, unknown>) => {
+    broadcastControl({ type: 'session-plan-draft', ...notice });
+  });
   const memoryDistillSessions = new Map<string, Session>();
   const memoryDistiller = memoryStore
     ? createMemoryDistiller({

@@ -1,16 +1,21 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import type { FileHandle } from 'node:fs/promises';
 
+import { canonicalizePath } from '../shared/paths.ts';
+import { claudeProjectsDir } from '../session/core/conversation-history.ts';
 import { PLAN_HOLD_RELEASE_MS } from '../detection/settings-injector.ts';
 import {
+  PLAN_BODY_CAP_BYTES,
+  PLAN_DRAFT_REVISION,
   PLAN_HOOK_EVENT,
   PLAN_RESULT_HOOK_EVENT,
   PlanRevision as PlanRevisionSchema,
   parseExitPlanModeHookPayload,
 } from '../shared/contracts/plan-review.ts';
-import type { ExitPlanModeRequest, PlanDecision, PlanReview, PlanRevisionBody } from '../shared/contracts/plan-review.ts';
+import type { ExitPlanModeRequest, PlanDecision, PlanDraftPush, PlanReview, PlanRevisionBody } from '../shared/contracts/plan-review.ts';
 import {
   NO_OPEN_REVIEW,
   PASS_THROUGH_REPLY,
@@ -19,6 +24,7 @@ import {
   closedProgress,
   decisionRefusal,
   decisionReply,
+  editedPlanRefusal,
   entriesForAgent,
   indexEntryFor,
   isPlanHookEvent,
@@ -40,7 +46,9 @@ import type {
   PlanReviewProgress,
   PlanRevisionIndexEntry,
 } from './core/plan-review-core.ts';
+import { planFeedbackRefusal } from './core/plan-feedback-core.ts';
 import { isSafePathSegment } from './core/upload-core.ts';
+import { openContainedFile } from './contained-file.ts';
 import { appendJsonLine } from './json-file.ts';
 import { configSiblingPath } from './pairings-store.ts';
 import { pruneAgedFiles } from './prune-files.ts';
@@ -57,17 +65,31 @@ const LIFECYCLE_HOOK_EVENTS: ReadonlySet<string> = new Set([
   SUBAGENT_STOP_HOOK_EVENT,
   SESSION_END_HOOK_EVENT,
 ]);
-const PLAN_HOOK_BODY_CAP_BYTES = 512 * 1024;
-const PLAN_RESULT_BODY_CAP_BYTES = 2 * PLAN_HOOK_BODY_CAP_BYTES;
+const PLAN_DRAFT_DEBOUNCE_MS = 250;
+const PLANS_DIRECTORY_NAME = 'plans';
+const PLAN_RESULT_BODY_CAP_BYTES = 2 * PLAN_BODY_CAP_BYTES;
 const PLAN_SUFFIX = '.jsonl';
 const PLAN_RETAIN_DAYS = 30;
 const PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const FILE_MODE = 0o600;
 
+interface PlanFileWatch {
+  close: () => void;
+}
+
+type PlanFileWatcherFactory = (
+  directoryPath: string,
+  onChange: (fileName: string | null) => void,
+  onError: (error: unknown) => void,
+) => PlanFileWatch;
+
+type PlanDraftNotice = PlanDraftPush;
+
 interface PlanReviewWiringOptions {
   configPath?: string | null;
   logger?: Pick<Console, 'warn'> | null;
   nowFn?: () => number;
+  watchPlanFileFn?: PlanFileWatcherFactory;
   setIntervalFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
   clearIntervalFn?: (handle: NodeJS.Timeout) => void;
   setTimeoutFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
@@ -104,6 +126,20 @@ interface PlanReadResult {
   body: PlanRevisionBody | null;
 }
 
+interface PlanReadRequest {
+  agentId?: string | null;
+  revision?: number | null;
+  draft?: boolean;
+}
+
+interface PlanDraftWatch {
+  sessionId: string;
+  planFilePath: string;
+  watch: PlanFileWatch | null;
+  debounceTimer: NodeJS.Timeout | null;
+  isDisabled: boolean;
+}
+
 interface SessionPlanState {
   entries: PlanRevisionIndexEntry[];
   progressByAgentKey: Map<string, PlanReviewProgress>;
@@ -123,7 +159,7 @@ function carriesPlanBody(event: string): boolean {
 
 function hookBodyCapBytes(event: string): number {
   if (event.toLowerCase() === PLAN_RESULT_HOOK_EVENT) return PLAN_RESULT_BODY_CAP_BYTES;
-  return carriesPlanBody(event) ? PLAN_HOOK_BODY_CAP_BYTES : 0;
+  return carriesPlanBody(event) ? PLAN_BODY_CAP_BYTES : 0;
 }
 
 function errorMessage(error: unknown): string {
@@ -134,6 +170,22 @@ function agentIdOf(payload: Record<string, unknown>): string | null {
   const agentId = payload.agent_id;
   if (typeof agentId === 'string' && agentId.length > 0) return agentId;
   return null;
+}
+
+function watchPlanFileWithNode(
+  directoryPath: string,
+  onChange: (fileName: string | null) => void,
+  onError: (error: unknown) => void,
+): PlanFileWatch {
+  const watcher = fs.watch(canonicalizePath(directoryPath), { persistent: false }, (_event, fileName) => {
+    onChange(typeof fileName === 'string' ? fileName : null);
+  });
+  watcher.on('error', onError);
+  return { close: () => watcher.close() };
+}
+
+function claudePlansRoot(): string {
+  return path.join(path.dirname(claudeProjectsDir(process.env, os.homedir())), PLANS_DIRECTORY_NAME);
 }
 
 function approvedPlanOf(payload: Record<string, unknown>): string | null {
@@ -148,6 +200,7 @@ function createPlanReviewWiring({
   configPath = null,
   logger = console,
   nowFn = Date.now,
+  watchPlanFileFn = watchPlanFileWithNode,
   setIntervalFn = (fn: () => void, ms: number) => setInterval(fn, ms),
   clearIntervalFn = clearInterval,
   setTimeoutFn = (fn: () => void, ms: number) => setTimeout(fn, ms),
@@ -165,6 +218,7 @@ function createPlanReviewWiring({
   let hasEnsuredDirectory = false;
   let operationChain: Promise<unknown> = Promise.resolve();
   const heldByKey = new Map<string, HeldReply>();
+  const draftWatchByKey = new Map<string, PlanDraftWatch>();
   let nextHoldId = 0;
 
   for (const entry of readPlanDirectorySync()) {
@@ -297,13 +351,99 @@ function createPlanReviewWiring({
     return true;
   }
 
+  function closeDraftWatch(record: PlanDraftWatch): void {
+    if (record.debounceTimer) clearTimeoutFn(record.debounceTimer);
+    record.debounceTimer = null;
+    record.watch?.close();
+    record.watch = null;
+  }
+
+  function stopDraftWatch(key: string): void {
+    const record = draftWatchByKey.get(key);
+    if (!record) return;
+    closeDraftWatch(record);
+    draftWatchByKey.delete(key);
+  }
+
+  function stopDraftWatchesFor(sessionId: string): void {
+    for (const [key, record] of [...draftWatchByKey]) {
+      if (record.sessionId === sessionId) stopDraftWatch(key);
+    }
+  }
+
+  function disableDraftWatch(key: string, sessionId: string, error: unknown): void {
+    const record = draftWatchByKey.get(key);
+    if (!record || record.isDisabled) return;
+    record.isDisabled = true;
+    closeDraftWatch(record);
+    warn(`draft watch for ${sessionId} stopped: ${errorMessage(error)}`);
+  }
+
+  function noteDraftChange(sessionId: string, agentId: string | null, key: string): void {
+    const record = draftWatchByKey.get(key);
+    if (!record || record.isDisabled) return;
+    if (record.debounceTimer) clearTimeoutFn(record.debounceTimer);
+    const timer = setTimeoutFn(() => {
+      record.debounceTimer = null;
+      if (draftWatchByKey.get(key) !== record) return;
+      emitter.emit('plan-draft', {
+        id: sessionId,
+        agentId,
+        planFilePath: record.planFilePath,
+        changedAt: nowFn(),
+      } satisfies PlanDraftNotice);
+    }, PLAN_DRAFT_DEBOUNCE_MS);
+    if (typeof timer.unref === 'function') timer.unref();
+    record.debounceTimer = timer;
+  }
+
+  async function startDraftWatch(sessionId: string, agentId: string | null, planFilePath: string): Promise<void> {
+    const key = holdKey(sessionId, agentId);
+    const known = draftWatchByKey.get(key);
+    if (known?.isDisabled) return;
+    if (known && known.planFilePath === planFilePath && known.watch) return;
+    stopDraftWatch(key);
+    const record: PlanDraftWatch = { sessionId, planFilePath, watch: null, debounceTimer: null, isDisabled: false };
+    draftWatchByKey.set(key, record);
+    const contained = await openContainedFile(planFilePath, claudePlansRoot(), true);
+    if (!contained.ok) {
+      disableDraftWatch(key, sessionId, `draft path refused, reason=${contained.reason}`);
+      return;
+    }
+    if ('handle' in contained.file) await contained.file.handle.close().catch(() => {});
+    if (draftWatchByKey.get(key) !== record) return;
+    const watchedFileName = path.basename(contained.file.realPath);
+    try {
+      record.watch = watchPlanFileFn(
+        path.dirname(contained.file.realPath),
+        (fileName: string | null) => {
+          if (fileName !== null && fileName !== watchedFileName) return;
+          noteDraftChange(sessionId, agentId, key);
+        },
+        (error: unknown) => disableDraftWatch(key, sessionId, error),
+      );
+    } catch (error) {
+      disableDraftWatch(key, sessionId, error);
+    }
+  }
+
+  function applyProgress(
+    sessionId: string,
+    state: SessionPlanState,
+    agentId: string | null,
+    progress: PlanReviewProgress,
+  ): void {
+    setProgress(state, agentId, progress);
+    if (progress.state === 'closed') stopDraftWatch(holdKey(sessionId, agentId));
+  }
+
   function moveReview(sessionId: string, agentId: string | null, event: PlanReviewEvent): void {
     const state = stateBySessionId.get(sessionId);
     if (!state) return;
     const progress = progressFor(state, agentId);
     const next = progressAfterEvent(progress, event);
     if (next.state === progress.state && progress.openRevision === null) return;
-    setProgress(state, agentId, next);
+    applyProgress(sessionId, state, agentId, next);
     emitChanged(sessionId, state, agentId);
   }
 
@@ -376,23 +516,27 @@ function createPlanReviewWiring({
       warn(`plan request refused by the schema for ${sessionId}`);
       return null;
     }
-    const entry = await appendRevision(sessionId, request);
-    if (!entry) return null;
-    const state = await stateFor(sessionId);
     if (releaseHold(sessionId, request.agentId, PASS_THROUGH_REPLY)) {
       warn(`a new plan request for ${sessionId} released the reply still held for the previous revision`);
     }
+    const entry = await appendRevision(sessionId, request);
+    if (!entry) {
+      moveReview(sessionId, request.agentId, 'release');
+      return null;
+    }
+    const state = await stateFor(sessionId);
     const opened = progressAfterRevision(
       progressFor(state, request.agentId),
       { revision: entry.revision, since: entry.receivedAt },
     );
     if (hasStopped) {
-      setProgress(state, request.agentId, progressAfterEvent(opened, 'release'));
+      applyProgress(sessionId, state, request.agentId, progressAfterEvent(opened, 'release'));
       emitChanged(sessionId, state, request.agentId);
       return null;
     }
     const hold = openHold(sessionId, request, entry);
-    setProgress(state, request.agentId, opened);
+    applyProgress(sessionId, state, request.agentId, opened);
+    await startDraftWatch(sessionId, request.agentId, request.planFilePath);
     emitChanged(sessionId, state, request.agentId);
     return hold;
   }
@@ -422,10 +566,25 @@ function createPlanReviewWiring({
     const progress = state ? state.progressByAgentKey.get(agentKey(decision.agentId)) ?? null : null;
     const refusal = decisionRefusal(progress, decision.revision);
     if (refusal) return refusal;
+    const editRefusal = editedPlanRefusal(decision.plan ?? null);
+    if (editRefusal) return editRefusal;
+    if (decision.decision === 'revise') {
+      const feedbackRefusal = planFeedbackRefusal({
+        revision: decision.revision,
+        comments: decision.comments,
+        feedback: decision.feedback,
+      });
+      if (feedbackRefusal) return feedbackRefusal;
+    }
     const held = heldByKey.get(holdKey(sessionId, decision.agentId));
     if (!state || !progress || !held || held.revision !== decision.revision) return NO_OPEN_REVIEW;
-    releaseHold(sessionId, decision.agentId, decisionReply(decision.decision, held, decision.feedback ?? ''));
-    setProgress(state, decision.agentId, progressAfterDecision(progress, decision.decision));
+    const reply = decisionReply(decision.decision, held, {
+      feedback: decision.feedback,
+      comments: decision.comments,
+      plan: decision.plan,
+    });
+    releaseHold(sessionId, decision.agentId, reply);
+    applyProgress(sessionId, state, decision.agentId, progressAfterDecision(progress, decision.decision));
     emitChanged(sessionId, state, decision.agentId);
     return null;
   }
@@ -441,7 +600,7 @@ function createPlanReviewWiring({
       warn(`the terminal answered the plan for ${sessionId} revision ${entry.revision} while the reply was held`);
     }
     const progress = progressFor(state, agentId);
-    setProgress(state, agentId, progressAfterPlanToolResult(progress, entry, approvedPlanOf(payload)));
+    applyProgress(sessionId, state, agentId, progressAfterPlanToolResult(progress, entry, approvedPlanOf(payload)));
     emitChanged(sessionId, state, agentId);
   }
 
@@ -469,6 +628,7 @@ function createPlanReviewWiring({
     }
     if (name !== SESSION_END_HOOK_EVENT) return;
     closeEveryReview(sessionId);
+    stopDraftWatchesFor(sessionId);
     stateBySessionId.delete(sessionId);
   }
 
@@ -506,28 +666,73 @@ function createPlanReviewWiring({
     }
   }
 
+  async function readDraftFile(
+    sessionId: string,
+    agentId: string | null,
+    planFilePath: string,
+  ): Promise<string | null> {
+    const opened = await openContainedFile(planFilePath, claudePlansRoot());
+    if (!opened.ok) {
+      warn(`draft read refused for ${sessionId}: reason=${opened.reason}`);
+      if (opened.reason !== 'missing') {
+        disableDraftWatch(holdKey(sessionId, agentId), sessionId, `draft path refused, reason=${opened.reason}`);
+      }
+      return null;
+    }
+    const draftSize = opened.file.stat.size;
+    try {
+      if (draftSize > PLAN_BODY_CAP_BYTES) {
+        warn(`draft for ${sessionId} is ${draftSize} bytes, over the plan cap`);
+        return null;
+      }
+      const buffer = Buffer.alloc(draftSize);
+      const { bytesRead } = await opened.file.handle.read(buffer, 0, draftSize, 0);
+      return buffer.subarray(0, bytesRead).toString('utf8');
+    } catch (error) {
+      warn(`draft read failed for ${sessionId}: ${errorMessage(error)}`);
+      return null;
+    } finally {
+      await opened.file.handle.close().catch(() => {});
+    }
+  }
+
+  async function loadBody(
+    sessionId: string,
+    entry: PlanRevisionIndexEntry,
+    isDraft: boolean,
+  ): Promise<PlanRevisionBody | null> {
+    if (isDraft) {
+      const plan = await readDraftFile(sessionId, entry.agentId, entry.planFilePath);
+      if (plan === null) return null;
+      return {
+        agentId: entry.agentId,
+        revision: PLAN_DRAFT_REVISION,
+        plan,
+        planFilePath: entry.planFilePath,
+        receivedAt: nowFn(),
+      };
+    }
+    const line = await readRevisionLine(sessionId, entry);
+    if (!line) return null;
+    return { agentId: entry.agentId, revision: entry.revision, ...line };
+  }
+
   async function loadPlanRevision(
     sessionId: string,
-    { agentId = null, revision = null }: { agentId?: string | null; revision?: number | null },
+    { agentId = null, revision = null, draft = false }: PlanReadRequest,
   ): Promise<PlanReadResult | null> {
     const state = await stateForRead(sessionId);
     if (state.entries.length === 0) return null;
+    const own = entriesForAgent(state.entries, agentId);
+    const entry = draft ? newestEntry(own) : selectEntry(own, revision);
+    if (!entry && revision !== null) return null;
+    const body = entry ? await loadBody(sessionId, entry, draft) : null;
     const reviews = agentIdsIn(state.entries)
       .map((reviewAgentId) => reviewFrom(state.entries, reviewAgentId, progressFor(state, reviewAgentId)));
-    const entry = selectEntry(entriesForAgent(state.entries, agentId), revision);
-    if (!entry) {
-      if (revision !== null) return null;
-      return { reviews, body: null };
-    }
-    const body = await readRevisionLine(sessionId, entry);
-    if (!body) return { reviews, body: null };
-    return { reviews, body: { agentId: entry.agentId, revision: entry.revision, ...body } };
+    return { reviews, body };
   }
 
-  function readPlanRevision(
-    sessionId: string,
-    request: { agentId?: string | null; revision?: number | null } = {},
-  ): Promise<PlanReadResult | null> {
+  function readPlanRevision(sessionId: string, request: PlanReadRequest = {}): Promise<PlanReadResult | null> {
     return exclusive(() => loadPlanRevision(sessionId, request));
   }
 
@@ -538,6 +743,7 @@ function createPlanReviewWiring({
     session.on('teardown', () => {
       exclusive(async () => {
         closeEveryReview(session.id);
+        stopDraftWatchesFor(session.id);
         stateBySessionId.delete(session.id);
         attachedSessionIds.delete(session.id);
       }).catch((error: unknown) => { warn(`teardown handling failed for ${session.id}: ${errorMessage(error)}`); });
@@ -569,6 +775,10 @@ function createPlanReviewWiring({
     await operationChain;
   }
 
+  function stopEveryDraftWatch(): void {
+    for (const key of [...draftWatchByKey.keys()]) stopDraftWatch(key);
+  }
+
   function flushEveryHold(): void {
     for (const held of [...heldByKey.values()]) {
       releaseHold(held.sessionId, held.agentId, PASS_THROUGH_REPLY, held.holdId);
@@ -580,6 +790,7 @@ function createPlanReviewWiring({
     hasStopped = true;
     if (pruneTimer) clearIntervalFn(pruneTimer);
     pruneTimer = null;
+    stopEveryDraftWatch();
     flushEveryHold();
     await operationChain;
   }
@@ -600,11 +811,18 @@ function createPlanReviewWiring({
 }
 
 export {
-  PLAN_HOOK_BODY_CAP_BYTES,
   PLAN_RESULT_BODY_CAP_BYTES,
   PLAN_RETAIN_DAYS,
   PLAN_SUFFIX,
   carriesPlanBody,
   createPlanReviewWiring,
 };
-export type { PlanChangedPayload, PlanHookEvent, PlanReadResult, PlanReviewWiringOptions };
+export type {
+  PlanChangedPayload,
+  PlanDraftNotice,
+  PlanFileWatcherFactory,
+  PlanHookEvent,
+  PlanReadRequest,
+  PlanReadResult,
+  PlanReviewWiringOptions,
+};

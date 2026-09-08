@@ -58,7 +58,7 @@ import { USAGE_VENDOR_KEYS, USAGE_BUDGET_KEYS } from '../shared/usage-config.ts'
 import type { UpdateJournal } from '../shared/contracts/update-journal.ts';
 import type { UpdateStatus } from './backend-update.ts';
 import type { UpdateApplyOutcome } from './update-apply.ts';
-import type { PlanReadResult } from './plan-review-wiring.ts';
+import type { PlanReadRequest, PlanReadResult } from './plan-review-wiring.ts';
 import type { TracePage, TracePageRequest } from './trace-wiring.ts';
 
 interface ControlRequest {
@@ -140,10 +140,7 @@ interface ControlHandlerDeps {
   conversationGit?: (args: string[], cwd: string) => Promise<string>;
   conversationProjectsDir?: string;
   readTracePage?: ((glissaSessionId: string, request: TracePageRequest) => Promise<TracePage>) | null;
-  readPlanRevision?: ((
-    sessionId: string,
-    request: { agentId?: string | null; revision?: number | null },
-  ) => Promise<PlanReadResult | null>) | null;
+  readPlanRevision?: ((sessionId: string, request: PlanReadRequest) => Promise<PlanReadResult | null>) | null;
   decidePlanReview?: ((sessionId: string, decision: PlanDecision) => string | null) | null;
 }
 
@@ -1058,8 +1055,9 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
       if (!readPlanRevision) return sendError(ws, 'Plan review is not enabled', { id: requestedSessionId, scope: 'plan' });
       const agentId = typeof message.agentId === 'string' ? message.agentId : null;
       const revision = typeof message.revision === 'number' ? message.revision : null;
+      const draft = message.draft === true;
       try {
-        const result = await readPlanRevision(requestedSessionId, { agentId, revision });
+        const result = await readPlanRevision(requestedSessionId, { agentId, revision, draft });
         if (!result) return sendError(ws, 'Plan revision not found', { id: requestedSessionId, scope: 'plan' });
         ws.send(JSON.stringify({ type: 'session-plan-response', id: requestedSessionId, ...result }));
       } catch (error) {
@@ -1072,13 +1070,7 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
       if (!decidePlanReview) return refuse('Plan review is not enabled');
       const session = findSession(message);
       if (!session) return refuse('Session not found');
-      const parsed = PlanDecision.safeParse({
-        id: session.id,
-        agentId: typeof message.agentId === 'string' ? message.agentId : null,
-        revision: message.revision,
-        decision: message.decision,
-        ...(typeof message.feedback === 'string' ? { feedback: message.feedback } : {}),
-      });
+      const parsed = PlanDecision.safeParse({ ...message, id: session.id });
       if (!parsed.success) return refuse('Plan decision refused by the schema');
       const refusal = decidePlanReview(session.id, parsed.data);
       if (!refusal) return;

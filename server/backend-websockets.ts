@@ -3,6 +3,7 @@ import type { Duplex } from 'node:stream';
 import { WebSocketServer } from 'ws';
 import type { WebSocket } from 'ws';
 import type { Session } from '../session/sessions.ts';
+import { CONTROL_FRAME_MAX_BYTES } from '../shared/contracts/control-messages.ts';
 import { STATES } from '../shared/states.ts';
 import { createReplayLog } from './control-replay-core.ts';
 import type { ControlMessageRecord, ReplayLog } from './control-replay-core.ts';
@@ -84,7 +85,7 @@ function createBackendWebSockets(dependencies: BackendWebSocketDependencies): Ba
     getVisionsLane,
     logger,
   } = dependencies;
-  const controlWss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
+  const controlWss = new WebSocketServer({ noServer: true, maxPayload: CONTROL_FRAME_MAX_BYTES });
   const dataWss = new WebSocketServer({ noServer: true, maxPayload: 2 * 1024 * 1024 });
   const controlReplayLog = createReplayLog();
   const sessionDataClients = new Map<string, Map<WebSocket, ViewerSizeRecord | null>>();

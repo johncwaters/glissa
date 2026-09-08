@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { PLAN_BODY_CAP_BYTES, PLAN_COMMENT_MAX_CHARS, PLAN_HOOK_OUTPUT_MAX_CHARS } from '../shared/contracts/plan-review.ts';
 import type { PlanReview, PlanReviewState } from '../shared/contracts/plan-review.ts';
-import { createPlanViewModel, mergePlanChanged } from '../public/plan/plan-view-core.ts';
+import { createPlanViewModel, mergePlanChanged, planLimitRefusal, previousRevisionFor } from '../public/plan/plan-view-core.ts';
 import type { PlanChangedMessage, PlanViewInput } from '../public/plan/plan-view-core.ts';
 
 const state: PlanReviewState = {
@@ -69,14 +70,13 @@ function viewFor(overrides: Partial<PlanReview>, input: Partial<PlanViewInput> =
   });
 }
 
-test('an open review enables every decision, and Edit plan stays disabled until M3', () => {
+test('an open review enables every decision, and the editor opens under the same guard', () => {
   const view = viewFor({});
   assert.deepEqual(view.actions.map((action) => action.label), CONSTANT_LABELS);
   assert.deepEqual(
     view.actions.filter((action) => action.enabled).map((action) => action.kind),
-    ['approve', 'approve-accept-edits', 'revise', 'terminal'],
+    ['approve', 'approve-accept-edits', 'revise', 'terminal', 'edit'],
   );
-  assert.equal(view.actions.find((action) => action.kind === 'edit')?.enabled, false);
 });
 
 test('a review that is not open disables every action and says why, with labels unchanged', () => {
@@ -96,7 +96,7 @@ test('a review that is not open disables every action and says why, with labels 
   }
 });
 
-test('a revision the open one has moved past disables every action, so no click can name it', () => {
+test('a revision the open one has moved past disables every action and says which one is open', () => {
   const view = viewFor(
     {
       revisions: [
@@ -109,6 +109,62 @@ test('a revision the open one has moved past disables every action, so no click 
   );
   assert.deepEqual(view.actions.map((action) => action.label), CONSTANT_LABELS, 'labels never change with selection');
   assert.equal(view.actions.every((action) => action.enabled === false), true);
+  assert.equal(view.status, 'Revision 1 of 2, 4 B, Revision 2 is the one open');
+});
+
+test('the status describes the SELECTED revision, so an approved one reads approved under a reopened review', () => {
+  const revisions = [
+    { revision: 1, receivedAt: 10, chars: 100, title: 'First' },
+    { revision: 2, receivedAt: 20, chars: 100, title: 'Second' },
+  ];
+  const approvedThenReopened = viewFor(
+    { revisions, state: 'open', openRevision: { revision: 2, since: 20 }, approvedRevision: 1 },
+    { selectedRevision: 1 },
+  );
+  assert.equal(approvedThenReopened.status, 'Revision 1 of 2, 4 B, Revision 2 is the one open');
+
+  const closedWithApproval = viewFor(
+    { revisions, state: 'closed', openRevision: null, approvedRevision: 1 },
+    { selectedRevision: 1 },
+  );
+  assert.equal(closedWithApproval.status, 'Revision 1 of 2, 4 B, Approved');
+
+  const closedUnapprovedRevision = viewFor(
+    { revisions, state: 'closed', openRevision: null, approvedRevision: 1 },
+    { selectedRevision: 2 },
+  );
+  assert.equal(closedUnapprovedRevision.status, 'Revision 2 of 2, 4 B, Closed');
+});
+
+test('pending section comments are counted beside the state, never inside a button label', () => {
+  assert.equal(viewFor({}, { pendingCommentCount: 0 }).status, 'Revision 1 of 1, 4 B, waiting for your decision');
+  assert.equal(
+    viewFor({}, { pendingCommentCount: 1 }).status,
+    'Revision 1 of 1, 4 B, waiting for your decision, 1 comment pending',
+  );
+  assert.equal(
+    viewFor({}, { pendingCommentCount: 3 }).status,
+    'Revision 1 of 1, 4 B, waiting for your decision, 3 comments pending',
+  );
+  assert.deepEqual(viewFor({}, { pendingCommentCount: 3 }).actions.map((action) => action.label), CONSTANT_LABELS);
+});
+
+test('a draft on screen is labelled a draft and takes no decision, whatever the review says', () => {
+  const view = viewFor({}, { isDraft: true, body: 'draft body' });
+  assert.equal(view.status, 'Draft, 10 B');
+  assert.equal(view.actions.every((action) => action.enabled === false), true, 'nobody approves bytes the agent has not submitted');
+  assert.deepEqual(view.actions.map((action) => action.label), CONSTANT_LABELS);
+  assert.equal(viewFor({}, { isDraft: true, body: 'draft body', pendingCommentCount: 2 }).status, 'Draft, 10 B, 2 comments pending');
+});
+
+test('the previous revision is what a diff runs against, and the first revision has none', () => {
+  const revisions = [
+    { revision: 1, receivedAt: 10, chars: 100, title: 'First' },
+    { revision: 3, receivedAt: 30, chars: 100, title: 'Third' },
+  ];
+  assert.equal(viewFor({ revisions }, { selectedRevision: 3 }).previousRevision, 1);
+  assert.equal(viewFor({ revisions }, { selectedRevision: 1 }).previousRevision, null);
+  assert.equal(previousRevisionFor({ reviews: [] }, null, 3), null);
 });
 
 test('an open revision whose body has not loaded disables every action, so no click approves unread bytes', () => {
@@ -168,4 +224,24 @@ test('a subagent summary lands beside the main review and the close push carries
   assert.deepEqual(closedMain.reviews.map((review) => review.agentId), [null, 'agent-1'], 'an updated review keeps its tab position');
   assert.equal(closedMain.reviews.find((review) => review.agentId === null)?.approvedRevision, 1);
   assert.equal(closedMain.reviews.find((review) => review.agentId === null)?.openRevision, null);
+});
+
+test('feedback composing past the hook output limit is refused before it is sent', () => {
+  const comments = [0, 1, 2].map((index) => ({
+    heading: `Section ${index}`,
+    comment: 'x'.repeat(PLAN_COMMENT_MAX_CHARS),
+  }));
+  const refusal = planLimitRefusal({ comments });
+  assert.ok(refusal);
+  assert.match(refusal, new RegExp(String(PLAN_HOOK_OUTPUT_MAX_CHARS)));
+  assert.equal(planLimitRefusal({ comments: comments.slice(0, 2), feedback: 'and ship it' }), null);
+});
+
+test('a decision serializing past one control frame is refused, since the socket would close on it', () => {
+  const plainPlan = 'y'.repeat(PLAN_BODY_CAP_BYTES);
+  assert.equal(planLimitRefusal({ plan: plainPlan }), null, 'a plan at the body cap still fits one frame');
+  const escapeHeavyPlan = String.fromCharCode(1).repeat(PLAN_BODY_CAP_BYTES - 1);
+  const refusal = planLimitRefusal({ plan: escapeHeavyPlan });
+  assert.ok(refusal);
+  assert.match(refusal, /control frame/);
 });

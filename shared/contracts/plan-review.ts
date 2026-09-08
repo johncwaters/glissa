@@ -2,6 +2,11 @@ import { z } from 'zod';
 
 export const PLAN_TITLE_MAX_CHARS = 120;
 export const PLAN_FEEDBACK_MAX_CHARS = 20000;
+export const PLAN_COMMENT_MAX_CHARS = 4000;
+export const PLAN_COMMENTS_MAX = 40;
+export const PLAN_BODY_CAP_BYTES = 512 * 1024;
+export const PLAN_HOOK_OUTPUT_MAX_CHARS = 10000;
+export const PLAN_DRAFT_REVISION = 0;
 export const PLAN_HOOK_EVENT = 'permissionrequest-plan';
 export const PLAN_RESULT_HOOK_EVENT = 'posttooluse-plan';
 export const PLAN_TOOL_NAME = 'ExitPlanMode';
@@ -86,12 +91,19 @@ export const PlanReviewStateValue = z.enum(PLAN_REVIEW_STATE_VALUES);
 export const PLAN_DECISION_KINDS = Object.freeze(['approve', 'approve-accept-edits', 'revise', 'terminal'] as const);
 export const PlanDecisionKind = z.enum(PLAN_DECISION_KINDS);
 
+export const PlanSectionComment = z.object({
+  heading: z.string().max(PLAN_COMMENT_MAX_CHARS).nullable(),
+  comment: z.string().min(1).max(PLAN_COMMENT_MAX_CHARS),
+});
+
 export const PlanDecision = z.object({
   id: z.string().min(1),
   agentId: z.string().nullable(),
   revision: z.number().int().positive(),
   decision: PlanDecisionKind,
   feedback: z.string().max(PLAN_FEEDBACK_MAX_CHARS).optional(),
+  comments: z.array(PlanSectionComment).max(PLAN_COMMENTS_MAX).optional(),
+  plan: z.string().min(1).max(PLAN_BODY_CAP_BYTES).optional(),
 });
 
 export const PlanRevisionSummary = z.object({
@@ -122,7 +134,7 @@ export const PlanReviewState = z.object({
 
 export const PlanRevisionBody = z.object({
   agentId: z.string().nullable(),
-  revision: z.number().int().positive(),
+  revision: z.number().int().nonnegative(),
   plan: z.string(),
   planFilePath: z.string(),
   receivedAt: z.number().finite(),
@@ -142,6 +154,13 @@ export const PlanChangedPush = z.object({
   hasPlan: z.boolean(),
 });
 
+export const PlanDraftPush = z.object({
+  id: z.string(),
+  agentId: z.string().nullable(),
+  planFilePath: z.string(),
+  changedAt: z.number().finite(),
+});
+
 export const PlanResponseFrame = z.object({
   id: z.string(),
   reviews: z.array(PlanReview),
@@ -153,6 +172,7 @@ export type ExitPlanModeRequest = z.infer<typeof ExitPlanModeRequest>;
 export type PlanRevision = z.infer<typeof PlanRevision>;
 export type PlanReviewStateValue = z.infer<typeof PlanReviewStateValue>;
 export type PlanDecisionKind = z.infer<typeof PlanDecisionKind>;
+export type PlanSectionComment = z.infer<typeof PlanSectionComment>;
 export type PlanDecision = z.infer<typeof PlanDecision>;
 export type PlanDecisionRequest = Omit<PlanDecision, 'id'>;
 export type PlanRevisionSummary = z.infer<typeof PlanRevisionSummary>;
@@ -161,4 +181,5 @@ export type PlanReview = z.infer<typeof PlanReview>;
 export type PlanReviewState = z.infer<typeof PlanReviewState>;
 export type PlanRevisionBody = z.infer<typeof PlanRevisionBody>;
 export type PlanChangedPush = z.infer<typeof PlanChangedPush>;
+export type PlanDraftPush = z.infer<typeof PlanDraftPush>;
 export type PlanResponseFrame = z.infer<typeof PlanResponseFrame>;

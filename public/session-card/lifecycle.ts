@@ -1,4 +1,5 @@
 import type { ServerMessage } from '#shared/contracts/control-messages.ts';
+import type { PlanDraftPush } from '#shared/contracts/plan-review.ts';
 import type { SessionState } from '#shared/states.ts';
 import { KILLABLE_STATES, RESTARTABLE_STATES, STATES } from '#shared/states.ts';
 import { playAlertSound } from '../alert-sound.ts';
@@ -30,6 +31,7 @@ import { openConfirmDialog } from './modal.ts';
 import type { DeliveredPack } from './pack-stale-core.ts';
 import { stalePackNames } from './pack-stale-core.ts';
 import { openResumeDialog } from './resume-dialog.ts';
+import { showErrorToast } from './toast.ts';
 
 import { refreshElapsed } from './session-tick.ts';
 import {
@@ -258,9 +260,11 @@ export function createSessionCard(sessionId: unknown, sessionName: unknown, init
   }
   const planFace = createPlanFace({
     requestPlan: (requestedId, agentId, revision) => sendControlMsg({ type: 'session-plan', id: requestedId, agentId, revision }),
+    requestDraft: (requestedId, agentId) => sendControlMsg({ type: 'session-plan', id: requestedId, agentId, draft: true }),
     showTerminal: showTerminalFace,
     sendDecision: (requestedId, request) => sendControlMsg({ type: 'plan-decision', id: requestedId, ...request }),
     promptFeedback: openPlanFeedbackDialog,
+    reportProblem: (message: string) => showErrorToast(`${dom.nameEl.textContent || id}: ${message}`),
   });
   sessionUi = {
     term: null,
@@ -329,6 +333,7 @@ export function createSessionCard(sessionId: unknown, sessionName: unknown, init
 }
 
 export type SessionPlanChangedMessage = PlanChangedMessage;
+export type SessionPlanDraftMessage = PlanDraftPush;
 
 function preferredFaceFor(ui: SessionUi): SessionCardFace {
   const hasOpenReview = ui.planReviewState.reviews.some((review) => review.state === 'open');
@@ -369,6 +374,12 @@ export function applySessionPlanChanged(message: SessionPlanChangedMessage) {
   ui.planFace.update({ state: ui.planReviewState });
   updateButtonVisibility(ui);
   showPlanFaceWhenPreferred(message.id);
+}
+
+export function applySessionPlanDraft(notice: SessionPlanDraftMessage) {
+  const ui = findSessionUi(notice.id);
+  if (!ui) return;
+  ui.planFace.update({ draft: notice });
 }
 
 export function applySessionPlanResponse(response: PlanResponse) {

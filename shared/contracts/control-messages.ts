@@ -1,5 +1,14 @@
 import { z } from 'zod';
-import { PlanChangedPush, PlanDecision, PlanResponseFrame } from './plan-review.ts';
+import {
+  PLAN_BODY_CAP_BYTES,
+  PLAN_COMMENTS_MAX,
+  PLAN_COMMENT_MAX_CHARS,
+  PLAN_FEEDBACK_MAX_CHARS,
+  PlanChangedPush,
+  PlanDecision,
+  PlanDraftPush,
+  PlanResponseFrame,
+} from './plan-review.ts';
 import { PendingWakeup, SessionSnapshot, SessionState } from './session.ts';
 import { TraceRecord } from './trace.ts';
 import { UpdateChannel, UpdateJournal, UpdateJournalSummary } from './update-journal.ts';
@@ -16,6 +25,10 @@ const opaqueObject = openObject();
 const opaqueArray = z.array(z.unknown());
 const planRevisionNumber = z.number().int().positive();
 const trailSteps = z.array(openObject({ at: timestamp, tool: z.string(), detail: z.string() }));
+
+export const CONTROL_FRAME_ENVELOPE_BYTES = 4096;
+export const CONTROL_FRAME_MAX_BYTES = CONTROL_FRAME_ENVELOPE_BYTES
+  + 2 * (PLAN_BODY_CAP_BYTES + PLAN_FEEDBACK_MAX_CHARS + 2 * PLAN_COMMENTS_MAX * PLAN_COMMENT_MAX_CHARS);
 
 export const UpdateApplyRefusal = z.object({ reason: z.string(), message: z.string() });
 export type UpdateApplyRefusal = z.infer<typeof UpdateApplyRefusal>;
@@ -134,6 +147,7 @@ const clientVariants = [
     id: sessionId,
     agentId: nullableString,
     revision: planRevisionNumber.optional(),
+    draft: z.boolean().optional(),
   }),
   loose('plan-decision', PlanDecision.shape),
   ...idOnlyClientTypes.map((type) => loose(type, { id: sessionId, force: z.unknown().optional() })),
@@ -174,6 +188,7 @@ export const SERVER_MESSAGE_TYPES = Object.freeze([
   'session-trace-response',
   'session-trace-changed',
   'session-plan-changed',
+  'session-plan-draft',
   'session-plan-response',
   'notify',
   'update-status',
@@ -360,6 +375,7 @@ const serverVariants = [
   }),
   loose('session-trace-changed', { id: sessionId }),
   loose('session-plan-changed', PlanChangedPush.shape),
+  loose('session-plan-draft', PlanDraftPush.shape),
   loose('session-plan-response', PlanResponseFrame.shape),
   loose('notify', {
     session: z.string(),

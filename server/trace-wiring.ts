@@ -10,6 +10,7 @@ import {
   TraceRecord as TraceRecordSchema,
 } from '../shared/contracts/trace.ts';
 import { claudeProjectsDir } from '../session/core/conversation-history.ts';
+import { openContainedFile } from './contained-file.ts';
 import { applyRead, createTailState } from './core/ingest-tail-core.ts';
 import type { TailState } from './core/ingest-tail-core.ts';
 import { traceRecordsFromTranscriptLine } from './core/trace-core.ts';
@@ -117,20 +118,6 @@ interface PendingCommit {
   appendedRecordCount: number;
 }
 
-interface OpenedFile {
-  handle: FileHandle;
-  realPath: string;
-  stat: fs.Stats;
-}
-
-interface MissingContainedFile {
-  realPath: string;
-}
-
-type ContainedFileResult<File extends OpenedFile | MissingContainedFile> =
-  | { ok: true; file: File }
-  | { ok: false; reason: ContainmentRefusal };
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -153,62 +140,6 @@ function trimOldest(entries: Set<string>, limit: number): void {
 
 function projectsRoot(): string {
   return claudeProjectsDir(process.env, os.homedir());
-}
-
-async function containedPathForMissingFile(
-  candidate: string,
-  realRoot: string,
-): Promise<ContainedFileResult<MissingContainedFile>> {
-  const transcriptName = path.basename(candidate);
-  if (!isSafePathSegment(transcriptName)) return { ok: false, reason: 'outside-root' };
-  try {
-    const realDirectory = await fs.promises.realpath(path.dirname(candidate));
-    if (!isPathInsideRoot(realRoot, realDirectory)) return { ok: false, reason: 'outside-root' };
-    const directoryStat = await fs.promises.lstat(realDirectory);
-    if (!directoryStat.isDirectory()) return { ok: false, reason: 'missing' };
-    return { ok: true, file: { realPath: path.join(realDirectory, transcriptName) } };
-  } catch (error) {
-    return { ok: false, reason: containmentRefusalReason(error) };
-  }
-}
-
-function openContainedFile(candidate: string, root: string): Promise<ContainedFileResult<OpenedFile>>;
-function openContainedFile(
-  candidate: string,
-  root: string,
-  allowsMissingFile: true,
-): Promise<ContainedFileResult<OpenedFile | MissingContainedFile>>;
-async function openContainedFile(
-  candidate: string,
-  root: string,
-  allowsMissingFile = false,
-): Promise<ContainedFileResult<OpenedFile | MissingContainedFile>> {
-  let realRoot: string;
-  try {
-    realRoot = await fs.promises.realpath(root);
-  } catch {
-    return { ok: false, reason: 'root-unresolvable' };
-  }
-  let realCandidate: string;
-  try {
-    realCandidate = await fs.promises.realpath(candidate);
-  } catch (error) {
-    const reason = containmentRefusalReason(error);
-    if (!allowsMissingFile || reason !== 'missing') return { ok: false, reason };
-    return containedPathForMissingFile(candidate, realRoot);
-  }
-  if (!isPathInsideRoot(realRoot, realCandidate)) return { ok: false, reason: 'outside-root' };
-  let handle: FileHandle | null = null;
-  try {
-    handle = await fs.promises.open(realCandidate, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
-    const stat = await handle.stat();
-    if (stat.isFile()) return { ok: true, file: { handle, realPath: realCandidate, stat } };
-    await handle.close().catch(() => {});
-    return { ok: false, reason: 'not-a-regular-file' };
-  } catch (error) {
-    if (handle) await handle.close().catch(() => {});
-    return { ok: false, reason: containmentRefusalReason(error) };
-  }
 }
 
 async function pruneTraceFiles({

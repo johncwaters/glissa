@@ -4689,6 +4689,8 @@ html[data-layout="phone"] .trace-row-pre { max-height: none; font-size: 12px; }
 
 .plan-tab,
 .plan-terminal-button,
+.plan-head-toggle,
+.plan-section-comment,
 .plan-heading-link,
 .plan-action {
   appearance: none;
@@ -4702,6 +4704,8 @@ html[data-layout="phone"] .trace-row-pre { max-height: none; font-size: 12px; }
 
 .plan-tab,
 .plan-terminal-button,
+.plan-head-toggle,
+.plan-section-comment,
 .plan-action {
   min-height: 30px;
   padding: 5px 10px;
@@ -4713,6 +4717,9 @@ html[data-layout="phone"] .trace-row-pre { max-height: none; font-size: 12px; }
 
 .plan-tab[aria-selected="true"] { border-color: var(--accent-dim); color: var(--accent); background: color-mix(in oklab, var(--accent) 8%, transparent); }
 .plan-terminal-button { border-color: var(--border); color: var(--text-head); }
+.plan-head-toggle { border-color: var(--border-dim); }
+.plan-head-toggle[aria-pressed="true"] { border-color: var(--accent-dim); color: var(--accent); background: color-mix(in oklab, var(--accent) 8%, transparent); }
+.plan-draft-chip { color: var(--state-waiting); border-color: color-mix(in oklab, var(--state-waiting) 40%, transparent); }
 
 .plan-revision-picker,
 .plan-heading-picker {
@@ -4777,6 +4784,34 @@ html[data-layout="phone"] .trace-row-pre { max-height: none; font-size: 12px; }
 }
 
 .plan-document { min-width: 0; }
+.plan-section-head { display: flex; justify-content: flex-end; height: 0; }
+.plan-section-comment {
+  position: relative;
+  top: 4px;
+  min-height: 24px;
+  padding: 3px 8px;
+  border-color: var(--border-dim);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+.plan-section:hover .plan-section-comment,
+.plan-section-comment:focus-visible,
+.plan-section-comment[data-commented="true"] { opacity: 1; }
+.plan-section-comment[data-commented="true"] { border-color: var(--accent-dim); color: var(--accent); }
+.plan-editor {
+  width: 100%;
+  min-height: 100%;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  color: var(--text-head);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  resize: none;
+}
+.plan-diff { font-size: 12px; line-height: 1.5; }
 .plan-heading { margin: 1.7em 0 0.65em; color: var(--text-head); line-height: 1.3; scroll-margin-top: 16px; }
 .plan-heading:first-child { margin-top: 0; }
 .plan-document h1 { font-size: 16px; letter-spacing: 0.04em; }
@@ -4828,6 +4863,7 @@ html[data-layout="phone"] .trace-row-pre { max-height: none; font-size: 12px; }
   .plan-body-layout { display: block; }
   .plan-heading-rail { display: none; }
   .plan-reading-column { height: 100%; padding: 20px 14px 96px; }
+  .plan-section-comment { opacity: 1; }
   .plan-action-bar { align-items: stretch; flex-direction: column; }
   .plan-actions { overflow-x: auto; }
   .plan-action { flex: 0 0 auto; min-height: 40px; }
@@ -5304,14 +5340,22 @@ html[data-layout="phone"] .trace-row-pre { max-height: none; font-size: 12px; }
   background: color-mix(in oklab, var(--accent) 8%, transparent);
   white-space: pre-wrap;
 }
-.review-line { display: flex; white-space: pre-wrap; }
-.review-line-gutter { flex: 0 0 1.4em; text-align: center; color: var(--text-muted); user-select: none; }
-.review-line-text { flex: 1; min-width: 0; word-break: break-word; }
-.review-line-add { background: color-mix(in oklab, var(--state-running) 12%, transparent); }
-.review-line-add .review-line-gutter { color: var(--state-running); }
-.review-line-del { background: color-mix(in oklab, var(--state-failed) 12%, transparent); }
-.review-line-del .review-line-gutter { color: var(--state-failed); }
-.review-line-meta { color: var(--text-muted); font-style: italic; }
+.review-line,
+.plan-diff-line { display: flex; white-space: pre-wrap; }
+.review-line-gutter,
+.plan-diff-gutter { flex: 0 0 1.4em; text-align: center; color: var(--text-muted); user-select: none; }
+.review-line-text,
+.plan-diff-text { flex: 1; min-width: 0; word-break: break-word; }
+.review-line-add,
+.plan-diff-added { background: color-mix(in oklab, var(--state-running) 12%, transparent); }
+.review-line-add .review-line-gutter,
+.plan-diff-added .plan-diff-gutter { color: var(--state-running); }
+.review-line-del,
+.plan-diff-removed { background: color-mix(in oklab, var(--state-failed) 12%, transparent); }
+.review-line-del .review-line-gutter,
+.plan-diff-removed .plan-diff-gutter { color: var(--state-failed); }
+.review-line-meta,
+.plan-diff-skipped { color: var(--text-muted); font-style: italic; }
 .review-expand {
   display: block;
   width: 100%;
