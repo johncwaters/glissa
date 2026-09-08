@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { PLAN_HOOK_TIMEOUT_SEC, buildHookSettings, describeBuiltinHooks } from '../detection/settings-injector.ts';
+import {
+  DEFAULT_TIMEOUT_SEC,
+  PLAN_HOLD_RELEASE_MS,
+  PLAN_HOOK_TIMEOUT_SEC,
+  buildHookSettings,
+  describeBuiltinHooks,
+} from '../detection/settings-injector.ts';
 
 const base = { port: 3000, glissaId: 'g1', token: 'tok' };
 
@@ -119,9 +125,32 @@ test('ExitPlanMode joins the PostToolUse matchers without displacing the wakeup 
   );
 });
 
+test('the plan tool result has its own URL segment, so only it carries the raised body cap', () => {
+  const settings = buildHookSettings({ ...base, planReview: true, detectPackReads: true });
+  assert.deepEqual(
+    settings.hooks.PostToolUse.map((entry) => entry.hooks[0].url),
+    [
+      'http://127.0.0.1:3000/hook/g1/posttooluse?t=tok',
+      'http://127.0.0.1:3000/hook/g1/posttooluse?t=tok',
+      'http://127.0.0.1:3000/hook/g1/posttooluse-plan?t=tok',
+    ],
+  );
+  assert.equal(settings.hooks.PostToolUse[2].hooks[0].timeout, DEFAULT_TIMEOUT_SEC, 'only the held request waits a day');
+});
+
 test('plan review off leaves the settings byte-identical', () => {
   assert.equal(
     JSON.stringify(buildHookSettings({ ...base, planReview: false })),
     JSON.stringify(buildHookSettings(base)),
   );
+});
+
+test('the plan hook carries the measured 86400 second ceiling, with the lane releasing a minute early', () => {
+  assert.equal(PLAN_HOOK_TIMEOUT_SEC, 86400, 'the bundle applies no clamp and honored 86400 live in spike 3');
+  assert.notEqual(PLAN_HOOK_TIMEOUT_SEC, DEFAULT_TIMEOUT_SEC, 'the plan entry never shares the status signal timeout');
+  assert.ok(PLAN_HOLD_RELEASE_MS < PLAN_HOOK_TIMEOUT_SEC * 1000, 'the lane always answers before Claude Code abandons the socket');
+
+  const settings = buildHookSettings({ port: 3000, glissaId: 'g1', token: 'tok', planReview: true });
+  assert.equal(settings.hooks.PermissionRequest[1].hooks[0].timeout, PLAN_HOOK_TIMEOUT_SEC);
+  assert.equal(settings.hooks.PermissionRequest[0].hooks[0].timeout, DEFAULT_TIMEOUT_SEC);
 });

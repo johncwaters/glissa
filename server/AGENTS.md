@@ -51,7 +51,6 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - WAITING is the load-bearing exclusion: it is a permission prompt PAUSING a turn, and the agent resumes into the files an unattended rebase would have rewritten under it.
 - `rebaseOnly` never stashes and merges nothing back: it runs unattended under a live agent, so a dirty tree is a hard refusal.
 - A conflict is never escalated: the worktree is left byte-identical for the operator's own Merge. A cooldown key of both shas stops the retry loop; a sibling's resolution retriggers it.
-- The completeness proof is "no unmerged paths remain". `git rerere remaining` may NEVER be one: it ignores binary conflicts, so continuing on its silence silently drops the commit (`tests/git-workspace-rebase.test.ts`).
 - Which paths rerere replayed is deliberately unreported: git clears `MERGE_RR` as it resolves, so any list would be a guess, and a guess in a forensic trace is worse than a silence.
 - rerere config is seeded only when UNSET, an operator who disabled it meaning it. A rebase suppresses the change funnel while it runs, or the review gate self-heals to none mid-rebase.
 
@@ -123,10 +122,12 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 ### Plan Review (plan: `docs/plan-plan-review.md`)
 
 - The plan endpoint is a SECOND URL, never a second entry on the shared one: hooks run in parallel and a `PermissionRequest` payload carries no tool-use id, so two entries on one URL arrive as indistinguishable posts. The unmatched entry stays byte-identical (`tests/settings-injector-user-hooks.test.ts`).
-- Every path fails OPEN: a refused parse, a refused hook, a failed append or a stopped lane all answer as the route answers today, and the terminal dialog decides.
+- Every path fails OPEN and the held reply is written AT MOST ONCE, never after the socket closed: a fired hook timeout destroys the socket in silence, so a late write is a no-op.
+- EVERY way a review can end writes that one reply and lands on `released` or `decided`, since a hold nobody answers is an agent hung forever; `PostToolUse` counts, because the terminal can answer without cancelling the hook (`tests/backend-plan-hold.test.ts`).
+- An allow echoes the plan bytes AS RECEIVED, never a re-read of `planFilePath`, or whatever the file holds then becomes the approved plan.
 - The in-memory index holds offsets, chars and titles and never a body, so a summary push carries no plan and a body crosses an authenticated socket only on request (`tests/control-plan-review.test.ts`).
 - Revisions are numbered PER REVIEW, one review per agent, or two concurrent subagent plans collapse into one summary and one action bar.
-- Only this route's body cap rises to 512 KB, and an oversized body is logged with its size: a dropped body destroys the request silently.
+- Only a plan segment raises the body cap, the RESULT one twice, as it repeats the plan it approves.
 
 ### Security: Trust Boundary
 

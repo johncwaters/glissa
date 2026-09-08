@@ -5,6 +5,8 @@ import path from 'node:path';
 import { pipeline } from 'node:stream';
 import express from 'express';
 import type { Express, Request, RequestHandler, Response } from 'express';
+import { HOOK_EVENTS } from '../detection/settings-injector.ts';
+import { PLAN_HOOK_EVENT, PLAN_RESULT_HOOK_EVENT } from '../shared/contracts/plan-review.ts';
 import type { Session } from '../session/sessions.ts';
 import { decideHostAllowed } from './core/host-policy.ts';
 import { decideOriginAllowed } from './core/origin-policy.ts';
@@ -20,6 +22,20 @@ import {
 } from './core/upload-core.ts';
 
 const HOOK_BODY_CAP_BYTES = 64 * 1024;
+const UNNAMED_HOOK_EVENT = 'an unknown event';
+const KNOWN_HOOK_EVENTS: ReadonlySet<string> = new Set([
+  ...HOOK_EVENTS.map((event) => event.toLowerCase()),
+  'pretooluse',
+  'posttooluse',
+  'statusline',
+  PLAN_HOOK_EVENT,
+  PLAN_RESULT_HOOK_EVENT,
+]);
+
+function knownHookEventName(event: string): string {
+  const name = event.toLowerCase();
+  return KNOWN_HOOK_EVENTS.has(name) ? name : UNNAMED_HOOK_EVENT;
+}
 
 interface HookRouterOutput {
   status: number;
@@ -33,6 +49,7 @@ interface PlanReviewHookPort {
     event: string;
     payload: Record<string, unknown>;
     accepted: boolean;
+    signal: AbortSignal;
   }): Promise<Record<string, unknown> | null> | null;
 }
 
@@ -199,7 +216,7 @@ function createBackendHttpApp(dependencies: BackendHttpDependencies): Express {
       if (receivedBytes <= bodyCapBytes) return;
       aborted = true;
       const declaredBytes = req.headers['content-length'] || `at least ${receivedBytes}`;
-      logger.warn(`[hook] ${req.params.event} body of ${declaredBytes} bytes is over the ${bodyCapBytes} byte cap and was refused`);
+      logger.warn(`[hook] ${knownHookEventName(req.params.event)} body of ${declaredBytes} bytes is over the ${bodyCapBytes} byte cap and was refused`);
       req.destroy();
     });
     req.on('end', () => {
@@ -231,19 +248,25 @@ function createBackendHttpApp(dependencies: BackendHttpDependencies): Express {
         };
       }
       const answer = (decision: Record<string, unknown> | null) => {
-        if (res.headersSent) return;
+        if (res.headersSent || res.writableEnded || res.destroyed) return;
         res.status(output.status).json(decision ? { ...reply, ...decision } : reply);
       };
+      const abandonedByClaudeCode = new AbortController();
       const planDecision = getPlanReview()?.onHookEvent({
         glissaId: req.params.glissaId,
         event: req.params.event,
         payload,
         accepted: output.status === 200,
+        signal: abandonedByClaudeCode.signal,
       }) || null;
       if (!planDecision) {
         answer(null);
         return;
       }
+      res.on('close', () => {
+        if (res.writableFinished) return;
+        abandonedByClaudeCode.abort();
+      });
       planDecision.then(answer, () => { answer(null); });
     });
   });

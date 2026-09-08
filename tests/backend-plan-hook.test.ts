@@ -8,7 +8,7 @@ import type { Server } from 'node:http';
 
 import { createBackend } from '../server/backend.ts';
 import { createBackendHttpApp } from '../server/backend-http.ts';
-import { PLAN_HOOK_BODY_CAP_BYTES, carriesPlanBody } from '../server/plan-review-wiring.ts';
+import { PLAN_HOOK_BODY_CAP_BYTES, PLAN_RESULT_BODY_CAP_BYTES, carriesPlanBody } from '../server/plan-review-wiring.ts';
 import type { Session } from '../session/sessions.ts';
 import { boundPort, closeServer, listenOnLoopback } from './helpers/http-server.ts';
 import type { Backend } from './helpers/lanes.ts';
@@ -48,6 +48,32 @@ async function postHook(event: string, body: unknown): Promise<Response> {
     body: typeof body === 'string' ? body : JSON.stringify(body),
     headers: { 'content-type': 'application/json' },
   });
+}
+
+async function releasePlanHold(): Promise<void> {
+  const lane = ctx().backend.getLane('plan-review');
+  if (!lane) throw new Error('the plan review lane is off');
+  for (let attempt = 0; attempt < 400; attempt++) {
+    const result = await lane.readPlanRevision(SESSION_ID, {});
+    const open = result?.reviews.find((review) => review.state === 'open');
+    if (open?.openRevision) {
+      lane.decide(SESSION_ID, {
+        id: SESSION_ID,
+        agentId: open.agentId,
+        revision: open.openRevision.revision,
+        decision: 'terminal',
+      });
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error('the plan request never opened a held reply');
+}
+
+async function postPlanHook(body: unknown): Promise<Response> {
+  const pending = postHook('permissionrequest-plan', body);
+  await releasePlanHold();
+  return pending;
 }
 
 function exitPlanModeBody(plan: string, agentId?: string) {
@@ -98,11 +124,11 @@ test.after(async () => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-test('a plan request is stored as one revision and answered with no decision', async () => {
-  const response = await postHook('permissionrequest-plan', exitPlanModeBody('# Ship it\n\nthe body'));
+test('a plan request is stored as one revision and a terminal decision answers it with no hook decision', async () => {
+  const response = await postPlanHook(exitPlanModeBody('# Ship it\n\nthe body'));
   assert.equal(response.status, 200);
   const body = await response.json();
-  assert.equal(Object.hasOwn(body, 'decision'), false, 'M1 never decides for the operator');
+  assert.equal(Object.hasOwn(body, 'hookSpecificOutput'), false, 'answer in terminal decides nothing for the agent');
   assert.equal(body.ok, true);
 
   const lines = planLines();
@@ -120,7 +146,7 @@ test('hasPlan reaches the session snapshot without a filesystem check on the ren
 });
 
 test('a resubmitted plan appends the next revision on the same review', async () => {
-  await postHook('permissionrequest-plan', exitPlanModeBody('# Ship it, revised'));
+  await postPlanHook(exitPlanModeBody('# Ship it, revised'));
   const lines = planLines();
   assert.equal(lines.length, 2);
   assert.equal(lines[1].revision, 2);
@@ -128,7 +154,7 @@ test('a resubmitted plan appends the next revision on the same review', async ()
 });
 
 test('a subagent plan is stored beside the main review with its own numbering', async () => {
-  await postHook('permissionrequest-plan', exitPlanModeBody('# Explore plan', 'sub-7'));
+  await postPlanHook(exitPlanModeBody('# Explore plan', 'sub-7'));
   const lines = planLines();
   assert.equal(lines.length, 3);
   assert.equal(lines[2].agentId, 'sub-7');
@@ -149,7 +175,7 @@ test('a plan over the raised cap is refused and logged, and the server survives'
 
 test('a plan between the old 64 KB cap and the raised cap is accepted', async () => {
   const plan = `# Big plan\n${'y'.repeat(200 * 1024)}`;
-  const response = await postHook('permissionrequest-plan', exitPlanModeBody(plan));
+  const response = await postPlanHook(exitPlanModeBody(plan));
   assert.equal(response.status, 200);
   const lines = planLines();
   assert.equal(lines.length, 4);
@@ -187,11 +213,49 @@ test('an event that carries no plan keeps the 64 KB cap', async () => {
   assert.equal(after.status, 200, 'the route still answers after the aborted request');
 });
 
-test('the raised cap belongs to the plan lane and covers only the events that carry a plan', () => {
+test('the raised cap belongs to the plan lane and covers only the segments that carry a plan', () => {
   assert.equal(PLAN_HOOK_BODY_CAP_BYTES, 512 * 1024);
   assert.equal(carriesPlanBody('permissionrequest-plan'), true);
+  assert.equal(carriesPlanBody('posttooluse-plan'), true, 'the approved plan arrives twice in one plan result body');
   assert.equal(carriesPlanBody('PermissionRequest'), true);
+  assert.equal(carriesPlanBody('PostToolUse'), false, 'the shared tool result route never carries a plan');
   assert.equal(carriesPlanBody('stop'), false);
+  assert.equal(
+    PLAN_RESULT_BODY_CAP_BYTES,
+    2 * PLAN_HOOK_BODY_CAP_BYTES,
+    'the result segment carries the plan in tool_input and in tool_response',
+  );
+});
+
+test('a plan the request cap accepted still clears the result cap once the result carries it twice', async () => {
+  const plan = `# Big plan\n${'y'.repeat(300 * 1024)}`;
+  const body = JSON.stringify({
+    tool_name: 'ExitPlanMode',
+    tool_input: { plan, planFilePath: '/plans/session.md' },
+    tool_response: { plan },
+  });
+  assert.ok(
+    Buffer.byteLength(body) > PLAN_HOOK_BODY_CAP_BYTES,
+    'the doubled result of an accepted plan is over the request cap',
+  );
+  const approved = await postHook('posttooluse-plan', body);
+  assert.equal(approved.status, 200, 'a terminal approval of an accepted plan always reaches the lane');
+});
+
+test('the shared PostToolUse route keeps the 64 KB cap that only the plan segment raises', async () => {
+  const sharedRouteOutcome: number | string = await postHook('PostToolUse', {
+    tool_name: 'Read',
+    tool_response: { content: 'q'.repeat(100 * 1024) },
+  }).then((response) => response.status).catch(() => 'destroyed');
+  assert.notEqual(sharedRouteOutcome, 200, 'a wakeup or pack read body over 64 KB is still refused');
+
+  const plan = `# Big plan\n${'y'.repeat(200 * 1024)}`;
+  const approved = await postHook('posttooluse-plan', {
+    tool_name: 'ExitPlanMode',
+    tool_input: { plan, planFilePath: '/plans/session.md' },
+    tool_response: { plan },
+  });
+  assert.equal(approved.status, 200, 'the plan segment carries the plan the shared route no longer may');
 });
 
 test('a disabled plan lane leaves the 64 KB cap on the permission request route', async () => {
@@ -257,8 +321,9 @@ test('a plan whose multibyte character straddles two socket reads is stored inta
   assert.ok(charStart > 0, 'the multibyte character is in the request body');
 
   const before = planLines().length;
-  const status = await postHookSplitAcross('permissionrequest-plan', body, charStart + 1);
-  assert.equal(status, 200);
+  const pending = postHookSplitAcross('permissionrequest-plan', body, charStart + 1);
+  await releasePlanHold();
+  assert.equal(await pending, 200);
 
   const lines = planLines();
   assert.equal(lines.length, before + 1);

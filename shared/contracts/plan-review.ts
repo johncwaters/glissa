@@ -1,7 +1,9 @@
 import { z } from 'zod';
 
 export const PLAN_TITLE_MAX_CHARS = 120;
+export const PLAN_FEEDBACK_MAX_CHARS = 20000;
 export const PLAN_HOOK_EVENT = 'permissionrequest-plan';
+export const PLAN_RESULT_HOOK_EVENT = 'posttooluse-plan';
 export const PLAN_TOOL_NAME = 'ExitPlanMode';
 
 const HEADING_SCAN_MAX_CHARS = 4096;
@@ -81,6 +83,17 @@ export const PlanRevision = ExitPlanModeRequest.extend({
 export const PLAN_REVIEW_STATE_VALUES = Object.freeze(['open', 'released', 'decided', 'closed'] as const);
 export const PlanReviewStateValue = z.enum(PLAN_REVIEW_STATE_VALUES);
 
+export const PLAN_DECISION_KINDS = Object.freeze(['approve', 'approve-accept-edits', 'revise', 'terminal'] as const);
+export const PlanDecisionKind = z.enum(PLAN_DECISION_KINDS);
+
+export const PlanDecision = z.object({
+  id: z.string().min(1),
+  agentId: z.string().nullable(),
+  revision: z.number().int().positive(),
+  decision: PlanDecisionKind,
+  feedback: z.string().max(PLAN_FEEDBACK_MAX_CHARS).optional(),
+});
+
 export const PlanRevisionSummary = z.object({
   revision: z.number().int().positive(),
   receivedAt: z.number().finite(),
@@ -100,6 +113,7 @@ export const PlanReview = z.object({
   state: PlanReviewStateValue,
   openRevision: PlanReviewOpenRevision.nullable(),
   approvedRevision: z.number().int().positive().nullable(),
+  lastDecision: PlanDecisionKind.nullable(),
 });
 
 export const PlanReviewState = z.object({
@@ -121,6 +135,8 @@ export const PlanChangedPush = z.object({
   revision: z.number().int().positive(),
   receivedAt: z.number().finite(),
   state: PlanReviewStateValue,
+  lastDecision: PlanDecisionKind.nullable(),
+  approvedRevision: z.number().int().positive().nullable(),
   chars: z.number().int().nonnegative(),
   title: z.string(),
   hasPlan: z.boolean(),
@@ -136,6 +152,9 @@ export type ExitPlanModeInput = z.infer<typeof ExitPlanModeInput>;
 export type ExitPlanModeRequest = z.infer<typeof ExitPlanModeRequest>;
 export type PlanRevision = z.infer<typeof PlanRevision>;
 export type PlanReviewStateValue = z.infer<typeof PlanReviewStateValue>;
+export type PlanDecisionKind = z.infer<typeof PlanDecisionKind>;
+export type PlanDecision = z.infer<typeof PlanDecision>;
+export type PlanDecisionRequest = Omit<PlanDecision, 'id'>;
 export type PlanRevisionSummary = z.infer<typeof PlanRevisionSummary>;
 export type PlanReviewOpenRevision = z.infer<typeof PlanReviewOpenRevision>;
 export type PlanReview = z.infer<typeof PlanReview>;

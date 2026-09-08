@@ -47,7 +47,7 @@ const headingPattern = /^ {0,3}(#{1,6})[ \t]+(.*)$/;
 const fencePattern = /^ {0,3}(`{3,}|~{3,})([^`]*)$/;
 const listPattern = /^(\s*)(?:([-+*])|(\d+)[.)])\s+(.+)$/;
 const rulePattern = /^ {0,3}(?:(?:\*\s*){3,}|(?:-\s*){3,}|(?:_\s*){3,})$/;
-const tableDividerPattern = /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/;
+const tableDividerCellPattern = /^:?-{3,}:?$/;
 const fenceLanguagePattern = /^[A-Za-z0-9_+#.-]{1,32}$/;
 
 function withoutClosingHeadingMarks(text: string): string {
@@ -208,6 +208,8 @@ export function planInlineText(nodes: readonly PlanInline[]): string {
   }).join('');
 }
 
+const HEADING_ID_PREFIX = 'plan-h-';
+
 function slugFor(text: string, context: ParseContext) {
   const base = text
     .toLowerCase()
@@ -217,7 +219,15 @@ function slugFor(text: string, context: ParseContext) {
     .replace(/^-+|-+$/g, '') || 'section';
   const count = (context.slugCounts.get(base) ?? 0) + 1;
   context.slugCounts.set(base, count);
-  return count === 1 ? base : `${base}-${count}`;
+  const uniqueBase = count === 1 ? base : `${base}-${count}`;
+  return `${HEADING_ID_PREFIX}${uniqueBase}`;
+}
+
+function isTableDivider(line: string | undefined): boolean {
+  if (typeof line !== 'string' || !line.includes('|')) return false;
+  const cells = splitTableRow(line);
+  if (cells.length < 2) return false;
+  return cells.every((cell) => tableDividerCellPattern.test(cell));
 }
 
 function splitTableRow(line: string) {
@@ -269,7 +279,7 @@ function isBlockStart(lines: readonly string[], index: number) {
   if (line.trim() === '') return true;
   if (headingLine(line) || fencePattern.test(line) || rulePattern.test(line)) return true;
   if (listLine(line) || /^ {0,3}>/.test(line)) return true;
-  return index + 1 < lines.length && line.includes('|') && tableDividerPattern.test(lines[index + 1]);
+  return index + 1 < lines.length && line.includes('|') && isTableDivider(lines[index + 1]);
 }
 
 function parseBlocks(lines: readonly string[], context: ParseContext, depth: number): PlanBlock[] {
@@ -313,7 +323,7 @@ function parseBlocks(lines: readonly string[], context: ParseContext, depth: num
       continue;
     }
 
-    if (index + 1 < lines.length && line.includes('|') && tableDividerPattern.test(lines[index + 1])) {
+    if (index + 1 < lines.length && line.includes('|') && isTableDivider(lines[index + 1])) {
       const header = splitTableRow(line).map(parsePlanInline);
       const rows: PlanInline[][][] = [];
       index += 2;

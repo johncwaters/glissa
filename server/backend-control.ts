@@ -5,6 +5,7 @@ import type { ConfigStore, GlissaConfig, ProjectEntry } from './config-store.ts'
 import { registerControlHandlers } from './control-handlers.ts';
 import type { MillControl } from './control-handlers.ts';
 import type { ReplayLog } from './control-replay-core.ts';
+import type { PlanDecision } from '../shared/contracts/plan-review.ts';
 import type { UpdateJournal } from '../shared/contracts/update-journal.ts';
 import type { UpdateApplyOutcome } from './update-apply.ts';
 import type { UpdateStatus } from './backend-update.ts';
@@ -75,6 +76,7 @@ interface BackendControlDependencies {
     sessionId: string,
     request: { agentId?: string | null; revision?: number | null },
   ) => Promise<PlanReadResult | null>) | null;
+  decidePlanReview: ((sessionId: string, decision: PlanDecision) => string | null) | null;
   serverBuild: () => string;
   logger: Pick<Console, 'warn'>;
 }
@@ -131,6 +133,7 @@ function createBackendControl(dependencies: BackendControlDependencies): void {
     millReport: mill,
     readTracePage: dependencies.readTracePage,
     readPlanRevision: dependencies.readPlanRevision,
+    decidePlanReview: dependencies.decidePlanReview,
   });
 
   const sendLaneSnapshotOnConnect = (

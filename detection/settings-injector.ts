@@ -7,12 +7,14 @@ import { relayPath } from '../server/runtime-paths.ts';
 import { buildRtkHookEntry } from '../session/core/rtk-command.ts';
 import { appendUserHooks } from '../session/core/user-hooks-core.ts';
 import type { UserHook } from '../session/core/user-hooks-core.ts';
-import { PLAN_HOOK_EVENT, PLAN_TOOL_NAME } from '../shared/contracts/plan-review.ts';
+import { PLAN_HOOK_EVENT, PLAN_RESULT_HOOK_EVENT, PLAN_TOOL_NAME } from '../shared/contracts/plan-review.ts';
 import { safePathSegment } from '../shared/paths.ts';
 
 const DEFAULT_BASE_DIR = path.join(os.tmpdir(), 'glissa-hooks');
 const DEFAULT_TIMEOUT_SEC = 5;
-const PLAN_HOOK_TIMEOUT_SEC = DEFAULT_TIMEOUT_SEC;
+const PLAN_HOOK_TIMEOUT_SEC = 86400;
+const PLAN_HOLD_RELEASE_LEAD_SEC = 60;
+const PLAN_HOLD_RELEASE_MS = (PLAN_HOOK_TIMEOUT_SEC - PLAN_HOLD_RELEASE_LEAD_SEC) * 1000;
 
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
@@ -138,13 +140,20 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
       hooks: [{ type: 'http', url: hookUrl(PLAN_HOOK_EVENT), timeout: PLAN_HOOK_TIMEOUT_SEC }],
     });
   }
-  const postToolUse: string[] = [];
-  if (detectScheduledWakeups) postToolUse.push(WAKEUP_TOOL_MATCHER);
-  if (detectPackReads) postToolUse.push(PACK_READ_TOOL_MATCHER);
-  if (planReview) postToolUse.push(PLAN_TOOL_MATCHER);
+  const sharedPostToolUseMatchers: string[] = [];
+  if (detectScheduledWakeups) sharedPostToolUseMatchers.push(WAKEUP_TOOL_MATCHER);
+  if (detectPackReads) sharedPostToolUseMatchers.push(PACK_READ_TOOL_MATCHER);
+  const sharedPostToolUseUrl = hookUrl('PostToolUse');
+  const postToolUse: SettingsHookEntry[] = sharedPostToolUseMatchers
+    .map((matcher) => ({ matcher, hooks: [{ type: 'http', url: sharedPostToolUseUrl, timeout: timeoutSec }] }));
+  if (planReview) {
+    postToolUse.push({
+      matcher: PLAN_TOOL_MATCHER,
+      hooks: [{ type: 'http', url: hookUrl(PLAN_RESULT_HOOK_EVENT), timeout: timeoutSec }],
+    });
+  }
   if (postToolUse.length > 0) {
-    const url = hookUrl('PostToolUse');
-    hooks.PostToolUse = postToolUse.map((matcher) => ({ matcher, hooks: [{ type: 'http', url, timeout: timeoutSec }] }));
+    hooks.PostToolUse = postToolUse;
   }
   const preToolUse: SettingsHookEntry[] = [];
   if (observeToolCalls) {
@@ -278,6 +287,7 @@ export {
   DEFAULT_BASE_DIR,
   DEFAULT_TIMEOUT_SEC,
   PLAN_HOOK_TIMEOUT_SEC,
+  PLAN_HOLD_RELEASE_MS,
   PLAN_TOOL_MATCHER,
   DIR_MODE,
   FILE_MODE,

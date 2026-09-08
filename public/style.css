@@ -4816,11 +4816,11 @@ html[data-layout="phone"] .trace-row-pre { max-height: none; font-size: 12px; }
   background: var(--bg-header);
 }
 
+.plan-feedback-input { width: 100%; min-height: 140px; resize: vertical; line-height: 1.5; }
 .plan-status { flex: 1 1 auto; color: var(--text-muted); font-size: 10px; line-height: 1.4; }
 .plan-actions { display: flex; align-items: center; gap: 6px; }
 .plan-action { border-color: var(--border); color: var(--text-head); }
 .plan-action:disabled { cursor: default; opacity: 0.42; }
-html[data-layout="phone"] .phone-terminal:has(.session-card[data-face="plan"]) .phone-key-strip { display: none; }
 
 @container (max-width: 700px) {
   .plan-head { flex-wrap: wrap; }
@@ -6542,6 +6542,7 @@ html[data-layout="phone"] .phone-shell:not([data-keyboard="open"]) .phone-key-st
 html[data-layout="phone"] .phone-shell[data-keyboard="open"] .phone-key-strip:not([hidden]) {
   display: flex;
 }
+html[data-layout="phone"] .phone-terminal:has(.session-card[data-face="plan"]) .phone-key-strip { display: none; }
 .phone-key-strip[hidden] { display: none; }
 .phone-key {
   flex: 1 1 0;

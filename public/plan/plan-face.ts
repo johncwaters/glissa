@@ -1,8 +1,15 @@
-import type { PlanResponseFrame, PlanReviewState, PlanRevisionBody } from '#shared/contracts/plan-review.ts';
+import type {
+  PlanDecisionKind,
+  PlanDecisionRequest,
+  PlanResponseFrame,
+  PlanReviewState,
+  PlanRevisionBody,
+} from '#shared/contracts/plan-review.ts';
 import { el } from '../dom-helpers.ts';
 import { parsePlanMarkdown, planInlineText } from './plan-markdown-core.ts';
 import { renderPlanBlocks } from './plan-render.ts';
-import { createPlanViewModel } from './plan-view-core.ts';
+import { createPlanViewModel, openRevisionFor } from './plan-view-core.ts';
+import type { PlanActionKind } from './plan-view-core.ts';
 
 export type PlanResponse = PlanResponseFrame;
 
@@ -11,11 +18,19 @@ export interface PlanFaceUpdate {
   response?: PlanResponse;
   isConnected?: boolean;
   requestFailed?: boolean;
+  decisionRefused?: boolean;
 }
 
 export interface PlanFaceDeps {
   requestPlan: (id: string, agentId: string | null, revision?: number) => boolean;
   showTerminal: () => void;
+  sendDecision: (id: string, request: PlanDecisionRequest) => boolean;
+  promptFeedback: (onSubmit: (feedback: string) => void) => void;
+}
+
+interface DecisionTarget {
+  agentId: string | null;
+  revision: number | null;
 }
 
 const MAX_CACHED_BODIES_PER_SESSION = 12;
@@ -86,6 +101,7 @@ export function createPlanFace(deps: PlanFaceDeps) {
   let isConnected = true;
   let lastRequestKey = '';
   let failedRequestKey = '';
+  let isDecisionInFlight = false;
 
   function scrollToHeading(id: string) {
     const heading = readingColumn.querySelector<HTMLElement>(`#${CSS.escape(id)}`);
@@ -101,6 +117,35 @@ export function createPlanFace(deps: PlanFaceDeps) {
 
   function requestKey() {
     return `${sessionId ?? ''}:${selectedAgentId ?? 'main'}:${selectedRevision ?? 'latest'}`;
+  }
+
+  function refreshReviewIndex() {
+    if (!sessionId || root.hidden) return;
+    if (lastRequestKey === requestKey()) return;
+    deps.requestPlan(sessionId, selectedAgentId, selectedRevision ?? undefined);
+  }
+
+  function submitDecision(decision: PlanDecisionKind, target: DecisionTarget, feedback?: string) {
+    if (!sessionId || target.revision === null || isDecisionInFlight) return;
+    const request: PlanDecisionRequest = {
+      agentId: target.agentId,
+      revision: target.revision,
+      decision,
+      ...(feedback === undefined ? {} : { feedback }),
+    };
+    if (!deps.sendDecision(sessionId, request)) return;
+    isDecisionInFlight = true;
+    render();
+  }
+
+  function actOn(kind: PlanActionKind) {
+    if (kind === 'edit') return;
+    const readRevision: DecisionTarget = { agentId: selectedAgentId, revision: selectedRevision };
+    if (kind !== 'revise') {
+      submitDecision(kind, readRevision);
+      return;
+    }
+    deps.promptFeedback((feedback) => submitDecision('revise', readRevision, feedback));
   }
 
   function requestSelectedBody() {
@@ -136,7 +181,14 @@ export function createPlanFace(deps: PlanFaceDeps) {
     selectedAgentId = selection.selectedAgentId;
     selectedRevision = selection.selectedRevision;
     const body = bodyFromCache(sessionId, selectedAgentId, selectedRevision);
-    const model = createPlanViewModel({ state, selectedAgentId, selectedRevision, body, isConnected });
+    const model = createPlanViewModel({
+      state,
+      selectedAgentId,
+      selectedRevision,
+      body,
+      isConnected,
+      isDecisionInFlight,
+    });
 
     tabs.replaceChildren();
     for (const tab of model.tabs) {
@@ -170,6 +222,8 @@ export function createPlanFace(deps: PlanFaceDeps) {
       const button = el('button', 'plan-action', action.label);
       button.type = 'button';
       button.disabled = !action.enabled;
+      button.dataset.decision = action.kind;
+      button.addEventListener('click', () => actOn(action.kind));
       actions.append(button);
     }
 
@@ -185,11 +239,13 @@ export function createPlanFace(deps: PlanFaceDeps) {
   }
 
   function show(id: string) {
+    if (id !== sessionId) isDecisionInFlight = false;
     sessionId = id;
     root.hidden = false;
     lastRequestKey = '';
     failedRequestKey = '';
     render();
+    refreshReviewIndex();
   }
 
   function hide() {
@@ -197,17 +253,28 @@ export function createPlanFace(deps: PlanFaceDeps) {
   }
 
   function update(next: PlanFaceUpdate) {
-    if (next.state) state = next.state;
+    let hasReconnected = false;
+    if (next.state) {
+      const reopenedRevision = openRevisionFor(next.state, selectedAgentId);
+      if (reopenedRevision !== null && reopenedRevision !== openRevisionFor(state, selectedAgentId)) {
+        selectedRevision = reopenedRevision;
+      }
+      state = next.state;
+      isDecisionInFlight = false;
+    }
+    if (next.decisionRefused) isDecisionInFlight = false;
     if (typeof next.isConnected === 'boolean') {
-      const hasReconnected = next.isConnected && !isConnected;
+      hasReconnected = next.isConnected && !isConnected;
       isConnected = next.isConnected;
       if (hasReconnected) {
         lastRequestKey = '';
         failedRequestKey = '';
+        isDecisionInFlight = false;
       }
     }
     if (next.requestFailed) failedRequestKey = lastRequestKey;
     if (next.response) {
+      isDecisionInFlight = false;
       state = { reviews: next.response.reviews };
       const body = next.response.body;
       if (!body) failedRequestKey = lastRequestKey;
@@ -220,6 +287,7 @@ export function createPlanFace(deps: PlanFaceDeps) {
       }
     }
     if (!root.hidden) render();
+    if (hasReconnected || next.decisionRefused) refreshReviewIndex();
   }
 
   return { el: root, show, hide, update };

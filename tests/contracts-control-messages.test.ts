@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { ClientMessage, ServerMessage } from '../shared/contracts/index.ts';
+import { PLAN_FEEDBACK_MAX_CHARS, PlanDecision } from '../shared/contracts/plan-review.ts';
 import { STATES } from '../shared/states.ts';
 import { REFRESHABLE_TYPES } from '../server/core/control-send-core.ts';
 import { connectControl, controlDeps, createControlServer } from './helpers/control-harness.ts';
@@ -67,6 +68,7 @@ const PLAN_REVIEW = {
   state: 'decided' as const,
   openRevision: null,
   approvedRevision: 1,
+  lastDecision: 'approve' as const,
 };
 const SESSION = {
   id: 'session-1',
@@ -119,7 +121,7 @@ const REAL_SERVER_PAYLOADS: ServerPayload[] = [
   { type: 'debug-state-response', id: 'session-1', payload: { state: STATES.RUNNING } },
   { type: 'session-trace-response', id: 'session-1', records: [], start: 0, next: 0, reset: false, path: '/traces/session-1.jsonl' },
   { type: 'session-trace-changed', id: 'session-1' },
-  { type: 'session-plan-changed', id: 'session-1', agentId: null, agentType: null, revision: 2, receivedAt: NOW, state: 'open', chars: 8454, title: 'Shrink the large owned files', hasPlan: true },
+  { type: 'session-plan-changed', id: 'session-1', agentId: null, agentType: null, revision: 2, receivedAt: NOW, state: 'open', lastDecision: null, approvedRevision: null, chars: 8454, title: 'Shrink the large owned files', hasPlan: true },
   { type: 'session-plan-response', id: 'session-1', reviews: [PLAN_REVIEW], body: { agentId: 'agent-9', revision: 2, plan: '# Shrink the large owned files', planFilePath: '/home/u/.claude/plans/a.md', receivedAt: NOW } },
   { type: 'notify', session: 'session-1', category: 'complete', message: 'finished', escalationCount: 0 },
   {
@@ -237,7 +239,7 @@ test('a plan summary push never carries the plan body but does carry who wrote i
   assert.ok(summaryArm);
   assert.deepEqual(Object.keys(summaryArm.shape).includes('plan'), false);
   assert.equal(REFRESHABLE_TYPES.has('session-plan-changed'), true);
-  const summary = { type: 'session-plan-changed', id: 'session-1', agentId: 'agent-9', agentType: 'Explore', revision: 1, receivedAt: NOW, state: 'open', chars: 12, title: 'Explore', hasPlan: true };
+  const summary = { type: 'session-plan-changed', id: 'session-1', agentId: 'agent-9', agentType: 'Explore', revision: 1, receivedAt: NOW, state: 'open', lastDecision: null, approvedRevision: null, chars: 12, title: 'Explore', hasPlan: true };
   assert.deepEqual(ServerMessage.parse(summary), summary);
   const { agentType: _agentType, ...withoutAgentType } = summary;
   assert.equal(ServerMessage.safeParse(withoutAgentType).success, false);
@@ -253,6 +255,38 @@ test('a plan response carries the whole review index, and its body is present or
     type: 'session-plan-response', id: 'session-1', reviews: [PLAN_REVIEW],
     body: { agentId: null, revision: 1, plan: '# Ship it', receivedAt: NOW },
   }).success, false);
+});
+
+test('the plan decision wire shape is the lane schema, so one edit cannot leave the two disagreeing', () => {
+  const decisionArm = ClientMessage.options.find((option) => option.shape.type.value === 'plan-decision');
+  assert.ok(decisionArm);
+  const { type: _type, ...wireShape } = decisionArm.shape;
+  assert.deepEqual(Object.keys(wireShape).sort(), Object.keys(PlanDecision.shape).sort());
+  assert.equal(ClientMessage.safeParse({ type: 'plan-decision', id: 'session-1', agentId: null, revision: 1, decision: 'approve' }).success, true);
+  assert.equal(ClientMessage.safeParse({ type: 'plan-decision', id: 'session-1', agentId: null, revision: 0, decision: 'approve' }).success, false);
+  assert.equal(ClientMessage.safeParse({
+    type: 'plan-decision',
+    id: 'session-1',
+    agentId: null,
+    revision: 1,
+    decision: 'revise',
+    feedback: 'x'.repeat(PLAN_FEEDBACK_MAX_CHARS + 1),
+  }).success, false);
+});
+
+test('both error frames declare the scope and the id the plan face keys on', () => {
+  for (const type of ['error', 'session-error']) {
+    const arm = ServerMessage.options.find((option) => option.shape.type.value === type);
+    assert.ok(arm, type);
+    assert.ok(Object.keys(arm.shape).includes('scope'), type);
+    assert.ok(Object.keys(arm.shape).includes('id'), `${type} routes to a card by id, never through passthrough`);
+  }
+  assert.equal(ServerMessage.parse({ type: 'error', id: 'session-1', message: 'Plan revision not found', scope: 'plan' }).id, 'session-1');
+  assert.equal(ServerMessage.parse({ type: 'error', id: 'session-1', message: 'Plan revision not found', scope: 'plan' }).scope, 'plan');
+  assert.equal(
+    ServerMessage.parse({ type: 'session-error', id: 'session-1', session: 'glissa', message: 'refused', scope: 'plan-decision' }).scope,
+    'plan-decision',
+  );
 });
 
 test('id-only client variants reject the removed session-name fallback', () => {

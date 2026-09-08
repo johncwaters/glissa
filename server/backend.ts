@@ -367,6 +367,7 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     mill,
     readTracePage: traceWiring?.readTracePage ?? null,
     readPlanRevision: laneAssembly.planReview?.readPlanRevision ?? null,
+    decidePlanReview: laneAssembly.planReview?.decide ?? null,
     serverBuild: () => serverBuild,
     logger: console,
   });

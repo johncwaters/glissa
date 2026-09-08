@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { PlanReviewState } from '../shared/contracts/plan-review.ts';
+import type { PlanReview, PlanReviewState } from '../shared/contracts/plan-review.ts';
 import { createPlanViewModel, mergePlanChanged } from '../public/plan/plan-view-core.ts';
-import type { PlanChangedMessage } from '../public/plan/plan-view-core.ts';
+import type { PlanChangedMessage, PlanViewInput } from '../public/plan/plan-view-core.ts';
 
 const state: PlanReviewState = {
   reviews: [
@@ -16,6 +16,7 @@ const state: PlanReviewState = {
       state: 'open',
       openRevision: { revision: 2, since: 20 },
       approvedRevision: null,
+      lastDecision: null,
     },
     {
       agentId: 'agent-1',
@@ -24,6 +25,7 @@ const state: PlanReviewState = {
       state: 'closed',
       openRevision: null,
       approvedRevision: 1,
+      lastDecision: 'approve',
     },
   ],
 };
@@ -41,25 +43,90 @@ test('plan view exposes main and subagent tabs with revision metadata', () => {
     ['Revision 1', 10],
     ['Revision 2', 20],
   ]);
-  assert.equal(view.status, 'Revision 2 of 2, 8.4 KB, waiting for a decision in the terminal');
+  assert.equal(view.status, 'Revision 2 of 2, 8.4 KB, waiting for your decision');
 });
 
-test('M1 action labels are constant and every action stays disabled', () => {
-  const view = createPlanViewModel({
-    state,
-    selectedAgentId: 'agent-1',
+const CONSTANT_LABELS = ['Approve', 'Approve and accept edits', 'Send feedback', 'Answer in terminal', 'Edit plan'];
+
+function viewFor(overrides: Partial<PlanReview>, input: Partial<PlanViewInput> = {}) {
+  const review: PlanReview = {
+    agentId: null,
+    agentType: null,
+    revisions: [{ revision: 1, receivedAt: 10, chars: 100, title: 'First' }],
+    state: 'open',
+    openRevision: { revision: 1, since: 10 },
+    approvedRevision: null,
+    lastDecision: null,
+    ...overrides,
+  };
+  return createPlanViewModel({
+    state: { reviews: [review] },
+    selectedAgentId: null,
     selectedRevision: 1,
     body: 'plan',
     isConnected: true,
+    ...input,
   });
-  assert.deepEqual(view.actions.map((action) => action.label), [
-    'Approve',
-    'Approve and accept edits',
-    'Send feedback',
-    'Answer in terminal',
-    'Edit plan',
-  ]);
+}
+
+test('an open review enables every decision, and Edit plan stays disabled until M3', () => {
+  const view = viewFor({});
+  assert.deepEqual(view.actions.map((action) => action.label), CONSTANT_LABELS);
+  assert.deepEqual(
+    view.actions.filter((action) => action.enabled).map((action) => action.kind),
+    ['approve', 'approve-accept-edits', 'revise', 'terminal'],
+  );
+  assert.equal(view.actions.find((action) => action.kind === 'edit')?.enabled, false);
+});
+
+test('a review that is not open disables every action and says why, with labels unchanged', () => {
+  const cases = [
+    { overrides: { state: 'released' as const }, status: 'Answer in the terminal' },
+    { overrides: { state: 'decided' as const, lastDecision: 'approve' as const }, status: 'Approved' },
+    { overrides: { state: 'decided' as const, lastDecision: 'approve-accept-edits' as const }, status: 'Approved' },
+    { overrides: { state: 'decided' as const, lastDecision: 'revise' as const }, status: 'Feedback sent, waiting for the next revision' },
+    { overrides: { state: 'closed' as const }, status: 'Closed' },
+    { overrides: { state: 'closed' as const, approvedRevision: 1 }, status: 'Approved' },
+  ];
+  for (const { overrides, status } of cases) {
+    const view = viewFor({ openRevision: null, ...overrides });
+    assert.deepEqual(view.actions.map((action) => action.label), CONSTANT_LABELS, 'labels never change with state');
+    assert.equal(view.actions.every((action) => action.enabled === false), true, `${overrides.state} disables every action`);
+    assert.equal(view.status, `Revision 1 of 1, 4 B, ${status}`);
+  }
+});
+
+test('a revision the open one has moved past disables every action, so no click can name it', () => {
+  const view = viewFor(
+    {
+      revisions: [
+        { revision: 1, receivedAt: 10, chars: 100, title: 'First' },
+        { revision: 2, receivedAt: 20, chars: 100, title: 'Second' },
+      ],
+      openRevision: { revision: 2, since: 20 },
+    },
+    { selectedRevision: 1 },
+  );
+  assert.deepEqual(view.actions.map((action) => action.label), CONSTANT_LABELS, 'labels never change with selection');
   assert.equal(view.actions.every((action) => action.enabled === false), true);
+});
+
+test('an open revision whose body has not loaded disables every action, so no click approves unread bytes', () => {
+  const view = viewFor({}, { body: null });
+  assert.equal(view.actions.every((action) => action.enabled === false), true);
+  assert.equal(view.status, 'Revision 1 of 1, 100 B, loading');
+});
+
+test('a decision in flight disables every action and says so beside them', () => {
+  const view = viewFor({}, { isDecisionInFlight: true });
+  assert.equal(view.actions.every((action) => action.enabled === false), true);
+  assert.equal(view.status, 'Revision 1 of 1, 4 B, sending your decision');
+});
+
+test('a disconnected socket disables every action on an open review', () => {
+  const view = viewFor({}, { isConnected: false });
+  assert.equal(view.actions.every((action) => action.enabled === false), true);
+  assert.equal(view.status, 'Revision 1 of 1, 4 B, disconnected');
 });
 
 function planChanged(overrides: Partial<PlanChangedMessage> = {}): PlanChangedMessage {
@@ -70,6 +137,8 @@ function planChanged(overrides: Partial<PlanChangedMessage> = {}): PlanChangedMe
     revision: 1,
     receivedAt: 10,
     state: 'open',
+    lastDecision: null,
+    approvedRevision: null,
     chars: 100,
     title: 'First',
     hasPlan: true,
@@ -92,12 +161,11 @@ test('summaries that arrive out of order are ordered by revision, not arrival', 
   assert.deepEqual(merged.reviews[0].openRevision, { revision: 2, since: 20 });
 });
 
-test('a subagent summary lands beside the main review and carries its approved revision forward', () => {
+test('a subagent summary lands beside the main review and the close push carries the approved revision', () => {
   const opened = mergePlanChanged({ reviews: [] }, planChanged());
-  const approved = { reviews: [{ ...opened.reviews[0], approvedRevision: 1 }] };
-  const withSubagent = mergePlanChanged(approved, planChanged({ agentId: 'agent-1', agentType: 'Explore' }));
-  const closedMain = mergePlanChanged(withSubagent, planChanged({ state: 'closed' }));
-  assert.deepEqual(closedMain.reviews.map((review) => review.agentId), ['agent-1', null]);
+  const withSubagent = mergePlanChanged(opened, planChanged({ agentId: 'agent-1', agentType: 'Explore' }));
+  const closedMain = mergePlanChanged(withSubagent, planChanged({ state: 'closed', approvedRevision: 1 }));
+  assert.deepEqual(closedMain.reviews.map((review) => review.agentId), [null, 'agent-1'], 'an updated review keeps its tab position');
   assert.equal(closedMain.reviews.find((review) => review.agentId === null)?.approvedRevision, 1);
   assert.equal(closedMain.reviews.find((review) => review.agentId === null)?.openRevision, null);
 });

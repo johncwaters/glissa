@@ -196,6 +196,10 @@ class PlanFaceElement {
     this.listenersByType.set(type, listeners);
   }
 
+  fire(type: string) {
+    for (const listener of this.listenersByType.get(type) ?? []) listener();
+  }
+
   append(...nodes: PlanFaceElement[]) {
     this.children.push(...nodes);
   }
@@ -236,7 +240,30 @@ const exploreReview = {
   state: 'closed' as const,
   openRevision: null,
   approvedRevision: 1,
+  lastDecision: null,
 };
+
+const openMainReview = {
+  agentId: null,
+  agentType: null,
+  revisions: [{ revision: 2, receivedAt: 40, chars: 10, title: 'Ship it' }],
+  state: 'open' as const,
+  openRevision: { revision: 2, since: 40 },
+  approvedRevision: null,
+  lastDecision: null,
+};
+
+function planFaceButtons(root: unknown): PlanFaceElement[] {
+  if (!(root instanceof PlanFaceElement)) return [];
+  const nested = root.children.flatMap(planFaceButtons);
+  return root.tagName === 'button' ? [root, ...nested] : nested;
+}
+
+function decisionButton(root: unknown, kind: string): PlanFaceElement {
+  const found = planFaceButtons(root).find((button) => button.dataset.decision === kind);
+  if (!found) throw new Error(`no ${kind} action button`);
+  return found;
+}
 
 test('a shown plan face asks for the review index, then for the one body the index names', async () => {
   installPlanFaceDocument();
@@ -245,6 +272,8 @@ test('a shown plan face asks for the review index, then for the one body the ind
   const face = createPlanFace({
     requestPlan: (id, agentId, revision) => { requests.push({ id, agentId, revision }); return true; },
     showTerminal: () => {},
+    sendDecision: () => true,
+    promptFeedback: () => {},
   });
 
   face.show('session-index');
@@ -271,6 +300,8 @@ test('a reply with no body stops the request loop and says the revision could no
   const face = createPlanFace({
     requestPlan: (id, agentId, revision) => { requests.push(`${id}:${agentId}:${revision}`); return true; },
     showTerminal: () => {},
+    sendDecision: () => true,
+    promptFeedback: () => {},
   });
 
   face.show('session-null-body');
@@ -295,6 +326,8 @@ test('an error reply and a dropped send both leave the face able to ask again', 
       return true;
     },
     showTerminal: () => {},
+    sendDecision: () => true,
+    promptFeedback: () => {},
   });
 
   face.show('session-offline');
@@ -310,4 +343,286 @@ test('an error reply and a dropped send both leave the face able to ask again', 
   face.update({ requestFailed: true });
   assert.ok(planFaceTexts(face.el).includes('This plan revision could not be loaded'));
   dropPlanBodyCache('session-offline');
+});
+
+test('an approve click sends one decision, then every action disables until the review changes', async () => {
+  installPlanFaceDocument();
+  const { createPlanFace, dropPlanBodyCache } = await import('../public/plan/plan-face.ts');
+  const decisions: { id: string; request: Record<string, unknown> }[] = [];
+  const face = createPlanFace({
+    requestPlan: () => true,
+    showTerminal: () => {},
+    sendDecision: (id, request) => { decisions.push({ id, request: { ...request } }); return true; },
+    promptFeedback: () => {},
+  });
+
+  face.show('session-approve');
+  face.update({
+    response: {
+      id: 'session-approve',
+      reviews: [openMainReview],
+      body: { agentId: null, revision: 2, plan: '# Ship it', planFilePath: '/plans/a.md', receivedAt: 40 },
+    },
+  });
+  assert.equal(decisionButton(face.el, 'approve').disabled, false);
+  assert.equal(decisionButton(face.el, 'edit').disabled, true, 'Edit plan waits for M3');
+
+  decisionButton(face.el, 'approve').fire('click');
+  assert.deepEqual(decisions, [{ id: 'session-approve', request: { agentId: null, revision: 2, decision: 'approve' } }]);
+  for (const kind of ['approve', 'approve-accept-edits', 'revise', 'terminal']) {
+    assert.equal(decisionButton(face.el, kind).disabled, true, `${kind} is disabled while the decision is in flight`);
+  }
+  assert.ok(planFaceTexts(face.el).some((text) => text.includes('sending your decision')));
+  assert.deepEqual(
+    planFaceButtons(face.el).filter((button) => button.dataset.decision).map((button) => button.textContent),
+    ['Approve', 'Approve and accept edits', 'Send feedback', 'Answer in terminal', 'Edit plan'],
+    'labels never change while a decision is in flight',
+  );
+
+  decisionButton(face.el, 'approve').fire('click');
+  assert.equal(decisions.length, 1, 'a second click while one decision is in flight sends nothing');
+
+  face.update({ state: { reviews: [{ ...openMainReview, state: 'decided', openRevision: null, lastDecision: 'approve' }] } });
+  assert.ok(planFaceTexts(face.el).some((text) => text.includes('Approved')));
+  dropPlanBodyCache('session-approve');
+});
+
+test('a revision that reopens the review moves the face onto it, so no decision names the revision it replaced', async () => {
+  installPlanFaceDocument();
+  const { createPlanFace, dropPlanBodyCache } = await import('../public/plan/plan-face.ts');
+  const requests: { agentId: string | null; revision: number | undefined }[] = [];
+  const decisions: Record<string, unknown>[] = [];
+  const face = createPlanFace({
+    requestPlan: (_id, agentId, revision) => { requests.push({ agentId, revision }); return true; },
+    showTerminal: () => {},
+    sendDecision: (_id, request) => { decisions.push({ ...request }); return true; },
+    promptFeedback: () => {},
+  });
+
+  face.show('session-reopen');
+  face.update({
+    response: {
+      id: 'session-reopen',
+      reviews: [openMainReview],
+      body: { agentId: null, revision: 2, plan: '# Ship it', planFilePath: '/plans/a.md', receivedAt: 40 },
+    },
+  });
+  assert.equal(decisionButton(face.el, 'approve').disabled, false);
+
+  const reopened = {
+    ...openMainReview,
+    revisions: [...openMainReview.revisions, { revision: 3, receivedAt: 50, chars: 12, title: 'Ship it again' }],
+    openRevision: { revision: 3, since: 50 },
+  };
+  face.update({ state: { reviews: [reopened] } });
+  assert.deepEqual(requests.at(-1), { agentId: null, revision: 3 }, 'the face asks for the revision that reopened the review');
+  assert.equal(decisionButton(face.el, 'approve').disabled, true, 'nothing is decidable until those bytes are on screen');
+
+  face.update({
+    response: {
+      id: 'session-reopen',
+      reviews: [reopened],
+      body: { agentId: null, revision: 3, plan: '# Ship it again', planFilePath: '/plans/a.md', receivedAt: 50 },
+    },
+  });
+  decisionButton(face.el, 'approve').fire('click');
+  assert.deepEqual(decisions, [{ agentId: null, revision: 3, decision: 'approve' }]);
+  dropPlanBodyCache('session-reopen');
+});
+
+test('Send feedback asks for text through the modal dep and sends it with the revise decision', async () => {
+  installPlanFaceDocument();
+  const { createPlanFace, dropPlanBodyCache } = await import('../public/plan/plan-face.ts');
+  const decisions: Record<string, unknown>[] = [];
+  const feedbackPrompts: ((feedback: string) => void)[] = [];
+  const face = createPlanFace({
+    requestPlan: () => true,
+    showTerminal: () => {},
+    sendDecision: (_id, request) => { decisions.push({ ...request }); return true; },
+    promptFeedback: (onSubmit) => { feedbackPrompts.push(onSubmit); },
+  });
+
+  face.show('session-feedback');
+  face.update({
+    response: {
+      id: 'session-feedback',
+      reviews: [openMainReview],
+      body: { agentId: null, revision: 2, plan: '# Ship it', planFilePath: '/plans/a.md', receivedAt: 40 },
+    },
+  });
+  decisionButton(face.el, 'revise').fire('click');
+  assert.equal(decisions.length, 0, 'nothing is sent until the modal comes back');
+  assert.equal(feedbackPrompts.length, 1, 'the face asked for feedback through the dep');
+  feedbackPrompts[0]('step 2 must print the file');
+  assert.deepEqual(decisions, [{ agentId: null, revision: 2, decision: 'revise', feedback: 'step 2 must print the file' }]);
+  dropPlanBodyCache('session-feedback');
+});
+
+test('feedback names the revision whose button opened the modal, never one that arrived while it was open', async () => {
+  installPlanFaceDocument();
+  const { createPlanFace, dropPlanBodyCache } = await import('../public/plan/plan-face.ts');
+  const decisions: Record<string, unknown>[] = [];
+  const feedbackPrompts: ((feedback: string) => void)[] = [];
+  const face = createPlanFace({
+    requestPlan: () => true,
+    showTerminal: () => {},
+    sendDecision: (_id, request) => { decisions.push({ ...request }); return true; },
+    promptFeedback: (onSubmit) => { feedbackPrompts.push(onSubmit); },
+  });
+
+  face.show('session-modal-race');
+  face.update({
+    response: {
+      id: 'session-modal-race',
+      reviews: [openMainReview],
+      body: { agentId: null, revision: 2, plan: '# Ship it', planFilePath: '/plans/a.md', receivedAt: 40 },
+    },
+  });
+  decisionButton(face.el, 'revise').fire('click');
+
+  face.update({
+    state: {
+      reviews: [{
+        ...openMainReview,
+        revisions: [...openMainReview.revisions, { revision: 3, receivedAt: 50, chars: 12, title: 'Ship it again' }],
+        openRevision: { revision: 3, since: 50 },
+      }],
+    },
+  });
+  feedbackPrompts[0]('step 2 must print the file');
+  assert.deepEqual(
+    decisions,
+    [{ agentId: null, revision: 2, decision: 'revise', feedback: 'step 2 must print the file' }],
+    'the server refuses the read revision rather than accepting feedback on bytes nobody saw',
+  );
+  dropPlanBodyCache('session-modal-race');
+});
+
+test('a refused decision re-enables the actions and pulls the review index again', async () => {
+  installPlanFaceDocument();
+  const { createPlanFace, dropPlanBodyCache } = await import('../public/plan/plan-face.ts');
+  const requests: { agentId: string | null; revision: number | undefined }[] = [];
+  const face = createPlanFace({
+    requestPlan: (_id, agentId, revision) => { requests.push({ agentId, revision }); return true; },
+    showTerminal: () => {},
+    sendDecision: () => true,
+    promptFeedback: () => {},
+  });
+
+  face.show('session-refused');
+  face.update({
+    response: {
+      id: 'session-refused',
+      reviews: [openMainReview],
+      body: { agentId: null, revision: 2, plan: '# Ship it', planFilePath: '/plans/a.md', receivedAt: 40 },
+    },
+  });
+  decisionButton(face.el, 'approve').fire('click');
+  const requestsBeforeRefusal = requests.length;
+
+  face.update({ decisionRefused: true });
+  assert.equal(decisionButton(face.el, 'approve').disabled, false, 'a refusal hands the actions back');
+  assert.deepEqual(requests.slice(requestsBeforeRefusal), [{ agentId: null, revision: 2 }]);
+  dropPlanBodyCache('session-refused');
+});
+
+test('showing the face and reconnecting both pull the review index, which backpressure may have dropped', async () => {
+  installPlanFaceDocument();
+  const { createPlanFace, dropPlanBodyCache } = await import('../public/plan/plan-face.ts');
+  const requests: { agentId: string | null; revision: number | undefined }[] = [];
+  const face = createPlanFace({
+    requestPlan: (_id, agentId, revision) => { requests.push({ agentId, revision }); return true; },
+    showTerminal: () => {},
+    sendDecision: () => true,
+    promptFeedback: () => {},
+  });
+
+  face.show('session-repair');
+  assert.deepEqual(requests, [{ agentId: null, revision: undefined }], 'one request covers both the body and the index');
+
+  face.update({
+    response: {
+      id: 'session-repair',
+      reviews: [openMainReview],
+      body: { agentId: null, revision: 2, plan: '# Ship it', planFilePath: '/plans/a.md', receivedAt: 40 },
+    },
+  });
+  const requestsAfterBody = requests.length;
+
+  face.show('session-repair');
+  assert.deepEqual(requests.slice(requestsAfterBody), [{ agentId: null, revision: 2 }], 'a cached body still pulls the index');
+
+  face.update({ isConnected: false });
+  face.update({ isConnected: true });
+  assert.deepEqual(requests.slice(requestsAfterBody + 1), [{ agentId: null, revision: 2 }], 'a reconnect pulls the index');
+  dropPlanBodyCache('session-repair');
+});
+
+test('a repair pull carries the selected review, so showing the face again never snaps back to the main plan', async () => {
+  installPlanFaceDocument();
+  const { createPlanFace, dropPlanBodyCache } = await import('../public/plan/plan-face.ts');
+  const requests: { agentId: string | null; revision: number | undefined }[] = [];
+  const face = createPlanFace({
+    requestPlan: (_id, agentId, revision) => { requests.push({ agentId, revision }); return true; },
+    showTerminal: () => {},
+    sendDecision: () => true,
+    promptFeedback: () => {},
+  });
+
+  face.show('session-selected');
+  face.update({
+    response: {
+      id: 'session-selected',
+      reviews: [openMainReview, exploreReview],
+      body: { agentId: 'sub-1', revision: 1, plan: '# Explore plan', planFilePath: '/plans/a.md', receivedAt: 30 },
+    },
+  });
+  const requestsAfterBody = requests.length;
+
+  face.hide();
+  face.show('session-selected');
+  assert.deepEqual(requests.slice(requestsAfterBody), [{ agentId: 'sub-1', revision: 1 }]);
+  dropPlanBodyCache('session-selected');
+});
+
+test('a hidden plan face transfers no plan when the socket reconnects', async () => {
+  installPlanFaceDocument();
+  const { createPlanFace, dropPlanBodyCache } = await import('../public/plan/plan-face.ts');
+  const requests: { agentId: string | null; revision: number | undefined }[] = [];
+  const face = createPlanFace({
+    requestPlan: (_id, agentId, revision) => { requests.push({ agentId, revision }); return true; },
+    showTerminal: () => {},
+    sendDecision: () => true,
+    promptFeedback: () => {},
+  });
+
+  face.show('session-offscreen');
+  face.update({
+    response: {
+      id: 'session-offscreen',
+      reviews: [openMainReview],
+      body: { agentId: null, revision: 2, plan: '# Ship it', planFilePath: '/plans/a.md', receivedAt: 40 },
+    },
+  });
+  const requestsAfterBody = requests.length;
+
+  face.hide();
+  face.update({ isConnected: false });
+  face.update({ isConnected: true });
+  assert.equal(requests.length, requestsAfterBody, 'a card nobody is looking at costs one reconnect nothing');
+
+  face.show('session-offscreen');
+  assert.deepEqual(requests.slice(requestsAfterBody), [{ agentId: null, revision: 2 }], 'showing it pulls the index the reconnect skipped');
+  dropPlanBodyCache('session-offscreen');
+});
+
+test('a plan deep link that cannot open the plan says so', () => {
+  const appSource = fs.readFileSync(new URL('../public/app.ts', import.meta.url), 'utf8');
+  const planHashSource = appSource.slice(
+    appSource.indexOf('function activatePlanHash'),
+    appSource.indexOf('function activateLocationHash'),
+  );
+
+  assert.match(planHashSource, /if \(!showPhonePlan\(sessionId\)\) showErrorToast\('No plan is stored for this session yet'\)/);
+  assert.match(planHashSource, /if \(!openPlanInFocus\(sessionId\)\) showErrorToast\('No plan is stored for this session yet'\)/);
 });

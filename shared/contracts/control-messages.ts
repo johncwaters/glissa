@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PlanChangedPush, PlanResponseFrame } from './plan-review.ts';
+import { PlanChangedPush, PlanDecision, PlanResponseFrame } from './plan-review.ts';
 import { PendingWakeup, SessionSnapshot, SessionState } from './session.ts';
 import { TraceRecord } from './trace.ts';
 import { UpdateChannel, UpdateJournal, UpdateJournalSummary } from './update-journal.ts';
@@ -83,6 +83,7 @@ export const CLIENT_MESSAGE_TYPES = Object.freeze([
   'debug-state',
   'session-trace',
   'session-plan',
+  'plan-decision',
   'shutdown',
   'restart-server',
   'focus-change',
@@ -134,6 +135,7 @@ const clientVariants = [
     agentId: nullableString,
     revision: planRevisionNumber.optional(),
   }),
+  loose('plan-decision', PlanDecision.shape),
   ...idOnlyClientTypes.map((type) => loose(type, { id: sessionId, force: z.unknown().optional() })),
 ] as const;
 
@@ -368,8 +370,8 @@ const serverVariants = [
   }),
   loose('update-status', updateStatusShape),
   loose('update-progress', { journal: UpdateJournal }),
-  loose('error', { message: z.string(), requestId }),
-  loose('session-error', { id: sessionId.optional(), session: z.string(), message: z.string() }),
+  loose('error', { id: sessionId.optional(), message: z.string(), requestId, scope: z.string().optional() }),
+  loose('session-error', { id: sessionId.optional(), session: z.string(), message: z.string(), scope: z.string().optional() }),
   loose('settings', { settings: opaqueObject, requestId }),
   loose('settings-error', { message: z.string(), requestId }),
   loose('settings-updated', { settings: opaqueObject, requestId }),

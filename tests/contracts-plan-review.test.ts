@@ -6,8 +6,11 @@ import path from 'node:path';
 import {
   ExitPlanModeInput,
   parseExitPlanModeHookPayload,
+  PLAN_DECISION_KINDS,
+  PLAN_FEEDBACK_MAX_CHARS,
   PLAN_REVIEW_STATE_VALUES,
   PLAN_TITLE_MAX_CHARS,
+  PlanDecision,
   PlanReview,
   PlanReviewState,
   PlanRevision,
@@ -128,6 +131,7 @@ test('a review summarizes its revisions without ever carrying a body', () => {
     state: 'open',
     openRevision: { revision: 1, since: 2 },
     approvedRevision: null,
+    lastDecision: null,
   });
   assert.deepEqual(Object.keys(review.revisions[0]).includes('plan'), false);
   assert.equal(PlanReviewState.parse({ reviews: [review] }).reviews.length, 1);
@@ -136,4 +140,19 @@ test('a review summarizes its revisions without ever carrying a body', () => {
 
 test('the enumeration pins the four review states', () => {
   assert.deepEqual([...PLAN_REVIEW_STATE_VALUES], ['open', 'released', 'decided', 'closed']);
+});
+
+test('a decision names one revision of one review and one of the four kinds', () => {
+  assert.deepEqual([...PLAN_DECISION_KINDS], ['approve', 'approve-accept-edits', 'revise', 'terminal']);
+  const decision = PlanDecision.parse({ id: 'session-1', agentId: null, revision: 2, decision: 'revise', feedback: 'no' });
+  assert.deepEqual(decision, { id: 'session-1', agentId: null, revision: 2, decision: 'revise', feedback: 'no' });
+  assert.equal(PlanDecision.safeParse({ id: 'session-1', agentId: null, revision: 2, decision: 'approve' }).success, true);
+  assert.equal(PlanDecision.safeParse({ id: 'session-1', agentId: null, revision: 0, decision: 'approve' }).success, false);
+  assert.equal(PlanDecision.safeParse({ id: 'session-1', agentId: null, revision: 2, decision: 'edit' }).success, false);
+  assert.equal(PlanDecision.safeParse({ id: '', agentId: null, revision: 2, decision: 'approve' }).success, false);
+  assert.equal(
+    PlanDecision.safeParse({ id: 'session-1', agentId: null, revision: 2, decision: 'revise', feedback: 'x'.repeat(PLAN_FEEDBACK_MAX_CHARS + 1) }).success,
+    false,
+    'feedback is capped at the boundary, not truncated inside the lane',
+  );
 });

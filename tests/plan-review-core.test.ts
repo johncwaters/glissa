@@ -2,9 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  NO_OPEN_REVIEW,
+  PASS_THROUGH_REPLY,
   agentIdsIn,
   agentKey,
   closedProgress,
+  composeDenyMessage,
+  decisionRefusal,
+  decisionReply,
   entriesForAgent,
   indexEntryFor,
   isPlanHookEvent,
@@ -13,6 +18,8 @@ import {
   nextReviewState,
   nextRevisionNumber,
   planChangedPayload,
+  progressAfterDecision,
+  progressAfterEvent,
   progressAfterPlanToolResult,
   progressAfterRevision,
   reviewFrom,
@@ -102,7 +109,7 @@ test('a review projects only its own agent revisions, in revision order', () => 
     entry({ revision: 1, agentId: 'sub-1', agentType: 'Explore' }),
     entry({ revision: 1, agentType: 'main' }),
   ];
-  const main = reviewFrom(entries, null, { state: 'open', openRevision: { revision: 2, since: 500 }, approvedRevision: null });
+  const main = reviewFrom(entries, null, { state: 'open', openRevision: { revision: 2, since: 500 }, approvedRevision: null, lastDecision: null });
   assert.deepEqual(main.revisions.map((revision) => revision.revision), [1, 2]);
   assert.equal(main.agentType, 'main');
   assert.deepEqual(main.openRevision, { revision: 2, since: 500 });
@@ -126,6 +133,7 @@ test('the changed summary names the agent and the receipt time, and never the pl
     state: 'released',
     openRevision: null,
     approvedRevision: null,
+    lastDecision: 'terminal',
   }, true);
   assert.deepEqual(payload, {
     id: 'session-1',
@@ -134,6 +142,8 @@ test('the changed summary names the agent and the receipt time, and never the pl
     revision: 3,
     receivedAt: 1234,
     state: 'released',
+    lastDecision: 'terminal',
+    approvedRevision: null,
     chars: 42,
     title: 'Ship it',
     hasPlan: true,
@@ -153,36 +163,42 @@ test('the review index lists the main agent first and every subagent once', () =
   assert.deepEqual(agentIdsIn([]), []);
 });
 
-test('a new revision reopens a closed review and releases it, keeping any earlier approval', () => {
-  assert.deepEqual(progressAfterRevision(closedProgress()), {
-    state: 'released',
-    openRevision: null,
+test('a new revision reopens a closed review on that revision, keeping any earlier approval', () => {
+  assert.deepEqual(progressAfterRevision(closedProgress(), { revision: 1, since: 5 }), {
+    state: 'open',
+    openRevision: { revision: 1, since: 5 },
     approvedRevision: null,
+    lastDecision: null,
   });
-  assert.deepEqual(progressAfterRevision({ state: 'open', openRevision: { revision: 1, since: 5 }, approvedRevision: 1 }), {
-    state: 'released',
-    openRevision: null,
+  const decided = { state: 'decided', openRevision: null, approvedRevision: 1, lastDecision: 'revise' } satisfies PlanReviewProgress;
+  assert.deepEqual(progressAfterRevision(decided, { revision: 2, since: 9 }), {
+    state: 'open',
+    openRevision: { revision: 2, since: 9 },
     approvedRevision: 1,
+    lastDecision: null,
   });
 });
 
 test('an ExitPlanMode result approves the newest revision only when its plan is the one stored', () => {
-  const released = { state: 'released', openRevision: null, approvedRevision: null } satisfies PlanReviewProgress;
+  const released = { state: 'released', openRevision: null, approvedRevision: null, lastDecision: null } satisfies PlanReviewProgress;
   const newest = entry({ revision: 4, chars: 12 });
   assert.deepEqual(progressAfterPlanToolResult(released, newest, null), {
     state: 'closed',
     openRevision: null,
     approvedRevision: 4,
+    lastDecision: null,
   });
   assert.deepEqual(progressAfterPlanToolResult(released, newest, 'x'.repeat(12)), {
     state: 'closed',
     openRevision: null,
     approvedRevision: 4,
+    lastDecision: null,
   });
   assert.deepEqual(progressAfterPlanToolResult(released, newest, 'x'.repeat(13)), {
     state: 'closed',
     openRevision: null,
     approvedRevision: null,
+    lastDecision: null,
   });
 });
 
@@ -190,4 +206,93 @@ test('only an ExitPlanMode tool result closes a review', () => {
   assert.equal(isPlanToolResult({ tool_name: 'ExitPlanMode' }), true);
   assert.equal(isPlanToolResult({ tool_name: 'Read' }), false);
   assert.equal(isPlanToolResult(null), false);
+});
+
+function openProgress(revision: number): PlanReviewProgress {
+  return { state: 'open', openRevision: { revision, since: 5 }, approvedRevision: null, lastDecision: null };
+}
+
+test('an allow decides the review and a terminal pass-through only releases it', () => {
+  assert.deepEqual(progressAfterDecision(openProgress(2), 'approve'), {
+    state: 'decided',
+    openRevision: null,
+    approvedRevision: null,
+    lastDecision: 'approve',
+  });
+  assert.deepEqual(progressAfterDecision(openProgress(2), 'revise'), {
+    state: 'decided',
+    openRevision: null,
+    approvedRevision: null,
+    lastDecision: 'revise',
+  });
+  assert.deepEqual(progressAfterDecision(openProgress(2), 'terminal'), {
+    state: 'released',
+    openRevision: null,
+    approvedRevision: null,
+    lastDecision: 'terminal',
+  });
+});
+
+test('every release path clears the open revision and keeps the earlier approval', () => {
+  const open = { state: 'open', openRevision: { revision: 3, since: 5 }, approvedRevision: 2, lastDecision: null } satisfies PlanReviewProgress;
+  assert.deepEqual(progressAfterEvent(open, 'release'), {
+    state: 'released',
+    openRevision: null,
+    approvedRevision: 2,
+    lastDecision: null,
+  });
+  assert.deepEqual(progressAfterEvent(open, 'close'), {
+    state: 'closed',
+    openRevision: null,
+    approvedRevision: 2,
+    lastDecision: null,
+  });
+});
+
+test('a decision is refused unless it names the revision of an open review', () => {
+  assert.equal(decisionRefusal(openProgress(2), 2), null);
+  assert.equal(decisionRefusal(openProgress(2), 1), 'This decision names revision 1, but revision 2 is open');
+  assert.equal(decisionRefusal(closedProgress(), 1), NO_OPEN_REVIEW);
+  assert.equal(decisionRefusal(null, 1), NO_OPEN_REVIEW);
+  assert.equal(
+    decisionRefusal({ state: 'decided', openRevision: null, approvedRevision: null, lastDecision: 'approve' }, 1),
+    NO_OPEN_REVIEW,
+  );
+});
+
+test('each decision composes the hook reply the spike measured, echoing the bytes as received', () => {
+  const held = { plan: '# Ship it\n', planFilePath: '/plans/a.md', revision: 2 };
+  assert.deepEqual(decisionReply('approve', held, ''), {
+    hookSpecificOutput: {
+      hookEventName: 'PermissionRequest',
+      decision: { behavior: 'allow', updatedInput: { plan: '# Ship it\n', planFilePath: '/plans/a.md' } },
+    },
+  });
+  assert.deepEqual(decisionReply('approve-accept-edits', held, ''), {
+    hookSpecificOutput: {
+      hookEventName: 'PermissionRequest',
+      decision: {
+        behavior: 'allow',
+        updatedInput: { plan: '# Ship it\n', planFilePath: '/plans/a.md' },
+        updatedPermissions: [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }],
+      },
+    },
+  });
+  assert.deepEqual(decisionReply('revise', held, 'drop step 2'), {
+    hookSpecificOutput: {
+      hookEventName: 'PermissionRequest',
+      decision: { behavior: 'deny', message: composeDenyMessage({ revision: 2, feedback: 'drop step 2' }) },
+    },
+  });
+  assert.deepEqual(decisionReply('terminal', held, ''), PASS_THROUGH_REPLY);
+  assert.deepEqual(PASS_THROUGH_REPLY, {});
+});
+
+test('the deny message names the revision and carries the operator text verbatim', () => {
+  const message = composeDenyMessage({ revision: 3, feedback: '  step 2 must print the file  ' });
+  assert.equal(message, 'Operator feedback on revision 3:\n\nstep 2 must print the file\n\nRevise the plan and present it again.');
+  assert.equal(
+    composeDenyMessage({ revision: 1, feedback: '   ' }),
+    'Operator feedback on revision 1:\n\nNo detail was given.\n\nRevise the plan and present it again.',
+  );
 });

@@ -77,7 +77,7 @@ test('plan markdown parses the M1 block tree and stable sections', () => {
     'paragraph', 'heading', 'list', 'list', 'code', 'table', 'blockquote', 'rule', 'heading',
   ]);
   const headings = blocks.filter((block) => block.type === 'heading');
-  assert.deepEqual(headings.map((heading) => heading.id), ['build', 'build-2']);
+  assert.deepEqual(headings.map((heading) => heading.id), ['plan-h-build', 'plan-h-build-2']);
   const unordered = blocks.find((block) => block.type === 'list' && !block.ordered);
   assert.equal(unordered?.type, 'list');
   if (unordered?.type !== 'list') throw new Error('Expected an unordered list');
@@ -186,4 +186,24 @@ test('a fenced code info string renders at most one safe language class', async 
   const root = renderPlanBlocks(blocks);
   const codeClasses = Array.from(root.querySelectorAll('code')).map((node) => node.className);
   assert.deepEqual(codeClasses, ['language-js', 'language-plan', '']);
+});
+
+test('a heading id is namespaced so plan text cannot claim a dashboard element id', () => {
+  const blocks = parsePlanMarkdown('# notice-region\n\n## Session Card\n');
+  const headings = blocks.filter((block) => block.type === 'heading');
+  assert.deepEqual(headings.map((heading) => heading.id), ['plan-h-notice-region', 'plan-h-session-card']);
+  assert.equal(headings.every((heading) => heading.id.startsWith('plan-h-')), true);
+});
+
+test('a table divider is recognized in linear time, whatever padding and alignment it carries', () => {
+  const table = ['| a | b |', '| :--- | ---: |', '| 1 | 2 |'].join('\n');
+  assert.equal(parsePlanMarkdown(table)[0]?.type, 'table');
+  assert.equal(parsePlanMarkdown(['a | b', '--- | ---', '1 | 2'].join('\n'))[0]?.type, 'table');
+  assert.equal(parsePlanMarkdown(['| a |', '| --- |', '| 1 |'].join('\n'))[0]?.type, 'paragraph');
+
+  const adversarial = `| a |\n${'|'.repeat(40)}${' '.repeat(40)}x\n`;
+  const startedAt = process.hrtime.bigint();
+  parsePlanMarkdown(adversarial);
+  const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+  assert.ok(elapsedMs < 200, `a divider-shaped line must not backtrack, took ${elapsedMs} ms`);
 });

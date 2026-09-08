@@ -26,6 +26,7 @@ import { execFile } from './child-process-safe.ts';
 import { DEFAULT_AGENT_ID, isKnownAgentId, listAgentIds, getAdapter, commandFor } from '../session/adapters/index.ts';
 import { HOOK_EVENT_CATALOG, ID_RE as HOOK_ID_RE, MAX_TIMEOUT_SEC as HOOK_MAX_TIMEOUT_SEC, normalizeHook, rawStoredHooks, readStoredHooks, removeHook, upsertHook } from '../session/core/user-hooks-core.ts';
 import { describeBuiltinHooks } from '../detection/settings-injector.ts';
+import { PlanDecision } from '../shared/contracts/plan-review.ts';
 import { getRtkPath } from './rtk-resolver.ts';
 import {
   BRANCH_GC_INTERVAL_MS_RANGE,
@@ -143,6 +144,7 @@ interface ControlHandlerDeps {
     sessionId: string,
     request: { agentId?: string | null; revision?: number | null },
   ) => Promise<PlanReadResult | null>) | null;
+  decidePlanReview?: ((sessionId: string, decision: PlanDecision) => string | null) | null;
 }
 
 function errorCode(error: unknown): string | undefined {
@@ -281,11 +283,12 @@ async function runGitForConversationHistory(args: string[], cwd: string): Promis
   return stdout;
 }
 
-function sendError(ws: ControlSocket, message: string, { type = 'error', requestId, id }: { type?: string; requestId?: string | null; id?: string } = {}): void {
+function sendError(ws: ControlSocket, message: string, { type = 'error', requestId, id, scope }: { type?: string; requestId?: string | null; id?: string; scope?: string } = {}): void {
   const payload = {
     type,
     ...(requestId !== undefined ? { requestId } : {}),
     ...(id ? { id } : {}),
+    ...(scope ? { scope } : {}),
     message,
   };
   ws.send(JSON.stringify(payload));
@@ -320,6 +323,7 @@ function requestValidationErrorReply(msg: Record<string, unknown> | null | undef
     'debug-state',
     'session-trace',
     'session-plan',
+    'plan-decision',
     'request-health-snapshot',
   ]);
   if (genericErrorRequests.has(requestType)) return { type: 'error', message };
@@ -387,6 +391,7 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     conversationProjectsDir = claudeProjectsDir(process.env, os.homedir()),
     readTracePage = null,
     readPlanRevision = null,
+    decidePlanReview = null,
   } = deps;
 
   function buildSettingsPayload() {
@@ -1050,16 +1055,40 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     },
     'session-plan':     async (message: ControlRequest, ws: ControlSocket) => {
       const requestedSessionId = String(message.id || '');
-      if (!readPlanRevision) return sendError(ws, 'Plan review is not enabled', { id: requestedSessionId });
+      if (!readPlanRevision) return sendError(ws, 'Plan review is not enabled', { id: requestedSessionId, scope: 'plan' });
       const agentId = typeof message.agentId === 'string' ? message.agentId : null;
       const revision = typeof message.revision === 'number' ? message.revision : null;
       try {
         const result = await readPlanRevision(requestedSessionId, { agentId, revision });
-        if (!result) return sendError(ws, 'Plan revision not found', { id: requestedSessionId });
+        if (!result) return sendError(ws, 'Plan revision not found', { id: requestedSessionId, scope: 'plan' });
         ws.send(JSON.stringify({ type: 'session-plan-response', id: requestedSessionId, ...result }));
       } catch (error) {
-        sendError(ws, `Plan read failed: ${errorMessage(error)}`, { id: requestedSessionId });
+        sendError(ws, `Plan read failed: ${errorMessage(error)}`, { id: requestedSessionId, scope: 'plan' });
       }
+    },
+    'plan-decision':    (message: ControlRequest, ws: ControlSocket) => {
+      const requestedSessionId = String(message.id || '');
+      const refuse = (reason: string) => sendError(ws, reason, { id: requestedSessionId, scope: 'plan-decision' });
+      if (!decidePlanReview) return refuse('Plan review is not enabled');
+      const session = findSession(message);
+      if (!session) return refuse('Session not found');
+      const parsed = PlanDecision.safeParse({
+        id: session.id,
+        agentId: typeof message.agentId === 'string' ? message.agentId : null,
+        revision: message.revision,
+        decision: message.decision,
+        ...(typeof message.feedback === 'string' ? { feedback: message.feedback } : {}),
+      });
+      if (!parsed.success) return refuse('Plan decision refused by the schema');
+      const refusal = decidePlanReview(session.id, parsed.data);
+      if (!refusal) return;
+      ws.send(JSON.stringify({
+        type: 'session-error',
+        id: session.id,
+        scope: 'plan-decision',
+        session: session.name,
+        message: refusal,
+      }));
     },
     'shutdown':         handleShutdown,
     'restart-server':   handleRestart,

@@ -2,6 +2,7 @@ import { PLAN_HOOK_EVENT, PLAN_TOOL_NAME, planTitle } from '../../shared/contrac
 import type {
   ExitPlanModeRequest,
   PlanChangedPush,
+  PlanDecisionKind,
   PlanReview,
   PlanReviewStateValue,
   PlanRevision,
@@ -27,6 +28,7 @@ interface PlanReviewProgress {
   state: PlanReviewStateValue;
   openRevision: { revision: number; since: number } | null;
   approvedRevision: number | null;
+  lastDecision: PlanDecisionKind | null;
 }
 
 type PlanChangedPayload = PlanChangedPush;
@@ -147,23 +149,52 @@ function reviewFrom(
     state: progress.state,
     openRevision: progress.openRevision,
     approvedRevision: progress.approvedRevision,
+    lastDecision: progress.lastDecision,
   };
 }
 
 function closedProgress(): PlanReviewProgress {
-  return { state: 'closed', openRevision: null, approvedRevision: null };
+  return { state: 'closed', openRevision: null, approvedRevision: null, lastDecision: null };
 }
 
 function nextReviewState(state: PlanReviewStateValue, event: PlanReviewEvent): PlanReviewStateValue {
   return REVIEW_TRANSITIONS[state][event] ?? state;
 }
 
-function progressAfterRevision(progress: PlanReviewProgress): PlanReviewProgress {
+function progressAfterRevision(
+  progress: PlanReviewProgress,
+  openRevision: { revision: number; since: number },
+): PlanReviewProgress {
   return {
-    state: nextReviewState(nextReviewState(progress.state, 'revise'), 'release'),
+    state: nextReviewState(progress.state, 'revise'),
+    openRevision,
+    approvedRevision: progress.approvedRevision,
+    lastDecision: null,
+  };
+}
+
+function progressAfterEvent(progress: PlanReviewProgress, event: PlanReviewEvent): PlanReviewProgress {
+  return {
+    state: nextReviewState(progress.state, event),
     openRevision: null,
     approvedRevision: progress.approvedRevision,
+    lastDecision: progress.lastDecision,
   };
+}
+
+function progressAfterDecision(progress: PlanReviewProgress, decision: PlanDecisionKind): PlanReviewProgress {
+  const event: PlanReviewEvent = decision === 'terminal' ? 'release' : 'decide';
+  return { ...progressAfterEvent(progress, event), lastDecision: decision };
+}
+
+const NO_OPEN_REVIEW = 'This plan review is no longer open';
+
+function decisionRefusal(progress: PlanReviewProgress | null, revision: number): string | null {
+  if (!progress || progress.state !== 'open' || !progress.openRevision) return NO_OPEN_REVIEW;
+  if (progress.openRevision.revision !== revision) {
+    return `This decision names revision ${revision}, but revision ${progress.openRevision.revision} is open`;
+  }
+  return null;
 }
 
 function progressAfterPlanToolResult(
@@ -176,6 +207,7 @@ function progressAfterPlanToolResult(
     state: nextReviewState(progress.state, 'close'),
     openRevision: null,
     approvedRevision: approvesNewestRevision ? newest.revision : null,
+    lastDecision: progress.lastDecision,
   };
 }
 
@@ -192,16 +224,63 @@ function planChangedPayload(
     revision: entry.revision,
     receivedAt: entry.receivedAt,
     state: progress.state,
+    lastDecision: progress.lastDecision,
+    approvedRevision: progress.approvedRevision,
     chars: entry.chars,
     title: entry.title,
     hasPlan,
   };
 }
 
+const PASS_THROUGH_REPLY: Record<string, unknown> = Object.freeze({});
+
+function hookDecisionReply(decision: Record<string, unknown>): Record<string, unknown> {
+  return { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision } };
+}
+
+function allowReply(
+  { plan, planFilePath, acceptsEdits }: { plan: string; planFilePath: string; acceptsEdits: boolean },
+): Record<string, unknown> {
+  const decision: Record<string, unknown> = { behavior: 'allow', updatedInput: { plan, planFilePath } };
+  if (acceptsEdits) decision.updatedPermissions = [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }];
+  return hookDecisionReply(decision);
+}
+
+function denyReply(message: string): Record<string, unknown> {
+  return hookDecisionReply({ behavior: 'deny', message });
+}
+
+function composeDenyMessage({ revision, feedback }: { revision: number; feedback: string }): string {
+  const trimmed = feedback.trim();
+  const header = `Operator feedback on revision ${revision}:`;
+  const tail = 'Revise the plan and present it again.';
+  if (trimmed.length === 0) return `${header}\n\nNo detail was given.\n\n${tail}`;
+  return `${header}\n\n${trimmed}\n\n${tail}`;
+}
+
+function decisionReply(
+  decision: PlanDecisionKind,
+  held: { plan: string; planFilePath: string; revision: number },
+  feedback: string,
+): Record<string, unknown> {
+  if (decision === 'terminal') return PASS_THROUGH_REPLY;
+  if (decision === 'revise') return denyReply(composeDenyMessage({ revision: held.revision, feedback }));
+  return allowReply({
+    plan: held.plan,
+    planFilePath: held.planFilePath,
+    acceptsEdits: decision === 'approve-accept-edits',
+  });
+}
+
 export {
+  NO_OPEN_REVIEW,
+  PASS_THROUGH_REPLY,
   agentIdsIn,
   agentKey,
   closedProgress,
+  composeDenyMessage,
+  decisionRefusal,
+  decisionReply,
   entriesForAgent,
   indexEntryFor,
   isPlanHookEvent,
@@ -210,6 +289,8 @@ export {
   nextReviewState,
   nextRevisionNumber,
   planChangedPayload,
+  progressAfterDecision,
+  progressAfterEvent,
   progressAfterPlanToolResult,
   progressAfterRevision,
   reviewFrom,

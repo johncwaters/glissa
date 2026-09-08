@@ -1,9 +1,11 @@
+import type { ServerMessage } from '#shared/contracts/control-messages.ts';
 import type { SessionState } from '#shared/states.ts';
 import { KILLABLE_STATES, RESTARTABLE_STATES, STATES } from '#shared/states.ts';
 import { playAlertSound } from '../alert-sound.ts';
 import { sendControlMsg } from '../control-ws.ts';
 import { el } from '../dom-helpers.ts';
 import { setHealthMonitorVisible } from '../health-monitor.ts';
+import { openPlanFeedbackDialog } from '../plan/plan-feedback-dialog.ts';
 import { createPlanFace, dropPlanBodyCache } from '../plan/plan-face.ts';
 import type { PlanResponse } from '../plan/plan-face.ts';
 import { createPlanHash } from '../plan/plan-link.ts';
@@ -257,6 +259,8 @@ export function createSessionCard(sessionId: unknown, sessionName: unknown, init
   const planFace = createPlanFace({
     requestPlan: (requestedId, agentId, revision) => sendControlMsg({ type: 'session-plan', id: requestedId, agentId, revision }),
     showTerminal: showTerminalFace,
+    sendDecision: (requestedId, request) => sendControlMsg({ type: 'plan-decision', id: requestedId, ...request }),
+    promptFeedback: openPlanFeedbackDialog,
   });
   sessionUi = {
     term: null,
@@ -376,11 +380,16 @@ export function applySessionPlanResponse(response: PlanResponse) {
   updateButtonVisibility(ui);
 }
 
-export function applySessionPlanError(message: unknown) {
-  const sessionId = (message as { id?: unknown } | null)?.id;
-  const ui = findSessionUi(sessionId);
+export function applySessionPlanError(message: ServerMessage) {
+  if (message.type !== 'error' && message.type !== 'session-error') return;
+  if (message.scope !== 'plan' && message.scope !== 'plan-decision') return;
+  const ui = findSessionUi(message.id);
   if (!ui) return;
-  ui.planFace.update({ requestFailed: true });
+  if (message.scope === 'plan') {
+    ui.planFace.update({ requestFailed: true });
+    return;
+  }
+  ui.planFace.update({ decisionRefused: true });
 }
 
 export function applyPlanConnectionState(isConnected: boolean) {

@@ -359,7 +359,7 @@ const messageHandlers = {
   'update-status':      (msg) => { showUpdateBanner(msg); applyRadarUpdate(msg); applySettingsUpdateStatus(msg); },
   'update-progress':    (msg) => applySettingsUpdateProgress(msg.journal),
   'error':              (msg) => { clearSettingsUpdateRequest(); applyTraceError(msg); applySessionPlanError(msg); showErrorToast(msg.message, { persist: true }); },
-  'session-error':      (msg) => showErrorToast(`${msg.session}: ${msg.message}`, { persist: true }),
+  'session-error':      (msg) => { applySessionPlanError(msg); showErrorToast(`${msg.session}: ${msg.message}`, { persist: true }); },
   'settings-updated':   (msg) => { if (msg.settings) { applyTerminalSettings(msg.settings); applySettingsBroadcast(msg.settings); applyVisionsSettings(msg.settings); } },
   'health-snapshot':    (msg) => { if (msg.stats) { applyHealthSnapshot(msg.stats as HealthSnapshot); applyRadarHealth(msg.stats as HealthSnapshot); } },
   'posthog-status':     (msg) => applyPosthogStatus(msg),
@@ -526,7 +526,7 @@ function activatePlanHash() {
     return true;
   }
   activateView('focus', { persist: false });
-  openPlanInFocus(sessionId);
+  if (!openPlanInFocus(sessionId)) showErrorToast('No plan is stored for this session yet');
   return true;
 }
 
