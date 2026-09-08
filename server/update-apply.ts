@@ -295,7 +295,17 @@ function createUpdateApplyLane(dependencies: UpdateApplyDependencies): UpdateApp
         timeoutMs: FETCH_TIMEOUT_MS,
       }));
       const fastForwardProbe = await gitCommand(['merge-base', '--is-ancestor', tree.headSha, status.latestSha]);
-      const fastForward = decideFastForward({ canFastForward: fastForwardProbe.ok });
+      let isTargetAncestorOfHead = false;
+      if (!fastForwardProbe.ok) {
+        const alreadyCheckedOutProbe = await gitCommand([
+          'merge-base', '--is-ancestor', status.latestSha, tree.headSha,
+        ]);
+        isTargetAncestorOfHead = alreadyCheckedOutProbe.ok;
+      }
+      const fastForward = decideFastForward({
+        canFastForward: fastForwardProbe.ok,
+        isTargetAncestorOfHead,
+      });
       if (!fastForward.ok) return failAndClean(fastForward.reason, fastForward.message);
       await runWorkspaceStep('stage', () => dependencies.gitWorkspace.stageDetachedWorktree({
         projectPath: dependencies.packageRoot,

@@ -48,7 +48,12 @@ function argvOf(rest: unknown[]): string[] {
   return Array.isArray(args) ? args.map((arg) => String(arg)) : [];
 }
 
-function fakeGit({ head, tags, throws }: { head?: string; tags?: string; throws?: Error } = {}): RunCommand {
+function fakeGit({ head, tags, throws, isReleaseAncestor }: {
+  head?: string;
+  tags?: string;
+  throws?: Error;
+  isReleaseAncestor?: boolean;
+} = {}): RunCommand {
   return async (_file: string, ...rest: unknown[]) => {
     if (throws) throw throws;
     const args = argvOf(rest);
@@ -59,6 +64,10 @@ function fakeGit({ head, tags, throws }: { head?: string; tags?: string; throws?
     if (args[0] === 'ls-remote' && args[1] === '--tags') {
       if (!tags) throw new Error('could not read from remote repository');
       return { stdout: tags, stderr: '' };
+    }
+    if (args[0] === 'merge-base' && args[1] === '--is-ancestor') {
+      if (isReleaseAncestor === true) return { stdout: '', stderr: '' };
+      throw new Error(isReleaseAncestor === false ? 'not ancestor' : `unexpected git ${args.join(' ')}`);
     }
     throw new Error(`unexpected git ${args.join(' ')}`);
   };
@@ -122,6 +131,63 @@ test('a clone resolves its commit with git rev-parse and reports the clone comma
   assert.equal(statusOf(result).currentSha, SHA_LOCAL);
   assert.equal(statusOf(result).flavor, 'clone');
   assert.equal(statusOf(result).command, 'git pull --ff-only && npm ci && npm run build');
+});
+
+test('a clone descendant of the latest release reports that release as already checked out', async () => {
+  const fixture = makeTempRoot();
+  fs.mkdirSync(path.join(fixture.packageRoot, '.git'));
+  const result = statusOf(await checkForUpdate(baseOptions(fixture, {
+    runCommand: fakeGit({ head: SHA_LOCAL, tags: tagsStdout(), isReleaseAncestor: true }),
+  })));
+  assert.equal(result.updateAvailable, false);
+  assert.equal(result.reason, 'release-already-checked-out');
+});
+
+test('a clone at the latest release reports that release as already checked out', async () => {
+  const fixture = makeTempRoot();
+  fs.mkdirSync(path.join(fixture.packageRoot, '.git'));
+  const result = statusOf(await checkForUpdate(baseOptions(fixture, {
+    runCommand: fakeGit({
+      head: SHA_RELEASE_COMMIT,
+      tags: tagsStdout(),
+      isReleaseAncestor: true,
+    }),
+  })));
+  assert.equal(result.currentSha, SHA_RELEASE_COMMIT);
+  assert.equal(result.updateAvailable, false);
+  assert.equal(result.reason, 'release-already-checked-out');
+});
+
+test('a clone already at the latest release version reports no reason', async () => {
+  const fixture = makeTempRoot();
+  fs.mkdirSync(path.join(fixture.packageRoot, '.git'));
+  const result = statusOf(await checkForUpdate(baseOptions(fixture, {
+    currentVersion: '0.21.0',
+    runCommand: fakeGit({ head: SHA_RELEASE_COMMIT, tags: tagsStdout(), isReleaseAncestor: true }),
+    fetchFn: fakeFetch({ version: '0.21.0' }),
+  })));
+  assert.equal(result.updateAvailable, false);
+  assert.equal(result.reason, null);
+});
+
+test('a clone behind the latest release still reports an available update', async () => {
+  const fixture = makeTempRoot();
+  fs.mkdirSync(path.join(fixture.packageRoot, '.git'));
+  const result = statusOf(await checkForUpdate(baseOptions(fixture, {
+    runCommand: fakeGit({ head: SHA_LOCAL, tags: tagsStdout(), isReleaseAncestor: false }),
+  })));
+  assert.equal(result.updateAvailable, true);
+  assert.equal(result.reason, null);
+});
+
+test('a failed release ancestry probe falls back to the version comparison', async () => {
+  const fixture = makeTempRoot();
+  fs.mkdirSync(path.join(fixture.packageRoot, '.git'));
+  const result = statusOf(await checkForUpdate(baseOptions(fixture, {
+    runCommand: fakeGit({ head: SHA_LOCAL, tags: tagsStdout() }),
+  })));
+  assert.equal(result.updateAvailable, true);
+  assert.equal(result.reason, null);
 });
 
 test('an unresolvable installed commit still compares versions', async () => {

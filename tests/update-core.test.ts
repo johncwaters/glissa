@@ -196,6 +196,67 @@ test('decideUpdateStatus reports updates by version only', () => {
   assert.equal(sameVersionWithDifferentSha.command, CLONE_COMMAND);
 });
 
+test('decideUpdateStatus suppresses a release already contained by a clone checkout', () => {
+  const descendantCheckout = decideUpdateStatus({
+    installedSha: SHA_A,
+    latestSha: SHA_B,
+    currentVersion: '0.20.0',
+    latestVersion: '0.21.0',
+    flavor: 'clone',
+    isLatestReleaseAncestorOfHead: true,
+  });
+  assert.equal(descendantCheckout.updateAvailable, false);
+  assert.equal(descendantCheckout.reason, 'release-already-checked-out');
+
+  const checkoutAtRelease = decideUpdateStatus({
+    installedSha: SHA_B,
+    latestSha: SHA_B,
+    currentVersion: '0.20.0',
+    latestVersion: '0.21.0',
+    flavor: 'clone',
+    isLatestReleaseAncestorOfHead: true,
+  });
+  assert.equal(checkoutAtRelease.updateAvailable, false);
+  assert.equal(checkoutAtRelease.reason, 'release-already-checked-out');
+});
+
+test('decideUpdateStatus reports no reason when the clone is not behind the latest release', () => {
+  const atLatest = decideUpdateStatus({
+    installedSha: SHA_B,
+    latestSha: SHA_B,
+    currentVersion: '0.21.0',
+    latestVersion: '0.21.0',
+    flavor: 'clone',
+    isLatestReleaseAncestorOfHead: true,
+  });
+  assert.equal(atLatest.updateAvailable, false);
+  assert.equal(atLatest.reason, null);
+
+  const aheadOfLatest = decideUpdateStatus({
+    installedSha: SHA_A,
+    latestSha: SHA_B,
+    currentVersion: '0.22.0',
+    latestVersion: '0.21.0',
+    flavor: 'clone',
+    isLatestReleaseAncestorOfHead: true,
+  });
+  assert.equal(aheadOfLatest.updateAvailable, false);
+  assert.equal(aheadOfLatest.reason, null);
+});
+
+test('decideUpdateStatus still reports a release ahead of a clone checkout', () => {
+  const status = decideUpdateStatus({
+    installedSha: SHA_A,
+    latestSha: SHA_B,
+    currentVersion: '0.20.0',
+    latestVersion: '0.21.0',
+    flavor: 'clone',
+    isLatestReleaseAncestorOfHead: false,
+  });
+  assert.equal(status.updateAvailable, true);
+  assert.equal(status.reason, null);
+});
+
 test('decideUpdateStatus reports a main-channel update from the behind count', () => {
   const behind = decideUpdateStatus({
     installedSha: SHA_A,

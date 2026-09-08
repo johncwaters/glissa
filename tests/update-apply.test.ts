@@ -125,6 +125,7 @@ interface HarnessOptions {
   statusBranch?: string | null;
   statusUpstream?: string | null;
   canFastForward?: boolean;
+  isTargetAncestorOfHead?: boolean;
   lockfileChanged?: boolean;
   failStep?: 'fetch' | 'stage' | 'install' | 'build';
   mergeMovedHead?: boolean;
@@ -246,7 +247,10 @@ function makeHarness(options: HarnessOptions = {}): ApplyHarness {
     }
     if (file === 'git' && joined.startsWith('merge-base --is-ancestor')) {
       events.push('ancestry');
-      if (options.canFastForward === false) throw new Error('not ancestor');
+      const isReverseProbe = args[2] === (options.targetSha || TARGET_SHA) && args[3] === HEAD_SHA;
+      if (isReverseProbe && options.isTargetAncestorOfHead === true) return { stdout: '', stderr: '' };
+      if (isReverseProbe) throw new Error('target is not an ancestor');
+      if (options.canFastForward === false) throw new Error('head is not an ancestor');
       return { stdout: '', stderr: '' };
     }
     if (file === 'git' && joined.startsWith('diff --name-only')) {
@@ -357,6 +361,16 @@ test('a target the fetched history cannot reach fails the run with a named reaso
   const outcome = await harness.lane.applyUpdate();
   assert.equal(outcome.reason, 'not-fast-forward');
   assert.equal(harness.lane.getJournal().state, 'failed');
+  assert.equal(harness.commands.some((command) => command.args[0] === 'diff'), false);
+  assert.deepEqual(harness.fileSystem.artifactRenames, []);
+});
+
+test('a target behind HEAD refuses with a restart instruction instead of a divergence error', async () => {
+  const harness = makeHarness({ canFastForward: false, isTargetAncestorOfHead: true });
+  const outcome = await harness.lane.applyUpdate();
+  assert.equal(outcome.reason, 'target-already-checked-out');
+  assert.match(outcome.message, /Restart/);
+  assert.equal(harness.lane.getJournal().reason, 'target-already-checked-out');
   assert.equal(harness.commands.some((command) => command.args[0] === 'diff'), false);
   assert.deepEqual(harness.fileSystem.artifactRenames, []);
 });

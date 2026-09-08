@@ -23,6 +23,7 @@ const GITHUB_LATEST_RELEASE_URL = 'https://api.github.com/repos/johncwaters/glis
 const DEFAULT_TIMEOUT_MS = 8000;
 const GIT_HEAD_TIMEOUT_MS = 3000;
 const LS_REMOTE_TIMEOUT_MS = 5000;
+const RELEASE_ANCESTRY_TIMEOUT_MS = 3000;
 const MAIN_CHANNEL_BUDGET_MS = DEFAULT_TIMEOUT_MS;
 const MAIN_FETCH_TIMEOUT_MS = Math.floor(MAIN_CHANNEL_BUDGET_MS / 2);
 const MAIN_REMOTE_TIP_TIMEOUT_MS = Math.floor(MAIN_CHANNEL_BUDGET_MS / 4);
@@ -274,13 +275,26 @@ function writeCheckState(statePath: string, state: Record<string, unknown>): voi
   }
 }
 
-function finish(
+async function finish(
   installed: InstalledIdentity,
   latestTarget: LatestTarget,
   currentVersion: string | undefined,
   channel: UpdateChannel,
   lastCheckAt: number,
-): UpdateCheckStatus {
+  packageRoot: string,
+  runCommand: RunCommand,
+  signal: AbortSignal,
+): Promise<UpdateCheckStatus> {
+  let isLatestReleaseAncestorOfHead = false;
+  const latestSha = normalizeSha(latestTarget.sha);
+  if (channel === 'release' && installed.flavor === 'clone' && installed.installedSha && latestSha) {
+    const ancestry = await runGitProbe(
+      runCommand,
+      ['merge-base', '--is-ancestor', latestSha, 'HEAD'],
+      { cwd: packageRoot, timeout: RELEASE_ANCESTRY_TIMEOUT_MS, signal },
+    );
+    isLatestReleaseAncestorOfHead = ancestry.ok;
+  }
   return {
     ...decideUpdateStatus({
       installedSha: installed.installedSha,
@@ -291,6 +305,7 @@ function finish(
       channel,
       behindCount: latestTarget.behindCount,
       reason: latestTarget.reason,
+      isLatestReleaseAncestorOfHead,
     }),
     installedBranch: installed.installedBranch,
     upstream: installed.upstream,
@@ -339,7 +354,7 @@ async function checkForUpdate({
     const cacheOutrunByInstall = normalizeSha(cached?.latestSha) !== null
       && normalizeSha(cached?.latestSha) === installed.installedSha;
     if (cached?.channel === updateChannel && !cacheOutrunByInstall && isCheckFresh(cached.lastCheckAt, now, ttlMs)) {
-      return finish(installed, targetFromCache(cached), currentVersion, updateChannel, now);
+      return finish(installed, targetFromCache(cached), currentVersion, updateChannel, now, packageRoot, runCommand, signal);
     }
     signal.throwIfAborted();
     const latestTarget = updateChannel === 'main'
@@ -357,7 +372,7 @@ async function checkForUpdate({
         reason: latestTarget.reason,
       });
     }
-    return finish(installed, latestTarget, currentVersion, updateChannel, now);
+    return finish(installed, latestTarget, currentVersion, updateChannel, now, packageRoot, runCommand, signal);
   } catch {
     return finish(
       installed,
@@ -365,6 +380,9 @@ async function checkForUpdate({
       currentVersion,
       updateChannel,
       now,
+      packageRoot,
+      runCommand,
+      signal,
     );
   } finally {
     clearTimeout(timer);

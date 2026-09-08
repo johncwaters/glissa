@@ -51,6 +51,7 @@ const CHECK_FAILURE_TEXT: Readonly<Record<string, string>> = Object.freeze({
   'main-channel-requires-clone': 'The main channel requires a clone install.',
   'no-branch': 'The last update check found no checked-out branch.',
   'no-upstream': 'The checked-out branch has no upstream.',
+  'release-already-checked-out': 'The checkout already contains the latest release. Restart to run it.',
   'release-check-failed': 'The last release check failed.',
   'remote-tip-unavailable': 'The last update check could not resolve the upstream branch tip.',
   'update-check-failed': 'The last update check failed.',

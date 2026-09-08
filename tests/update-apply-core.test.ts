@@ -75,9 +75,18 @@ test('decidePreflight requests a lockfile check when every guard passes', () => 
   assert.deepEqual(decidePreflight(READY_FACTS), { ok: true, lockfileCheckNeeded: true });
 });
 
-test('decideFastForward refuses a target the fetched history cannot reach', () => {
-  assert.deepEqual(decideFastForward({ canFastForward: true }), { ok: true, lockfileCheckNeeded: true });
-  const refused = decideFastForward({ canFastForward: false });
+test('decideFastForward distinguishes a checked-out target from diverged history', () => {
+  assert.deepEqual(
+    decideFastForward({ canFastForward: true, isTargetAncestorOfHead: false }),
+    { ok: true, lockfileCheckNeeded: true },
+  );
+  const alreadyCheckedOut = decideFastForward({ canFastForward: false, isTargetAncestorOfHead: true });
+  assert.equal(alreadyCheckedOut.ok, false);
+  if (alreadyCheckedOut.ok) throw new Error('the fast-forward check unexpectedly passed');
+  assert.equal(alreadyCheckedOut.reason, 'target-already-checked-out');
+  assert.match(alreadyCheckedOut.message, /Restart/);
+
+  const refused = decideFastForward({ canFastForward: false, isTargetAncestorOfHead: false });
   assert.equal(refused.ok, false);
   if (refused.ok) throw new Error('the fast-forward check unexpectedly passed');
   assert.equal(refused.reason, 'not-fast-forward');

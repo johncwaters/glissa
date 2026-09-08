@@ -152,7 +152,7 @@ function normalizeBehindCount(value: unknown): number | null {
   return count;
 }
 
-function decideUpdateStatus({ installedSha, latestSha: remoteSha, currentVersion, latestVersion, flavor, channel, behindCount, reason }: {
+function decideUpdateStatus({ installedSha, latestSha: remoteSha, currentVersion, latestVersion, flavor, channel, behindCount, reason, isLatestReleaseAncestorOfHead }: {
   installedSha?: unknown;
   latestSha?: unknown;
   currentVersion?: unknown;
@@ -161,27 +161,33 @@ function decideUpdateStatus({ installedSha, latestSha: remoteSha, currentVersion
   channel?: unknown;
   behindCount?: unknown;
   reason?: unknown;
+  isLatestReleaseAncestorOfHead?: unknown;
 } = {}) {
   const currentSha = normalizeSha(installedSha);
   const latestSha = normalizeSha(remoteSha);
   const current = textOrNull(currentVersion);
   const latest = textOrNull(latestVersion);
+  const normalizedFlavor = normalizeFlavor(flavor);
   const normalizedChannel = normalizeUpdateChannel(channel);
   const normalizedBehindCount = normalizeBehindCount(behindCount);
+  const isReleaseAlreadyCheckedOut = normalizedChannel === 'release'
+    && normalizedFlavor === 'clone'
+    && isLatestReleaseAncestorOfHead === true
+    && compareSemver(latest, current) > 0;
   return {
     updateAvailable: normalizedChannel === 'main'
       ? normalizedBehindCount !== null && normalizedBehindCount > 0 && currentSha !== latestSha
-      : compareSemver(latest, current) > 0,
+      : !isReleaseAlreadyCheckedOut && compareSemver(latest, current) > 0,
     current,
     latest,
     currentSha,
     latestSha,
     releaseUrl: buildReleaseUrl(latest),
     command: buildUpdateCommand(flavor, latest),
-    flavor: normalizeFlavor(flavor),
+    flavor: normalizedFlavor,
     channel: normalizedChannel,
     behindCount: normalizedBehindCount,
-    reason: textOrNull(reason),
+    reason: isReleaseAlreadyCheckedOut ? 'release-already-checked-out' : textOrNull(reason),
   };
 }
 

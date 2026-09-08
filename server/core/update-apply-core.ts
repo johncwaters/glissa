@@ -29,6 +29,7 @@ type PreflightRefusalReason =
   | 'checkout-changed'
   | 'missing-target-sha'
   | 'nothing-to-do'
+  | 'target-already-checked-out'
   | 'not-fast-forward'
   | 'already-running'
   | 'already-staged'
@@ -152,8 +153,18 @@ function decidePreflight(facts: PreflightFacts): PreflightDecision {
   return { ok: true, lockfileCheckNeeded: true };
 }
 
-function decideFastForward({ canFastForward }: { canFastForward: boolean }): PreflightDecision {
+function decideFastForward({ canFastForward, isTargetAncestorOfHead }: {
+  canFastForward: boolean;
+  isTargetAncestorOfHead: boolean;
+}): PreflightDecision {
   if (canFastForward) return { ok: true, lockfileCheckNeeded: true };
+  if (isTargetAncestorOfHead) {
+    return {
+      ok: false,
+      reason: 'target-already-checked-out',
+      message: 'The checkout already contains the update target. Restart to run it.',
+    };
+  }
   return { ok: false, reason: 'not-fast-forward', message: 'Update the branch manually because the target is not a fast-forward. Check for updates again.' };
 }
 

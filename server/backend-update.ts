@@ -70,6 +70,13 @@ function createBackendUpdateCheck(dependencies: BackendUpdateDependencies): Back
     recorded: RecordedUpdateStatus,
     journal: UpdateJournal | null | undefined,
   ): UpdateApplyRefusal | null {
+    const alreadyCheckedOut = decideFastForward({
+      canFastForward: false,
+      isTargetAncestorOfHead: recorded.reason === 'release-already-checked-out',
+    });
+    if (!alreadyCheckedOut.ok && alreadyCheckedOut.reason === 'target-already-checked-out') {
+      return { reason: alreadyCheckedOut.reason, message: alreadyCheckedOut.message };
+    }
     const decision = decidePreflight({
       flavor: recorded.flavor,
       platform,
@@ -87,7 +94,10 @@ function createBackendUpdateCheck(dependencies: BackendUpdateDependencies): Back
       restartRequested: dependencies.isRestartRequested?.() === true,
     });
     if (!decision.ok) return { reason: decision.reason, message: decision.message };
-    const fastForward = decideFastForward({ canFastForward: recorded.reason !== 'branch-diverged' });
+    const fastForward = decideFastForward({
+      canFastForward: recorded.reason !== 'branch-diverged',
+      isTargetAncestorOfHead: false,
+    });
     if (fastForward.ok) return null;
     return { reason: fastForward.reason, message: fastForward.message };
   }

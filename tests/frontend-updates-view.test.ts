@@ -119,6 +119,15 @@ test('updateActionAvailability renders the server refusal verbatim and derives n
       status: status({ applyRefusal: { reason: 'already-staged', message: 'Restart to apply the staged update.' } }),
       reason: 'Restart to apply the staged update.',
     },
+    {
+      status: status({
+        applyRefusal: {
+          reason: 'target-already-checked-out',
+          message: 'The checkout already contains the update target. Restart to run it.',
+        },
+      }),
+      reason: 'The checkout already contains the update target. Restart to run it.',
+    },
   ];
   for (const entry of cases) {
     assert.deepEqual(updateActionAvailability({ status: entry.status }).update, { enabled: false, reason: entry.reason });
@@ -268,4 +277,14 @@ test('lastUpdateCheckText explains disabled checks, local config, unknown flavor
   assert.equal(lastUpdateCheckText({ status: status({ flavor: 'unknown' }), relativeTime: '1m ago' }), 'The install flavor is unknown.');
   assert.equal(lastUpdateCheckText({ status: status({ reason: 'update-check-failed' }), relativeTime: '1m ago' }), 'The last update check failed.');
   assert.equal(lastUpdateCheckText({ status: status(), relativeTime: '1m ago' }), '1m ago');
+});
+
+test('lastUpdateCheckText explains when the checkout already contains the release', () => {
+  assert.equal(
+    lastUpdateCheckText({
+      status: status({ reason: 'release-already-checked-out', updateAvailable: false }),
+      relativeTime: '1m ago',
+    }),
+    'The checkout already contains the latest release. Restart to run it.',
+  );
 });
