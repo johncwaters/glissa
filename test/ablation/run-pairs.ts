@@ -25,7 +25,7 @@ import {
 import { createBackend } from '../../server/backend.ts';
 import type { Session } from '../../session/sessions.ts';
 import type { HookSignal } from '../../detection/hook-source.ts';
-import type { MillMetricPack, MillMetricPromptCounts, MillMetricSession } from '../../shared/contracts/mill-metrics.ts';
+import type { MillMetricPromptCounts, MillMetricSession } from '../../shared/contracts/mill-metrics.ts';
 
 type ArmName = 'on' | 'off';
 
@@ -66,7 +66,7 @@ interface ExitOutcome {
 interface ArmResult {
   outcome: string;
   wallMs: number;
-  funnel: { opened: boolean; filesRead: number; prompts: MillMetricPromptCounts };
+  funnel: { prompts: MillMetricPromptCounts };
   execution: {
     timedOut: boolean;
     exitCode: number | null;
@@ -474,14 +474,11 @@ async function runArm({
   if (!executionError && arm.armName === 'on' && !metricRecord) {
     executionError = 'ON funnel record was not persisted';
   }
-  const packRecord: MillMetricPack | null = metricRecord?.packs?.find((pack) => pack.name === PACK_NAME) ?? null;
   const check = runCheckCommand(task.checkCommand, arm.projectDirectory);
   return {
     outcome: armOutcome(executionError, check.passed),
     wallMs: Date.now() - startedAt,
     funnel: {
-      opened: packRecord?.opened === true,
-      filesRead: Number.isInteger(packRecord?.filesRead) ? (packRecord?.filesRead ?? 0) : 0,
       prompts: classifyObservedPrompts(promptPayloads),
     },
     execution: {
@@ -507,8 +504,6 @@ function printArm(taskId: string, seed: number, armName: string, armResult: ArmR
   const label = armName.toUpperCase();
   console.log(
     `  ${taskId} seed=${seed} ${label} ${armResult.outcome.toUpperCase()}`
-      + ` opened=${armResult.funnel.opened}`
-      + ` filesRead=${armResult.funnel.filesRead}`
       + ` prompts=${promptCount(armResult.funnel.prompts)}`
       + ` wallMs=${armResult.wallMs}`,
   );

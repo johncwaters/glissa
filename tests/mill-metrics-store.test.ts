@@ -7,7 +7,6 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { createMillMetricsStore } from '../server/mill-metrics-store.ts';
-import { MAX_PACK_FILES_PER_SESSION } from '../shared/contracts/mill-metrics.ts';
 import type { MillMetricSession } from '../shared/contracts/mill-metrics.ts';
 
 const NOW = Date.parse('2026-08-30T12:00:00Z');
@@ -19,7 +18,6 @@ function record(overrides: Partial<MillMetricSession> = {}): MillMetricSession {
     startedAt: NOW - 1000,
     endedAt: NOW,
     agent: 'claude-code',
-    readDetection: 'available',
     disposition: 'natural',
     finalState: 'DONE',
     tokens: 100,
@@ -30,10 +28,6 @@ function record(overrides: Partial<MillMetricSession> = {}): MillMetricSession {
       name: 'alpha',
       version: 'v1',
       tokenEstimate: 100,
-      filesRead: 1,
-      files: ['rules.md'],
-      filesDropped: 0,
-      opened: true,
     }],
     ...overrides,
   };
@@ -61,34 +55,34 @@ test('closed records round-trip through the durable store', async (t) => {
   assert.deepEqual(reloaded.records(), [record()]);
 });
 
-test('two capped runs of one session fold into a record the next boot can still read', async (t) => {
+test('legacy record keys are stripped while loading', async (t) => {
   const paths = await fixture(t);
-  const filesFor = (prefix: string) => Array.from(
-    { length: MAX_PACK_FILES_PER_SESSION },
-    (_, index) => `${prefix}-${String(index).padStart(4, '0')}.md`,
-  );
-  const runWithFiles = (prefix: string) => record({
-    packs: [{
-      name: 'alpha',
-      version: 'v1',
-      tokenEstimate: 100,
-      filesRead: MAX_PACK_FILES_PER_SESSION,
-      files: filesFor(prefix),
-      filesDropped: 0,
+  const legacyRecord = {
+    ...record(),
+    readDetection: 'available',
+    packs: record().packs.map((pack) => ({
+      ...pack,
+      filesRead: 1,
+      files: ['rules.md'],
+      filesDropped: 2,
       opened: true,
-    }],
-  });
+      measurable: true,
+    })),
+  };
+  await fsp.writeFile(paths.recordsPath, JSON.stringify({
+    version: 1,
+    updatedAt: new Date(NOW).toISOString(),
+    sessions: [legacyRecord],
+  }), 'utf8');
   const store = createMillMetricsStore({ ...paths, retainDays: 90, nowFn: () => NOW });
   await store.load();
-  store.closeSession(runWithFiles('first'));
-  store.closeSession(runWithFiles('second'));
-  await store.whenIdle();
-
-  const reloaded = createMillMetricsStore({ ...paths, retainDays: 90, nowFn: () => NOW });
-  await reloaded.load();
-  assert.equal(reloaded.records().length, 1);
-  assert.equal(reloaded.records()[0].packs[0].files.length, MAX_PACK_FILES_PER_SESSION);
-  assert.equal(reloaded.records()[0].packs[0].filesDropped, MAX_PACK_FILES_PER_SESSION);
+  const loaded = store.records()[0];
+  assert.ok(loaded);
+  assert.deepEqual(loaded, record());
+  assert.equal(Object.hasOwn(loaded, 'readDetection'), false);
+  for (const key of ['filesRead', 'files', 'filesDropped', 'opened', 'measurable']) {
+    assert.equal(Object.hasOwn(loaded.packs[0], key), false);
+  }
 });
 
 test('an unreadable records file starts empty and warns', async (t) => {
@@ -112,15 +106,17 @@ test('appendEvent writes one JSON line per accepted event and whenIdle drains th
   const store = createMillMetricsStore({ ...paths, retainDays: 90, nowFn: () => NOW });
   const delivered = {
     v: 1, kind: 'pack-delivered', ts: NOW, sessionId: 's1', pack: 'alpha', version: 'v1',
-    tokenEstimate: 100, agent: 'claude-code', readDetection: 'available',
+    tokenEstimate: 100, agent: 'claude-code',
   };
-  const read = { v: 1, kind: 'pack-read', ts: NOW, sessionId: 's1', pack: 'alpha', relPath: 'rules.md' };
+  const prompt = {
+    v: 1, kind: 'prompt', ts: NOW, sessionId: 's1', promptClass: 'interruption', state: 'RUNNING',
+  };
   store.appendEvent(delivered);
-  store.appendEvent(read);
+  store.appendEvent(prompt);
   await store.whenIdle();
   const eventPath = path.join(paths.eventsDir, 'events-2026-08-30.jsonl');
   const lines = (await fsp.readFile(eventPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as unknown);
-  assert.deepEqual(lines, [delivered, read]);
+  assert.deepEqual(lines, [delivered, prompt]);
 });
 
 test('invalid event shapes are dropped without throwing and warn once per kind', async (t) => {
@@ -132,11 +128,41 @@ test('invalid event shapes are dropped without throwing and warn once per kind',
     nowFn: () => NOW,
     logger: { warn: (message) => warnings.push(message) },
   });
-  assert.doesNotThrow(() => store.appendEvent({ kind: 'pack-read' }));
-  assert.doesNotThrow(() => store.appendEvent({ kind: 'pack-read' }));
+  assert.doesNotThrow(() => store.appendEvent({ kind: 'prompt' }));
+  assert.doesNotThrow(() => store.appendEvent({ kind: 'prompt' }));
   await store.whenIdle();
   assert.equal(warnings.length, 1);
   assert.equal(fs.existsSync(paths.eventsDir), false);
+});
+
+test('a retired event kind is skipped while the events around it still persist', async (t) => {
+  const paths = await fixture(t);
+  const warnings: string[] = [];
+  const store = createMillMetricsStore({
+    ...paths,
+    retainDays: 90,
+    nowFn: () => NOW,
+    logger: { warn: (message) => warnings.push(message) },
+  });
+  const delivered = {
+    v: 1, kind: 'pack-delivered', ts: NOW, sessionId: 's1', pack: 'alpha', version: 'v1',
+    tokenEstimate: 100, agent: 'claude-code',
+  };
+  const sessionEnd = {
+    v: 1, kind: 'session-end', ts: NOW, sessionId: 's1', disposition: 'natural', finalState: 'DONE',
+    transition: 'task_complete',
+  };
+  store.appendEvent(delivered);
+  store.appendEvent({ v: 1, kind: 'pack-read', ts: NOW, sessionId: 's1', pack: 'alpha', relPath: 'data/notes.md' });
+  store.appendEvent({ v: 1, kind: 'pack-read', ts: NOW, sessionId: 's1', pack: 'alpha', relPath: 'data/other.md' });
+  store.appendEvent(sessionEnd);
+  await store.whenIdle();
+
+  const eventPath = path.join(paths.eventsDir, 'events-2026-08-30.jsonl');
+  const lines = (await fsp.readFile(eventPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as unknown);
+  assert.deepEqual(lines, [delivered, sessionEnd]);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /pack-read/);
 });
 
 test('load prunes only dated event files older than the retention cutoff', async (t) => {
@@ -159,7 +185,7 @@ test('load prunes only dated event files older than the retention cutoff', async
   ]);
 });
 
-test('a record too large for the shape is refused rather than persisted', async (t) => {
+test('an invalid record shape is refused rather than persisted', async (t) => {
   const paths = await fixture(t);
   const warnings: string[] = [];
   const store = createMillMetricsStore({
@@ -171,13 +197,9 @@ test('a record too large for the shape is refused rather than persisted', async 
   await store.load();
   store.closeSession(record({
     packs: [{
-      name: 'alpha',
+      name: '',
       version: 'v1',
       tokenEstimate: 100,
-      filesRead: 1,
-      files: ['x'.repeat(513)],
-      filesDropped: 0,
-      opened: true,
     }],
   }));
   await store.whenIdle();

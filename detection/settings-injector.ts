@@ -50,7 +50,6 @@ export interface BuildHookSettingsOptions {
   timeoutSec?: number;
   permissions?: SessionPermissions | null;
   detectScheduledWakeups?: boolean;
-  detectPackReads?: boolean;
   observeToolCalls?: boolean;
   enableProjectMcp?: boolean;
   rtkPath?: string | null;
@@ -82,7 +81,6 @@ function ensureOwnedDir(dir: string, mode: number): void {
 const HOOK_EVENTS = ['SessionStart', 'SessionEnd', 'UserPromptSubmit', 'Stop', 'Notification', 'PermissionRequest', 'SubagentStart', 'SubagentStop', 'TaskCreated', 'TaskCompleted', 'TeammateIdle'];
 
 const WAKEUP_TOOL_MATCHER = 'ScheduleWakeup|CronCreate|CronDelete';
-const PACK_READ_TOOL_MATCHER = 'Read';
 const PLAN_TOOL_MATCHER = PLAN_TOOL_NAME;
 
 const RELAY_PATH = relayPath('statusline-relay');
@@ -123,7 +121,7 @@ function buildStatuslineCommand(
   return `node ${shellQuote(toForwardSlashes(relayPath))} ${shellQuote(postUrl)} ${shellQuote(encoded)}`;
 }
 
-function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, detectPackReads = false, observeToolCalls = false, enableProjectMcp = false, rtkPath = null, planLimits = false, planReview = false, userSettingsPath = null, relayPath = RELAY_PATH, userHooks = [] }: BuildHookSettingsOptions): HookSettings {
+function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, observeToolCalls = false, enableProjectMcp = false, rtkPath = null, planLimits = false, planReview = false, userSettingsPath = null, relayPath = RELAY_PATH, userHooks = [] }: BuildHookSettingsOptions): HookSettings {
   if (!port || !glissaId || !token) {
     throw new Error('buildHookSettings requires port, glissaId, token');
   }
@@ -142,7 +140,6 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
   }
   const sharedPostToolUseMatchers: string[] = [];
   if (detectScheduledWakeups) sharedPostToolUseMatchers.push(WAKEUP_TOOL_MATCHER);
-  if (detectPackReads) sharedPostToolUseMatchers.push(PACK_READ_TOOL_MATCHER);
   const sharedPostToolUseUrl = hookUrl('PostToolUse');
   const postToolUse: SettingsHookEntry[] = sharedPostToolUseMatchers
     .map((matcher) => ({ matcher, hooks: [{ type: 'http', url: sharedPostToolUseUrl, timeout: timeoutSec }] }));
@@ -190,23 +187,16 @@ function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT
 }
 
 function describeBuiltinHooks(
-  { detectScheduledWakeups = true, detectPackReads = false, observeToolCalls = false, rtkPath = null, planReview = false }:
-    { detectScheduledWakeups?: boolean; detectPackReads?: boolean; observeToolCalls?: boolean; rtkPath?: string | null; planReview?: boolean } = {},
+  { detectScheduledWakeups = true, observeToolCalls = false, rtkPath = null, planReview = false }:
+    { detectScheduledWakeups?: boolean; observeToolCalls?: boolean; rtkPath?: string | null; planReview?: boolean } = {},
 ): { event: string; matcher: string | null; purpose: string }[] {
   const rows = HOOK_EVENTS.map((event) => ({ event, matcher: null as string | null, purpose: 'Status detection: POST to the Glissa hook router' }));
   if (planReview) rows.push({ event: 'PermissionRequest', matcher: PLAN_TOOL_MATCHER, purpose: 'Plan review: POST the plan to the Glissa plan endpoint' });
   if (detectScheduledWakeups) rows.push({ event: 'PostToolUse', matcher: WAKEUP_TOOL_MATCHER, purpose: 'Scheduled wakeup tracking' });
-  if (detectPackReads) rows.push({ event: 'PostToolUse', matcher: PACK_READ_TOOL_MATCHER, purpose: 'Pack read tracking' });
   if (planReview) rows.push({ event: 'PostToolUse', matcher: PLAN_TOOL_MATCHER, purpose: 'Plan review: record the approved plan' });
   if (observeToolCalls) rows.push({ event: 'PreToolUse', matcher: null, purpose: 'Investigation trail: POST every tool call to the Glissa hook router' });
   if (rtkPath) rows.push({ event: 'PreToolUse', matcher: buildRtkHookEntry(rtkPath).matcher, purpose: 'rtk command rewriting' });
   return rows;
-}
-
-function settingsDetectPackReads(settings: HookSettings): boolean {
-  const postToolUse = settings.hooks?.PostToolUse;
-  if (!Array.isArray(postToolUse)) return false;
-  return postToolUse.some((entry) => entry?.matcher === PACK_READ_TOOL_MATCHER);
 }
 
 function writeSessionSettings({ glissaId, token, baseDir = DEFAULT_BASE_DIR, ...rest }: WriteSessionSettingsOptions) {
@@ -225,7 +215,6 @@ function writeSessionSettings({ glissaId, token, baseDir = DEFAULT_BASE_DIR, ...
     settingsPath,
     dir,
     token: tok,
-    packReadHook: settingsDetectPackReads(settings),
     cleanup() {
       try {
         fs.rmSync(dir, { recursive: true, force: true });
@@ -281,9 +270,7 @@ export {
   buildStatuslineCommand,
   readUserStatuslineCommand,
   HOOK_EVENTS,
-  PACK_READ_TOOL_MATCHER,
   WAKEUP_TOOL_MATCHER,
-  settingsDetectPackReads,
   DEFAULT_BASE_DIR,
   DEFAULT_TIMEOUT_SEC,
   PLAN_HOOK_TIMEOUT_SEC,

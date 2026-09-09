@@ -9,7 +9,6 @@ import type { SessionPlanReviewPort } from '../session/sessions.ts';
 import { DEFAULT_CONFIG } from './config-store.ts';
 import type { GlissaConfig, ProjectEntry } from './config-store.ts';
 import { configuredIntegrationBranch } from './core/integration-branch-core.ts';
-import type { MillMetricsPort } from './mill-metrics-wiring.ts';
 import { isMillEnabled, projectVariantSlug } from './core/pack-core.ts';
 import { projectSkipsPermissions } from './core/session-registry-core.ts';
 import { resolveUsageConfig } from './usage-wiring.ts';
@@ -20,7 +19,6 @@ interface SessionFactoryDependencies {
   hookRouter: Pick<HookRouter, 'register' | 'unregister'> | null;
   getHookPort: () => number | null;
   getGitWorkspace: () => GitWorkspace | null;
-  getMillMetricsPort: () => MillMetricsPort | null;
   getPlanReviewPort: () => SessionPlanReviewPort | null;
   rtkPathForConfig: (config: GlissaConfig) => string | null;
   getUserHooks: (projectId: string) => UserHook[];
@@ -58,7 +56,6 @@ function createSessionFactory(dependencies: SessionFactoryDependencies) {
       resumeSessionId: (project.resumeSessionId as string | null | undefined) || null,
       packs: () => (isMillEnabled(dependencies.getConfig()) ? dependencies.listPackNames() : []),
       packVariantSlug: projectVariantSlug(project.path),
-      millMetricsPort: dependencies.getMillMetricsPort(),
       planReviewPort: dependencies.getPlanReviewPort(),
       planLimits: planLimitsEnabled(config),
       getUserHooks: () => dependencies.getUserHooks(project.id),

@@ -870,7 +870,6 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
   function builtinHooksReport() {
     return describeBuiltinHooks({
       detectScheduledWakeups: config.detectScheduledWakeups !== false,
-      detectPackReads: true,
       rtkPath: config.rtk ? resolveRtkPath() : null,
       planReview: config.planReview?.enabled !== false,
     });

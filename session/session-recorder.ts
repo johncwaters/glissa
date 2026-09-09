@@ -10,6 +10,7 @@ import { safePathSegment } from "../shared/paths.ts";
 import type { DecisionEntry } from "./core/decision-log.ts";
 import type { SessionState } from "../shared/states.ts";
 import type { HookPayload } from "../shared/contracts/index.ts";
+import { projectHookPayload } from "./core/hook-payload-projection.ts";
 
 function defaultRecordingsDir(): string {
   return path.join(glissaHomeDir(os.homedir(), process.env), "recordings");
@@ -127,7 +128,7 @@ class SessionRecorder {
   }
 
   writeHook(event: string, payload: HookPayload | null | undefined): void {
-    this._write({ type: "hook", ts: Date.now(), event, payload: payload || null });
+    this._write({ type: "hook", ts: Date.now(), event, payload: projectHookPayload(payload) });
   }
 
   writeState(from: SessionState, to: SessionState, event: string, detail: unknown): void {

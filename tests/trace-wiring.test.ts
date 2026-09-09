@@ -185,7 +185,7 @@ test('main and subagent transcript records append under the Glissa session id', 
 
   const checkpoint = readCheckpoint(harness.checkpointPath('glissa-session-id'));
   assert.equal(checkpoint.offset, fs.statSync(transcriptPath).size);
-  assert.deepEqual(checkpoint.ingestedSubagentPaths, [subagentPath]);
+  assert.deepEqual(checkpoint.ingestedSubagentPaths, []);
   assert.equal(checkpoint.subagentOffsetByPath[subagentPath], fs.statSync(subagentPath).size);
 
   await harness.wiring.stop();
@@ -497,7 +497,51 @@ test('a subagent transcript truncated to zero is read from the start once it reg
   fs.rmSync(configDirectory, { recursive: true, force: true });
 });
 
-test('a legacy checkpoint skips retained subagent lines and tails later additions', async () => {
+test('a legacy checkpoint with no remembered offset resumes the subagent transcript at its end', async () => {
+  const { configDirectory, projectDirectory } = makeWorkspace('legacy-subagent-eof');
+  const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
+  fs.writeFileSync(transcriptPath, '', 'utf8');
+  const subagentPath = writeSubagentTranscript(projectDirectory, 'already ingested answer');
+  const first = createHarness(configDirectory);
+  await first.wiring.start();
+  const firstSession = new TestTraceSession('glissa-session-id');
+  first.wiring.attachSession(firstSession);
+  firstSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
+  await first.wiring.whenIdle();
+  await first.wiring.stop();
+
+  const checkpoint = readCheckpoint(first.checkpointPath('glissa-session-id'));
+  const legacyCheckpoint = {
+    transcriptPath: checkpoint.transcriptPath,
+    vendorSessionId: checkpoint.vendorSessionId,
+    offset: checkpoint.offset,
+    ingestedSubagentPaths: [subagentPath],
+    offsetByTranscriptPath: checkpoint.offsetByTranscriptPath,
+    subagentOffsetByPath: {},
+  };
+  fs.writeFileSync(first.checkpointPath('glissa-session-id'), JSON.stringify(legacyCheckpoint), 'utf8');
+  const sizeAtResume = fs.statSync(subagentPath).size;
+
+  const second = createHarness(configDirectory);
+  await second.wiring.start();
+  const secondSession = new TestTraceSession('glissa-session-id');
+  second.wiring.attachSession(secondSession);
+  secondSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
+  await second.wiring.whenIdle();
+  secondSession.emit('hook-event', subagentStop(subagentPath));
+  await second.wiring.whenIdle();
+
+  assert.equal(readTrace(second.tracePath('glissa-session-id')).filter((record) => record.kind === 'assistant').length, 0);
+  assert.equal(
+    readCheckpoint(second.checkpointPath('glissa-session-id')).subagentOffsetByPath[subagentPath],
+    sizeAtResume,
+  );
+
+  await second.wiring.stop();
+  fs.rmSync(configDirectory, { recursive: true, force: true });
+});
+
+test('a legacy union checkpoint ignores paths already held in offsets and tails later additions', async () => {
   const { configDirectory, projectDirectory } = makeWorkspace('legacy-subagent-checkpoint');
   const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
   fs.writeFileSync(transcriptPath, '', 'utf8');
@@ -517,6 +561,7 @@ test('a legacy checkpoint skips retained subagent lines and tails later addition
     offset: checkpoint.offset,
     ingestedSubagentPaths: [subagentPath],
     offsetByTranscriptPath: checkpoint.offsetByTranscriptPath,
+    subagentOffsetByPath: { [subagentPath]: fs.statSync(subagentPath).size },
   };
   fs.writeFileSync(first.checkpointPath('glissa-session-id'), JSON.stringify(legacyCheckpoint), 'utf8');
 
@@ -576,8 +621,7 @@ test('a subagent path evicted from the remembered offsets is tailed again instea
 
   const afterCrowding = readCheckpoint(harness.checkpointPath('glissa-session-id'));
   assert.equal(afterCrowding.subagentOffsetByPath[evictedPath], undefined);
-  assert.deepEqual(afterCrowding.ingestedSubagentPaths, Object.keys(afterCrowding.subagentOffsetByPath));
-  assert.equal(afterCrowding.ingestedSubagentPaths.length, MAX_REMEMBERED_SUBAGENTS);
+  assert.deepEqual(afterCrowding.ingestedSubagentPaths, []);
 
   fs.appendFileSync(evictedPath, subagentAnswer('answer after the eviction', 'subagent-answer-after'), 'utf8');
   session.emit('hook-event', subagentStop(evictedPath));
@@ -587,7 +631,7 @@ test('a subagent path evicted from the remembered offsets is tailed again instea
   assert.equal(uuids.includes('subagent-answer-after'), true);
   const afterReturn = readCheckpoint(harness.checkpointPath('glissa-session-id'));
   assert.equal(afterReturn.subagentOffsetByPath[evictedPath], fs.statSync(evictedPath).size);
-  assert.deepEqual(afterReturn.ingestedSubagentPaths, Object.keys(afterReturn.subagentOffsetByPath));
+  assert.deepEqual(afterReturn.ingestedSubagentPaths, []);
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });

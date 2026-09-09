@@ -31,7 +31,7 @@ import {
   measurementEmptyText,
   measurementLines,
   moreOutputsLine,
-  outcomeSplitLines,
+  outcomeLines,
   outputTokenLine,
   shouldApplyMillReport,
   sortPackRows,
@@ -135,7 +135,7 @@ function buildMeasurementBlock(pack: MillPack) {
     wrap.append(buildLine('mill-empty', emptyText));
     return wrap;
   }
-  for (const line of [...measurementLines(pack), ...outcomeSplitLines(pack.measurement)]) {
+  for (const line of [...measurementLines(pack), ...outcomeLines(pack.measurement)]) {
     wrap.append(buildLine('mill-meta', `${line.label}: ${line.value}`, line.tone));
   }
   return wrap;

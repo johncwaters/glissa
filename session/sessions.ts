@@ -56,10 +56,6 @@ const DISMISSIBLE_STATES: Set<SessionState> = new Set([STATES.WAITING, STATES.CO
 
 type SessionEndIntent = "operator-abort" | "close-out" | "natural";
 
-interface SessionMillMetricsPort {
-  onHookEvent: (sessionId: string, event: string, payload: Record<string, unknown>) => void;
-}
-
 interface SessionPlanReviewPort {
   hasPlan: (sessionId: string) => boolean;
 }
@@ -138,7 +134,6 @@ interface SessionOptions {
   packs?: unknown;
   packsBuiltRoot?: string | null;
   packVariantSlug?: string | null;
-  millMetricsPort?: SessionMillMetricsPort | null;
   planReviewPort?: SessionPlanReviewPort | null;
   planLimits?: boolean;
   getUserHooks?: (() => UserHook[]) | null;
@@ -272,7 +267,6 @@ class Session extends EventEmitter {
     packsBuiltRoot = null,
 
     packVariantSlug = null,
-    millMetricsPort = null,
     planReviewPort = null,
 
     planLimits = false,
@@ -409,9 +403,6 @@ class Session extends EventEmitter {
       hooksBaseDir,
       settingsPermissions,
       detectScheduledWakeups,
-      detectPackReads: () => millMetricsPort != null
-        && this._can("packReads")
-        && this._packDelivery.deliveredWithDirs().length > 0,
       observeToolCalls: observeToolCalls === true,
       enableProjectMcp: !!enableProjectMcp,
       rtkPath: this._rtkPath,
@@ -422,7 +413,6 @@ class Session extends EventEmitter {
       effectiveCwd: () => this.effectiveCwd(),
       ingestSignal: (raw) => this.ingestHookSignal(raw),
       observeHook: (event, payload) => {
-        millMetricsPort?.onHookEvent(this.id, event, payload);
         this.emit("hook-event", { event, payload });
       },
       recordDecision: (entry) => this._recordDecision(entry),
@@ -1037,9 +1027,8 @@ class Session extends EventEmitter {
 
     if (packDelivery.packs.length > 0) {
       this.emit("packs-delivered", {
-        packs: this._packDelivery.deliveredWithDirs(),
+        packs: this._packDelivery.deliveredWithTokenEstimates(),
         agent: this.agentId,
-        readDetection: this._hooks.detectsPackReads() ? "available" : "unavailable",
         ts: Date.now(),
       });
     }

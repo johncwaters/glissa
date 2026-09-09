@@ -16,7 +16,6 @@ interface AgentCapabilities {
   resume: boolean;
   packs: boolean;
   packNotice: boolean;
-  packReads: boolean;
   statusLine: boolean;
   rtk: boolean;
   antiSlop: boolean;

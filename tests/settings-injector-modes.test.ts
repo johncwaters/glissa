@@ -9,7 +9,6 @@ import {
   writeSessionSettings,
   DIR_MODE,
   FILE_MODE,
-  PACK_READ_TOOL_MATCHER,
   WAKEUP_TOOL_MATCHER,
 } from '../detection/settings-injector.ts';
 
@@ -82,16 +81,10 @@ test('the written settings still contain the hooks the session needs', () => {
   }
 });
 
-test('pack read detection adds one PostToolUse matcher and defaults byte-identically off', () => {
+test('no Read matcher reaches PostToolUse, since nothing consumes pack reads', () => {
   const base = { port: 3000, glissaId: 'metrics', token: 'tok' };
-  const baseline = buildHookSettings(base);
-  const explicitlyOff = buildHookSettings({ ...base, detectPackReads: false });
-  assert.equal(JSON.stringify(explicitlyOff), JSON.stringify(baseline));
-
-  const enabled = buildHookSettings({ ...base, detectPackReads: true });
-  assert.deepEqual(enabled.hooks.PostToolUse.map((entry: { matcher?: string }) => entry.matcher), [
+  const settings = buildHookSettings(base);
+  assert.deepEqual(settings.hooks.PostToolUse.map((entry: { matcher?: string }) => entry.matcher), [
     WAKEUP_TOOL_MATCHER,
-    PACK_READ_TOOL_MATCHER,
   ]);
-  assert.equal(enabled.hooks.PostToolUse[0].hooks[0].url, enabled.hooks.PostToolUse[1].hooks[0].url);
 });

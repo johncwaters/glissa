@@ -5,7 +5,7 @@ import {
   MillMetricSessionRecord,
   MillMetricStore,
 } from '../shared/contracts/mill-metrics.ts';
-import type { MillMetricPack, MillMetricSession } from '../shared/contracts/mill-metrics.ts';
+import type { MillMetricSession } from '../shared/contracts/mill-metrics.ts';
 import {
   DEFAULT_MILL_METRICS_RETAIN_DAYS,
   mergeRecords,
@@ -225,10 +225,7 @@ function createMillMetricsStore({
     return sessionRecords.map((record) => ({
       ...record,
       prompts: { ...record.prompts },
-      packs: record.packs.map((pack: MillMetricPack) => ({
-        ...pack,
-        files: [...pack.files],
-      })),
+      packs: record.packs.map((pack) => ({ ...pack })),
     }));
   }
 

@@ -5,6 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { SessionRecorder, createRecorder } from '../session/session-recorder.ts';
 import { Session } from '../session/sessions.ts';
+import { replayDetection } from '../detection/replay.ts';
+import { parseRecording } from '../detection/replay.ts';
+import { projectHookPayload } from '../session/core/hook-payload-projection.ts';
 import { STATES } from '../shared/states.ts';
 function makeBaseDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-recorder-'));
@@ -212,10 +215,82 @@ test('signals mode records hooks and state transitions but no PTY bytes, input o
     assert.deepEqual(
       (records[1].payload as Record<string, unknown>).background_tasks,
       [{ id: 't1', type: 'teammate', status: 'running' }],
-      'hook payloads are recorded verbatim: that is the whole point',
+      'background task state needed for the completion gate remains recorded',
     );
     assert.equal(records[2].action, 'gate-held', 'decisions ride the default signals mode');
     assert.equal((records[3].detail as Record<string, unknown>).deferred, true);
+  } finally {
+    fs.rmSync(baseDir, { recursive: true, force: true });
+  }
+});
+
+test('hook recording reduces background tasks and drops the assistant message, keeping every other field', async () => {
+  const baseDir = makeBaseDir();
+  try {
+    const recorder = new SessionRecorder({ name: 'projected-hook', baseDir });
+    recorder.open();
+    recorder.writeHook('Stop', {
+      session_id: 'session-1',
+      task_id: 'task-1',
+      teammate_name: 'researcher',
+      tool_input: { file_path: '/tmp/thing.ts' },
+      agent_transcript_path: '/tmp/sub.jsonl',
+      background_tasks: [{ id: 'task-1', type: 'teammate', status: 'running', transcript: 'large' }],
+      backgroundTasks: [{ id: 'task-2', type: 'teammate', status: 'done', transcript: 'large' }],
+      last_assistant_message: 'unused response',
+      lastAssistantMessage: 'unused grok response',
+    });
+    await closeAndFlush(recorder);
+
+    const [hook] = readLines(findRecordingFile(baseDir, 'projected-hook'));
+    assert.deepEqual(hook.payload, {
+      session_id: 'session-1',
+      task_id: 'task-1',
+      teammate_name: 'researcher',
+      tool_input: { file_path: '/tmp/thing.ts' },
+      agent_transcript_path: '/tmp/sub.jsonl',
+      background_tasks: [{ id: 'task-1', type: 'teammate', status: 'running' }],
+      backgroundTasks: [{ id: 'task-2', type: 'teammate', status: 'done' }],
+    });
+  } finally {
+    fs.rmSync(baseDir, { recursive: true, force: true });
+  }
+});
+
+test('a projected recording replays with the same state transitions as its full payload recording', async () => {
+  const baseDir = makeBaseDir();
+  try {
+    const fullPayload = {
+      notification_type: 'permission_prompt',
+      tool_name: 'Read',
+      background_tasks: [{ id: 'task-1', type: 'teammate', status: 'running', detail: 'unread' }],
+      last_assistant_message: 'unused response',
+      unused: 'unused field',
+    };
+    const fullRecording = [
+      JSON.stringify({ type: 'header', version: 2, agent: 'claude-code' }),
+      JSON.stringify({ type: 'hook', ts: 1, event: 'Notification', payload: fullPayload }),
+    ].join('\n');
+    const expected = await replayDetection(parseRecording(fullRecording).records, {
+      stabilizationMs: 1,
+      conflictWindowMs: 1,
+      dedupWindowMs: 1,
+    });
+    const recorder = new SessionRecorder({ name: 'projected-replay', baseDir });
+    recorder.open();
+    recorder.writeHeader({ agent: 'claude-code' });
+    recorder.writeHook('Notification', fullPayload);
+    await closeAndFlush(recorder);
+
+    const projectedRecording = parseRecording(fs.readFileSync(findRecordingFile(baseDir, 'projected-replay'), 'utf8'));
+    const actual = await replayDetection(projectedRecording.records, {
+      stabilizationMs: 1,
+      conflictWindowMs: 1,
+      dedupWindowMs: 1,
+      agent: projectedRecording.agent,
+    });
+    assert.deepEqual(actual.signals.map((signal) => signal.signal), expected.signals.map((signal) => signal.signal));
+    assert.deepEqual(projectHookPayload(fullPayload), projectedRecording.records[0]?.payload);
   } finally {
     fs.rmSync(baseDir, { recursive: true, force: true });
   }

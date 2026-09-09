@@ -62,14 +62,12 @@ test('describeBuiltinHooks rows are exactly the entries buildHookSettings writes
   for (const options of [
     {},
     { detectScheduledWakeups: false },
-    { detectPackReads: true },
-    { detectScheduledWakeups: false, detectPackReads: true },
     { rtkPath: '/usr/bin/rtk' },
     { observeToolCalls: true },
     { observeToolCalls: true, rtkPath: '/usr/bin/rtk' },
-    { detectScheduledWakeups: false, detectPackReads: true, rtkPath: '/usr/bin/rtk' },
+    { detectScheduledWakeups: false, rtkPath: '/usr/bin/rtk' },
     { planReview: true },
-    { planReview: true, detectPackReads: true, rtkPath: '/usr/bin/rtk' },
+    { planReview: true, rtkPath: '/usr/bin/rtk' },
   ]) {
     const settings = buildHookSettings({ ...base, ...options });
     const written: { event: string; matcher: string | null }[] = [];
@@ -81,15 +79,14 @@ test('describeBuiltinHooks rows are exactly the entries buildHookSettings writes
   }
 });
 
-test('an operator PostToolUse hook stays after both built-in matchers', () => {
+test('an operator PostToolUse hook stays after the built-in matcher', () => {
   const settings = buildHookSettings({
     ...base,
-    detectPackReads: true,
     userHooks: [{
       id: 'read-audit', name: 'read audit', event: 'PostToolUse', matcher: 'Read', type: 'command', command: 'echo', enabled: true,
     }],
   });
-  assert.deepEqual(settings.hooks.PostToolUse.map((entry) => entry.hooks[0].type), ['http', 'http', 'command']);
+  assert.deepEqual(settings.hooks.PostToolUse.map((entry) => entry.hooks[0].type), ['http', 'command']);
 });
 
 function byRow(a: { event: string; matcher: string | null }, b: { event: string; matcher: string | null }) {
@@ -126,16 +123,15 @@ test('ExitPlanMode joins the PostToolUse matchers without displacing the wakeup 
 });
 
 test('the plan tool result has its own URL segment, so only it carries the raised body cap', () => {
-  const settings = buildHookSettings({ ...base, planReview: true, detectPackReads: true });
+  const settings = buildHookSettings({ ...base, planReview: true });
   assert.deepEqual(
     settings.hooks.PostToolUse.map((entry) => entry.hooks[0].url),
     [
       'http://127.0.0.1:3000/hook/g1/posttooluse?t=tok',
-      'http://127.0.0.1:3000/hook/g1/posttooluse?t=tok',
       'http://127.0.0.1:3000/hook/g1/posttooluse-plan?t=tok',
     ],
   );
-  assert.equal(settings.hooks.PostToolUse[2].hooks[0].timeout, DEFAULT_TIMEOUT_SEC, 'only the held request waits a day');
+  assert.equal(settings.hooks.PostToolUse[1].hooks[0].timeout, DEFAULT_TIMEOUT_SEC, 'only the held request waits a day');
 });
 
 test('plan review off leaves the settings byte-identical', () => {

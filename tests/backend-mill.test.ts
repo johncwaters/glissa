@@ -221,13 +221,12 @@ test('the backend report carries the measurement lane scorecard', withBackend(as
   const report = await waitForMessage(asker.received, isMillReport, 'mill-report');
   assert.deepEqual(packNamed(report, 'good').measurement, {
     deliveries: 3,
-    measurableDeliveries: 2,
-    openRate: 0.5,
+    outcomes: { sessions: 3, meanInterruptions: 1, abortRate: 0.5, meanTokens: 100 },
   });
   await closeSocket(asker.ws);
 }, {
   measurement: () => ({
-    good: { deliveries: 3, measurableDeliveries: 2, openRate: 0.5 },
+    good: { deliveries: 3, outcomes: { sessions: 3, meanInterruptions: 1, abortRate: 0.5, meanTokens: 100 } },
   }),
 }));
 

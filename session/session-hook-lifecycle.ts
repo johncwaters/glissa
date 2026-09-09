@@ -39,7 +39,6 @@ interface SessionHookOptions {
   hooksBaseDir: string | undefined;
   settingsPermissions: Record<string, unknown> | null;
   detectScheduledWakeups: boolean;
-  detectPackReads: (() => boolean) | null;
   observeToolCalls: boolean;
   enableProjectMcp: boolean;
   rtkPath: string | null;
@@ -59,7 +58,6 @@ interface SessionHookLifecycle {
   token(): string | null;
   hasInjection(): boolean;
   hasSettings(): boolean;
-  detectsPackReads(): boolean;
 }
 
 function errorCode(error: unknown): string | null {
@@ -222,7 +220,6 @@ function createSessionHookLifecycle(options: SessionHookOptions): SessionHookLif
         baseDir: options.hooksBaseDir,
         permissions: options.settingsPermissions,
         detectScheduledWakeups: options.detectScheduledWakeups,
-        detectPackReads: typeof options.detectPackReads === "function" ? options.detectPackReads() : false,
         observeToolCalls: options.observeToolCalls,
         enableProjectMcp: options.enableProjectMcp,
         rtkPath: options.rtkPath,
@@ -252,7 +249,6 @@ function createSessionHookLifecycle(options: SessionHookOptions): SessionHookLif
     token: () => token,
     hasInjection: () => token !== null,
     hasSettings: () => settingsHandle !== null,
-    detectsPackReads: () => settingsHandle?.packReadHook === true,
   };
 }
 

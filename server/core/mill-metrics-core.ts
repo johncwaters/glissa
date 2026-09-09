@@ -1,11 +1,8 @@
-import path from 'node:path';
-import { MAX_PACK_FILES_PER_SESSION } from '../../shared/contracts/mill-metrics.ts';
 import type {
   MillMetricDisposition,
   MillMetricPack,
   MillMetricPromptClass,
   MillMetricPromptCounts,
-  MillMetricReadDetection,
   MillMetricSession,
 } from '../../shared/contracts/mill-metrics.ts';
 import { MILL_METRICS_RETAIN_DAY_RANGE } from '../../shared/settings-ranges.ts';
@@ -19,24 +16,15 @@ const DEFAULT_MILL_METRICS_RETAIN_DAYS = 90;
 
 type EndIntent = 'operator-abort' | 'close-out' | 'natural';
 
-type DeliveredPackDirectory = {
-  name: string;
-  dir: string;
-};
-
 type AccumulatorPack = {
   version: string;
   tokenEstimate: number | null;
-  dir: string;
-  files: Set<string>;
-  filesDropped: number;
 };
 
 type MillMetricAccumulator = {
   sessionId: string;
   startedAt: number;
   agent: string;
-  readDetection: MillMetricReadDetection;
   packs: Map<string, AccumulatorPack>;
   prompts: MillMetricPromptCounts;
 };
@@ -59,14 +47,7 @@ type OutcomeBucket = {
 
 type PackScorecard = {
   deliveries: number;
-  measurableDeliveries: number;
-  unmeasurableDeliveries: number;
-  openedSessions: number;
-  openRate: number | null;
-  distinctFilesRead: number;
-  medianFilesRead: number | null;
-  opened: OutcomeBucket;
-  unopened: OutcomeBucket;
+  outcomes: OutcomeBucket;
   liveSessions: number;
   ambiguousPrompts: number;
   firstDay: string | null;
@@ -84,17 +65,11 @@ type OutcomeTotals = {
 
 type ScorecardTotals = {
   deliveries: number;
-  measurableDeliveries: number;
-  unmeasurableDeliveries: number;
-  openedSessions: number;
   liveSessions: number;
   ambiguousPrompts: number;
   firstDay: string | null;
   lastDay: string | null;
-  filesRead: number[];
-  distinctFiles: Set<string>;
-  opened: OutcomeTotals;
-  unopened: OutcomeTotals;
+  outcomes: OutcomeTotals;
 };
 
 function nonnegativeInteger(value: unknown): number {
@@ -126,32 +101,6 @@ function utcDay(timestamp: number): string | null {
   } catch {
     return null;
   }
-}
-
-function classifyReadPath(
-  filePath: unknown,
-  deliveredPacks: DeliveredPackDirectory[],
-  { caseInsensitive = false }: { caseInsensitive?: boolean } = {},
-): { pack: string; relPath: string } | null {
-  if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) return null;
-  const resolvedCandidate = path.resolve(filePath);
-  const comparableCandidate = caseInsensitive ? resolvedCandidate.toLowerCase() : resolvedCandidate;
-  let bestMatch: { pack: string; relPath: string; directoryLength: number } | null = null;
-  for (const deliveredPack of Array.isArray(deliveredPacks) ? deliveredPacks : []) {
-    if (typeof deliveredPack?.name !== 'string' || !deliveredPack.name) continue;
-    if (typeof deliveredPack.dir !== 'string' || !path.isAbsolute(deliveredPack.dir)) continue;
-    const resolvedDirectory = path.resolve(deliveredPack.dir);
-    const comparableDirectory = caseInsensitive ? resolvedDirectory.toLowerCase() : resolvedDirectory;
-    const comparableRelativePath = path.relative(comparableDirectory, comparableCandidate);
-    if (!comparableRelativePath || path.isAbsolute(comparableRelativePath) || comparableRelativePath.startsWith('..')) continue;
-    const relPath = caseInsensitive
-      ? resolvedCandidate.slice(resolvedDirectory.length).replace(/^[/\\]+/, '')
-      : comparableRelativePath;
-    if (bestMatch && bestMatch.directoryLength >= resolvedDirectory.length) continue;
-    bestMatch = { pack: deliveredPack.name, relPath, directoryLength: resolvedDirectory.length };
-  }
-  if (!bestMatch) return null;
-  return { pack: bestMatch.pack, relPath: bestMatch.relPath };
 }
 
 function classifyPrompt({
@@ -188,22 +137,15 @@ function recordFromAccumulator(
 ): MillMetricSession | null {
   if (!accumulator || typeof accumulator.sessionId !== 'string' || !accumulator.sessionId) return null;
   if (typeof accumulator.agent !== 'string' || !accumulator.agent) return null;
-  if (accumulator.readDetection !== 'available' && accumulator.readDetection !== 'unavailable') return null;
   const day = utcDay(accumulator.startedAt);
   if (!day) return null;
   const packs: MillMetricPack[] = [];
   for (const [packName, pack] of accumulator.packs instanceof Map ? accumulator.packs : []) {
     if (typeof packName !== 'string' || !packName) continue;
-    const files = Array.from(pack.files instanceof Set ? pack.files : []).sort();
     packs.push({
       name: packName,
       version: typeof pack.version === 'string' ? pack.version : '',
       tokenEstimate: numberOrNull(pack.tokenEstimate),
-      filesRead: files.length,
-      files,
-      filesDropped: nonnegativeInteger(pack.filesDropped),
-      opened: files.length > 0,
-      measurable: accumulator.readDetection === 'available',
     });
   }
   return {
@@ -212,7 +154,6 @@ function recordFromAccumulator(
     startedAt: accumulator.startedAt,
     endedAt: numberOrNull(endedAt),
     agent: accumulator.agent,
-    readDetection: accumulator.readDetection,
     disposition,
     finalState: typeof finalState === 'string' ? finalState : null,
     tokens: nonnegativeFigure(tokens),
@@ -240,20 +181,6 @@ function addNumbers(left: number | null, right: number | null): number | null {
   return left + right;
 }
 
-function packWasMeasurable(record: MillMetricSession, pack: MillMetricPack): boolean {
-  if (typeof pack.measurable === 'boolean') return pack.measurable;
-  return record.readDetection === 'available';
-}
-
-function measurablePacks(record: MillMetricSession): MillMetricPack[] {
-  const packs = Array.isArray(record.packs) ? record.packs : [];
-  return packs.map((pack) => {
-    const measurable = packWasMeasurable(record, pack);
-    if (measurable) return { ...pack, measurable };
-    return { ...pack, measurable, filesRead: 0, files: [], opened: false };
-  });
-}
-
 function mergePacks(earlier: MillMetricPack[], later: MillMetricPack[]): MillMetricPack[] {
   const packsByName = new Map<string, MillMetricPack>();
   for (const pack of [...(earlier || []), ...(later || [])]) {
@@ -263,24 +190,10 @@ function mergePacks(earlier: MillMetricPack[], later: MillMetricPack[]): MillMet
       packsByName.set(pack.name, pack);
       continue;
     }
-    const union = Array.from(new Set([
-      ...(Array.isArray(current.files) ? current.files : []),
-      ...(Array.isArray(pack.files) ? pack.files : []),
-    ])).sort();
-
-    const files = union.slice(0, MAX_PACK_FILES_PER_SESSION);
-    const filesRead = Math.max(files.length, nonnegativeInteger(current.filesRead), nonnegativeInteger(pack.filesRead));
     packsByName.set(pack.name, {
       name: pack.name,
       version: pack.version,
       tokenEstimate: pack.tokenEstimate,
-      filesRead,
-      files,
-      filesDropped: nonnegativeInteger(current.filesDropped)
-        + nonnegativeInteger(pack.filesDropped)
-        + (union.length - files.length),
-      opened: filesRead > 0,
-      measurable: current.measurable === true || pack.measurable === true,
     });
   }
   return Array.from(packsByName.values());
@@ -296,9 +209,6 @@ function mergeSessionRecords(first: MillMetricSession, second: MillMetricSession
     startedAt: earlier.startedAt,
     endedAt: later.endedAt,
     agent: later.agent,
-    readDetection: earlier.readDetection === 'available' || later.readDetection === 'available'
-      ? 'available'
-      : 'unavailable',
     disposition: later.disposition,
     finalState: later.finalState,
     tokens: addNumbers(earlier.tokens, later.tokens),
@@ -310,7 +220,7 @@ function mergeSessionRecords(first: MillMetricSession, second: MillMetricSession
       followup: nonnegativeInteger(earlier.prompts?.followup) + nonnegativeInteger(later.prompts?.followup),
       ambiguous: nonnegativeInteger(earlier.prompts?.ambiguous) + nonnegativeInteger(later.prompts?.ambiguous),
     },
-    packs: mergePacks(measurablePacks(earlier), measurablePacks(later)),
+    packs: mergePacks(earlier.packs, later.packs),
   };
 }
 
@@ -347,31 +257,17 @@ function emptyOutcomeTotals(): OutcomeTotals {
 function emptyScorecardTotals(): ScorecardTotals {
   return {
     deliveries: 0,
-    measurableDeliveries: 0,
-    unmeasurableDeliveries: 0,
-    openedSessions: 0,
     liveSessions: 0,
     ambiguousPrompts: 0,
     firstDay: null,
     lastDay: null,
-    filesRead: [],
-    distinctFiles: new Set(),
-    opened: emptyOutcomeTotals(),
-    unopened: emptyOutcomeTotals(),
+    outcomes: emptyOutcomeTotals(),
   };
 }
 
 function mean(total: number, count: number): number | null {
   if (count === 0) return null;
   return total / count;
-}
-
-function median(values: number[]): number | null {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((left, right) => left - right);
-  const midpoint = Math.floor(sorted.length / 2);
-  if (sorted.length % 2 === 1) return sorted[midpoint];
-  return (sorted[midpoint - 1] + sorted[midpoint]) / 2;
 }
 
 function outcomeBucket(totals: OutcomeTotals): OutcomeBucket {
@@ -410,27 +306,14 @@ function buildScorecards(
   for (const record of mergeRecords(records, liveRecords)) {
     if (!Array.isArray(record.packs)) continue;
     const packsByName = new Map(record.packs.map((pack) => [pack.name, pack]));
-    for (const [packName, pack] of packsByName) {
+    for (const packName of packsByName.keys()) {
       if (typeof packName !== 'string' || !packName) continue;
       const scorecard = totalsByPack.get(packName) || emptyScorecardTotals();
       scorecard.deliveries += 1;
-      if (!packWasMeasurable(record, pack)) {
-        scorecard.unmeasurableDeliveries += 1;
-        totalsByPack.set(packName, scorecard);
-        continue;
-      }
-      scorecard.measurableDeliveries += 1;
       if (record.endedAt === null) scorecard.liveSessions += 1;
       scorecard.ambiguousPrompts += nonnegativeInteger(record.prompts?.ambiguous);
       updateDays(scorecard, record);
-      const filesRead = nonnegativeInteger(pack.filesRead);
-      scorecard.filesRead.push(filesRead);
-      for (const relPath of Array.isArray(pack.files) ? pack.files : []) {
-        if (typeof relPath === 'string' && relPath) scorecard.distinctFiles.add(relPath);
-      }
-      const wasOpened = filesRead > 0;
-      if (wasOpened) scorecard.openedSessions += 1;
-      addOutcome(wasOpened ? scorecard.opened : scorecard.unopened, record);
+      addOutcome(scorecard.outcomes, record);
       totalsByPack.set(packName, scorecard);
     }
   }
@@ -438,14 +321,7 @@ function buildScorecards(
   for (const [packName, totals] of totalsByPack) {
     scorecards[packName] = {
       deliveries: totals.deliveries,
-      measurableDeliveries: totals.measurableDeliveries,
-      unmeasurableDeliveries: totals.unmeasurableDeliveries,
-      openedSessions: totals.openedSessions,
-      openRate: mean(totals.openedSessions, totals.measurableDeliveries),
-      distinctFilesRead: totals.distinctFiles.size,
-      medianFilesRead: median(totals.filesRead),
-      opened: outcomeBucket(totals.opened),
-      unopened: outcomeBucket(totals.unopened),
+      outcomes: outcomeBucket(totals.outcomes),
       liveSessions: totals.liveSessions,
       ambiguousPrompts: totals.ambiguousPrompts,
       firstDay: totals.firstDay,
@@ -467,7 +343,6 @@ export {
   TITLE_RACE_MS,
   buildScorecards,
   classifyPrompt,
-  classifyReadPath,
   dispositionFor,
   mergeRecords,
   pruneRecords,

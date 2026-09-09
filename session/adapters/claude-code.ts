@@ -192,7 +192,6 @@ const claudeCode = {
   packCarrier: "--add-dir directories",
   capabilities: {
     hooks: true,
-    packReads: true,
     awaitingInput: true,
     backgroundAgents: true,
     resume: true,

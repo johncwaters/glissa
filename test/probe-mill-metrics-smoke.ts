@@ -15,7 +15,6 @@ interface MetricEvent {
   kind: string;
   sessionId?: string;
   pack?: string;
-  relPath?: string;
   promptClass?: string;
 }
 
@@ -273,7 +272,6 @@ async function main() {
       'the spawn delivered the throwaway pack through --add-dir',
       addDirectoryIndex >= 0 && spawnCall.args[addDirectoryIndex + 1] === path.dirname(path.dirname(packFile)),
     );
-    check('the Read hook was injected for measurable pack delivery', probeSession._hooks.detectsPackReads());
     await delay(5000);
     if (probeSession.state === 'FAILED') throw new Error('Claude exited before the first prompt');
 
@@ -291,20 +289,9 @@ async function main() {
       () => stateChanges.some(({ to }) => to === 'RUNNING' || to === 'WAITING'),
       'a hook-driven RUNNING or WAITING state',
     );
-    await waitForValue(
-      () => readHookPayloads.find((payload) => payload?.tool_name === 'Read'),
-      'the real PostToolUse Read payload',
-    );
-    await waitForValue(
-      () => readMetricEvents(eventsDirectory).find(
-        (event) => event.kind === 'pack-read'
-          && event.pack === PACK_NAME
-          && event.relPath === PACK_REL_PATH,
-      ),
-      'the persisted pack-read event',
-    );
     await waitForValue(() => probeSession.state === 'COMPLETE', 'the first turn to complete');
     check('the first prompt reached the hook-driven work cycle', probeSession.hookSeen === true);
+    check('a real Read tool call posts no PostToolUse hook, since none is injected', readHookPayloads.length === 0);
 
     console.log('\nFollow-up turn:');
     await submitPrompt(probeSession, 'Answer with exactly one line containing done.');
@@ -337,9 +324,6 @@ async function main() {
     const deliveredEvents = events.filter(
       (event) => event.kind === 'pack-delivered' && event.sessionId === SESSION_ID,
     );
-    const readEvents = events.filter(
-      (event) => event.kind === 'pack-read' && event.sessionId === SESSION_ID,
-    );
     const prompts = events.filter(
       (event) => event.kind === 'prompt' && event.sessionId === SESSION_ID,
     );
@@ -348,20 +332,14 @@ async function main() {
     );
     const sessionRecords = recordsDocument.sessions.filter((record) => record.sessionId === SESSION_ID);
     const sessionRecord = sessionRecords[0];
-    const packRecord = sessionRecord?.packs.find((pack) => pack.name === PACK_NAME);
 
     console.log('\nAssertions:');
     check('events JSONL contains pack-delivered for the smoke pack', deliveredEvents.length === 1 && deliveredEvents[0].pack === PACK_NAME);
-    check('events JSONL contains pack-read with the pack name and relative path', readEvents.some((event) => event.pack === PACK_NAME && event.relPath === PACK_REL_PATH));
     check('events JSONL contains at least two prompt classifications', prompts.length >= 2 && prompts.every((event) => typeof event.promptClass === 'string'));
     check('events JSONL contains session-end', sessionEndEvents.length === 1);
     check('mill-metrics.json contains one smoke session record', sessionRecords.length === 1);
-    check('the persisted pack record is opened', packRecord?.opened === true);
-    check('the persisted pack record counted at least one file', (packRecord?.filesRead ?? 0) >= 1);
     check('the dashboard kill was classified as user-kill', sessionRecord?.disposition === 'user-kill');
 
-    console.log('\nPostToolUse Read payload:');
-    console.log(JSON.stringify(readHookPayloads[0], null, 2));
     console.log(`\nPrompt classes: ${prompts.map((event) => event.promptClass).join(', ')}`);
     console.log('\nScorecard:');
     console.log(JSON.stringify(buildScorecards(recordsDocument.sessions)[PACK_NAME], null, 2));

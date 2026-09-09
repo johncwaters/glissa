@@ -72,7 +72,7 @@ test('request-hooks-report answers the stored records, the catalog, the built-in
   for (const event of HOOK_EVENTS) assert.ok(builtinEvents.includes(event), event);
   assert.ok(report.builtin?.some((row) => row.event === 'PreToolUse' && row.matcher === 'Bash'), 'rtk entry when config.rtk');
   assert.ok(report.builtin?.some((row) => row.event === 'PostToolUse'), 'wakeup tracking entry');
-  assert.ok(report.builtin?.some((row) => row.event === 'PostToolUse' && row.matcher === 'Read' && row.purpose === 'Pack read tracking'));
+  assert.equal(report.builtin?.some((row) => row.matcher === 'Read'), false, 'no pack read row, since nothing consumes pack reads');
   assert.deepEqual(report.limits, { maxTimeoutSec: MAX_TIMEOUT_SEC });
 });
 

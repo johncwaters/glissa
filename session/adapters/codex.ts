@@ -226,7 +226,6 @@ const codex = {
   PACK_DIRECTIVE,
   capabilities: {
     hooks: true,
-    packReads: false,
     awaitingInput: true,
     backgroundAgents: false,
     resume: true,

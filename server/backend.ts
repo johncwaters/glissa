@@ -76,7 +76,6 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     config,
     configStore,
     getGitWorkspace: () => gitWorkspace,
-    getMillMetricsPort: () => laneAssembly.millMetrics.port,
     getPlanReviewPort: () => laneAssembly.planReview?.port ?? null,
     getBroadcastControl: () => broadcastControl,
     logger: console,

@@ -257,7 +257,7 @@ test('the report lists every project as a consumer of every spec', async (t: Tes
 test('the report carries the injected measurement for its named pack', async (t: TestContext) => {
   const fixture = writeFixture();
   t.after(() => fs.rmSync(fixture.tmpDir, { recursive: true, force: true }));
-  const measurement = { deliveries: 2, measurableDeliveries: 1, openRate: 1 };
+  const measurement = { deliveries: 2, outcomes: { sessions: 2, meanInterruptions: 1, abortRate: 0.5, meanTokens: 100 } };
   const { wiring } = makeWiring(fixture, { measurement: () => ({ good: measurement }) });
 
   const { replies, done } = pull(wiring, 'r1');
@@ -393,6 +393,8 @@ test('a group spec reports its base row plus one row per consuming project', asy
   }
 });
 
+
+
 test('a group with no consuming project reports only its base row', async () => {
   const fixture = writeVariantFixture();
   try {
@@ -407,5 +409,3 @@ test('a group with no consuming project reports only its base row', async () => 
     fs.rmSync(fixture.tmpDir, { recursive: true, force: true });
   }
 });
-
-

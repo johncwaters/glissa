@@ -1,7 +1,6 @@
 import {
   buildScorecards,
   classifyPrompt,
-  classifyReadPath,
   dispositionFor,
   recordFromAccumulator,
 } from './core/mill-metrics-core.ts';
@@ -12,14 +11,9 @@ import type {
   MillMetricPackAccumulator,
   MillMetricsConfig,
 } from './core/mill-metrics-core.ts';
-import {
-  MAX_PACK_FILES_PER_SESSION,
-  MAX_PACK_REL_PATH_CHARS,
-} from '../shared/contracts/mill-metrics.ts';
 import type {
   MillMetricDisposition,
   MillMetricPromptClass,
-  MillMetricReadDetection,
   MillMetricSession,
 } from '../shared/contracts/mill-metrics.ts';
 import { numberOrNull } from './core/usage-number-core.ts';
@@ -28,7 +22,6 @@ import type { MillMetricsStoreInstance } from './mill-metrics-store.ts';
 type DeliveredPack = {
   name: string;
   version: string;
-  dir: string;
   tokenEstimate?: number | null;
 };
 
@@ -59,7 +52,6 @@ type MillMetricsWiringOptions = {
   nowFn?: () => number;
   tokensForSession?: (sessionId: string) => (TokenTotals & { identity?: string | null }) | null;
   logger?: Pick<Console, 'warn'> | null;
-  caseInsensitive?: boolean;
 };
 
 function createMillMetricsWiring({
@@ -67,7 +59,6 @@ function createMillMetricsWiring({
   nowFn = Date.now,
   tokensForSession = () => null,
   logger = null,
-  caseInsensitive = process.platform === 'win32',
 }: MillMetricsWiringOptions) {
   const accumulators = new Map<string, Accumulator>();
 
@@ -178,25 +169,19 @@ function createMillMetricsWiring({
   function onPacksDelivered(sessionId: string, payload: {
     packs?: DeliveredPack[];
     agent?: string;
-    readDetection?: MillMetricReadDetection;
     ts?: number;
   }): void {
     if (typeof sessionId !== 'string' || !sessionId) return;
     if (!Array.isArray(payload?.packs) || payload.packs.length === 0) return;
     const agent = typeof payload.agent === 'string' && payload.agent ? payload.agent : null;
     if (!agent) return;
-    const readDetection = payload.readDetection === 'available' ? 'available' : 'unavailable';
     const startedAt = numberOrNull(payload.ts) ?? nowFn();
     const packs = new Map<string, MillMetricPackAccumulator>();
     for (const pack of payload.packs) {
       if (typeof pack?.name !== 'string' || !pack.name) continue;
-      if (typeof pack.dir !== 'string' || !pack.dir) continue;
       packs.set(pack.name, {
         version: typeof pack.version === 'string' ? pack.version : '',
         tokenEstimate: numberOrNull(pack.tokenEstimate),
-        dir: pack.dir,
-        files: new Set<string>(),
-        filesDropped: 0,
       });
     }
     if (packs.size === 0) return;
@@ -204,7 +189,6 @@ function createMillMetricsWiring({
       sessionId,
       startedAt,
       agent,
-      readDetection,
       packs,
       prompts: { interruption: 0, answer: 0, followup: 0, ambiguous: 0 },
       tokens: emptyLedger(),
@@ -221,7 +205,6 @@ function createMillMetricsWiring({
         version: pack.version,
         tokenEstimate: pack.tokenEstimate,
         agent,
-        readDetection,
       });
     }
   }
@@ -248,34 +231,6 @@ function createMillMetricsWiring({
       sessionId,
       promptClass,
       state,
-    });
-  }
-
-  function onHookEvent(sessionId: string, event: unknown, payload: unknown): void {
-    if (typeof event !== 'string' || event.toLowerCase() !== 'posttooluse') return;
-    if (!payload || typeof payload !== 'object') return;
-    const hookPayload = payload as { tool_name?: unknown; tool_input?: { file_path?: unknown } };
-    if (hookPayload.tool_name !== 'Read') return;
-    const accumulator = accumulators.get(sessionId);
-    if (!accumulator) return;
-    const deliveredPacks = Array.from(accumulator.packs, ([name, pack]) => ({ name, dir: pack.dir }));
-    const read = classifyReadPath(hookPayload.tool_input?.file_path, deliveredPacks, { caseInsensitive });
-    if (!read) return;
-    const pack = accumulator.packs.get(read.pack);
-    if (!pack || pack.files.has(read.relPath)) return;
-
-    if (read.relPath.length > MAX_PACK_REL_PATH_CHARS || pack.files.size >= MAX_PACK_FILES_PER_SESSION) {
-      pack.filesDropped += 1;
-      return;
-    }
-    pack.files.add(read.relPath);
-    store.appendEvent({
-      v: 1,
-      kind: 'pack-read',
-      ts: nowFn(),
-      sessionId,
-      pack: read.pack,
-      relPath: read.relPath,
     });
   }
 
@@ -348,7 +303,6 @@ function createMillMetricsWiring({
   }
 
   const port: MillMetricsPort = {
-    onHookEvent,
     onPacksDelivered,
     onPromptSubmitted,
     onSessionEnd,
@@ -496,11 +450,9 @@ function createMillMetricsLane({ resolveConfig, createStore, ...wiringOptions }:
 }
 
 export type MillMetricsPort = {
-  onHookEvent: (sessionId: string, event: unknown, payload: unknown) => void;
   onPacksDelivered: (sessionId: string, payload: {
-    packs?: { name: string; version: string; dir: string; tokenEstimate?: number | null }[];
+    packs?: DeliveredPack[];
     agent?: string;
-    readDetection?: MillMetricReadDetection;
     ts?: number;
   }) => void;
   onPromptSubmitted: (sessionId: string, payload: { state?: string; stateSince?: number; ts?: number }) => void;

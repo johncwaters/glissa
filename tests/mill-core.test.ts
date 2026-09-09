@@ -93,7 +93,7 @@ test('a built valid pack reports its version, budget share and content counts', 
 });
 
 test('a named measurement joins its pack row without changing an unmeasured row', () => {
-  const measurement = { deliveries: 4, measurableDeliveries: 3, openRate: 2 / 3 };
+  const measurement = { deliveries: 4, outcomes: { sessions: 4, meanInterruptions: 1, abortRate: 0.25, meanTokens: 100 } };
   const measured = buildMillReport(baseInput({ measurementByPack: { 'house-rules': measurement } }));
   assert.strictEqual(measured.packs[0].measurement, measurement);
 

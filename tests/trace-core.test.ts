@@ -67,6 +67,13 @@ test('the no-debug-value table and compaction summaries are dropped', () => {
   }), { vendorSessionId: 'vendor-session', now: 1 }), []);
 });
 
+test('Claude bookkeeping line types are dropped instead of retained as raw trace records', () => {
+  for (const type of ['frame-link', 'artifact-autoreact-ledger', 'cost-state', 'artifact-comment-monitor']) {
+    const records = traceRecordsFromTranscriptLine(JSON.stringify({ type }), context);
+    assert.deepEqual(records, [], type);
+  }
+});
+
 test('tool results are capped and marked only when content crosses the cap', () => {
   const [exact] = traceRecordsFromTranscriptLine(JSON.stringify({
     type: 'user',

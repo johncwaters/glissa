@@ -87,8 +87,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 ### Mill Measurement
 
-- Always-on measurement reads packs through the hook-router observer, never as status signals, so it cannot move a card; `millMetrics.retainDays` only bounds retained history.
-- Open rate includes only adapters that expose pack-read hooks; other deliveries remain visible without depressing the denominator.
+- Always-on measurement observes pack delivery and prompt hooks outside status signals, so it cannot move a card; `millMetrics.retainDays` only bounds retained history.
 - A prompt inside `TITLE_RACE_MS` of entering RUNNING is ambiguous because the title spinner can win the prompt race.
 
 ### Long-Term Memory (plan: `docs/plan-visions-3.md`)

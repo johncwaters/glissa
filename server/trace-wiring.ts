@@ -288,10 +288,7 @@ function createTraceWiring({
       transcriptPath: binding.transcriptPath,
       vendorSessionId: binding.vendorSessionId,
       offset,
-      ingestedSubagentPaths: [
-        ...Object.keys(binding.subagentOffsetByPath),
-        ...binding.subagentPathsWithoutOffset,
-      ],
+      ingestedSubagentPaths: Array.from(binding.subagentPathsWithoutOffset),
       offsetByTranscriptPath: binding.committedOffsetByTranscriptPath,
       subagentOffsetByPath: binding.subagentOffsetByPath,
     };

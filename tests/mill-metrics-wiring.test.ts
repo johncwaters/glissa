@@ -9,7 +9,6 @@ import { tokensFromUsage } from '../server/backend-lanes.ts';
 import { createMillMetricsStore } from '../server/mill-metrics-store.ts';
 import { createMillMetricsLane, createMillMetricsWiring } from '../server/mill-metrics-wiring.ts';
 import type { MillMetricsStoreInstance } from '../server/mill-metrics-store.ts';
-import { MAX_PACK_FILES_PER_SESSION } from '../shared/contracts/mill-metrics.ts';
 import type { MillMetricSession } from '../shared/contracts/mill-metrics.ts';
 
 interface StoredEvent {
@@ -24,7 +23,6 @@ interface StoredEvent {
   version?: string;
   tokenEstimate?: number | null;
   agent?: string;
-  readDetection?: string;
   ts?: number;
 }
 
@@ -41,14 +39,12 @@ interface VendorTotals {
 }
 
 interface DeliveredPayload {
-  packs: { name: string; version: string; dir: string; tokenEstimate?: number | null }[];
+  packs: { name: string; version: string; tokenEstimate?: number | null }[];
   agent: string;
-  readDetection: 'available' | 'unavailable';
   ts: number;
 }
 
 const NOW = Date.parse('2026-08-30T12:00:00Z');
-const PACK_DIR = path.resolve(path.parse(process.cwd()).root, 'mill-metrics-wiring', 'alpha');
 
 function storedEventAt(store: FakeStore, index: number): StoredEvent {
   const event = store.events.at(index);
@@ -81,40 +77,12 @@ function fakeStore(overrides: Partial<FakeStore> = {}): FakeStore {
 
 function delivered(overrides: Partial<DeliveredPayload> = {}): DeliveredPayload {
   return {
-    packs: [{ name: 'alpha', version: 'v1', dir: PACK_DIR }],
+    packs: [{ name: 'alpha', version: 'v1' }],
     agent: 'claude-code',
-    readDetection: 'available',
     ts: NOW,
     ...overrides,
   };
 }
-
-test('a delivered pack read is recorded once per relative file', () => {
-  const store = fakeStore();
-  const wiring = createMillMetricsWiring({ store, nowFn: () => NOW });
-  wiring.port.onPacksDelivered('s1', delivered());
-  const payload = { tool_name: 'Read', tool_input: { file_path: path.join(PACK_DIR, 'rules.md') } };
-  wiring.port.onHookEvent('s1', 'PostToolUse', payload);
-  wiring.port.onHookEvent('s1', 'posttooluse', payload);
-  assert.equal(store.events.filter((event) => event.kind === 'pack-read').length, 1);
-  assert.equal(wiring.scorecards().alpha.distinctFilesRead, 1);
-});
-
-test('reads outside delivered directories and non-Read events are ignored', () => {
-  const store = fakeStore();
-  const wiring = createMillMetricsWiring({ store, nowFn: () => NOW });
-  wiring.port.onPacksDelivered('s1', delivered());
-  wiring.port.onHookEvent('s1', 'PostToolUse', {
-    tool_name: 'Read', tool_input: { file_path: path.join(path.dirname(PACK_DIR), 'outside.md') },
-  });
-  wiring.port.onHookEvent('s1', 'PostToolUse', {
-    tool_name: 'Bash', tool_input: { file_path: path.join(PACK_DIR, 'rules.md') },
-  });
-  wiring.port.onHookEvent('s1', 'Stop', {
-    tool_name: 'Read', tool_input: { file_path: path.join(PACK_DIR, 'rules.md') },
-  });
-  assert.equal(store.events.filter((event) => event.kind === 'pack-read').length, 0);
-});
 
 test('prompt classes are accumulated only for measured sessions', () => {
   const store = fakeStore();
@@ -177,24 +145,6 @@ test('a session torn down while live closes with no disposition instead of stayi
   assert.equal(wiring.scorecards().alpha.liveSessions, 0);
 });
 
-test('recorded pack files are capped per session and the overflow is counted', () => {
-  const store = fakeStore();
-  const wiring = createMillMetricsWiring({ store, nowFn: () => NOW });
-  wiring.port.onPacksDelivered('s1', delivered());
-  for (let index = 0; index < MAX_PACK_FILES_PER_SESSION + 5; index += 1) {
-    wiring.port.onHookEvent('s1', 'PostToolUse', {
-      tool_name: 'Read', tool_input: { file_path: path.join(PACK_DIR, `rules-${index}.md`) },
-    });
-  }
-  wiring.port.onHookEvent('s1', 'PostToolUse', {
-    tool_name: 'Read', tool_input: { file_path: path.join(PACK_DIR, `${'deep/'.repeat(120)}rules.md`) },
-  });
-  wiring.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'operator-abort', finalState: 'DONE' });
-  assert.equal(store.events.filter((event) => event.kind === 'pack-read').length, MAX_PACK_FILES_PER_SESSION);
-  assert.equal(closedAt(store, 0).packs[0].filesRead, MAX_PACK_FILES_PER_SESSION);
-  assert.equal(closedAt(store, 0).packs[0].filesDropped, 6);
-});
-
 test('live scorecards report the tokens the run has added so far', () => {
   const store = fakeStore();
   let vendorTotals = { tokens: 500, costUSD: 1 };
@@ -207,8 +157,8 @@ test('live scorecards report the tokens the run has added so far', () => {
   vendorTotals = { tokens: 900, costUSD: 1.5 };
   const scorecard = wiring.scorecards().alpha;
   assert.equal(scorecard.liveSessions, 1);
-  assert.equal(scorecard.unopened.meanTokens, 400);
-  assert.equal(scorecard.unopened.abortRate, null);
+  assert.equal(scorecard.outcomes.meanTokens, 400);
+  assert.equal(scorecard.outcomes.abortRate, null);
 });
 
 test('a run whose usage is unscanned when it starts waits for a real baseline instead of guessing zero', () => {
@@ -220,9 +170,9 @@ test('a run whose usage is unscanned when it starts waits for a real baseline in
     tokensForSession: () => vendorTotals,
   });
   wiring.port.onPacksDelivered('s1', delivered());
-  assert.equal(wiring.scorecards().alpha.unopened.meanTokens, null);
+  assert.equal(wiring.scorecards().alpha.outcomes.meanTokens, null);
   vendorTotals = { tokens: 9000, costUSD: 20 };
-  assert.equal(wiring.scorecards().alpha.unopened.meanTokens, 0);
+  assert.equal(wiring.scorecards().alpha.outcomes.meanTokens, 0);
   vendorTotals = { tokens: 9200, costUSD: 20.5 };
   wiring.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'natural', finalState: 'DONE' });
   assert.equal(closedAt(store, 0).tokens, 200);
@@ -239,9 +189,9 @@ test('a conversation created mid-run is billed to this run in full, on top of wh
   });
   wiring.port.onPacksDelivered('s1', delivered());
   vendorTotals = { tokens: 400, costUSD: 2, identity: 'conv-a' };
-  assert.equal(wiring.scorecards().alpha.unopened.meanTokens, 300);
+  assert.equal(wiring.scorecards().alpha.outcomes.meanTokens, 300);
   vendorTotals = { tokens: 50, costUSD: 0.5, identity: 'conv-b' };
-  assert.equal(wiring.scorecards().alpha.unopened.meanTokens, 350);
+  assert.equal(wiring.scorecards().alpha.outcomes.meanTokens, 350);
   vendorTotals = { tokens: 120, costUSD: 0.9, identity: 'conv-b' };
   wiring.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'natural', finalState: 'DONE' });
   assert.equal(closedAt(store, 0).tokens, 420);
@@ -259,9 +209,9 @@ test('a total that moves backward banks the delta already earned instead of eras
   });
   wiring.port.onPacksDelivered('s1', delivered());
   vendorTotals = { tokens: 900, costUSD: 3, identity: 'conv-a' };
-  assert.equal(wiring.scorecards().alpha.unopened.meanTokens, 800);
+  assert.equal(wiring.scorecards().alpha.outcomes.meanTokens, 800);
   vendorTotals = { tokens: 40, costUSD: 0.4, identity: 'conv-a' };
-  assert.equal(wiring.scorecards().alpha.unopened.meanTokens, 800);
+  assert.equal(wiring.scorecards().alpha.outcomes.meanTokens, 800);
   vendorTotals = { tokens: 90, costUSD: 0.9, identity: 'conv-a' };
   wiring.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'natural', finalState: 'DONE' });
   assert.equal(closedAt(store, 0).tokens, 850);
@@ -453,7 +403,7 @@ test('a conversation known at delivery but scanned later still bills only what t
   });
   wiring.port.onPacksDelivered('s1', delivered());
   vendorTotals = { tokens: 9000, costUSD: 20, identity: 'conv-a' };
-  assert.equal(wiring.scorecards().alpha.unopened.meanTokens, 0);
+  assert.equal(wiring.scorecards().alpha.outcomes.meanTokens, 0);
   vendorTotals = { tokens: 9200, costUSD: 20.5, identity: 'conv-a' };
   wiring.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'natural', finalState: 'DONE' });
   assert.equal(closedAt(store, 0).tokens, 200);
@@ -469,7 +419,7 @@ test('a tokens rewind keeps the cost that the same sample added', () => {
   });
   wiring.port.onPacksDelivered('s1', delivered());
   vendorTotals = { tokens: 900, costUSD: 3, identity: 'conv-a' };
-  assert.equal(wiring.scorecards().alpha.unopened.meanTokens, 800);
+  assert.equal(wiring.scorecards().alpha.outcomes.meanTokens, 800);
   vendorTotals = { tokens: 40, costUSD: 3.5, identity: 'conv-a' };
   wiring.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'natural', finalState: 'DONE' });
   assert.equal(closedAt(store, 0).tokens, 800);
@@ -486,7 +436,7 @@ test('a resumed card reports its own run, not the whole conversation', () => {
   });
   wiring.port.onPacksDelivered('s1', delivered());
   vendorTotals = { tokens: 1100, costUSD: 2.5, identity: 'conv-a' };
-  assert.equal(wiring.scorecards().alpha.unopened.meanTokens, 200);
+  assert.equal(wiring.scorecards().alpha.outcomes.meanTokens, 200);
 });
 
 function laneFedByUsage(
@@ -507,9 +457,9 @@ test('a resumed card whose usage is unscanned at delivery is never billed the pr
   let vendorTotals: VendorTotals | null = null;
   const wiring = laneFedByUsage(store, sessions, () => vendorTotals);
   wiring.port.onPacksDelivered('s1', delivered());
-  assert.equal(wiring.scorecards().alpha.unopened.meanTokens, null);
+  assert.equal(wiring.scorecards().alpha.outcomes.meanTokens, null);
   vendorTotals = { tokens: 500000, costUSD: 12.5 };
-  assert.equal(wiring.scorecards().alpha.unopened.meanTokens, 0);
+  assert.equal(wiring.scorecards().alpha.outcomes.meanTokens, 0);
   vendorTotals = { tokens: 500300, costUSD: 12.6 };
   wiring.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'natural', finalState: 'DONE' });
   assert.equal(closedAt(store, 0).tokens, 300);

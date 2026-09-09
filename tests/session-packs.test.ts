@@ -9,14 +9,13 @@ import type { SessionOptions } from '../session/sessions.ts';
 import { createSessionPackDelivery } from '../session/session-pack-delivery.ts';
 import codex from '../session/adapters/codex.ts';
 import { HookRouter } from '../detection/hook-source.ts';
-import { PACK_READ_TOOL_MATCHER, WAKEUP_TOOL_MATCHER } from '../detection/settings-injector.ts';
+import { WAKEUP_TOOL_MATCHER } from '../detection/settings-injector.ts';
 import { fakePty, spawnCapture } from './helpers/fake-pty.ts';
 import type { SpawnCall } from './helpers/fake-pty.ts';
 
 interface PacksDeliveredPayload {
-  packs: { name: string; version: string; dir: string; tokenEstimate: number | null }[];
+  packs: { name: string; version: string; tokenEstimate: number | null }[];
   agent: string;
-  readDetection: string;
   ts: number;
 }
 const CLAUDE_MD_ENV = 'CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD';
@@ -107,7 +106,7 @@ test('the runtime built-pack root override is resolved when the session starts',
   }
 });
 
-test('a measurable packed session injects Read tracking after pack resolution', async () => {
+test('a packed session leaves the PostToolUse matchers alone, since nothing consumes pack reads', async () => {
   const builtRoot = await makeBuiltRoot({ 'house-rules': 'v-abc' });
   const hooksBaseDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glissa-pack-hooks-'));
   const payloads: PacksDeliveredPayload[] = [];
@@ -120,7 +119,6 @@ test('a measurable packed session injects Read tracking after pack resolution', 
     hookRouter: new HookRouter(),
     getHookPort: () => 4321,
     hooksBaseDir,
-    millMetricsPort: { onHookEvent: () => {} },
     spawnCommand: { path: process.execPath, kind: 'exe' },
     ptySpawn: () => fakePty(),
   });
@@ -130,11 +128,10 @@ test('a measurable packed session injects Read tracking after pack resolution', 
     const settings = JSON.parse(await fsp.readFile(path.join(hooksBaseDir, 'measured-pack', 'settings.json'), 'utf8'));
     assert.deepEqual(settings.hooks.PostToolUse.map((entry: { matcher: string }) => entry.matcher), [
       WAKEUP_TOOL_MATCHER,
-      PACK_READ_TOOL_MATCHER,
     ]);
-    assert.equal(payloads[0].readDetection, 'available');
-    assert.equal(payloads[0].packs[0].dir, fixtureVersionDir(builtRoot, 'house-rules', 'v-abc'));
-    assert.equal(payloads[0].packs[0].tokenEstimate, 10);
+    assert.deepEqual(payloads[0].packs, [
+      { name: 'house-rules', version: fixtureVersion('v-abc'), tokenEstimate: 10 },
+    ]);
   } finally {
     session.destroy();
     await fsp.rm(builtRoot, { recursive: true, force: true });
@@ -142,7 +139,7 @@ test('a measurable packed session injects Read tracking after pack resolution', 
   }
 });
 
-test('a delivery whose Read matcher never reached the settings file is reported unmeasurable', async () => {
+test('a delivery with no hook injection at all still reports its packs', async () => {
   const builtRoot = await makeBuiltRoot({ 'house-rules': 'v-abc' });
   const payloads: PacksDeliveredPayload[] = [];
   const session = new Session({
@@ -151,7 +148,6 @@ test('a delivery whose Read matcher never reached the settings file is reported 
     path: process.cwd(),
     packs: ['house-rules'],
     packsBuiltRoot: builtRoot,
-    millMetricsPort: { onHookEvent: () => {} },
     spawnCommand: { path: process.execPath, kind: 'exe' },
     ptySpawn: () => fakePty(),
   });
@@ -159,14 +155,14 @@ test('a delivery whose Read matcher never reached the settings file is reported 
   try {
     await session.start();
     assert.equal(payloads.length, 1);
-    assert.equal(payloads[0].readDetection, 'unavailable');
+    assert.equal(payloads[0].packs.length, 1);
   } finally {
     session.destroy();
     await fsp.rm(builtRoot, { recursive: true, force: true });
   }
 });
 
-test('a spawn that never starts delivers no measurable pack', async () => {
+test('a spawn that never starts delivers no pack', async () => {
   const builtRoot = await makeBuiltRoot({ 'house-rules': 'v-abc' });
   const payloads: PacksDeliveredPayload[] = [];
   const session = new Session({
@@ -175,7 +171,6 @@ test('a spawn that never starts delivers no measurable pack', async () => {
     path: process.cwd(),
     packs: ['house-rules'],
     packsBuiltRoot: builtRoot,
-    millMetricsPort: { onHookEvent: () => {} },
     spawnCommand: { path: process.execPath, kind: 'exe' },
     ptySpawn: () => { throw new Error('spawn refused'); },
   });
@@ -190,7 +185,7 @@ test('a spawn that never starts delivers no measurable pack', async () => {
   }
 });
 
-test('measurement leaves a session without delivered packs on the existing matcher set', async () => {
+test('a session without delivered packs keeps the wakeup matcher alone', async () => {
   const hooksBaseDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glissa-pack-hooks-'));
   const session = new Session({
     id: 'measured-empty',
@@ -199,7 +194,6 @@ test('measurement leaves a session without delivered packs on the existing match
     hookRouter: new HookRouter(),
     getHookPort: () => 4321,
     hooksBaseDir,
-    millMetricsPort: { onHookEvent: () => {} },
     spawnCommand: { path: process.execPath, kind: 'exe' },
     ptySpawn: () => fakePty(),
   });
@@ -520,8 +514,9 @@ test('a pack update between lookups still arms a notice before the delivered lis
     },
   });
   packDelivery.replaceDelivered(previousDeliveries);
-  assert.deepEqual(packDelivery.deliveredWithDirs(), previousDeliveries.map((pack) => ({
-    ...pack,
+  assert.deepEqual(packDelivery.deliveredWithTokenEstimates(), previousDeliveries.map(({ name, version }) => ({
+    name,
+    version,
     tokenEstimate: null,
   })));
   assert.deepEqual(packDelivery.delivered(), [

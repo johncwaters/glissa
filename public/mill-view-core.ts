@@ -66,16 +66,9 @@ export interface MillOutcomeBucket {
 
 export interface MillMeasurement {
   deliveries?: unknown;
-  measurableDeliveries?: unknown;
-  unmeasurableDeliveries?: unknown;
-  openedSessions?: unknown;
-  openRate?: unknown;
-  distinctFilesRead?: unknown;
-  medianFilesRead?: unknown;
   liveSessions?: unknown;
   ambiguousPrompts?: unknown;
-  opened?: MillOutcomeBucket | null;
-  unopened?: MillOutcomeBucket | null;
+  outcomes?: MillOutcomeBucket | null;
 }
 
 export interface MillPack {
@@ -301,12 +294,6 @@ export function deliveryEmptyText(pack: MillPack | null | undefined) {
   return 'no live sessions';
 }
 
-export function openRateText(measurement: MillMeasurement | null | undefined): string {
-  const openRate = measurement?.openRate;
-  if (typeof openRate !== 'number' || !Number.isFinite(openRate)) return NO_VALUE;
-  return formatPercent(openRate * 100);
-}
-
 export function measurementEmptyText(pack: MillPack | null | undefined): string {
   if (!pack?.measurement) return 'not yet measured';
   return '';
@@ -317,23 +304,12 @@ export function measurementLines(pack: MillPack | null | undefined): MillLine[] 
   if (!measurement) return [];
   const lines = [
     { label: 'deliveries', value: formatCount(measurement.deliveries), tone: 'ok' },
-    { label: 'measurable deliveries', value: formatCount(measurement.measurableDeliveries), tone: 'ok' },
-    { label: 'opened sessions', value: `${formatCount(measurement.openedSessions)} (${openRateText(measurement)})`, tone: 'ok' },
-    { label: 'distinct files read', value: formatCount(measurement.distinctFilesRead), tone: 'ok' },
-    { label: 'median files read', value: measured(measurement.medianFilesRead) ? formatCount(measurement.medianFilesRead) : NO_VALUE, tone: 'ok' },
   ];
   if (Number(measurement.liveSessions) > 0) {
     lines.push({ label: 'live sessions', value: formatCount(measurement.liveSessions), tone: 'ok' });
   }
   if (Number(measurement.ambiguousPrompts) > 0) {
     lines.push({ label: 'ambiguous prompts', value: formatCount(measurement.ambiguousPrompts), tone: 'warn' });
-  }
-  if (Number(measurement.unmeasurableDeliveries) > 0) {
-    lines.push({
-      label: 'unmeasurable deliveries',
-      value: `${formatCount(measurement.unmeasurableDeliveries)} (read hooks unavailable)`,
-      tone: 'warn',
-    });
   }
   return lines;
 }
@@ -358,11 +334,10 @@ function outcomeValue(bucket: MillOutcomeBucket | null | undefined): string {
   ].join(', ');
 }
 
-export function outcomeSplitLines(measurement: MillMeasurement | null | undefined): MillLine[] {
+export function outcomeLines(measurement: MillMeasurement | null | undefined): MillLine[] {
   if (!measurement) return [];
   return [
-    { label: 'opened outcomes', value: outcomeValue(measurement.opened), tone: 'ok' },
-    { label: 'unopened outcomes', value: outcomeValue(measurement.unopened), tone: 'ok' },
+    { label: 'outcomes', value: outcomeValue(measurement.outcomes), tone: 'ok' },
   ];
 }
 

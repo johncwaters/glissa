@@ -13,10 +13,14 @@ const DROPPED_LINE_TYPES = new Set([
   'bridge-session',
   'file-history-delta',
   'file-history-snapshot',
+  'frame-link',
   'last-prompt',
   'mode',
   'permission-mode',
   'queue-operation',
+  'artifact-autoreact-ledger',
+  'artifact-comment-monitor',
+  'cost-state',
   'system',
 ]);
 

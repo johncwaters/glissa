@@ -5,7 +5,6 @@ import { hooksForProject } from '../session/core/user-hooks-core.ts';
 import type { SessionPlanReviewPort } from '../session/sessions.ts';
 import type { GitWorkspace } from '../session/session-worktree-lifecycle.ts';
 import type { ControlBroadcast } from './backend-websockets.ts';
-import type { MillMetricsPort } from './mill-metrics-wiring.ts';
 import type { ConfigStore, GlissaConfig } from './config-store.ts';
 import { createRtkInstallWiring } from './rtk-install-wiring.ts';
 import { getRtkPath } from './rtk-resolver.ts';
@@ -18,7 +17,6 @@ interface BackendSessionRuntimeDependencies {
   config: GlissaConfig;
   configStore: ConfigStore;
   getGitWorkspace: () => GitWorkspace | null;
-  getMillMetricsPort?: () => MillMetricsPort | null;
   getPlanReviewPort?: () => SessionPlanReviewPort | null;
   getBroadcastControl: () => ControlBroadcast | null;
   logger: Pick<Console, 'warn'>;
@@ -65,7 +63,6 @@ function createBackendSessionRuntime(dependencies: BackendSessionRuntimeDependen
     hookRouter,
     getHookPort,
     getGitWorkspace: dependencies.getGitWorkspace,
-    getMillMetricsPort: dependencies.getMillMetricsPort || (() => null),
     getPlanReviewPort: dependencies.getPlanReviewPort || (() => null),
     rtkPathForConfig,
     getUserHooks: (projectId: string) => hooksForProject(dependencies.config.hooks, projectId),

@@ -17,6 +17,12 @@ interface ResolvedDelivery {
   tokenEstimate: number | null;
 }
 
+interface MeasuredDelivery {
+  name: string;
+  version: string;
+  tokenEstimate: number | null;
+}
+
 interface PackResolution {
   name?: string;
   version?: string | null;
@@ -48,7 +54,7 @@ interface PackDeliveryResult {
 interface SessionPackDelivery {
   names(): string[];
   delivered(): { name: string; version: string }[];
-  deliveredWithDirs(): ResolvedDelivery[];
+  deliveredWithTokenEstimates(): MeasuredDelivery[];
   replaceDelivered(packs: DeliveredPack[]): void;
   clearNotice(): void;
   hasPendingNotice(): boolean;
@@ -182,8 +188,8 @@ function createSessionPackDelivery(options: SessionPackDeliveryOptions): Session
   return {
     names: () => [...configuredNames],
     delivered: () => delivered.map(({ name, version }) => ({ name, version })),
-    deliveredWithDirs: () => delivered.flatMap(({ name, version, dir, tokenEstimate }) => (
-      dir ? [{ name, version, dir, tokenEstimate: tokenEstimate ?? null }] : []
+    deliveredWithTokenEstimates: () => delivered.map(({ name, version, tokenEstimate }) => (
+      { name, version, tokenEstimate: tokenEstimate ?? null }
     )),
     replaceDelivered,
     clearNotice,
@@ -195,4 +201,4 @@ function createSessionPackDelivery(options: SessionPackDeliveryOptions): Session
 }
 
 export { createSessionPackDelivery };
-export type { DeliveredPack, PackResolution, ResolvedDelivery, SessionPackDelivery, SessionPackDeliveryOptions };
+export type { DeliveredPack, MeasuredDelivery, PackResolution, ResolvedDelivery, SessionPackDelivery, SessionPackDeliveryOptions };
