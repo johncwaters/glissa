@@ -4,6 +4,7 @@ import { Readable } from 'node:stream';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { main, fallbackLine, decodeChainCommand, parsePayload, NO_CHAIN } from '../session/statusline-relay.ts';
+import * as statuslineRelay from '../session/statusline-relay.ts';
 function fakeStdin(text: string) {
   return Readable.from([Buffer.from(text, 'utf8')]);
 }
@@ -121,4 +122,11 @@ test('the POST reaches a listening local server with the raw body intact', async
   assert.equal(received[0].url, '/hook/sess/statusline?t=tok');
 
   assert.equal(received[0].body, raw);
+});
+
+test('the statusline relay does not re-export the loopback post helpers', () => {
+  assert.deepEqual(
+    Object.keys(statuslineRelay).filter((name) => name === 'postPayload' || name === 'POST_TIMEOUT_MS'),
+    [],
+  );
 });

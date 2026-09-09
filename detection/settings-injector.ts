@@ -57,6 +57,7 @@ export interface BuildHookSettingsOptions {
   planReview?: boolean;
   userSettingsPath?: string | null;
   relayPath?: string;
+  commandHookRelayPath?: string;
   userHooks?: UserHook[];
 }
 
@@ -84,6 +85,7 @@ const WAKEUP_TOOL_MATCHER = 'ScheduleWakeup|CronCreate|CronDelete';
 const PLAN_TOOL_MATCHER = PLAN_TOOL_NAME;
 
 const RELAY_PATH = relayPath('statusline-relay');
+const COMMAND_HOOK_RELAY_PATH = relayPath('command-hook-relay');
 const NO_CHAIN = '-';
 
 function generateToken(): string {
@@ -121,14 +123,27 @@ function buildStatuslineCommand(
   return `node ${shellQuote(toForwardSlashes(relayPath))} ${shellQuote(postUrl)} ${shellQuote(encoded)}`;
 }
 
-function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, observeToolCalls = false, enableProjectMcp = false, rtkPath = null, planLimits = false, planReview = false, userSettingsPath = null, relayPath = RELAY_PATH, userHooks = [] }: BuildHookSettingsOptions): HookSettings {
+function buildCommandHookCommand(
+  { relayPath = COMMAND_HOOK_RELAY_PATH, postUrl }: { relayPath?: string; postUrl: string },
+): string {
+  return `node ${shellQuote(toForwardSlashes(relayPath))} ${shellQuote(postUrl)}`;
+}
+
+function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, observeToolCalls = false, enableProjectMcp = false, rtkPath = null, planLimits = false, planReview = false, userSettingsPath = null, relayPath = RELAY_PATH, commandHookRelayPath = COMMAND_HOOK_RELAY_PATH, userHooks = [] }: BuildHookSettingsOptions): HookSettings {
   if (!port || !glissaId || !token) {
     throw new Error('buildHookSettings requires port, glissaId, token');
   }
   const base = `http://127.0.0.1:${port}/hook/${encodeURIComponent(glissaId)}`;
   const hookUrl = (event: string) => `${base}/${event.toLowerCase()}?t=${encodeURIComponent(token)}`;
-  const hooks: Record<string, SettingsHookEntry[]> = {};
+  const hooks: Record<string, SettingsHookEntry[]> = {
+    SessionStart: [{ hooks: [{
+      type: 'command',
+      command: buildCommandHookCommand({ relayPath: commandHookRelayPath, postUrl: hookUrl('SessionStart') }),
+      timeout: timeoutSec,
+    }] }],
+  };
   for (const event of HOOK_EVENTS) {
+    if (event === 'SessionStart') continue;
     hooks[event] = [{ hooks: [{ type: 'http', url: hookUrl(event), timeout: timeoutSec }] }];
   }
   const permissionRequestEntries = hooks.PermissionRequest;
@@ -268,6 +283,7 @@ export {
   generateToken,
   safeDirSegment,
   buildStatuslineCommand,
+  buildCommandHookCommand,
   readUserStatuslineCommand,
   HOOK_EVENTS,
   WAKEUP_TOOL_MATCHER,
@@ -279,5 +295,6 @@ export {
   DIR_MODE,
   FILE_MODE,
   RELAY_PATH,
+  COMMAND_HOOK_RELAY_PATH,
   NO_CHAIN,
 };

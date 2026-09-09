@@ -7,11 +7,15 @@ import {
   buildScorecards,
   classifyPrompt,
   dispositionFor,
+  initialTurnBoundaryState,
   mergeRecords,
+  promptBoundaryOrNull,
   pruneRecords,
   recordFromAccumulator,
+  reduceTurnBoundary,
   resolveMillMetricsConfig,
 } from '../server/core/mill-metrics-core.ts';
+import { STATES } from '../shared/states.ts';
 import type {
   MillMetricAccumulatorShape,
   MillMetricPackAccumulator,
@@ -66,13 +70,138 @@ function accumulator(overrides: Partial<MillMetricAccumulatorShape> = {}): MillM
   };
 }
 
-test('classifyPrompt keeps the title race separate from real interruptions', () => {
+test('classifyPrompt uses the prior turn boundary for every prompt class', () => {
   const ts = 10_000;
-  assert.equal(classifyPrompt({ state: 'RUNNING', stateSince: ts - TITLE_RACE_MS, ts }), 'interruption');
-  assert.equal(classifyPrompt({ state: 'RUNNING', stateSince: ts - TITLE_RACE_MS + 1, ts }), 'ambiguous');
-  assert.equal(classifyPrompt({ state: 'WAITING', stateSince: 0, ts }), 'answer');
-  assert.equal(classifyPrompt({ state: 'IDLE', stateSince: 0, ts }), 'followup');
-  assert.equal(classifyPrompt({ state: 'FAILED', stateSince: 0, ts }), 'followup');
+  const hasSeenTurnEnd = true;
+  const hasSeenPriorPrompt = true;
+  assert.equal(classifyPrompt({ boundary: null, hasSeenTurnEnd, hasSeenPriorPrompt, ts }), 'interruption');
+  assert.equal(classifyPrompt({ boundary: { ts: ts - 5000, wasAwaitingInput: true }, hasSeenTurnEnd, hasSeenPriorPrompt, ts }), 'answer');
+  assert.equal(classifyPrompt({ boundary: { ts: ts - TITLE_RACE_MS, wasAwaitingInput: false }, hasSeenTurnEnd, hasSeenPriorPrompt, ts }), 'followup');
+  assert.equal(classifyPrompt({ boundary: { ts: ts - TITLE_RACE_MS + 1, wasAwaitingInput: false }, hasSeenTurnEnd, hasSeenPriorPrompt, ts }), 'ambiguous');
+});
+
+test('the first prompt of a session is a followup, not an interruption', () => {
+  const ts = 10_000;
+  assert.equal(classifyPrompt({ boundary: null, hasSeenTurnEnd: false, hasSeenPriorPrompt: false, ts }), 'followup');
+  assert.equal(classifyPrompt({ boundary: null, hasSeenTurnEnd: true, hasSeenPriorPrompt: false, ts }), 'interruption');
+  assert.equal(classifyPrompt({ boundary: null, hasSeenTurnEnd: false, hasSeenPriorPrompt: true, ts }), 'interruption');
+});
+
+test('promptBoundaryOrNull rejects every boundary shape it cannot trust', () => {
+  assert.deepEqual(promptBoundaryOrNull({ ts: 5, wasAwaitingInput: true }), { ts: 5, wasAwaitingInput: true });
+  assert.equal(promptBoundaryOrNull(null), null);
+  assert.equal(promptBoundaryOrNull(7), null);
+  assert.equal(promptBoundaryOrNull({ ts: 5 }), null);
+  assert.equal(promptBoundaryOrNull({ wasAwaitingInput: true }), null);
+  assert.equal(promptBoundaryOrNull({ ts: Number.NaN, wasAwaitingInput: false }), null);
+  assert.equal(promptBoundaryOrNull({ ts: '5', wasAwaitingInput: false }), null);
+  assert.equal(promptBoundaryOrNull({ ts: 5, wasAwaitingInput: 'yes' }), null);
+});
+
+test('a Stop hook opens a boundary the next prompt consumes once', () => {
+  const opened = reduceTurnBoundary(initialTurnBoundaryState(), {
+    kind: 'hook-event', event: 'Stop', state: STATES.WAITING, ts: 1000,
+  });
+  assert.deepEqual(opened.state, { boundary: { ts: 1000, wasAwaitingInput: true }, hasSeenTurnEnd: true, hasSeenPrompt: false });
+
+  const consumed = reduceTurnBoundary(opened.state, { kind: 'user-prompt' });
+  assert.deepEqual(consumed.boundary, { ts: 1000, wasAwaitingInput: true });
+  assert.deepEqual(consumed.state, { boundary: null, hasSeenTurnEnd: true, hasSeenPrompt: true });
+
+  const secondPrompt = reduceTurnBoundary(consumed.state, { kind: 'user-prompt' });
+  assert.equal(secondPrompt.boundary, null);
+  assert.equal(secondPrompt.state.hasSeenTurnEnd, true);
+});
+
+test('a prompt before any turn has ended reports no turn end', () => {
+  const step = reduceTurnBoundary(initialTurnBoundaryState(), { kind: 'user-prompt' });
+  assert.equal(step.boundary, null);
+  assert.equal(step.state.hasSeenTurnEnd, false);
+  assert.equal(step.hasSeenPriorPrompt, false);
+  assert.equal(classifyPrompt({
+    boundary: step.boundary,
+    hasSeenTurnEnd: step.state.hasSeenTurnEnd,
+    hasSeenPriorPrompt: step.hasSeenPriorPrompt,
+    ts: 10_000,
+  }), 'followup');
+});
+
+test('only the very first prompt of a session falls back to followup', () => {
+  const firstPrompt = reduceTurnBoundary(initialTurnBoundaryState(), { kind: 'user-prompt' });
+  assert.equal(classifyPrompt({
+    boundary: firstPrompt.boundary,
+    hasSeenTurnEnd: firstPrompt.state.hasSeenTurnEnd,
+    hasSeenPriorPrompt: firstPrompt.hasSeenPriorPrompt,
+    ts: 10_000,
+  }), 'followup');
+
+  const secondPrompt = reduceTurnBoundary(firstPrompt.state, { kind: 'user-prompt' });
+  assert.equal(secondPrompt.state.hasSeenTurnEnd, false);
+  assert.equal(secondPrompt.hasSeenPriorPrompt, true);
+  assert.equal(classifyPrompt({
+    boundary: secondPrompt.boundary,
+    hasSeenTurnEnd: secondPrompt.state.hasSeenTurnEnd,
+    hasSeenPriorPrompt: secondPrompt.hasSeenPriorPrompt,
+    ts: 20_000,
+  }), 'interruption');
+});
+
+test('a turn end keeps the prompts a session has already seen', () => {
+  const afterPrompt = reduceTurnBoundary(initialTurnBoundaryState(), { kind: 'user-prompt' }).state;
+  const afterStop = reduceTurnBoundary(afterPrompt, {
+    kind: 'hook-event', event: 'Stop', state: STATES.WAITING, ts: 1000,
+  }).state;
+  assert.equal(afterStop.hasSeenPrompt, true);
+});
+
+test('only a WAITING or COMPLETE transition and a Stop hook open a boundary', () => {
+  const start = initialTurnBoundaryState();
+  assert.deepEqual(reduceTurnBoundary(start, { kind: 'hook-event', event: 'PreToolUse', state: STATES.RUNNING, ts: 1000 }).state, start);
+  assert.deepEqual(reduceTurnBoundary(start, { kind: 'state-change', to: STATES.RUNNING, ts: 1000 }).state, start);
+  assert.deepEqual(reduceTurnBoundary(start, { kind: 'state-change', to: STATES.COMPLETE, ts: 1000 }).state, {
+    boundary: { ts: 1000, wasAwaitingInput: false }, hasSeenTurnEnd: true, hasSeenPrompt: false,
+  });
+  assert.deepEqual(reduceTurnBoundary(start, { kind: 'state-change', to: STATES.WAITING, ts: 1000 }).state, {
+    boundary: { ts: 1000, wasAwaitingInput: true }, hasSeenTurnEnd: true, hasSeenPrompt: false,
+  });
+  assert.deepEqual(reduceTurnBoundary(start, { kind: 'hook-event', event: 'stop', state: STATES.RUNNING, ts: 1000 }).state, {
+    boundary: { ts: 1000, wasAwaitingInput: false }, hasSeenTurnEnd: true, hasSeenPrompt: false,
+  });
+});
+
+test('work resuming without a prompt retires the boundary so the next prompt is an interruption', () => {
+  const afterWaiting = reduceTurnBoundary(initialTurnBoundaryState(), { kind: 'state-change', to: STATES.WAITING, ts: 1000 }).state;
+  const waitingResumed = reduceTurnBoundary(afterWaiting, { kind: 'state-change', to: STATES.RUNNING, ts: 2000 }).state;
+  assert.deepEqual(waitingResumed, { boundary: null, hasSeenTurnEnd: true, hasSeenPrompt: false });
+  const promptAfterWaiting = reduceTurnBoundary(waitingResumed, { kind: 'user-prompt' });
+  assert.equal(classifyPrompt({
+    boundary: promptAfterWaiting.boundary,
+    hasSeenTurnEnd: promptAfterWaiting.state.hasSeenTurnEnd,
+    hasSeenPriorPrompt: promptAfterWaiting.hasSeenPriorPrompt,
+    ts: 600_000,
+  }), 'interruption');
+
+  const afterComplete = reduceTurnBoundary(initialTurnBoundaryState(), { kind: 'state-change', to: STATES.COMPLETE, ts: 1000 }).state;
+  const completeResumed = reduceTurnBoundary(afterComplete, { kind: 'state-change', to: STATES.RUNNING, ts: 2000 }).state;
+  assert.deepEqual(completeResumed, { boundary: null, hasSeenTurnEnd: true, hasSeenPrompt: false });
+  const promptAfterComplete = reduceTurnBoundary(completeResumed, { kind: 'user-prompt' });
+  assert.equal(classifyPrompt({
+    boundary: promptAfterComplete.boundary,
+    hasSeenTurnEnd: promptAfterComplete.state.hasSeenTurnEnd,
+    hasSeenPriorPrompt: promptAfterComplete.hasSeenPriorPrompt,
+    ts: 600_000,
+  }), 'interruption');
+});
+
+test('a prompt answered while the session still waits keeps scoring as an answer', () => {
+  const afterWaiting = reduceTurnBoundary(initialTurnBoundaryState(), { kind: 'state-change', to: STATES.WAITING, ts: 1000 }).state;
+  const prompt = reduceTurnBoundary(afterWaiting, { kind: 'user-prompt' });
+  assert.equal(classifyPrompt({
+    boundary: prompt.boundary,
+    hasSeenTurnEnd: prompt.state.hasSeenTurnEnd,
+    hasSeenPriorPrompt: prompt.hasSeenPriorPrompt,
+    ts: 600_000,
+  }), 'answer');
 });
 
 test('only an operator abandoning live work counts as an abort', () => {

@@ -2,6 +2,7 @@
 const DEFAULT_AGENT_TTL_MS = 30 * 60 * 1000;
 
 type TimestampMap = Map<string, number>;
+type AgentStopOutcome = 'removed' | 'orphan' | 'duplicate' | 'ignored';
 
 function addAgent(map: TimestampMap, agentId: string | null | undefined, ts: number): boolean {
   if (!agentId) return false;
@@ -180,7 +181,7 @@ interface TaskRegistryInspection {
 
 interface TaskRegistry {
   noteAgentStart(agentId: string | null | undefined, ts: number): boolean;
-  noteAgentStop(agentId: string | null | undefined): boolean;
+  noteAgentStop(agentId: string | null | undefined): AgentStopOutcome;
   hasOrphanStopEvidence(): boolean;
   resetTurnEvidence(): void;
   reconcileDeclared(entries: DeclaredEntry[]): void;
@@ -237,16 +238,16 @@ function createTaskRegistry({
     },
 
     noteAgentStop(agentId) {
-      if (!agentId) return false;
+      if (!agentId) return 'ignored';
       const changed = removeAgent(countedAgents, agentId);
       if (changed) {
         observedAgentIdsThisTurn.add(agentId);
-        return true;
+        return 'removed';
       }
-      if (observedAgentIdsThisTurn.has(agentId)) return false;
+      if (observedAgentIdsThisTurn.has(agentId)) return 'duplicate';
       observedAgentIdsThisTurn.add(agentId);
       orphanAgentStops.set(agentId, now());
-      return false;
+      return 'orphan';
     },
 
     hasOrphanStopEvidence() {
@@ -388,4 +389,5 @@ export type {
   TaskRegistryInspection,
   TaskRegistryOptions,
   TimestampMap,
+  AgentStopOutcome,
 };

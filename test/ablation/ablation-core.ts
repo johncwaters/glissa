@@ -1,9 +1,9 @@
-import { classifyPrompt } from '../../server/core/mill-metrics-core.ts';
+import { classifyPrompt, promptBoundaryOrNull } from '../../server/core/mill-metrics-core.ts';
 import type { MillMetricPromptCounts } from '../../shared/contracts/mill-metrics.ts';
 
 type ArmName = 'on' | 'off';
 type ArmOutcome = 'invalid' | 'pass' | 'fail';
-type PromptPayload = { ts?: unknown; state?: unknown; stateSince?: unknown } | null | undefined;
+type PromptPayload = { ts?: unknown; boundary?: unknown; hasSeenTurnEnd?: unknown; hasSeenPriorPrompt?: unknown } | null | undefined;
 type TaskPair = { on?: unknown; off?: unknown };
 
 const OUTCOMES = new Set<unknown>(['pass', 'fail']);
@@ -35,8 +35,9 @@ function classifyObservedPrompts(promptPayloads: PromptPayload[]): MillMetricPro
   for (const payload of promptPayloads) {
     const timestamp = typeof payload?.ts === 'number' && Number.isFinite(payload.ts) ? payload.ts : Date.now();
     const promptClass = classifyPrompt({
-      state: typeof payload?.state === 'string' ? payload.state : '',
-      stateSince: typeof payload?.stateSince === 'number' && Number.isFinite(payload.stateSince) ? payload.stateSince : timestamp,
+      boundary: promptBoundaryOrNull(payload?.boundary),
+      hasSeenTurnEnd: payload?.hasSeenTurnEnd === true,
+      hasSeenPriorPrompt: payload?.hasSeenPriorPrompt === true,
       ts: timestamp,
     });
     prompts[promptClass] += 1;

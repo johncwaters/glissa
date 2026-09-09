@@ -25,6 +25,14 @@ test('v2 fixture (complete via Stop): emits working + ready, never awaiting-inpu
   assert.equal(c['awaiting-input'] || 0, 0, 'no false WAITING');
 });
 
+test('v2 fixture (SessionStart clear): the command-relayed reset signal reaches replay', async () => {
+  const { records } = load('v2-sessionstart-clear.jsonl');
+  const { signals } = await replayDetection(records, FAST);
+  assert.deepEqual(signals.map((signal) => signal.signal), ['session-start']);
+  const sessionStart = records.find((record) => record.type === 'hook');
+  assert.equal(sessionStart?.payload?.source, 'clear');
+});
+
 test('v2 fixture (waiting via permission Notification): emits working + awaiting-input, never ready', async () => {
   const { records } = load('v2-waiting-permission.jsonl');
   const { signals } = await replayDetection(records, FAST);

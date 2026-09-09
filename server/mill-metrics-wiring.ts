@@ -2,7 +2,10 @@ import {
   buildScorecards,
   classifyPrompt,
   dispositionFor,
+  initialTurnBoundaryState,
+  promptBoundaryOrNull,
   recordFromAccumulator,
+  reduceTurnBoundary,
 } from './core/mill-metrics-core.ts';
 import type {
   MillMetricAccumulatorShape,
@@ -10,6 +13,7 @@ import type {
   MillMetricEndIntent,
   MillMetricPackAccumulator,
   MillMetricsConfig,
+  MillPromptBoundary,
 } from './core/mill-metrics-core.ts';
 import type {
   MillMetricDisposition,
@@ -23,6 +27,22 @@ type DeliveredPack = {
   name: string;
   version: string;
   tokenEstimate?: number | null;
+};
+
+type MillPromptSubmittedPayload = {
+  boundary?: MillPromptBoundary | null;
+  hasSeenTurnEnd?: boolean;
+  hasSeenPriorPrompt?: boolean;
+  state?: string;
+  ts?: number;
+};
+
+type MillTurnBoundarySession = {
+  id: string;
+  state: string;
+  on(event: 'hook-event', listener: (payload: { event: string }) => void): unknown;
+  on(event: 'state-change', listener: (payload: { to: string }) => void): unknown;
+  on(event: 'user-prompt', listener: (payload: { state?: string; ts?: number }) => void): unknown;
 };
 
 type Accumulator = MillMetricAccumulatorShape & {
@@ -209,18 +229,15 @@ function createMillMetricsWiring({
     }
   }
 
-  function onPromptSubmitted(sessionId: string, payload: {
-    state?: string;
-    stateSince?: number;
-    ts?: number;
-  }): void {
+  function onPromptSubmitted(sessionId: string, payload: MillPromptSubmittedPayload): void {
     const accumulator = accumulators.get(sessionId);
     if (!accumulator) return;
     const state = typeof payload?.state === 'string' ? payload.state : '';
     const ts = numberOrNull(payload?.ts) ?? nowFn();
     const promptClass: MillMetricPromptClass = classifyPrompt({
-      state,
-      stateSince: numberOrNull(payload?.stateSince) ?? ts,
+      boundary: promptBoundaryOrNull(payload?.boundary),
+      hasSeenTurnEnd: payload?.hasSeenTurnEnd === true,
+      hasSeenPriorPrompt: payload?.hasSeenPriorPrompt === true,
       ts,
     });
     accumulator.prompts[promptClass] += 1;
@@ -310,6 +327,35 @@ function createMillMetricsWiring({
   };
 
   return { port, scorecards };
+}
+
+function attachMillMetricsSession(
+  session: MillTurnBoundarySession,
+  port: Pick<MillMetricsPort, 'onPromptSubmitted'>,
+): void {
+  let turnBoundary = initialTurnBoundaryState();
+  session.on('hook-event', ({ event }) => {
+    turnBoundary = reduceTurnBoundary(turnBoundary, {
+      kind: 'hook-event',
+      event,
+      state: session.state,
+      ts: Date.now(),
+    }).state;
+  });
+  session.on('state-change', ({ to }) => {
+    turnBoundary = reduceTurnBoundary(turnBoundary, { kind: 'state-change', to, ts: Date.now() }).state;
+  });
+  session.on('user-prompt', (payload) => {
+    const step = reduceTurnBoundary(turnBoundary, { kind: 'user-prompt' });
+    turnBoundary = step.state;
+    port.onPromptSubmitted(session.id, {
+      state: payload?.state,
+      ts: payload?.ts,
+      boundary: step.boundary,
+      hasSeenTurnEnd: step.state.hasSeenTurnEnd,
+      hasSeenPriorPrompt: step.hasSeenPriorPrompt,
+    });
+  });
 }
 
 type MillMetricsLaneOptions = Omit<MillMetricsWiringOptions, 'store'> & {
@@ -455,7 +501,7 @@ export type MillMetricsPort = {
     agent?: string;
     ts?: number;
   }) => void;
-  onPromptSubmitted: (sessionId: string, payload: { state?: string; stateSince?: number; ts?: number }) => void;
+  onPromptSubmitted: (sessionId: string, payload: MillPromptSubmittedPayload) => void;
   onSessionEnd: (sessionId: string, payload: {
     transitionEvent?: string;
     intent?: MillMetricEndIntent;
@@ -464,5 +510,5 @@ export type MillMetricsPort = {
   onSessionTeardown: (sessionId: string) => void;
 };
 
-export { createMillMetricsLane, createMillMetricsWiring };
-export type { MillMetricsRecordSink };
+export { attachMillMetricsSession, createMillMetricsLane, createMillMetricsWiring };
+export type { MillMetricsRecordSink, MillPromptSubmittedPayload, MillTurnBoundarySession };

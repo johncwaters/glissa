@@ -50,6 +50,7 @@ export default defineConfig({
         'server/index': path.join(repoRoot, 'server', 'index.ts'),
         'bin/glissa': path.join(repoRoot, 'bin', 'glissa.ts'),
         'session/hook-relay': path.join(repoRoot, 'session', 'hook-relay.ts'),
+        'session/command-hook-relay': path.join(repoRoot, 'session', 'command-hook-relay.ts'),
         'session/statusline-relay': path.join(repoRoot, 'session', 'statusline-relay.ts'),
         'session/rtk-relay': path.join(repoRoot, 'session', 'rtk-relay.ts'),
         'session/visions-relay': path.join(repoRoot, 'session', 'visions-relay.ts'),

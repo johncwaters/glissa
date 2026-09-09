@@ -12,6 +12,7 @@ import {
   summariseAblation,
   turnBudget,
 } from '../test/ablation/ablation-core.ts';
+import { promptBoundaryOrNull } from '../server/core/mill-metrics-core.ts';
 
 test('armOutcome treats an execution error as invalid ahead of the check result', () => {
   assert.equal(armOutcome('spawn did not use model haiku', true), 'invalid');
@@ -39,27 +40,48 @@ test('emptyPromptCounts starts every prompt class at zero in a fresh object', ()
   assert.notEqual(emptyPromptCounts(), emptyPromptCounts());
 });
 
-test('classifyObservedPrompts scores each observed payload by state and title race timing', () => {
+test('classifyObservedPrompts scores each observed payload by its prior turn boundary', () => {
   assert.deepEqual(classifyObservedPrompts([
-    { state: 'RUNNING', stateSince: 0, ts: 10000 },
-    { state: 'WAITING', stateSince: 0, ts: 10000 },
-    { state: 'IDLE', stateSince: 0, ts: 10000 },
-    { state: 'RUNNING', stateSince: 9900, ts: 10000 },
+    { boundary: null, hasSeenTurnEnd: true, ts: 10000 },
+    { boundary: { ts: 5000, wasAwaitingInput: true }, hasSeenTurnEnd: true, ts: 10000 },
+    { boundary: { ts: 5000, wasAwaitingInput: false }, hasSeenTurnEnd: true, ts: 10000 },
+    { boundary: { ts: 9900, wasAwaitingInput: false }, hasSeenTurnEnd: true, ts: 10000 },
   ]), {
     interruption: 1, answer: 1, followup: 1, ambiguous: 1,
   });
   assert.deepEqual(classifyObservedPrompts([]), emptyPromptCounts());
 });
 
-test('classifyObservedPrompts defaults missing and garbage payload fields', () => {
+test('classifyObservedPrompts rejects a boundary it cannot trust', () => {
+  const garbageBoundaries = [
+    { boundary: 7, hasSeenTurnEnd: true, ts: 'soon' },
+    { boundary: { ts: 1 }, hasSeenTurnEnd: true },
+    { boundary: { ts: Number.NaN, wasAwaitingInput: false }, hasSeenTurnEnd: true, ts: 10000 },
+  ];
+  for (const payload of garbageBoundaries) {
+    assert.equal(promptBoundaryOrNull(payload.boundary), null);
+  }
+  assert.deepEqual(classifyObservedPrompts(garbageBoundaries), {
+    interruption: 3, answer: 0, followup: 0, ambiguous: 0,
+  });
+});
+
+test('classifyObservedPrompts scores a prompt with no observed turn end as a followup', () => {
   assert.deepEqual(classifyObservedPrompts([
     {},
     null,
-    { state: 7, ts: 'soon' },
-    { state: 'RUNNING' },
-    { state: 'RUNNING', stateSince: Number.NaN, ts: 10000 },
+    { boundary: null, hasSeenTurnEnd: false, ts: 10000 },
   ]), {
-    interruption: 0, answer: 0, followup: 3, ambiguous: 2,
+    interruption: 0, answer: 0, followup: 3, ambiguous: 0,
+  });
+});
+
+test('classifyObservedPrompts scores a boundary-less prompt after the first as an interruption', () => {
+  assert.deepEqual(classifyObservedPrompts([
+    { boundary: null, hasSeenTurnEnd: false, hasSeenPriorPrompt: false, ts: 10000 },
+    { boundary: null, hasSeenTurnEnd: false, hasSeenPriorPrompt: true, ts: 20000 },
+  ]), {
+    interruption: 1, answer: 0, followup: 1, ambiguous: 0,
   });
 });
 

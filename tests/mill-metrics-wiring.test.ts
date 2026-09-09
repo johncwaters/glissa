@@ -8,8 +8,13 @@ import path from 'node:path';
 import { tokensFromUsage } from '../server/backend-lanes.ts';
 import { createMillMetricsStore } from '../server/mill-metrics-store.ts';
 import { createMillMetricsLane, createMillMetricsWiring } from '../server/mill-metrics-wiring.ts';
+import type { MillMetricsPort, MillPromptSubmittedPayload } from '../server/mill-metrics-wiring.ts';
 import type { MillMetricsStoreInstance } from '../server/mill-metrics-store.ts';
+import { createSessionEventWiring } from '../server/session-event-wiring.ts';
 import type { MillMetricSession } from '../shared/contracts/mill-metrics.ts';
+import type { Session } from '../session/sessions.ts';
+import { STATES } from '../shared/states.ts';
+import { plainSession } from './helpers/fake-session.ts';
 
 interface StoredEvent {
   kind: string;
@@ -75,6 +80,32 @@ function fakeStore(overrides: Partial<FakeStore> = {}): FakeStore {
   };
 }
 
+function millWiredSession(id: string): { session: Session; submitted: MillPromptSubmittedPayload[] } {
+  const submitted: MillPromptSubmittedPayload[] = [];
+  const millMetricsPort: MillMetricsPort = {
+    onPacksDelivered: () => {},
+    onPromptSubmitted: (_sessionId, payload) => { submitted.push(payload); },
+    onSessionEnd: () => {},
+    onSessionTeardown: () => {},
+  };
+  const session = plainSession(id);
+  createSessionEventWiring({
+    configStore: { save: () => null },
+    config: { projects: [] },
+    recordLane: () => {},
+    usage: { refreshSessions: () => {}, nudgeSession: () => {} },
+    broadcastControl: () => {},
+    telegramChannel: { noteStateChange: () => {}, recheck: () => {} },
+    notificationManager: { acknowledge: () => {}, trigger: () => {} },
+    getIngestLane: () => null,
+    tapIngestForSession: () => {},
+    closeSessionDataClients: () => {},
+    millMetricsPort,
+    logger: { error: () => {}, log: () => {}, warn: () => {} },
+  })(session);
+  return { session, submitted };
+}
+
 function delivered(overrides: Partial<DeliveredPayload> = {}): DeliveredPayload {
   return {
     packs: [{ name: 'alpha', version: 'v1' }],
@@ -87,14 +118,108 @@ function delivered(overrides: Partial<DeliveredPayload> = {}): DeliveredPayload 
 test('prompt classes are accumulated only for measured sessions', () => {
   const store = fakeStore();
   const wiring = createMillMetricsWiring({ store, nowFn: () => NOW });
-  wiring.port.onPromptSubmitted('missing', { state: 'RUNNING', stateSince: 0, ts: NOW });
+  wiring.port.onPromptSubmitted('missing', { state: 'RUNNING', ts: NOW, boundary: null, hasSeenTurnEnd: true });
   wiring.port.onPacksDelivered('s1', delivered());
-  wiring.port.onPromptSubmitted('s1', { state: 'RUNNING', stateSince: NOW - 5000, ts: NOW });
-  wiring.port.onPromptSubmitted('s1', { state: 'WAITING', stateSince: NOW - 5000, ts: NOW });
+  wiring.port.onPromptSubmitted('s1', { state: 'RUNNING', ts: NOW, boundary: null, hasSeenTurnEnd: true });
+  wiring.port.onPromptSubmitted('s1', {
+    state: 'RUNNING',
+    ts: NOW,
+    boundary: { ts: NOW - 5000, wasAwaitingInput: true },
+    hasSeenTurnEnd: true,
+  });
   assert.deepEqual(store.events.filter((event) => event.kind === 'prompt').map((event) => event.promptClass), [
     'interruption',
     'answer',
   ]);
+});
+
+test('a prompt before this session ended a turn is a followup, not an interruption', () => {
+  const store = fakeStore();
+  const wiring = createMillMetricsWiring({ store, nowFn: () => NOW });
+  wiring.port.onPacksDelivered('s1', delivered());
+  wiring.port.onPromptSubmitted('s1', { state: 'RUNNING', ts: NOW, boundary: null, hasSeenTurnEnd: false });
+  assert.deepEqual(store.events.filter((event) => event.kind === 'prompt').map((event) => event.promptClass), [
+    'followup',
+  ]);
+});
+
+test('a boundary-less prompt after the first is an interruption even before any turn end', () => {
+  const store = fakeStore();
+  const wiring = createMillMetricsWiring({ store, nowFn: () => NOW });
+  wiring.port.onPacksDelivered('s1', delivered());
+  wiring.port.onPromptSubmitted('s1', {
+    state: 'RUNNING', ts: NOW, boundary: null, hasSeenTurnEnd: false, hasSeenPriorPrompt: false,
+  });
+  wiring.port.onPromptSubmitted('s1', {
+    state: 'RUNNING', ts: NOW, boundary: null, hasSeenTurnEnd: false, hasSeenPriorPrompt: true,
+  });
+  assert.deepEqual(store.events.filter((event) => event.kind === 'prompt').map((event) => event.promptClass), [
+    'followup',
+    'interruption',
+  ]);
+});
+
+test('a boundary the port cannot trust is not read as a turn end', () => {
+  const store = fakeStore();
+  const wiring = createMillMetricsWiring({ store, nowFn: () => NOW });
+  wiring.port.onPacksDelivered('s1', delivered());
+  wiring.port.onPromptSubmitted('s1', {
+    state: 'RUNNING',
+    ts: NOW,
+    boundary: { ts: Number.NaN, wasAwaitingInput: true },
+    hasSeenTurnEnd: true,
+  });
+  assert.deepEqual(store.events.filter((event) => event.kind === 'prompt').map((event) => event.promptClass), [
+    'interruption',
+  ]);
+});
+
+test('session event wiring supplies and consumes the prior Stop or COMPLETE boundary', () => {
+  const { session, submitted } = millWiredSession('mill-boundary');
+
+  session.state = STATES.WAITING;
+  session.emit('hook-event', { event: 'Stop', payload: {} });
+  session.emit('user-prompt', { state: STATES.RUNNING, ts: NOW });
+  session.emit('state-change', {
+    from: STATES.RUNNING,
+    to: STATES.COMPLETE,
+    event: 'task_complete',
+    detail: { signal: 'ready' },
+  });
+  session.emit('user-prompt', { state: STATES.RUNNING, ts: NOW });
+  session.emit('user-prompt', { state: STATES.RUNNING, ts: NOW });
+
+  assert.equal(submitted[0]?.boundary?.wasAwaitingInput, true);
+  assert.equal(submitted[1]?.boundary?.wasAwaitingInput, false);
+  assert.equal(submitted[2]?.boundary, null);
+  assert.deepEqual(submitted.map((payload) => payload.hasSeenTurnEnd), [true, true, true]);
+  session.destroy();
+});
+
+test('session event wiring reports no turn end until one has happened', () => {
+  const { session, submitted } = millWiredSession('mill-first-prompt');
+
+  session.emit('user-prompt', { state: STATES.RUNNING, ts: NOW });
+  session.emit('hook-event', { event: 'Stop', payload: {} });
+  session.emit('user-prompt', { state: STATES.RUNNING, ts: NOW });
+  session.emit('user-prompt', { state: STATES.RUNNING, ts: NOW });
+
+  assert.deepEqual(submitted.map((payload) => payload.hasSeenTurnEnd), [false, true, true]);
+  assert.equal(submitted[0]?.boundary, null);
+  session.destroy();
+});
+
+test('session event wiring marks every prompt after the first as having a prior prompt', () => {
+  const { session, submitted } = millWiredSession('mill-prior-prompt');
+
+  session.emit('user-prompt', { state: STATES.RUNNING, ts: NOW });
+  session.emit('user-prompt', { state: STATES.RUNNING, ts: NOW });
+  session.emit('hook-event', { event: 'Stop', payload: {} });
+  session.emit('user-prompt', { state: STATES.RUNNING, ts: NOW });
+
+  assert.deepEqual(submitted.map((payload) => payload.hasSeenPriorPrompt), [false, true, true]);
+  assert.equal(submitted[1]?.boundary, null);
+  session.destroy();
 });
 
 test('a session with no delivered packs creates no closed record', () => {
@@ -368,7 +493,7 @@ test('a swap buffer filled with events gives ground to a close instead of droppi
   const swap = lane.restartIfConfigChanged();
   await tick();
   for (let index = 0; index < 600; index += 1) {
-    lane.port.onPromptSubmitted('s1', { state: 'RUNNING', stateSince: NOW - 5000, ts: NOW });
+    lane.port.onPromptSubmitted('s1', { state: 'RUNNING', ts: NOW });
   }
   lane.port.onSessionEnd('s1', { transitionEvent: 'user_kill', intent: 'natural', finalState: 'DONE' });
   gate.open();

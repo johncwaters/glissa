@@ -18,7 +18,7 @@ import {
 test('an unknown SubagentStop leaves turn evidence that zero reconciliation cannot erase', () => {
   let now = 1000;
   const registry = createTaskRegistry({ now: () => now, agentTtlMs: 100 });
-  assert.equal(registry.noteAgentStop('lost-start'), false);
+  assert.equal(registry.noteAgentStop('lost-start'), 'orphan');
   assert.equal(registry.hasOrphanStopEvidence(), true);
   registry.reconcileDeclared([]);
   assert.equal(registry.hasOrphanStopEvidence(), true);
@@ -30,12 +30,23 @@ test('an unknown SubagentStop leaves turn evidence that zero reconciliation cann
   assert.equal(registry.hasOrphanStopEvidence(), false, 'the agent TTL bounds an abandoned turn');
 });
 
-test('a duplicate stop for an agent started this turn is not orphan evidence', () => {
+test('a start, stop, stop sequence leaves the second stop as a state-preserving duplicate', () => {
   const registry = createTaskRegistry({ now: () => 1000 });
   registry.noteAgentStart('known', 1000);
-  registry.noteAgentStop('known');
-  registry.noteAgentStop('known');
+  assert.equal(registry.noteAgentStop('known'), 'removed');
+  const afterFirstStop = registry.inspect();
+  assert.equal(registry.noteAgentStop('known'), 'duplicate');
+  assert.deepEqual(registry.inspect(), afterFirstStop);
   assert.equal(registry.hasOrphanStopEvidence(), false);
+});
+
+test('a stop, stop sequence opens one orphan window and leaves the second stop as a no-op', () => {
+  const registry = createTaskRegistry({ now: () => 1000 });
+  assert.equal(registry.noteAgentStop('orphan'), 'orphan');
+  const afterFirstStop = registry.inspect();
+  assert.equal(registry.noteAgentStop('orphan'), 'duplicate');
+  assert.deepEqual(registry.inspect(), afterFirstStop);
+  assert.equal(registry.hasOrphanStopEvidence(), true);
 });
 
 test('addAgent adds a new id and reports the change; a duplicate is idempotent (count unchanged, ts refreshed)', () => {

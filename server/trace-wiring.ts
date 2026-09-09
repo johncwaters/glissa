@@ -399,11 +399,12 @@ function createTraceWiring({
     });
   }
 
-  function noteRefusedFile(binding: TraceBinding, filePath: string, reason: ContainmentRefusal): void {
+  function queueFileRefusalNotice(binding: TraceBinding, filePath: string, reason: ContainmentRefusal): boolean {
     const refusalKey = `${filePath}:${reason}`;
-    if (binding.notedFileRefusals.has(refusalKey)) return;
+    if (binding.notedFileRefusals.has(refusalKey)) return false;
     binding.notedFileRefusals.add(refusalKey);
     trimOldest(binding.notedFileRefusals, MAX_REMEMBERED_FILE_REFUSALS);
+    if (reason === 'missing') return false;
     queueRecord(binding.glissaSessionId, {
       ts: nowFn(),
       uuid: null,
@@ -412,6 +413,7 @@ function createTraceWiring({
       kind: 'notice',
       text: `refused ${path.basename(filePath)}: ${reason}`,
     });
+    return true;
   }
 
   function noteRecoveryFallback(binding: TraceBinding): void {
@@ -652,7 +654,7 @@ function createTraceWiring({
         reason: opened.reason,
       });
       if (!binding.hasOpenedTranscript) return;
-      noteRefusedFile(binding, subagentPath, opened.reason);
+      if (!queueFileRefusalNotice(binding, subagentPath, opened.reason)) return;
       await commitPending(binding);
       return;
     }

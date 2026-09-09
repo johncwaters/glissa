@@ -6,6 +6,7 @@ import type {
   MillMetricSession,
 } from '../../shared/contracts/mill-metrics.ts';
 import { MILL_METRICS_RETAIN_DAY_RANGE } from '../../shared/settings-ranges.ts';
+import { STATES } from '../../shared/states.ts';
 import { numberOrNull } from './usage-number-core.ts';
 import { cutoffDayKey } from './usage-warehouse-core.ts';
 
@@ -15,6 +16,28 @@ const TITLE_RACE_MS = 1500;
 const DEFAULT_MILL_METRICS_RETAIN_DAYS = 90;
 
 type EndIntent = 'operator-abort' | 'close-out' | 'natural';
+
+type MillPromptBoundary = {
+  ts: number;
+  wasAwaitingInput: boolean;
+};
+
+type MillTurnBoundaryState = {
+  boundary: MillPromptBoundary | null;
+  hasSeenTurnEnd: boolean;
+  hasSeenPrompt: boolean;
+};
+
+type MillTurnBoundaryEvent =
+  | { kind: 'hook-event'; event: string; state: string; ts: number }
+  | { kind: 'state-change'; to: string; ts: number }
+  | { kind: 'user-prompt' };
+
+type MillTurnBoundaryStep = {
+  state: MillTurnBoundaryState;
+  boundary: MillPromptBoundary | null;
+  hasSeenPriorPrompt: boolean;
+};
 
 type AccumulatorPack = {
   version: string;
@@ -103,20 +126,77 @@ function utcDay(timestamp: number): string | null {
   }
 }
 
+function promptBoundaryOrNull(value: unknown): MillPromptBoundary | null {
+  if (!value || typeof value !== 'object') return null;
+  if (!('ts' in value) || !('wasAwaitingInput' in value)) return null;
+  const { ts, wasAwaitingInput } = value;
+  if (typeof ts !== 'number' || !Number.isFinite(ts)) return null;
+  if (typeof wasAwaitingInput !== 'boolean') return null;
+  return { ts, wasAwaitingInput };
+}
+
+function initialTurnBoundaryState(): MillTurnBoundaryState {
+  return { boundary: null, hasSeenTurnEnd: false, hasSeenPrompt: false };
+}
+
+function endedTurnState(ts: number, wasAwaitingInput: boolean, hasSeenPrompt: boolean): MillTurnBoundaryState {
+  return { boundary: { ts, wasAwaitingInput }, hasSeenTurnEnd: true, hasSeenPrompt };
+}
+
+function reduceTurnBoundary(
+  state: MillTurnBoundaryState,
+  event: MillTurnBoundaryEvent,
+): MillTurnBoundaryStep {
+  const hasSeenPriorPrompt = state.hasSeenPrompt;
+  if (event.kind === 'user-prompt') {
+    return {
+      state: { boundary: null, hasSeenTurnEnd: state.hasSeenTurnEnd, hasSeenPrompt: true },
+      boundary: state.boundary,
+      hasSeenPriorPrompt,
+    };
+  }
+  if (event.kind === 'hook-event') {
+    if (event.event.toLowerCase() !== 'stop') return { state, boundary: null, hasSeenPriorPrompt };
+    return {
+      state: endedTurnState(event.ts, event.state === STATES.WAITING, state.hasSeenPrompt),
+      boundary: null,
+      hasSeenPriorPrompt,
+    };
+  }
+  if (event.to === STATES.RUNNING) {
+    return {
+      state: { boundary: null, hasSeenTurnEnd: state.hasSeenTurnEnd, hasSeenPrompt: state.hasSeenPrompt },
+      boundary: null,
+      hasSeenPriorPrompt,
+    };
+  }
+  if (event.to !== STATES.WAITING && event.to !== STATES.COMPLETE) return { state, boundary: null, hasSeenPriorPrompt };
+  return {
+    state: endedTurnState(event.ts, event.to === STATES.WAITING, state.hasSeenPrompt),
+    boundary: null,
+    hasSeenPriorPrompt,
+  };
+}
+
 function classifyPrompt({
-  state,
-  stateSince,
+  boundary,
+  hasSeenTurnEnd,
+  hasSeenPriorPrompt,
   ts,
 }: {
-  state: string;
-  stateSince: number;
+  boundary: MillPromptBoundary | null;
+  hasSeenTurnEnd: boolean;
+  hasSeenPriorPrompt: boolean;
   ts: number;
 }): MillMetricPromptClass {
-  if (state === 'WAITING') return 'answer';
-  if (state !== 'RUNNING') return 'followup';
-
-  if (ts - stateSince < TITLE_RACE_MS) return 'ambiguous';
-  return 'interruption';
+  if (!boundary) {
+    if (hasSeenTurnEnd || hasSeenPriorPrompt) return 'interruption';
+    return 'followup';
+  }
+  if (boundary.wasAwaitingInput) return 'answer';
+  const elapsedSinceBoundaryMs = ts - boundary.ts;
+  if (!Number.isFinite(elapsedSinceBoundaryMs) || elapsedSinceBoundaryMs < TITLE_RACE_MS) return 'ambiguous';
+  return 'followup';
 }
 
 function dispositionFor(intent: unknown): MillMetricDisposition {
@@ -332,6 +412,7 @@ function buildScorecards(
 }
 
 export type MillMetricEndIntent = EndIntent;
+export type { MillPromptBoundary, MillTurnBoundaryEvent, MillTurnBoundaryState, MillTurnBoundaryStep };
 export type MillMetricPackAccumulator = AccumulatorPack;
 export type MillMetricAccumulatorShape = MillMetricAccumulator;
 export type MillMetricsConfig = { retainDays: number };
@@ -344,9 +425,12 @@ export {
   buildScorecards,
   classifyPrompt,
   dispositionFor,
+  initialTurnBoundaryState,
   mergeRecords,
+  promptBoundaryOrNull,
   pruneRecords,
   recordFromAccumulator,
+  reduceTurnBoundary,
   resolveMillMetricsConfig,
   utcDay,
 };

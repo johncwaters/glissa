@@ -11,6 +11,7 @@ const REQUIRED_OUTPUTS = [
   'server/index.js',
   'bin/glissa.js',
   'session/hook-relay.js',
+  'session/command-hook-relay.js',
   'session/statusline-relay.js',
   'session/rtk-relay.js',
   'session/visions-relay.js',

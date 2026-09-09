@@ -493,6 +493,46 @@ test('a further orphan SubagentStop restarts the held Stop quiet window', (t) =>
   s.destroy();
 });
 
+test('a repeated stop for a started agent does not open a second quiet window', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
+  hook(s, 'subagent-start', { payload: { agent_id: 'known' } });
+  hook(s, 'ready', { payload: { background_tasks: [{ id: 'known' }] } });
+  hook(s, 'subagent-stop', { payload: { agent_id: 'known', background_tasks: [] } });
+  t.mock.timers.tick(20);
+  hook(s, 'subagent-stop', { payload: { agent_id: 'known', background_tasks: [] } });
+  t.mock.timers.tick(11);
+  assert.equal(s.state, STATES.COMPLETE);
+  s.destroy();
+});
+
+test('a repeated orphan stop keeps the first quiet window', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
+  hook(s, 'subagent-stop', { payload: { agent_id: 'lost-start', background_tasks: [] } });
+  hook(s, 'ready', { payload: { background_tasks: [] } });
+  t.mock.timers.tick(25);
+  t.mock.timers.tick(20);
+  hook(s, 'subagent-stop', { payload: { agent_id: 'lost-start', background_tasks: [] } });
+  t.mock.timers.tick(11);
+  assert.equal(s.state, STATES.COMPLETE);
+  s.destroy();
+});
+
+test('a duplicate SubagentStop still reconciles the declared list, clearing an agent whose stop was lost', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });
+  hook(s, 'subagent-start', { payload: { agent_id: 'agent-a' } });
+  hook(s, 'subagent-start', { payload: { agent_id: 'agent-b' } });
+  assert.equal(s.toSnapshot().activeAgents, 2);
+  hook(s, 'subagent-stop', { payload: { agent_id: 'agent-a', background_tasks: [] } });
+  assert.equal(s.toSnapshot().activeAgents, 0, 'an empty declaration clears every counted agent');
+  hook(s, 'subagent-start', { payload: { agent_id: 'agent-b' } });
+  hook(s, 'subagent-stop', { payload: { agent_id: 'agent-a', background_tasks: [] } });
+  assert.equal(s.toSnapshot().activeAgents, 0, 'the duplicate stop still clears the sibling that never stopped');
+  s.destroy();
+});
+
 test('UserPromptSubmit resets orphan SubagentStop evidence for the new turn', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const s = makeSession(STATES.RUNNING, { gateReleaseSettleMs: 30 });

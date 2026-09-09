@@ -1,15 +1,12 @@
-import http from "node:http";
 import type { ChildProcess } from "node:child_process";
 
+import { postPayload } from "./loopback-post.ts";
 import { readStdin } from "./relay-stdin.ts";
 import type { StdinLike } from "./relay-stdin.ts";
 
 import { spawn } from "../server/child-process-safe.ts";
 
-const POST_TIMEOUT_MS = 1500;
-
 const NO_CHAIN = "-";
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "[::1]", "localhost"]);
 
 interface StdoutLike {
   write(text: string): unknown;
@@ -17,55 +14,6 @@ interface StdoutLike {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function postPayload(url: string, body: Buffer): Promise<void> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const done = (): void => {
-      if (settled) return;
-      settled = true;
-      resolve();
-    };
-    let target: URL;
-    try {
-      target = new URL(url);
-    } catch {
-      done();
-      return;
-    }
-    if (target.protocol !== "http:" || !LOOPBACK_HOSTS.has(target.hostname)) {
-      done();
-      return;
-    }
-    try {
-      const req = http.request(
-        {
-          hostname: target.hostname,
-          port: target.port,
-          path: `${target.pathname}${target.search}`,
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "content-length": Buffer.byteLength(body),
-          },
-        },
-        (res) => {
-          res.resume();
-          res.on("end", done);
-          res.on("error", done);
-        },
-      );
-      req.on("error", done);
-      req.setTimeout(POST_TIMEOUT_MS, () => {
-        req.destroy();
-        done();
-      });
-      req.end(body);
-    } catch {
-      done();
-    }
-  });
 }
 
 function decodeChainCommand(encoded: string | undefined): string | null {
@@ -148,4 +96,4 @@ if (process.argv[1] === import.meta.filename) {
   main().then((code) => process.exit(code)).catch(() => process.exit(0));
 }
 
-export { main, fallbackLine, decodeChainCommand, parsePayload, NO_CHAIN, POST_TIMEOUT_MS };
+export { main, fallbackLine, decodeChainCommand, parsePayload, NO_CHAIN };

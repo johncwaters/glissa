@@ -1,0 +1,3 @@
+{"type":"header","version":2,"session":"fixture-sessionstart-clear","startedAt":0,"config":{},"cols":80,"rows":24}
+{"type":"hook","ts":1,"event":"SessionStart","payload":{"hook_event_name":"SessionStart","session_id":"clear-session","source":"clear"}}
+{"type":"footer","ts":2,"reason":"pty_exit","exitCode":0}

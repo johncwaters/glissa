@@ -438,7 +438,7 @@ test('with the fs source off a session carries no extra state-change listener', 
     const lane = laneOf(backend);
     assert.equal(lane.fsEnabled, false);
     assert.equal(lane.fs, null);
-    assert.equal(sessionOf(backend, 'p1').listenerCount('state-change'), 1, 'only the pre-existing handler');
+    assert.equal(sessionOf(backend, 'p1').listenerCount('state-change'), 2, 'only the pre-existing session and mill handlers');
   },
 ));
 

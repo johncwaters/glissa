@@ -5,6 +5,7 @@ import path from 'node:path';
 import {
   MAX_REMEMBERED_TRANSCRIPTS,
   MAX_TRANSCRIPT_READ_BYTES,
+  TRACE_TAIL_SCAN_BYTES,
   committedOffsetFromTraceTailOrNull,
   completeLineBytes,
   containmentRefusalReason,
@@ -14,6 +15,22 @@ import {
   resumeOffsetFrom,
   withCommittedOffset,
 } from '../server/core/trace-tail-core.ts';
+
+test('the trace tail window contains a maximum-size call record plus its run marker', () => {
+  assert.ok(TRACE_TAIL_SCAN_BYTES > 130_000);
+  const transcriptPath = '/projects/a/session.jsonl';
+  const trace = [
+    JSON.stringify({ kind: 'session', transcriptPath }),
+    JSON.stringify({ kind: 'prompt', transcriptOffset: 700 }),
+    JSON.stringify({ kind: 'tool_call', input: 'x'.repeat(130_000) }),
+    '',
+  ].join('\n');
+  const tail = Buffer.from(trace).subarray(-TRACE_TAIL_SCAN_BYTES).toString('utf8');
+  assert.equal(committedOffsetFromTraceTailOrNull(tail, {
+    transcriptPath,
+    isWholeFile: Buffer.byteLength(trace) <= TRACE_TAIL_SCAN_BYTES,
+  }), 700);
+});
 
 test('containment classifies missing path errors apart from unreadable errors', () => {
   assert.equal(containmentRefusalReason({ code: 'ENOENT' }), 'missing');

@@ -237,16 +237,19 @@ function createSessionBackgroundTracking({
       const changed = tasks.noteAgentStart(agentId, raw.ts || Date.now());
       if (changed) emitAgentsChange();
     }
-    if (agentId && raw.signal === "subagent-stop") {
-      if (gateHeldReady) {
-        gateQuietSince = null;
-        evaluateGateHeldReady();
-      }
-      const changed = tasks.noteAgentStop(agentId);
-      if (changed) emitAgentsChange();
-    }
+    if (agentId && raw.signal === "subagent-stop") noteAgentStopped(agentId);
 
     if (raw.signal === "subagent-stop") applyBackgroundTasks(raw.payload);
+  }
+
+  function noteAgentStopped(agentId: string): void {
+    const outcome = tasks.noteAgentStop(agentId);
+    if (outcome === "duplicate") return;
+    if (gateHeldReady) {
+      gateQuietSince = null;
+      evaluateGateHeldReady();
+    }
+    if (outcome === "removed") emitAgentsChange();
   }
 
   function stashGateHeldReady(signal: ResolvedStatusSignal): void {

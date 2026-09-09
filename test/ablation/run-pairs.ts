@@ -25,6 +25,8 @@ import {
 import { createBackend } from '../../server/backend.ts';
 import type { Session } from '../../session/sessions.ts';
 import type { HookSignal } from '../../detection/hook-source.ts';
+import { attachMillMetricsSession } from '../../server/mill-metrics-wiring.ts';
+import type { MillPromptSubmittedPayload } from '../../server/mill-metrics-wiring.ts';
 import type { MillMetricPromptCounts, MillMetricSession } from '../../shared/contracts/mill-metrics.ts';
 
 type ArmName = 'on' | 'off';
@@ -419,7 +421,7 @@ async function runArm({
   const startedAt = Date.now();
   const session = backend.getSession(arm.sessionId);
   const hookSignals: HookSignal[] = [];
-  const promptPayloads: { ts?: unknown; state?: unknown; stateSince?: unknown }[] = [];
+  const promptPayloads: MillPromptSubmittedPayload[] = [];
   const spawnCalls: SpawnCall[] = [];
   let outputTail = '';
   let executionError: string | null = null;
@@ -446,7 +448,9 @@ async function runArm({
       hookSignals.push(rawSignal);
       return ingestHookSignal(rawSignal);
     };
-    session.on('user-prompt', (payload: { ts?: unknown; state?: unknown; stateSince?: unknown }) => { promptPayloads.push(payload); });
+    attachMillMetricsSession(session, {
+      onPromptSubmitted: (_sessionId, payload) => { promptPayloads.push(payload); },
+    });
     session.on('data', (chunk: unknown) => {
       outputTail = `${outputTail}${String(chunk)}`.slice(-8192);
     });

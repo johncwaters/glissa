@@ -22,9 +22,9 @@ test('a counted sub-agent gates until its stop arrives', () => {
   assert.equal(registry.noteAgentStart('a1', 1_000_000), true, 'newly added');
   assert.equal(registry.noteAgentStart('a1', 1_000_000), false, 'a duplicate start is idempotent');
   assert.equal(registry.activeCount(), 1);
-  assert.equal(registry.noteAgentStop('a1'), true);
+  assert.equal(registry.noteAgentStop('a1'), 'removed');
   assert.equal(registry.activeCount(), 0);
-  assert.equal(registry.noteAgentStop('a1'), false, 'a duplicate stop is a no-op');
+  assert.equal(registry.noteAgentStop('a1'), 'duplicate', 'a duplicate stop is a no-op');
 });
 
 test('the larger of counted and declared wins, which is the query the registry exists for', () => {

@@ -6,6 +6,7 @@ import type { ControlMessageRecord } from './control-replay-core.ts';
 import { decideWasActiveFlip } from './core/session-registry-core.ts';
 import { INTERACTIVE_LANE } from './core/usage-lane-core.ts';
 import type { MillMetricEndIntent } from './core/mill-metrics-core.ts';
+import { attachMillMetricsSession } from './mill-metrics-wiring.ts';
 import type { MillMetricsPort } from './mill-metrics-wiring.ts';
 import { resolveCheckConfig, runPostTurnChecks } from './post-turn-checker.ts';
 
@@ -20,7 +21,6 @@ interface WiringConfig {
 }
 
 type PacksDeliveredPayload = Parameters<MillMetricsPort['onPacksDelivered']>[1];
-type PromptSubmittedPayload = Parameters<MillMetricsPort['onPromptSubmitted']>[1];
 
 interface WiringIngestLane {
   fsEnabled: boolean;
@@ -88,6 +88,7 @@ function createSessionEventWiring(dependencies: SessionEventDependencies): (sess
   return function wireSessionEvents(session: Session): void {
     dependencies.traceWiring?.attachSession(session);
     dependencies.planReview?.attachSession(session);
+    if (dependencies.millMetricsPort) attachMillMetricsSession(session, dependencies.millMetricsPort);
     let postTurnDebounce: NodeJS.Timeout | null = null;
     let pendingPromptKind: string | null = null;
     const notifyGate = createNotifyGate();
@@ -220,9 +221,8 @@ function createSessionEventWiring(dependencies: SessionEventDependencies): (sess
     session.on('packs-delivered', (payload: PacksDeliveredPayload) => {
       if (dependencies.millMetricsPort) dependencies.millMetricsPort.onPacksDelivered(session.id, payload);
     });
-    session.on('user-prompt', (payload: PromptSubmittedPayload) => {
+    session.on('user-prompt', () => {
       notifyGate.reset();
-      if (dependencies.millMetricsPort) dependencies.millMetricsPort.onPromptSubmitted(session.id, payload);
     });
     session.on('prompt-kind-change', ({ pendingPromptKind: nextKind }: { pendingPromptKind: string | null }) => {
       pendingPromptKind = nextKind;
