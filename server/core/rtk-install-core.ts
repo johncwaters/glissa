@@ -80,9 +80,9 @@ function verifyDigest(expectedHex: unknown, actualHex: unknown): boolean {
   return crypto.timingSafeEqual(Buffer.from(expectedHex, 'utf8'), Buffer.from(actualHex, 'utf8'));
 }
 
-function installTargetPath(homeDir: string, platform: string): string {
+function installTargetPath(glissaHome: string, platform: string): string {
   const binaryName = platform === 'win32' ? 'rtk.exe' : 'rtk';
-  return path.join(homeDir, '.glissa', 'bin', binaryName);
+  return path.join(glissaHome, 'bin', binaryName);
 }
 
 function isRtkBinaryName(name: string, platform: string): boolean {

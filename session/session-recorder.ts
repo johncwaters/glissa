@@ -5,12 +5,16 @@ import os from "node:os";
 import path from "node:path";
 import type { WriteStream } from "node:fs";
 
+import { glissaHomeDir } from "../server/core/config-path-core.ts";
 import { safePathSegment } from "../shared/paths.ts";
 import type { DecisionEntry } from "./core/decision-log.ts";
 import type { SessionState } from "../shared/states.ts";
 import type { HookPayload } from "../shared/contracts/index.ts";
 
-const DEFAULT_BASE_DIR = path.join(os.homedir(), ".glissa", "recordings");
+function defaultRecordingsDir(): string {
+  return path.join(glissaHomeDir(os.homedir(), process.env), "recordings");
+}
+
 const DEFAULT_MAX_FILE_SIZE = 50 * 1024 * 1024;
 const DEFAULT_RETAIN_DAYS = 7;
 const DEFAULT_RETAIN_FILES = 20;
@@ -51,7 +55,7 @@ class SessionRecorder {
   constructor({ name, baseDir, recordData = false, maxFileSize, retainDays, retainFiles }: SessionRecorderOptions) {
     this._name = name;
     this._safeName = safePathSegment(name);
-    this._baseDir = baseDir || DEFAULT_BASE_DIR;
+    this._baseDir = baseDir || defaultRecordingsDir();
     this._recordData = !!recordData;
     this._maxFileSize = maxFileSize || DEFAULT_MAX_FILE_SIZE;
     this._retainDays = retainDays != null ? retainDays : DEFAULT_RETAIN_DAYS;
@@ -253,5 +257,5 @@ function createRecorder(
   });
 }
 
-export { SessionRecorder, createRecorder };
+export { SessionRecorder, createRecorder, defaultRecordingsDir };
 export type { CaptureConfig, SessionRecorderOptions };

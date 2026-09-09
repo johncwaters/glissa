@@ -36,5 +36,10 @@ test('a package-local config beats the home one, and the home one beats nothing'
 });
 
 test('the home directory has one spelling', () => {
-  assert.equal(path.basename(glissaHomeDir('/home/operator')), '.glissa');
+  assert.equal(path.basename(glissaHomeDir('/home/operator', {})), '.glissa');
+});
+
+test('GLISSA_HOME overrides the home directory', () => {
+  const glissaHome = path.join('/tmp', 'glissa-home');
+  assert.equal(glissaHomeDir('/home/operator', { GLISSA_HOME: glissaHome }), path.resolve(glissaHome));
 });

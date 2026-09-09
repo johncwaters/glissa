@@ -122,7 +122,7 @@ function firstLineOf(error: unknown): string {
 function resolveConfigPathReadOnly(): string {
   const decided = decideConfigPath({
     env: process.env,
-    homeDir: glissaHomeDir(os.homedir()),
+    homeDir: glissaHomeDir(os.homedir(), process.env),
     packageRoot,
   }, (candidate) => fs.existsSync(candidate));
   if (decided.path) return decided.path;

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { execFileAsync } from './child-process-safe.ts';
+import { glissaHomeDir } from './core/config-path-core.ts';
 import {
   assetForPlatform,
   findEscapingArchiveMember,
@@ -26,6 +27,7 @@ type InstallResult =
 
 interface InstallRtkOptions {
   homeDir?: string;
+  glissaHome?: string;
   platform?: NodeJS.Platform;
   arch?: NodeJS.Architecture;
   fetchImpl?: typeof fetch;
@@ -129,6 +131,7 @@ async function moveIntoPlace(
 
 async function installRtk({
   homeDir = os.homedir(),
+  glissaHome = glissaHomeDir(homeDir, process.env),
   platform = process.platform,
   arch = process.arch,
   fetchImpl = globalThis.fetch,
@@ -141,7 +144,7 @@ async function installRtk({
   if (!asset) return { ok: false, reason: `unsupported platform ${platform}-${arch}` };
   if (typeof fetchImpl !== 'function') return { ok: false, reason: 'no fetch implementation available' };
 
-  const stagingDir = path.join(homeDir, '.glissa', 'tmp', `rtk-${crypto.randomBytes(6).toString('hex')}`);
+  const stagingDir = path.join(glissaHome, 'tmp', `rtk-${crypto.randomBytes(6).toString('hex')}`);
   try {
     await fsp.mkdir(stagingDir, { recursive: true });
   } catch (err) {
@@ -180,7 +183,7 @@ async function installRtk({
     if (!extractedStat.isFile()) return { ok: false, reason: `extract failed: rtk inside ${asset.file} is not a regular file` };
     if (platform !== 'win32') await fsp.chmod(extracted, 0o755);
 
-    const target = installTargetPath(homeDir, platform);
+    const target = installTargetPath(glissaHome, platform);
     await fsp.mkdir(path.dirname(target), { recursive: true });
 
     await removeQuietly(target);

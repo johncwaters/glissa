@@ -9,6 +9,7 @@ import path from 'node:path';
 import type { TestContext } from 'node:test';
 
 import { execFileAsync } from '../server/child-process-safe.ts';
+import { getRtkPath, resetRtkPathCache } from '../server/rtk-resolver.ts';
 import { installRtk, MAX_DOWNLOAD_BYTES } from '../server/rtk-installer.ts';
 import type { InstallResult } from '../server/rtk-installer.ts';
 
@@ -67,7 +68,7 @@ test('installRtk verifies the pinned digest, extracts and lands the binary in ~/
   const { impl, calls } = fakeFetch(fixture.bytes);
 
   const result = await installRtk({
-    homeDir,
+    glissaHome: path.join(homeDir, '.glissa'),
     platform: 'linux',
     arch: 'x64',
     fetchImpl: impl,
@@ -92,7 +93,7 @@ test('a digest mismatch lands nothing in bin and never extracts', { skip: IS_WIN
   let extracted = false;
 
   const result = await installRtk({
-    homeDir,
+    glissaHome: path.join(homeDir, '.glissa'),
     platform: 'linux',
     arch: 'x64',
     fetchImpl: fakeFetch(fixture.bytes).impl,
@@ -117,7 +118,7 @@ test('a missing tar fails with a reason instead of crashing', { skip: IS_WINDOWS
   const enoent = Object.assign(new Error('spawn tar ENOENT'), { code: 'ENOENT' });
 
   const result = await installRtk({
-    homeDir,
+    glissaHome: path.join(homeDir, '.glissa'),
     platform: 'linux',
     arch: 'x64',
     fetchImpl: fakeFetch(fixture.bytes).impl,
@@ -134,7 +135,7 @@ test('a missing tar fails with a reason instead of crashing', { skip: IS_WINDOWS
 test('a non-2xx response, an unsupported platform and an over-cap content-length all fail closed', async (t) => {
   const homeDir = await makeTempHome(t);
   const notFound = await installRtk({
-    homeDir,
+    glissaHome: path.join(homeDir, '.glissa'),
     platform: 'linux',
     arch: 'x64',
     fetchImpl: fakeFetch(Buffer.from('nope'), { status: 404 }).impl,
@@ -144,12 +145,12 @@ test('a non-2xx response, an unsupported platform and an over-cap content-length
   assert.equal(notFound.ok, false);
   assert.match(refusal(notFound), /HTTP 404/);
 
-  const unsupported = await installRtk({ homeDir, platform: 'sunos', arch: 'x64', log: SILENT });
+  const unsupported = await installRtk({ glissaHome: path.join(homeDir, '.glissa'), platform: 'sunos', arch: 'x64', log: SILENT });
   assert.equal(unsupported.ok, false);
   assert.match(refusal(unsupported), /unsupported platform sunos-x64/);
 
   const oversize = await installRtk({
-    homeDir,
+    glissaHome: path.join(homeDir, '.glissa'),
     platform: 'linux',
     arch: 'x64',
     fetchImpl: fakeFetch(Buffer.from('x'), { contentLength: MAX_DOWNLOAD_BYTES + 1 }).impl,
@@ -165,7 +166,7 @@ test('installRtk refuses an archive whose rtk entry is a symlink and lands nothi
   const fixture = await buildFixture(t, { symlink: true });
 
   const result = await installRtk({
-    homeDir,
+    glissaHome: path.join(homeDir, '.glissa'),
     platform: 'linux',
     arch: 'x64',
     fetchImpl: fakeFetch(fixture.bytes).impl,
@@ -189,7 +190,7 @@ test('installRtk refuses an archive listing a member outside the staging dir bef
   };
 
   const result = await installRtk({
-    homeDir,
+    glissaHome: path.join(homeDir, '.glissa'),
     platform: 'linux',
     arch: 'x64',
     fetchImpl: fakeFetch(fixture.bytes).impl,
@@ -216,7 +217,7 @@ test('installRtk completes through the copy path when the cross-device rename is
   };
 
   const result = await installRtk({
-    homeDir,
+    glissaHome: path.join(homeDir, '.glissa'),
     platform: 'linux',
     arch: 'x64',
     fetchImpl: fakeFetch(fixture.bytes).impl,
@@ -230,4 +231,31 @@ test('installRtk completes through the copy path when the cross-device rename is
   assert.equal(fs.existsSync(target), true);
   assert.equal(fs.existsSync(`${target}.partial`), false);
   assert.equal(await fsp.readFile(target, 'utf8'), '#!/bin/sh\necho "rtk 0.45.0"\n');
+});
+
+test('the installer target and the resolver probe agree under a relocated Glissa home', { skip: IS_WINDOWS }, async (t) => {
+  const homeDir = await makeTempHome(t);
+  const relocatedGlissaHome = await makeTempHome(t);
+  const fixture = await buildFixture(t);
+  const previousGlissaHome = process.env.GLISSA_HOME;
+  process.env.GLISSA_HOME = relocatedGlissaHome;
+  resetRtkPathCache();
+  t.after(() => {
+    process.env.GLISSA_HOME = previousGlissaHome;
+    resetRtkPathCache();
+  });
+
+  const result = await installRtk({
+    homeDir,
+    platform: 'linux',
+    arch: 'x64',
+    fetchImpl: fakeFetch(fixture.bytes).impl,
+    asset: assetFor(fixture.sha256),
+    log: SILENT,
+  });
+
+  assert.ok(result.ok, 'the install succeeded');
+  assert.equal(result.path, path.join(relocatedGlissaHome, 'bin', 'rtk'));
+  assert.equal(fs.existsSync(path.join(homeDir, '.glissa')), false);
+  assert.equal(getRtkPath(), result.path);
 });

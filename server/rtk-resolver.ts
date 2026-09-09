@@ -3,10 +3,11 @@ import os from 'node:os';
 
 import { resolveRtkPath } from '../session/core/rtk-command.ts';
 import { execSync } from './child-process-safe.ts';
+import { glissaHomeDir } from './core/config-path-core.ts';
 
 function resolveRtkPathFromSystem(): string | null {
   return resolveRtkPath({
-    homeDir: os.homedir(),
+    glissaHome: glissaHomeDir(os.homedir(), process.env),
     platform: process.platform,
     exec: execSync,
     fsApi: fs,

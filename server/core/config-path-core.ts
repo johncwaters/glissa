@@ -9,7 +9,8 @@ export interface ConfigPathDecision {
   envPath: string | null;
 }
 
-function glissaHomeDir(homeDirectory: string): string {
+function glissaHomeDir(homeDirectory: string, env: { GLISSA_HOME?: string }): string {
+  if (env.GLISSA_HOME) return path.resolve(env.GLISSA_HOME);
   return path.join(homeDirectory, '.glissa');
 }
 

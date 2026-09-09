@@ -36,10 +36,10 @@ test('buildRtkHookEntry quotes a forward-slash hook command containing spaces', 
 });
 
 test('resolveRtkPath prefers the Glissa managed bin directory before PATH', () => {
-  const homeDir = path.join('C:\\Users', 'johnw');
-  const bundled = path.join(homeDir, '.glissa', 'bin', 'rtk.exe');
+  const glissaHome = path.join('C:\\Users', 'johnw', '.glissa');
+  const bundled = path.join(glissaHome, 'bin', 'rtk.exe');
   const resolved = resolveRtkPath({
-    homeDir,
+    glissaHome,
     platform: 'win32',
     fsApi: fsWithFiles([bundled]),
     exec: () => {
@@ -50,10 +50,10 @@ test('resolveRtkPath prefers the Glissa managed bin directory before PATH', () =
 });
 
 test('resolveRtkPath probes extensionless Glissa bin candidate for non-Windows installs', () => {
-  const homeDir = '/home/jw';
-  const bundled = path.join(homeDir, '.glissa', 'bin', 'rtk');
+  const glissaHome = '/home/jw/.glissa';
+  const bundled = path.join(glissaHome, 'bin', 'rtk');
   const resolved = resolveRtkPath({
-    homeDir,
+    glissaHome,
     platform: 'linux',
     fsApi: fsWithFiles([bundled]),
     exec: () => {
@@ -65,7 +65,7 @@ test('resolveRtkPath probes extensionless Glissa bin candidate for non-Windows i
 
 test('resolveRtkPath falls back to the first PATH match', () => {
   const resolved = resolveRtkPath({
-    homeDir: 'C:\\Users\\johnw',
+    glissaHome: 'C:\\Users\\johnw\\.glissa',
     platform: 'win32',
     fsApi: fsWithFiles([]),
     exec: () => 'C:\\tools\\rtk.exe\r\nC:\\other\\rtk.exe\r\n',
@@ -76,7 +76,7 @@ test('resolveRtkPath falls back to the first PATH match', () => {
 test('resolveRtkPath falls back to command -v when which is missing on posix', () => {
   const commands: string[] = [];
   const resolved = resolveRtkPath({
-    homeDir: '/home/jw',
+    glissaHome: '/home/jw/.glissa',
     platform: 'linux',
     fsApi: fsWithFiles([]),
     exec(command: string) {
@@ -94,7 +94,7 @@ test('resolveRtkPath falls back to command -v when which is missing on posix', (
 test('resolveRtkPath falls back to command -v when which returns no matches', () => {
   const commands: string[] = [];
   const resolved = resolveRtkPath({
-    homeDir: '/home/jw',
+    glissaHome: '/home/jw/.glissa',
     platform: 'linux',
     fsApi: fsWithFiles([]),
     exec(command: string) {
@@ -110,7 +110,7 @@ test('resolveRtkPath falls back to command -v when which returns no matches', ()
 
 test('resolveRtkPath returns null when neither managed bin nor PATH resolves', () => {
   const resolved = resolveRtkPath({
-    homeDir: 'C:\\Users\\johnw',
+    glissaHome: 'C:\\Users\\johnw\\.glissa',
     platform: 'win32',
     fsApi: fsWithFiles([]),
     exec: () => {

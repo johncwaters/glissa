@@ -116,7 +116,7 @@ function resolvePortPlan(
 function readConfiguredPort(env: Record<string, string | undefined> = process.env, fsApi: FsApi = fs): unknown {
   const decided = decideConfigPath({
     env,
-    homeDir: glissaHomeDir(os.homedir()),
+    homeDir: glissaHomeDir(os.homedir(), env),
     packageRoot,
   }, (candidate) => {
     try {

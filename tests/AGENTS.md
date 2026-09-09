@@ -36,7 +36,7 @@ Tests are named `<module>.test.ts` after the module under test. Notable clusters
 - Frontend `.mjs` cores are dynamic-imported from `../public/`; keep them DOM-free or these tests break.
 
 ### Testing Requirements
-- `npm test` runs the whole suite; `node --test tests/<file>` runs one file.
+- `npm test` runs the whole suite; `node --import ./tests/helpers/isolate-home.ts --test tests/<file>` runs one file.
 
 ## Dependencies
 

@@ -122,7 +122,7 @@ function errorMessage(error: unknown): string {
 }
 
 function glissaHomeDir(): string {
-  return resolveGlissaHomeDir(os.homedir());
+  return resolveGlissaHomeDir(os.homedir(), process.env);
 }
 
 function restrictMode(target: string, mode: number): void {
