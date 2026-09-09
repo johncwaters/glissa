@@ -48,7 +48,7 @@ const SCHEMA = Object.freeze([
 
 const LAST_APPEND_KEY = 'memory.lastAppendAt';
 const PROJECT_TAG_SCHEMA_KEY = 'memory.schema.projectTags';
-const PROJECT_TAG_SCHEMA_VERSION = 2;
+const PROJECT_TAG_SCHEMA_VERSION = 3;
 const DISTILL_CURSOR_KEY = 'memory.distill.cursorSeq';
 const DISTILL_FAILURE_KEY = 'memory.distill.failures';
 const SEQ_HIGH_KEY = 'memory.seq.high';

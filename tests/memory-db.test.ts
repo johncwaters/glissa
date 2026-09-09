@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-import { createMemoryDb, ftsMatchExpression, recordToRow } from '../server/memory-db.ts';
+import { SCHEMA, createMemoryDb, ftsMatchExpression, recordToRow } from '../server/memory-db.ts';
 import type { MemoryDb } from '../server/memory-db.ts';
 import { SCHEMA_VERSION, isBusyError, isSqliteAvailable, openDatabase } from '../server/glissa-db.ts';
 import type { MemoryRecord } from '../server/core/memory-core.ts';
@@ -84,6 +84,53 @@ test('a record round-trips through its row unchanged', () => {
   assert.deepEqual(db.listRecords(), [{ ...original, seq: 1 }]);
   assert.equal(db.insertRecord(original), false, 'the same id is ignored, never doubled');
   assert.equal(db.recordCount(), 1);
+});
+
+test('opening a database with duplicate bodies deletes nothing and leaves its stamped version alone', () => {
+  const dbPath = tempDbPath();
+  const seeded = openDatabase(dbPath);
+  try {
+    for (const statement of SCHEMA) seeded.exec(statement);
+    const insert = seeded.prepare(`INSERT INTO memory_records (
+      id, ts, segment_key, kind, layer, project, source_kind, source_vendor, source_session_id,
+      body, valid_from, valid_to, supersedes, lineage, locked, sig, seq
+    ) VALUES (
+      $id, $ts, $segment_key, $kind, $layer, $project, $source_kind, $source_vendor, $source_session_id,
+      $body, $valid_from, $valid_to, $supersedes, $lineage, $locked, $sig, $seq
+    )`);
+    const projectRow = recordToRow(record());
+    const globalRow = recordToRow(record({ project: null, text: 'global duplicate body' }));
+    insert.run({ ...projectRow, seq: 1 });
+    insert.run({ ...projectRow, id: 'm-0000000000000002', ts: START + 1, valid_from: START + 1, seq: 2 });
+    insert.run({ ...globalRow, id: 'm-0000000000000003', locked: 1, seq: 3 });
+    insert.run({ ...globalRow, id: 'm-0000000000000004', ts: START + 1, valid_from: START + 1, seq: 4 });
+    seeded.exec('INSERT INTO memory_records_fts (id, body) SELECT id, body FROM memory_records');
+    seeded.exec('PRAGMA user_version = 1');
+  } finally {
+    seeded.close();
+  }
+
+  const reopened = openDb(dbPath);
+  assert.equal(reopened.recordCount(), 4);
+  assert.deepEqual(
+    reopened.listRecords().map((entry) => entry.id),
+    ['m-0000000000000001', 'm-0000000000000003', 'm-0000000000000002', 'm-0000000000000004'],
+  );
+  const inspected = new DatabaseSync(dbPath);
+  try {
+    assert.equal(pragmaValue(inspected, 'user_version', 'user_version'), 1);
+  } finally {
+    inspected.close();
+  }
+});
+
+test('a body that was superseded is stored again when it is asserted afresh', () => {
+  const db = openDb(tempDbPath());
+  assert.equal(db.insertRecord(record({ validTo: START + 1 })), 1);
+  assert.equal(db.insertRecord(record({ id: 'm-0000000000000002', ts: START + 2, validFrom: START + 2 })), 2);
+  assert.equal(db.recordCount(), 2);
+  assert.deepEqual(db.listRecords().map((entry) => entry.validTo), [START + 1, null]);
+  assert.equal(foundIds(db.searchIds(['rebase'], 10)).length, 2);
 });
 
 test('a month is deleted by key, which is how append-only storage and pruning coexist', () => {

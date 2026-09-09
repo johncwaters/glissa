@@ -335,7 +335,10 @@ function canonicalProjectPath(cwd: unknown, knownProjects: KnownProjects): strin
     return parts.parent === worktreeParent && slug.startsWith(`${parts.basename}-`);
   });
   matches.sort((left, right) => projectPathParts(right).basename.length - projectPathParts(left).basename.length);
-  return matches[0] || value;
+  if (matches[0]) return matches[0];
+  const worktreeNameSeparator = slug.lastIndexOf('-');
+  if (worktreeNameSeparator <= 0) return value;
+  return `${worktreeParent}/${slug.slice(0, worktreeNameSeparator)}`;
 }
 
 function projectFileSlug(tag: unknown): string {
@@ -676,9 +679,11 @@ function hashMemoryLine(line: unknown): string | null {
 
 function deliveredLineHashes(text: unknown): string[] {
   const hashes: string[] = [];
+  const seenHashes = new Set<string>();
   for (const line of String(text || '').split('\n')) {
     const hash = hashMemoryLine(line);
-    if (!hash || hashes.includes(hash)) continue;
+    if (!hash || seenHashes.has(hash)) continue;
+    seenHashes.add(hash);
     hashes.push(hash);
   }
   return hashes;

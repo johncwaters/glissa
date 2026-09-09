@@ -28,6 +28,7 @@ interface PackServiceDependencies {
   }) => Promise<BuildReport | null>;
   createWatcher?: typeof createPackWatcher;
   variantProjects?: () => VariantProject[];
+  noteDelivered?: ((text: string) => Promise<unknown> | unknown) | null;
   setIntervalFn?: (fn: () => void, ms: number) => NodeJS.Timeout;
   clearIntervalFn?: (handle: NodeJS.Timeout) => void;
   sweepMinutes?: number;
@@ -57,7 +58,10 @@ function createPackService(deps: PackServiceDependencies = {}): PackService {
     listSpecs = () => listPackSpecs(),
     loadSpec = (specPath: string) => loadPackSpec(specPath),
     watchRootsForSpec = (spec: unknown) => packWatchRoots(spec),
-    build = ({ specPath, projects }: { specPath: string; projects?: ProjectRecord[] | null }) => buildPack({ specPath, projects: projects ?? [] }),
+    noteDelivered = null,
+    build = ({ specPath, projects }: { specPath: string; projects?: ProjectRecord[] | null }) => buildPack({
+      specPath, projects: projects ?? [], noteDelivered,
+    }),
     createWatcher = createPackWatcher,
     variantProjects = () => [],
     setIntervalFn = (fn: () => void, ms: number) => setInterval(fn, ms),

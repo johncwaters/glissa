@@ -5,12 +5,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-import { createCanonicalProjectLookupPlanner, createMemoryStore } from '../server/memory-store.ts';
+import { MAX_DELIVERED_HASHES, createCanonicalProjectLookupPlanner, createMemoryStore } from '../server/memory-store.ts';
 import type { MemoryStoreOptions } from '../server/memory-store.ts';
-import { asMemoryRow, createMemoryDb, recordToRow, rowToRecord } from '../server/memory-db.ts';
-import type { MemoryRow } from '../server/memory-db.ts';
+import { PROJECT_TAG_SCHEMA_VERSION, asMemoryRow, createMemoryDb, recordToRow, rowToRecord } from '../server/memory-db.ts';
+import type { MemoryDb, MemoryRow } from '../server/memory-db.ts';
+import { memoryInputFromEvent } from '../server/core/memory-ingest-core.ts';
+import { buildPack } from '../server/pack-builder.ts';
 import {
-  resolveMemoryConfig, segmentFileName, verifyRecordSignature, withSignature,
+  isEchoedLine, resolveMemoryConfig, segmentFileName, verifyRecordSignature, withSignature,
 } from '../server/core/memory-core.ts';
 import type { MemoryConfig, MemoryRecord } from '../server/core/memory-core.ts';
 import { projectVariantSlug } from '../server/core/pack-core.ts';
@@ -124,7 +126,7 @@ test('a canonical project lookup invalidates a plan when a known project array i
     cachedProject: null, hasResolver: false,
   });
   assert.notStrictEqual(second, first);
-  assert.equal(second?.canonical, '/repos/.glissa-worktrees/glissa-abc123');
+  assert.equal(second?.canonical, '/repos/glissa');
 });
 
 test('a canonical project lookup distinguishes colliding legacy plan signature values', () => {
@@ -321,10 +323,36 @@ test('store open remaps worktree project tags once and publishes the configured 
   assert.equal(secondLogs.some((line) => line.includes('project tag migration')), false);
   withRawDb(dir, (raw) => {
     const meta = raw.prepare('SELECT value FROM memory_meta WHERE key = ?').get('memory.schema.projectTags');
-    assert.equal(meta?.value, '2');
+    assert.equal(meta?.value, String(PROJECT_TAG_SCHEMA_VERSION));
   });
   await second.stop();
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('a corpus stamped by the previous tag migration is re-tagged onto the parent repository', async () => {
+  const dir = tempDir();
+  const worktreePath = '/home/carbon/projects/.glissa-worktrees/glissa-abc123';
+  const projectPath = '/home/carbon/projects/glissa';
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const seededDb = createMemoryDb({ dbPath: dbPathFor(dir) });
+    seededDb.insertRecord(durableRecord({ project: worktreePath }));
+    seededDb.close();
+    withRawDb(dir, (raw) => {
+      raw.prepare('INSERT INTO memory_meta (key, value) VALUES (?, ?)').run('memory.schema.projectTags', String(PROJECT_TAG_SCHEMA_VERSION - 1));
+    });
+
+    const logs: string[] = [];
+    const store = openStore(dir, {
+      logger: { log: (line: string) => { logs.push(line); }, warn: (line: string) => { logs.push(line); } },
+      extra: { knownProjects: [] },
+    });
+
+    assert.equal(store.records()[0]?.project, projectPath);
+    assert.equal(logs.some((line) => line.includes('remapped 1 of 1 tagged record(s)')), true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('a failed project resolver is logged and retried on the next append', async () => {
@@ -347,6 +375,185 @@ test('a failed project resolver is logged and retried on the next append', async
     assert.equal(calls, 2);
     assert.equal(warnings.filter((line) => line.includes('git unavailable')).length, 2);
     await store.stop();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an append from a missing unconfigured Glissa worktree stores the parent repository path', async () => {
+  const dir = tempDir();
+  const worktreePath = path.join(dir, 'projects', '.glissa-worktrees', 'glissa-dead123');
+  const projectPath = path.join(dir, 'projects', 'glissa').replace(/\\/g, '/');
+  let resolverCalls = 0;
+  try {
+    const store = openStore(dir, {
+      extra: {
+        knownProjects: [],
+        resolveProjectPath: async () => {
+          resolverCalls += 1;
+          throw new Error('the worktree no longer exists');
+        },
+      },
+    });
+    const appended = await store.append(knowledge('the retired worktree recorded a useful fact', worktreePath));
+
+    assert.equal(fs.existsSync(worktreePath), false);
+    assert.equal(resolverCalls, 1);
+    assert.equal(appended?.project, projectPath);
+    assert.equal(readCanon(dir)[0]?.project, projectPath);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a memory pack build persists delivered hashes after a busy retry and an unchanged rebuild adds none', async () => {
+  const root = tempDir();
+  const glissaHome = path.join(root, 'home');
+  const memoryDir = path.join(glissaHome, 'memory');
+  const packsDir = path.join(root, 'packs');
+  const builtRoot = path.join(root, 'built');
+  const logs: string[] = [];
+  let deliveredAttempts = 0;
+  try {
+    fs.mkdirSync(path.join(packsDir, 'specs'), { recursive: true });
+    fs.writeFileSync(path.join(packsDir, 'specs', 'memory.pack.json'), `${JSON.stringify({
+      name: 'memory',
+      description: 'memory delivery test',
+      sources: [{ path: '{{glissaHome}}/memory/dist/current/MEMORY.md', data: true }],
+      budgetTokens: 4000,
+    })}\n`);
+    const store = openStore(memoryDir, {
+      logger: { log: (line: string) => { logs.push(line); }, warn: (line: string) => { logs.push(line); } },
+      extra: {
+        debug: true,
+        openDb: (options): MemoryDb => {
+          const memoryDb = createMemoryDb(options);
+          return {
+            ...memoryDb,
+            noteDelivered: (hashes, limits) => {
+              deliveredAttempts += 1;
+              if (deliveredAttempts === 1) {
+                const error = new Error('database is locked') as Error & { code: string };
+                error.code = 'SQLITE_BUSY';
+                throw error;
+              }
+              return memoryDb.noteDelivered(hashes, limits);
+            },
+          };
+        },
+      },
+    });
+    await store.append(knowledge('the queued delivery retry closes the echo loop', null));
+    await store.flushProjection();
+    const build = () => buildPack({
+      specPath: path.join(packsDir, 'specs', 'memory.pack.json'),
+      baseDir: packsDir,
+      builtRoot,
+      glissaHome,
+      noteDelivered: (text) => store.noteDelivered(text),
+    });
+
+    const firstBuild = await build();
+    assert.equal(firstBuild.ok, true, firstBuild.errors.join('; '));
+    const secondBuild = await build();
+    assert.equal(secondBuild.unchanged, true, secondBuild.errors.join('; '));
+    const deliveredLine = fs.readFileSync(path.join(memoryDir, 'dist', 'current', 'MEMORY.md'), 'utf8')
+      .split('\n').find((line) => line.includes('queued delivery retry'));
+    if (!deliveredLine) throw new Error('the memory projection has no delivered record line');
+    const echoed = memoryInputFromEvent({
+      source: 'agentLogs',
+      kind: 'agent-turn',
+      detail: { vendor: 'claude' },
+      scope: { root: '/repos/glissa', sessionId: 'sess-echo' },
+      summary: deliveredLine,
+      ts: START,
+    }, { deliveredHashes: store.deliveredHashes() });
+
+    assert.equal(echoed, null);
+    assert.equal(deliveredAttempts, 2);
+    assert.equal(logs.filter((line) => line.includes('delivered hashes persisted')).length, 1);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a project data layer stays echo suppressed when the global layer alone fills the delivered bound', async () => {
+  const root = tempDir();
+  const glissaHome = path.join(root, 'home');
+  const packsDir = path.join(root, 'packs');
+  const builtRoot = path.join(root, 'built');
+  const specPath = path.join(packsDir, 'specs', 'memory.pack.json');
+  try {
+    fs.mkdirSync(path.join(packsDir, 'specs'), { recursive: true });
+    fs.writeFileSync(specPath, `${JSON.stringify({
+      name: 'memory',
+      description: 'memory delivery test',
+      sources: [
+        { path: '{{glissaHome}}/memory/dist/current/MEMORY.md', data: true },
+        { path: '{{glissaHome}}/memory/dist/current/projects/glissa.md', data: true },
+      ],
+      budgetTokens: 400000,
+    })}\n`);
+    const globalLines = Array.from(
+      { length: MAX_DELIVERED_HASHES + 500 },
+      (_, index) => `- [m-0123456789ab${String(index).padStart(4, '0')}] (reported) the global memory line ${index}`,
+    );
+    const globalPath = path.join(glissaHome, 'memory', 'dist', 'current', 'MEMORY.md');
+    fs.mkdirSync(path.dirname(globalPath), { recursive: true });
+    fs.writeFileSync(globalPath, `${globalLines.join('\n')}\n`);
+    const projectHeadLine = '- [m-abcdef0123456789] (model) the project layer head line';
+    const projectPath = path.join(glissaHome, 'memory', 'dist', 'current', 'projects', 'glissa.md');
+    fs.mkdirSync(path.dirname(projectPath), { recursive: true });
+    fs.writeFileSync(projectPath, `${projectHeadLine}\n- [m-abcdef0123456780] (model) the project layer tail line\n`);
+    const store = openStore(path.join(root, 'store'));
+
+    const report = await buildPack({
+      specPath,
+      baseDir: packsDir,
+      builtRoot,
+      glissaHome,
+      noteDelivered: (text) => store.noteDelivered(text),
+    });
+
+    assert.equal(report.ok, true, report.errors.join('; '));
+    const delivered = store.deliveredHashes();
+    assert.equal(isEchoedLine(projectHeadLine, delivered), true, 'the project layer must survive the global layer cap');
+    assert.equal(isEchoedLine(globalLines[0], delivered), false);
+    assert.equal(isEchoedLine(globalLines[globalLines.length - 1], delivered), false);
+    assert.equal(isEchoedLine(globalLines[2], delivered), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a delivery wider than the retained bound is capped before it reaches the database', async () => {
+  const dir = tempDir();
+  const batchSizes: number[] = [];
+  try {
+    const store = openStore(dir, {
+      extra: {
+        openDb: (options): MemoryDb => {
+          const memoryDb = createMemoryDb(options);
+          return {
+            ...memoryDb,
+            noteDelivered: (hashes, limits) => {
+              batchSizes.push(Array.from(hashes).length);
+              return memoryDb.noteDelivered(hashes, limits);
+            },
+          };
+        },
+      },
+    });
+    const deliveredLines = Array.from({ length: MAX_DELIVERED_HASHES + 500 }, (_, index) => `delivered memory line ${index}`);
+    const freshestLine = deliveredLines[0];
+    const stalestLine = deliveredLines[deliveredLines.length - 1];
+    const retained = await store.noteDelivered(deliveredLines.join('\n'));
+
+    assert.deepEqual(batchSizes, [MAX_DELIVERED_HASHES]);
+    assert.equal(retained, MAX_DELIVERED_HASHES);
+    const delivered = store.deliveredHashes();
+    assert.equal(isEchoedLine(freshestLine, delivered), true, 'the projection head must survive the cap');
+    assert.equal(isEchoedLine(stalestLine, delivered), false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

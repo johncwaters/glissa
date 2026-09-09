@@ -405,11 +405,12 @@ test('canonicalProjectPath folds configured Claude and Glissa worktrees across W
   );
 });
 
-test('canonicalProjectPath gives exact configured paths priority and leaves unknown paths unchanged', () => {
+test('canonicalProjectPath gives exact configured paths priority and folds unconfigured Glissa worktrees', () => {
   const configuredWorktree = '/repos/glissa/.claude/worktrees/operator-kept';
   const projects = ['/repos/glissa', configuredWorktree];
   assert.equal(canonicalProjectPath(configuredWorktree, projects), configuredWorktree);
   assert.equal(canonicalProjectPath('/repos/unknown/.claude/worktrees/feature', projects), '/repos/unknown/.claude/worktrees/feature');
+  assert.equal(canonicalProjectPath('/repos/.glissa-worktrees/unknown-dead123', projects), '/repos/unknown');
   assert.equal(canonicalProjectPath('/tmp/custom-worktree', projects), '/tmp/custom-worktree');
   assert.equal(canonicalProjectPath('C:\\Other\\Repo', projects), 'C:\\Other\\Repo');
 });
@@ -418,7 +419,7 @@ test('canonicalProjectPath reads configured projects from a getter for every cal
   const projects: string[] = [];
   const worktreePath = '/repos/.glissa-worktrees/glissa-abc123';
   const knownProjects = () => projects;
-  assert.equal(canonicalProjectPath(worktreePath, knownProjects), worktreePath);
+  assert.equal(canonicalProjectPath(worktreePath, knownProjects), '/repos/glissa');
   projects.push('/repos/glissa');
   assert.equal(canonicalProjectPath(worktreePath, knownProjects), '/repos/glissa');
 });

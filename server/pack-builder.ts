@@ -17,6 +17,7 @@ import {
 } from '../session/core/pack-pointer-core.ts';
 import { glissaHomeDir, resolveConfigPath } from './config-store.ts';
 import {
+  DATA_DIR,
   GLISSA_HOME_PLACEHOLDER,
   PACK_NAME_RE,
   PROJECT_SLUG_PLACEHOLDER,
@@ -87,6 +88,10 @@ interface BuildReport {
   variants: BuildReport[];
   warnings: string[];
 }
+
+type NoteDelivered = (text: string) => Promise<unknown> | unknown;
+
+const MEMORY_PACK_GROUP = 'memory';
 
 type ReadManifest = (PackManifest & Record<string, unknown>) | null;
 
@@ -793,14 +798,27 @@ async function resolveBuiltPack(
   };
 }
 
+function memoryProjectionTexts(
+  entry: { name: string; variant: PackVariant | null },
+  outputs: { relPath: string; content: string }[],
+): string[] {
+  const group = entry.variant?.group || entry.name;
+  if (group !== MEMORY_PACK_GROUP) return [];
+  return outputs
+    .filter((output) => output.relPath.startsWith(`${DATA_DIR}/`))
+    .map((output) => output.content)
+    .filter((content) => content.length > 0);
+}
+
 async function buildOnePack(
   entry: { name: string; spec: PackSpec; variant: PackVariant | null },
-  { specPath, baseDir, builtRoot, glissaHome, now }: {
+  { specPath, baseDir, builtRoot, glissaHome, now, noteDelivered }: {
     specPath: string;
     baseDir: string;
     builtRoot: string;
     glissaHome: string | null;
     now: () => number;
+    noteDelivered: NoteDelivered | null;
   },
 ): Promise<BuildReport> {
   const spec = entry.spec;
@@ -843,6 +861,9 @@ async function buildOnePack(
   } catch (err) {
     return failure(entry.name, specPath, [`could not publish pack: ${errorMessage(err)}`]);
   }
+  if (noteDelivered) {
+    for (const deliveredText of memoryProjectionTexts(entry, built.outputs)) await noteDelivered(deliveredText);
+  }
   return report;
 }
 
@@ -861,6 +882,7 @@ async function buildPack({
   glissaHome = null,
   projects = [],
   now = Date.now,
+  noteDelivered = null,
 }: {
   specPath?: string;
   baseDir?: string;
@@ -868,6 +890,7 @@ async function buildPack({
   glissaHome?: string | null;
   projects?: Record<string, unknown>[];
   now?: () => number;
+  noteDelivered?: NoteDelivered | null;
 } = {}): Promise<BuildReport> {
   if (!specPath) return failure('', '', ['spec path required']);
   const fallbackName = path.basename(specPath).replace(/\.pack\.json$/, '');
@@ -889,7 +912,7 @@ async function buildPack({
   const plan = planPackVariants(validSpec, projects);
   const reports: BuildReport[] = [];
   for (const entry of plan.builds) {
-    reports.push(await buildOnePack(entry, { specPath, baseDir, builtRoot, glissaHome, now }));
+    reports.push(await buildOnePack(entry, { specPath, baseDir, builtRoot, glissaHome, now, noteDelivered }));
   }
   if (validSpec.perProjectVariants === true) {
     try {
@@ -911,6 +934,7 @@ async function buildPacks({
   glissaHome = null,
   projects = [],
   now = Date.now,
+  noteDelivered = null,
 }: {
   name?: string | null;
   specsDir?: string;
@@ -919,6 +943,7 @@ async function buildPacks({
   glissaHome?: string | null;
   projects?: Record<string, unknown>[];
   now?: () => number;
+  noteDelivered?: NoteDelivered | null;
 } = {}): Promise<BuildReport[]> {
   const specs = await listPackSpecs({ specsDir });
   const wanted = name ? specs.filter((spec) => spec.name === name) : specs;
@@ -928,7 +953,7 @@ async function buildPacks({
   const reports: BuildReport[] = [];
   for (const spec of wanted) {
     try {
-      const report = await buildPack({ specPath: spec.specPath, baseDir, builtRoot, glissaHome, projects, now });
+      const report = await buildPack({ specPath: spec.specPath, baseDir, builtRoot, glissaHome, projects, now, noteDelivered });
       reports.push(report, ...report.variants);
     } catch (err) {
       reports.push(failure(spec.name, spec.specPath, [`build crashed: ${errorMessage(err)}`]));

@@ -125,7 +125,10 @@ function createCanonicalProjectLookupPlanner(): (input: CanonicalPlanInput) => C
     const normalized = core.normalizeProjectTag(project);
     const configured = core.canonicalProjectPath(normalized, knownProjects);
     let plan: CanonicalProjectPlan | null = null;
-    if (!normalized || normalized !== configured || memoizedProjectTags.has(normalized)) {
+    if (!normalized || memoizedProjectTags.has(normalized)) {
+      plan = { canonical: configured };
+    }
+    if (!plan && configured && normalized !== configured && memoizedProjectTags.has(configured)) {
       plan = { canonical: configured };
     }
     if (!plan && hasCachedProject) plan = { canonical: cachedProject ?? null };
@@ -688,16 +691,34 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
 
   const deliveredView = { has: (hash: string) => openedDb.deliveredHas(hash) };
 
-  function noteDelivered(text: unknown): number {
-    const hashes = core.deliveredLineHashes(text);
+  function noteDelivered(text: unknown): number | Promise<number | null> | null {
+    const hashes = core.deliveredLineHashes(text).slice(0, MAX_DELIVERED_HASHES);
     if (hashes.length === 0) return openedDb.deliveredCount();
+    const persist = (): number => openedDb.noteDelivered(hashes, { maxHashes: MAX_DELIVERED_HASHES });
+    const logPersisted = (total: number, didRetry = false): number => {
+      if (didRetry) {
+        log.note(`delivered hashes persisted after a busy retry: ${hashes.length} line(s), ${total} retained`);
+        return total;
+      }
+      log.debugNote(() => `delivered hashes persisted: ${hashes.length} line(s), ${total} retained`);
+      return total;
+    };
     try {
-      return openedDb.noteDelivered(hashes, { maxHashes: MAX_DELIVERED_HASHES });
+      return logPersisted(persist());
     } catch (error) {
-      if (!isBusyError(error)) throw error;
-      log.debugNote(() => 'the delivered-hash write was refused: the database is busy');
-      return openedDb.deliveredCount();
+      if (!isBusyError(error)) {
+        log.warn(`delivered hashes were not persisted: ${errorMessage(error)}`);
+        return null;
+      }
     }
+    return queue(persist).then((total) => {
+      if (total !== null) return logPersisted(total, true);
+      log.warn('delivered hashes were not persisted: the memory store stopped');
+      return null;
+    }).catch((error: unknown) => {
+      log.warn(`delivered hashes were not persisted: ${errorMessage(error)}`);
+      return null;
+    });
   }
 
   function searchMatches(terms: string[], limit: number): string[] | null {
@@ -787,5 +808,5 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
   };
 }
 
-export { createCanonicalProjectLookupPlanner, createMemoryStore };
+export { MAX_DELIVERED_HASHES, createCanonicalProjectLookupPlanner, createMemoryStore };
 export type { MemoryStoreOptions, ProjectionFile };

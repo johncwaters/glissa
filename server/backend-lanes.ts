@@ -373,6 +373,7 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
   });
   const packService = createPackService({
     variantProjects: () => packVariantProjects(config),
+    noteDelivered: (text: string) => memoryStore?.noteDelivered(text) ?? null,
     ...(options.packServiceOptions || {}),
   });
   packService.on('pack-updated', ({ name, version }: { name: string; version: string }) => {

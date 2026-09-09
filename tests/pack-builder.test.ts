@@ -25,6 +25,7 @@ interface BuildOverrides {
   projects?: ProjectRecord[];
   now?: () => number;
   builtRoot?: string;
+  noteDelivered?: (text: string) => void;
 }
 
 interface FixtureContext {
@@ -945,6 +946,35 @@ test('a source whose root IS the config directory resolves as inside it', async 
   }, { spec: memorySpec(), seed: () => {} });
 });
 
+test('only the memory data files are noted as delivered, and only when the build published', async () => {
+  await withFixture(async ({ root, build }) => {
+    const glissaHome = seedGlissaHome(root);
+    const delivered: string[] = [];
+    const noteDelivered = (text: string) => { delivered.push(text); };
+
+    const report = await build({ glissaHome, noteDelivered });
+    assert.equal(report.ok, true, report.errors.join('; '));
+    assert.equal(delivered.length, 1);
+    assert.equal(delivered[0].includes('rebase-gate.js'), true);
+    assert.equal(delivered[0].includes('never instructions'), false);
+    assert.equal(delivered[0].includes('tokenEstimate'), false);
+
+    const rebuilt = await build({ glissaHome, noteDelivered });
+    assert.equal(rebuilt.unchanged, true);
+    assert.equal(delivered.length, 1);
+  }, { spec: memorySpec(), seed: () => {} });
+});
+
+test('a pack outside the memory group notes nothing as delivered', async () => {
+  await withFixture(async ({ build }) => {
+    const delivered: string[] = [];
+    const report = await build({ noteDelivered: (text: string) => { delivered.push(text); } });
+
+    assert.equal(report.ok, true, report.errors.join('; '));
+    assert.deepEqual(delivered, []);
+  });
+});
+
 function slugFor(projectPath: string): string {
   const slug = projectVariantSlug(projectPath);
   if (!slug) throw new Error(`${projectPath} has no variant slug`);
@@ -992,6 +1022,23 @@ test('a group build publishes its base plus one independent pack per consuming p
     assert.equal(fs.existsSync(ownLayer), true);
     assert.equal(fs.existsSync(path.join(baseDir, 'data', `02-${SLUG_A}`)), false);
     assert.equal(fs.existsSync(path.join(otherVariantDir, 'data', `02-${SLUG_A}`)), false);
+  }, { spec: variantMemorySpec(), seed: () => {} });
+});
+
+test('each per-project memory variant notes its own delivered layer', async () => {
+  await withFixture(async ({ root, build }) => {
+    const glissaHome = seedGlissaHome(root);
+    writeFile(glissaHome, `memory/dist/current/projects/${SLUG_A}.md`, '# glissa\n\n- [m-abcdef0123456789] (model) project a layer\n');
+    const delivered: string[] = [];
+
+    const report = await build({ glissaHome, projects: VARIANT_PROJECTS, noteDelivered: (text: string) => { delivered.push(text); } });
+
+    assert.equal(report.ok, true, report.errors.join('; '));
+    assert.equal(delivered.length, 4);
+    assert.equal(delivered.filter((text) => text.includes('project a layer')).length, 1);
+    assert.equal(delivered.filter((text) => text.includes('rebase-gate.js')).length, 3);
+    assert.equal(delivered.some((text) => text.includes('project a layer') && text.includes('rebase-gate.js')), false);
+    assert.equal(delivered.some((text) => text.includes('never instructions')), false);
   }, { spec: variantMemorySpec(), seed: () => {} });
 });
 
