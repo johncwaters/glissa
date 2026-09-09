@@ -455,6 +455,7 @@ test('a refused preflight probe leaves the handoff unswapped and names the refus
   assert.deepEqual(harness.fileSystem.artifactRenames, []);
   assert.deepEqual(harness.resets, []);
   assert.equal(harness.lane.getJournal().state, 'failed');
+  assert.equal(harness.lane.getJournal().failedAtHandOff, true);
   assert.match(String(harness.lane.getJournal().reason), /handoff-queue-admission-timed-out/);
 });
 
@@ -478,6 +479,7 @@ test('a staging failure clears the staged descriptor so a handoff swaps nothing'
   await harness.lane.handOffStagedUpdate();
   assert.deepEqual(harness.fileSystem.artifactRenames, []);
   assert.equal(harness.head(), HEAD_SHA);
+  assert.equal(harness.lane.getJournal().failedAtHandOff, false);
 });
 
 test('a failed reversal writes a restore marker for the startup shim', async () => {
@@ -514,26 +516,86 @@ test('handoff while apply is in flight refuses mutation and removes staging', as
   await applying;
 });
 
-function persistedJournal(state: 'running' | 'staged'): UpdateJournal {
+type PersistedJournalState = 'running' | 'staged' | 'succeeded' | 'failed' | 'interrupted' | 'discarded';
+
+function persistedSteps(state: PersistedJournalState): UpdateJournal['steps'] {
+  const fetchStep: UpdateJournal['steps'][number] = {
+    id: 'fetch',
+    status: state === 'running' ? 'running' : 'succeeded',
+    startedAt: 1000,
+    finishedAt: state === 'running' ? null : 1001,
+    outputTail: [],
+  };
+  if (state !== 'failed') return [fetchStep];
+  return [fetchStep, { id: 'stage', status: 'pending', startedAt: null, finishedAt: null, outputTail: [] }];
+}
+
+function persistedJournal(state: PersistedJournalState): UpdateJournal {
   return {
     state,
     fromSha: HEAD_SHA,
     toSha: TARGET_SHA,
     toVersion: '0.25.0',
     channel: 'release',
-    steps: [{
-      id: 'fetch',
-      status: state === 'running' ? 'running' : 'succeeded',
-      startedAt: 1000,
-      finishedAt: state === 'running' ? null : 1001,
-      outputTail: [],
-    }],
+    steps: persistedSteps(state),
     activeStep: state === 'running' ? 'fetch' : null,
-    reason: null,
+    reason: state === 'failed' ? 'not-fast-forward' : state === 'interrupted' ? 'interrupted' : state === 'discarded' ? 'restarted without handoff' : null,
     startedAt: 1000,
     finishedAt: state === 'running' ? null : 1002,
   };
 }
+
+for (const [state, expectedState, expectedReason] of [
+  ['failed', 'idle', null],
+  ['interrupted', 'idle', null],
+  ['discarded', 'idle', null],
+  ['succeeded', 'succeeded', null],
+] as const) {
+  test(`boot ${expectedState === 'idle' ? 'retires' : 'keeps'} a persisted ${state} journal`, async () => {
+    const harness = makeHarness({ journal: persistedJournal(state) });
+    harness.lane.startAfterListening({ listening: true, once: () => {}, removeListener: () => {} });
+    await harness.lane.whenIdle();
+    const displayedJournal = harness.lane.getJournal();
+    const persistedAfterBoot = JSON.parse(harness.fileSystem.files.get(JOURNAL_PATH) || '') as UpdateJournal;
+    assert.equal(displayedJournal.state, expectedState);
+    assert.equal(displayedJournal.reason, expectedReason);
+    assert.equal(persistedAfterBoot.state, expectedState);
+    assert.equal(persistedAfterBoot.reason, expectedReason);
+  });
+}
+
+test('boot keeps a persisted handoff failure so the operator still sees the reason', async () => {
+  const handOffFailure: UpdateJournal = {
+    ...persistedJournal('succeeded'),
+    state: 'failed',
+    reason: 'handoff-rename-failed: EACCES',
+    failedAtHandOff: true,
+  };
+  const harness = makeHarness({ journal: handOffFailure });
+  harness.lane.startAfterListening({ listening: true, once: () => {}, removeListener: () => {} });
+  await harness.lane.whenIdle();
+  const displayedJournal = harness.lane.getJournal();
+  const persistedAfterBoot = JSON.parse(harness.fileSystem.files.get(JOURNAL_PATH) || '') as UpdateJournal;
+  assert.equal(displayedJournal.state, 'failed');
+  assert.equal(displayedJournal.reason, 'handoff-rename-failed: EACCES');
+  assert.equal(persistedAfterBoot.state, 'failed');
+  assert.equal(persistedAfterBoot.reason, 'handoff-rename-failed: EACCES');
+});
+
+test('boot retires a failed journal whose steps all succeeded before the handoff', async () => {
+  const failedAfterEveryStep: UpdateJournal = {
+    ...persistedJournal('succeeded'),
+    state: 'failed',
+    reason: 'lockfile-check-failed: git exploded',
+  };
+  const harness = makeHarness({ journal: failedAfterEveryStep });
+  harness.lane.startAfterListening({ listening: true, once: () => {}, removeListener: () => {} });
+  await harness.lane.whenIdle();
+  const persistedAfterBoot = JSON.parse(harness.fileSystem.files.get(JOURNAL_PATH) || '') as UpdateJournal;
+  assert.equal(harness.lane.getJournal().state, 'idle');
+  assert.equal(harness.lane.getJournal().reason, null);
+  assert.equal(persistedAfterBoot.state, 'idle');
+});
 
 for (const [state, expectedState, reason] of [
   ['staged', 'discarded', 'restarted without handoff'],

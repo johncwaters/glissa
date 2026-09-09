@@ -11,6 +11,8 @@ import {
   decidePreflight,
   failRun,
   finishStep,
+  idleJournal,
+  interruptedDisplayJournal,
   markDiscarded,
   markInterrupted,
   markStaged,
@@ -19,6 +21,7 @@ import {
   planSteps,
   PREVIOUS_DEPENDENCIES_BACKUP_NAME,
   PREVIOUS_DIST_BACKUP_NAME,
+  retireAtBoot,
 } from '../server/core/update-apply-core.ts';
 import type { PreflightFacts } from '../server/core/update-apply-core.ts';
 
@@ -127,23 +130,8 @@ test('planHandOffRenames reverses every completed rename before each failure ind
   }
 });
 
-function idleJournal(): UpdateJournal {
-  return {
-    state: 'idle',
-    fromSha: null,
-    toSha: null,
-    toVersion: null,
-    channel: 'release',
-    steps: [],
-    activeStep: null,
-    reason: null,
-    startedAt: null,
-    finishedAt: null,
-  };
-}
-
 function startedRun(stepIds: UpdateStepId[]): UpdateJournal {
-  return beginRun(idleJournal(), {
+  return beginRun(idleJournal('release'), {
     stepIds,
     fromSha: HEAD_SHA,
     toSha: TARGET_SHA,
@@ -152,6 +140,98 @@ function startedRun(stepIds: UpdateStepId[]): UpdateJournal {
     now: STARTED_AT,
   });
 }
+
+function stagedRunWithEveryStepSucceeded(): UpdateJournal {
+  const fetched = finishStep(beginStep(startedRun(['fetch']), { stepId: 'fetch', now: STARTED_AT }), {
+    stepId: 'fetch',
+    now: FINISHED_AT,
+  });
+  return markStaged(fetched, { now: FINISHED_AT });
+}
+
+function journalForBootRetirement(state: UpdateJournal['state']): UpdateJournal {
+  if (state === 'idle') return idleJournal('main');
+  return {
+    ...startedRun(['fetch']),
+    state,
+    channel: 'main',
+    reason: state === 'failed' || state === 'interrupted' || state === 'discarded' ? 'previous result' : null,
+  };
+}
+
+for (const [state, shouldRetire] of [
+  ['failed', true],
+  ['interrupted', true],
+  ['discarded', true],
+  ['idle', false],
+  ['running', false],
+  ['staged', false],
+  ['succeeded', false],
+] as const) {
+  test(`retireAtBoot ${shouldRetire ? 'retires' : 'keeps'} a ${state} journal`, () => {
+    const journal = journalForBootRetirement(state);
+    const retiredJournal = retireAtBoot(journal, { wasPersisted: true });
+    if (shouldRetire) {
+      assert.deepEqual(retiredJournal, idleJournal('main'));
+      return;
+    }
+    assert.deepEqual(retiredJournal, journal);
+  });
+}
+
+test('retireAtBoot keeps a failed journal flagged as a handoff failure', () => {
+  const handOffFailure = failRun(stagedRunWithEveryStepSucceeded(), {
+    reason: 'handoff-rename-failed: EACCES',
+    now: FINISHED_AT,
+    atHandOff: true,
+  });
+  assert.equal(handOffFailure.failedAtHandOff, true);
+  assert.deepEqual(handOffFailure.steps.map((step) => step.status), ['succeeded']);
+  assert.deepEqual(retireAtBoot(handOffFailure, { wasPersisted: true }), handOffFailure);
+});
+
+test('retireAtBoot retires a failed journal whose steps all succeeded without the handoff flag', () => {
+  const failedAfterEveryStep: UpdateJournal = {
+    ...stagedRunWithEveryStepSucceeded(),
+    state: 'failed',
+    reason: 'lockfile-check-failed: git exploded',
+    channel: 'main',
+  };
+  assert.equal(failedAfterEveryStep.failedAtHandOff, undefined);
+  assert.deepEqual(retireAtBoot(failedAfterEveryStep, { wasPersisted: true }), idleJournal('main'));
+});
+
+test('retireAtBoot retires a failed journal that never planned a step', () => {
+  const failedBeforeStaging: UpdateJournal = { ...idleJournal('main'), state: 'failed', reason: 'not-fast-forward' };
+  assert.deepEqual(retireAtBoot(failedBeforeStaging, { wasPersisted: true }), idleJournal('main'));
+});
+
+test('retireAtBoot leaves a journal that was never persisted untouched', () => {
+  const displayOnly = interruptedDisplayJournal('main', 'update journal is invalid');
+  assert.deepEqual(retireAtBoot(displayOnly, { wasPersisted: false }), displayOnly);
+  assert.deepEqual(retireAtBoot(displayOnly, { wasPersisted: true }), idleJournal('main'));
+});
+
+test('failRun flags a handoff failure only when the caller says the failure came from the handoff', () => {
+  const failedAtHandOff = failRun(stagedRunWithEveryStepSucceeded(), {
+    reason: 'handoff-rename-failed: EACCES',
+    now: FINISHED_AT,
+    atHandOff: true,
+  });
+  const failedWhileStaged = failRun(stagedRunWithEveryStepSucceeded(), {
+    reason: 'journal-write-failed: ENOSPC',
+    now: FINISHED_AT,
+  });
+  const failedWhileRunning = failRun(beginStep(startedRun(['fetch']), { stepId: 'fetch', now: STARTED_AT }), {
+    reason: 'fetch failed',
+    now: FINISHED_AT,
+  });
+  assert.equal(failedAtHandOff.failedAtHandOff, true);
+  assert.equal(failedWhileStaged.failedAtHandOff, false);
+  assert.equal(failedWhileRunning.failedAtHandOff, false);
+  assert.deepEqual(retireAtBoot(failedWhileStaged, { wasPersisted: true }), idleJournal('release'));
+  assert.deepEqual(UpdateJournalSchema.parse(failedAtHandOff), failedAtHandOff);
+});
 
 test('beginRun records the run identity the persisted contract requires', () => {
   const running = startedRun(['fetch', 'stage']);
@@ -234,7 +314,7 @@ test('every terminal state absorbs the transitions that do not belong to it', ()
 });
 
 test('an idle journal refuses every transition except beginning a run', () => {
-  const idle = idleJournal();
+  const idle = idleJournal('release');
   assert.deepEqual(beginStep(idle, { stepId: 'fetch', now: STARTED_AT }), idle);
   assert.deepEqual(failRun(idle, { reason: 'nothing ran', now: STARTED_AT }), idle);
   assert.deepEqual(markStaged(idle, { now: STARTED_AT }), idle);

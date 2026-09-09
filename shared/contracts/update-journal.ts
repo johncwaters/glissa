@@ -24,6 +24,7 @@ export const UpdateJournal = z.object({
   reason: z.string().nullable(),
   startedAt: z.number().finite().nullable(),
   finishedAt: z.number().finite().nullable(),
+  failedAtHandOff: z.boolean().optional(),
 }).strict();
 
 export const UpdateJournalSummary = UpdateJournal.pick({

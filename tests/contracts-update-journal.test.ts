@@ -28,6 +28,13 @@ test('the update journal contract accepts every terminal state', () => {
   }
 });
 
+test('the update journal contract treats the handoff failure flag as optional', () => {
+  assert.deepEqual(UpdateJournal.parse(VALID_JOURNAL), VALID_JOURNAL);
+  const failedAtHandOff = { ...VALID_JOURNAL, state: 'failed', failedAtHandOff: true };
+  assert.deepEqual(UpdateJournal.parse(failedAtHandOff), failedAtHandOff);
+  assert.equal(UpdateJournal.safeParse({ ...VALID_JOURNAL, failedAtHandOff: 'yes' }).success, false);
+});
+
 test('the update journal contract rejects unknown fields and invalid steps', () => {
   assert.equal(UpdateJournal.safeParse({ ...VALID_JOURNAL, extra: true }).success, false);
   assert.equal(UpdateJournal.safeParse({

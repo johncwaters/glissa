@@ -20,12 +20,15 @@ import {
   markInterrupted,
   markStaged,
   markSucceeded,
+  idleJournal,
+  interruptedDisplayJournal,
   planHandOffRenames,
   planSteps,
   PREVIOUS_DEPENDENCIES_BACKUP_NAME,
   PREVIOUS_DIST_BACKUP_NAME,
   QUARANTINED_DEPENDENCIES_NAME,
   QUARANTINED_DIST_NAME,
+  retireAtBoot,
 } from './core/update-apply-core.ts';
 import type { RenameOperation } from './core/update-apply-core.ts';
 import type { GitWorkspaceInstance } from './git-workspace.ts';
@@ -103,23 +106,9 @@ interface UpdateApplyLane {
   whenIdle(): Promise<void>;
 }
 
-function idleJournal(channel: UpdateChannel): UpdateJournal {
-  return {
-    state: 'idle',
-    fromSha: null,
-    toSha: null,
-    toVersion: null,
-    channel,
-    steps: [],
-    activeStep: null,
-    reason: null,
-    startedAt: null,
-    finishedAt: null,
-  };
-}
-
-function interruptedDisplayJournal(channel: UpdateChannel, reason: string): UpdateJournal {
-  return { ...idleJournal(channel), state: 'interrupted', reason };
+interface PersistedJournalRead {
+  journal: UpdateJournal;
+  wasPersisted: boolean;
 }
 
 function errorText(error: unknown): string {
@@ -404,7 +393,7 @@ function createUpdateApplyLane(dependencies: UpdateApplyDependencies): UpdateApp
     const cleanupNote = refusedCleanupSteps.length === 0
       ? ''
       : `; the git queue refused ${refusedCleanupSteps.join(' and ')}`;
-    await publish(failRun(journal, { reason: `${reason}${cleanupNote}`, now: clock() }), false);
+    await publish(failRun(journal, { reason: `${reason}${cleanupNote}`, now: clock(), atHandOff: true }), false);
   }
 
   async function performHandOff(descriptor: StagedDescriptor): Promise<void> {
@@ -499,16 +488,16 @@ function createUpdateApplyLane(dependencies: UpdateApplyDependencies): UpdateApp
     restartRequested = true;
   }
 
-  async function readPersistedJournal(): Promise<UpdateJournal> {
+  async function readPersistedJournal(): Promise<PersistedJournalRead> {
     try {
       const parsedJson: unknown = JSON.parse(await fsPromises.readFile(dependencies.journalPath, 'utf8'));
       const parsed = UpdateJournalSchema.safeParse(parsedJson);
-      if (parsed.success) return parsed.data;
-      return interruptedDisplayJournal(dependencies.getUpdateChannel(), 'update journal is invalid');
+      if (parsed.success) return { journal: parsed.data, wasPersisted: true };
+      return { journal: interruptedDisplayJournal(dependencies.getUpdateChannel(), 'update journal is invalid'), wasPersisted: false };
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;
-      if (code === 'ENOENT') return idleJournal(dependencies.getUpdateChannel());
-      return interruptedDisplayJournal(dependencies.getUpdateChannel(), 'update journal could not be read');
+      if (code === 'ENOENT') return { journal: idleJournal(dependencies.getUpdateChannel()), wasPersisted: false };
+      return { journal: interruptedDisplayJournal(dependencies.getUpdateChannel(), 'update journal could not be read'), wasPersisted: false };
     }
   }
 
@@ -522,7 +511,10 @@ function createUpdateApplyLane(dependencies: UpdateApplyDependencies): UpdateApp
   }
 
   async function cleanAfterListening(): Promise<void> {
-    journal = await readPersistedJournal();
+    const persistedJournal = await readPersistedJournal();
+    journal = persistedJournal.journal;
+    const journalToDisplay = retireAtBoot(journal, { wasPersisted: persistedJournal.wasPersisted });
+    if (journalToDisplay !== journal) await publish(journalToDisplay, false);
     if (journal.state === 'staged') {
       await publish(markDiscarded(journal, { reason: 'restarted without handoff', now: clock() }), false);
     }

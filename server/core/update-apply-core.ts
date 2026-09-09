@@ -106,6 +106,42 @@ interface EndingMoment {
   now: number;
 }
 
+interface RunFailureMoment extends EndingMoment {
+  atHandOff?: boolean;
+}
+
+function idleJournal(channel: UpdateChannel): UpdateJournal {
+  return {
+    state: 'idle',
+    fromSha: null,
+    toSha: null,
+    toVersion: null,
+    channel,
+    steps: [],
+    activeStep: null,
+    reason: null,
+    startedAt: null,
+    finishedAt: null,
+  };
+}
+
+function interruptedDisplayJournal(channel: UpdateChannel, reason: string): UpdateJournal {
+  return { ...idleJournal(channel), state: 'interrupted', reason };
+}
+
+function isHandOffFailure(journal: UpdateJournal): boolean {
+  return journal.state === 'failed' && journal.failedAtHandOff === true;
+}
+
+function retireAtBoot(journal: UpdateJournal, { wasPersisted }: { wasPersisted: boolean }): UpdateJournal {
+  if (!wasPersisted) return journal;
+  if (isHandOffFailure(journal)) return journal;
+  if (journal.state === 'failed' || journal.state === 'interrupted' || journal.state === 'discarded') {
+    return idleJournal(journal.channel);
+  }
+  return journal;
+}
+
 function decidePreflight(facts: PreflightFacts): PreflightDecision {
   if (facts.flavor !== 'clone') {
     return { ok: false, reason: 'unsupported-flavor', message: 'Use the install command because dashboard updates require a clone.' };
@@ -272,10 +308,11 @@ function finishStep(journal: UpdateJournal, { stepId, now }: StepMoment): Update
   }));
 }
 
-function failRun(journal: UpdateJournal, { reason, now }: EndingMoment): UpdateJournal {
+function failRun(journal: UpdateJournal, { reason, now, atHandOff }: RunFailureMoment): UpdateJournal {
   return applyTransition(journal, 'fail-run', (current) => ({
     ...current,
     state: 'failed',
+    failedAtHandOff: atHandOff === true,
     steps: failActiveStep(current, now),
     activeStep: null,
     reason,
@@ -332,6 +369,8 @@ export {
   decidePreflight,
   failRun,
   finishStep,
+  idleJournal,
+  interruptedDisplayJournal,
   markDiscarded,
   markInterrupted,
   markStaged,
@@ -342,6 +381,7 @@ export {
   PREVIOUS_DIST_BACKUP_NAME,
   QUARANTINED_DEPENDENCIES_NAME,
   QUARANTINED_DIST_NAME,
+  retireAtBoot,
 };
 export type {
   EndingMoment,
@@ -350,6 +390,7 @@ export type {
   PreflightFacts,
   PreflightRefusalReason,
   RenameOperation,
+  RunFailureMoment,
   RunStartFacts,
   StepMoment,
   UpdateArtifact,
