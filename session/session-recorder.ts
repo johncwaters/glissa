@@ -18,6 +18,23 @@ function defaultRecordingsDir(): string {
 const DEFAULT_MAX_FILE_SIZE = 50 * 1024 * 1024;
 const DEFAULT_RETAIN_DAYS = 7;
 const DEFAULT_RETAIN_FILES = 20;
+const DEFAULT_RETAIN_BYTES = 64 * 1024 * 1024;
+
+const openRecordingPaths = new Set<string>();
+
+let pendingCleanups: Promise<void> = Promise.resolve();
+
+function afterPendingCleanups(runCleanup: () => Promise<void>): Promise<void> {
+  const thisCleanup = pendingCleanups.then(runCleanup, runCleanup);
+  pendingCleanups = thisCleanup.then(() => undefined, () => undefined);
+  return thisCleanup;
+}
+
+function resolveRetainBytes(requestedRetainBytes: number | undefined, resolvedRetainDays: number, resolvedRetainFiles: number): number {
+  if (requestedRetainBytes != null) return requestedRetainBytes;
+  if (resolvedRetainDays <= 0 && resolvedRetainFiles <= 0) return 0;
+  return DEFAULT_RETAIN_BYTES;
+}
 
 interface SessionRecorderOptions {
   name: string;
@@ -26,6 +43,7 @@ interface SessionRecorderOptions {
   maxFileSize?: number;
   retainDays?: number;
   retainFiles?: number;
+  retainBytes?: number;
 }
 
 interface CaptureConfig {
@@ -34,6 +52,7 @@ interface CaptureConfig {
   maxFileSizeMB?: number;
   retainDays?: number;
   retainFiles?: number;
+  retainBytes?: number;
 }
 
 class SessionRecorder {
@@ -44,6 +63,7 @@ class SessionRecorder {
   _maxFileSize: number;
   _retainDays: number;
   _retainFiles: number;
+  _retainBytes: number;
   _stream: WriteStream | null;
   _filepath: string | null;
   _currentSize: number;
@@ -52,7 +72,7 @@ class SessionRecorder {
   _disabled: boolean;
   retentionDone: Promise<void>;
 
-  constructor({ name, baseDir, recordData = false, maxFileSize, retainDays, retainFiles }: SessionRecorderOptions) {
+  constructor({ name, baseDir, recordData = false, maxFileSize, retainDays, retainFiles, retainBytes }: SessionRecorderOptions) {
     this._name = name;
     this._safeName = safePathSegment(name);
     this._baseDir = baseDir || defaultRecordingsDir();
@@ -60,6 +80,7 @@ class SessionRecorder {
     this._maxFileSize = maxFileSize || DEFAULT_MAX_FILE_SIZE;
     this._retainDays = retainDays != null ? retainDays : DEFAULT_RETAIN_DAYS;
     this._retainFiles = retainFiles != null ? retainFiles : DEFAULT_RETAIN_FILES;
+    this._retainBytes = resolveRetainBytes(retainBytes, this._retainDays, this._retainFiles);
     this._stream = null;
     this._filepath = null;
     this._currentSize = 0;
@@ -79,7 +100,7 @@ class SessionRecorder {
     try {
       fs.mkdirSync(this._baseDir, { recursive: true });
       this._openNewFile();
-      this.retentionDone = this._cleanup();
+      this.retentionDone = afterPendingCleanups(() => this._cleanup());
     } catch (err) {
       this._disableWithWarning("open", err);
     }
@@ -134,11 +155,10 @@ class SessionRecorder {
   }
 
   close(): void {
-    if (this._closed || !this._stream) {
-      this._closed = true;
-      return;
-    }
+    if (this._closed) return;
     this._closed = true;
+    this._releaseOpenPath();
+    if (!this._stream) return;
     try {
       this._stream.end();
     } catch {
@@ -164,9 +184,16 @@ class SessionRecorder {
     }
   }
 
+  _releaseOpenPath(): void {
+    if (!this._filepath) return;
+    openRecordingPaths.delete(this._filepath);
+  }
+
   _openNewFile(): void {
+    this._releaseOpenPath();
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
     this._filepath = path.join(this._baseDir, `${this._safeName}-${ts}.jsonl`);
+    openRecordingPaths.add(this._filepath);
     this._stream = fs.createWriteStream(this._filepath, { flags: "a" });
     this._currentSize = 0;
 
@@ -187,7 +214,7 @@ class SessionRecorder {
   }
 
   async _cleanup(): Promise<void> {
-    if (this._retainDays <= 0 && this._retainFiles <= 0) return;
+    if (this._retainDays <= 0 && this._retainFiles <= 0 && this._retainBytes <= 0) return;
     let entries: string[];
     try {
       entries = await fsp.readdir(this._baseDir);
@@ -219,10 +246,36 @@ class SessionRecorder {
 
     for (const entry of doomed) {
       const filepath = path.join(this._baseDir, entry);
-      if (filepath === this._filepath) continue;
+      if (filepath === this._filepath || openRecordingPaths.has(filepath)) continue;
       try {
         await fsp.unlink(filepath);
       } catch {
+      }
+    }
+    if (this._retainBytes <= 0) return;
+    const current = this._filepath ? path.basename(this._filepath) : null;
+    const measured = (await Promise.all(recordings
+      .filter((entry) => !doomed.has(entry) && entry !== current)
+      .map(async (entry) => {
+        try {
+          const stat = await fsp.stat(path.join(this._baseDir, entry));
+          return { entry, size: stat.size, mtimeMs: stat.mtimeMs };
+        } catch {
+          return null;
+        }
+      }))).filter((entry): entry is { entry: string; size: number; mtimeMs: number } => entry !== null);
+    const liveSize = current ? this._currentSize : 0;
+    let totalBytes = liveSize + measured.reduce((total, entry) => total + entry.size, 0);
+    const evictable = measured
+      .filter((entry) => !openRecordingPaths.has(path.join(this._baseDir, entry.entry)))
+      .sort((a, b) => a.mtimeMs - b.mtimeMs);
+    for (const entry of evictable) {
+      if (totalBytes <= this._retainBytes) return;
+      try {
+        await fsp.unlink(path.join(this._baseDir, entry.entry));
+        totalBytes -= entry.size;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") totalBytes -= entry.size;
       }
     }
   }
@@ -231,6 +284,7 @@ class SessionRecorder {
     if (this._disabled) return;
     this._disabled = true;
     console.warn(`[session-recorder:${this._name}] Recording disabled (${context}): ${err instanceof Error ? err.message : String(err)}`);
+    this._releaseOpenPath();
     if (this._stream) {
       try { this._stream.end(); } catch {  }
       this._stream = null;
@@ -254,6 +308,7 @@ function createRecorder(
     maxFileSize: cfg.maxFileSizeMB ? cfg.maxFileSizeMB * 1024 * 1024 : undefined,
     retainDays: cfg.retainDays,
     retainFiles: cfg.retainFiles,
+    retainBytes: cfg.retainBytes,
   });
 }
 

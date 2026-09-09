@@ -995,6 +995,43 @@ test('a group build publishes its base plus one independent pack per consuming p
   }, { spec: variantMemorySpec(), seed: () => {} });
 });
 
+test('a build that plans no project variant sweeps nothing, so a config load failure cannot wipe the variants', async () => {
+  await withFixture(async ({ root, build, builtRoot }) => {
+    const glissaHome = seedGlissaHome(root);
+    await build({ glissaHome, projects: VARIANT_PROJECTS });
+    assert.equal(fs.existsSync(path.join(builtRoot, `memory-${SLUG_A}`)), true);
+
+    const report = await build({ glissaHome, projects: [] });
+
+    assert.equal(report.ok, true, report.errors.join('; '));
+    assert.equal(fs.existsSync(path.join(builtRoot, `memory-${SLUG_A}`)), true);
+    assert.equal(fs.existsSync(path.join(builtRoot, `memory-${SLUG_B}`)), true);
+  }, { spec: variantMemorySpec(), seed: () => {} });
+});
+
+test('the stale sweep removes its own dropped variant and leaves a group whose name shares it as a dash prefix', async () => {
+  await withFixture(async ({ root, packsDir, build, builtRoot }) => {
+    const glissaHome = seedGlissaHome(root);
+    writeSpec(packsDir, 'memory-notes', variantMemorySpec({ name: 'memory-notes' }));
+    await build({ glissaHome, projects: VARIANT_PROJECTS });
+    const notes = await buildPack({
+      specPath: path.join(packsDir, 'specs', 'memory-notes.pack.json'),
+      baseDir: packsDir,
+      builtRoot,
+      glissaHome,
+      projects: VARIANT_PROJECTS,
+    });
+    assert.equal(notes.ok, true, notes.errors.join('; '));
+    assert.equal(fs.existsSync(path.join(builtRoot, `memory-notes-${SLUG_B}`)), true);
+
+    await build({ glissaHome, projects: [VARIANT_PROJECTS[0]] });
+
+    assert.equal(fs.existsSync(path.join(builtRoot, `memory-${SLUG_B}`)), false, 'its own dropped variant is swept');
+    assert.equal(fs.existsSync(path.join(builtRoot, `memory-notes-${SLUG_A}`)), true);
+    assert.equal(fs.existsSync(path.join(builtRoot, `memory-notes-${SLUG_B}`)), true);
+  }, { spec: variantMemorySpec(), seed: () => {} });
+});
+
 test('a project with no layer yet still gets a variant: a missing per-project source is skipped, not an error', async () => {
   await withFixture(async ({ root, build, builtRoot }) => {
     const glissaHome = seedGlissaHome(root);

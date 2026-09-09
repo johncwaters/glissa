@@ -41,6 +41,7 @@ interface BackendShutdownDependencies {
   memoryDistiller: Stoppable | null;
   memoryStore: Stoppable | null;
   traceWiring?: Stoppable | null;
+  uploadsWiring?: Stoppable | null;
   traceChangeBroadcast?: Stoppable | null;
   planReview?: Stoppable | null;
   millMetricsIdle?: (() => Promise<void>) | null;
@@ -117,6 +118,8 @@ function createBackendShutdown(dependencies: BackendShutdownDependencies): () =>
         return traceWiring.stop();
       });
     }
+    const uploadsWiring = dependencies.uploadsWiring;
+    if (uploadsWiring) stoppers.add('uploads', () => uploadsWiring.stop());
 
     const planReview = dependencies.planReview;
     if (planReview) stoppers.add('plan-review', () => planReview.stop());

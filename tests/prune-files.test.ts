@@ -72,3 +72,20 @@ test('one id with two suffixes is reported once per file removed', async () => {
   });
   assert.deepEqual(removed.sort(), ['gone', 'gone']);
 });
+
+test('directory mode removes an aged directory and preserves a live directory', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-prune-directories-'));
+  directories.push(directory);
+  for (const name of ['old', 'live']) {
+    const target = path.join(directory, name);
+    fs.mkdirSync(target);
+    fs.writeFileSync(path.join(target, 'upload.txt'), 'upload');
+    fs.utimesSync(target, new Date(NOW - 90 * DAY_MS), new Date(NOW - 90 * DAY_MS));
+  }
+  const removed = await pruneAgedFiles({
+    directory, suffixes: [''], retainDays: 7, now: NOW, entryMode: 'directory', isRetainedId: (id) => id === 'live',
+  });
+  assert.deepEqual(removed, ['old']);
+  assert.equal(fs.existsSync(path.join(directory, 'old')), false);
+  assert.equal(fs.existsSync(path.join(directory, 'live')), true);
+});

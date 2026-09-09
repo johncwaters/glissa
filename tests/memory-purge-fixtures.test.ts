@@ -100,7 +100,7 @@ test('a purge removes the fixtures, backs the database up first and leaves the r
     assert.ok(out.lines.some((line) => line.startsWith('before: 6 record(s), 6 of them remembered text')));
     assert.ok(out.lines.some((line) => line.startsWith('after: ')));
     assert.equal(result.indexed, result.after, 'the search index was rebuilt from the surviving canon');
-    assert.equal(result.tails, 1, 'the offset for a temp transcript that no longer exists is dropped');
+    assert.equal(result.tails, 0);
 
     const store = createMemoryStore({
       dir,

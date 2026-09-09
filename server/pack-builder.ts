@@ -26,6 +26,7 @@ import {
   packTmpOwnerPid,
   planPackBuild,
   planPackVariants,
+  staleVariantPackNames,
   sha256,
   shouldReclaimPackArtifact,
   sourcePattern,
@@ -845,6 +846,14 @@ async function buildOnePack(
   return report;
 }
 
+async function variantPackNamesOwnedBy(candidateNames: string[], group: string, builtRoot: string): Promise<string[]> {
+  const owned = await Promise.all(candidateNames.map(async (name) => {
+    const manifest = await readBuiltManifest(name, { builtRoot });
+    return manifest && manifest.group === group ? name : null;
+  }));
+  return owned.filter((name): name is string => name !== null);
+}
+
 async function buildPack({
   specPath,
   baseDir = DEFAULT_PACKS_DIR,
@@ -881,6 +890,14 @@ async function buildPack({
   const reports: BuildReport[] = [];
   for (const entry of plan.builds) {
     reports.push(await buildOnePack(entry, { specPath, baseDir, builtRoot, glissaHome, now }));
+  }
+  if (validSpec.perProjectVariants === true) {
+    try {
+      const staleNames = staleVariantPackNames(await fsp.readdir(builtRoot), plan.builds.map((entry) => entry.name));
+      const ownedStaleNames = await variantPackNamesOwnedBy(staleNames, validSpec.name, builtRoot);
+      await Promise.all(ownedStaleNames.map((entry) => fsp.rm(path.join(builtRoot, entry), { recursive: true, force: true })));
+    } catch {
+    }
   }
   const [base = failure(fallbackName, specPath, plan.warnings), ...variants] = reports;
   return { ...base, variants, warnings: plan.warnings };

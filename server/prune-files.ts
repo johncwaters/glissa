@@ -9,11 +9,13 @@ interface PruneAgedFilesOptions {
   retainDays: number;
   now?: number;
   isRetainedId?: (id: string) => boolean;
-  fsPromises?: Pick<typeof fs.promises, 'readdir' | 'stat' | 'unlink'>;
+  entryMode?: 'file' | 'directory';
+  fsPromises?: Pick<typeof fs.promises, 'readdir' | 'stat' | 'unlink' | 'rm'>;
 }
 
 function idForEntry(entry: string, suffixes: string[]): string | null {
   for (const suffix of suffixes) {
+    if (suffix.length === 0) return entry;
     if (entry.endsWith(suffix)) return entry.slice(0, -suffix.length);
   }
   return null;
@@ -25,6 +27,7 @@ async function pruneAgedFiles({
   retainDays,
   now = Date.now(),
   isRetainedId = () => false,
+  entryMode = 'file',
   fsPromises = fs.promises,
 }: PruneAgedFilesOptions): Promise<string[]> {
   let entries: string[];
@@ -42,7 +45,8 @@ async function pruneAgedFiles({
     try {
       const stat = await fsPromises.stat(filePath);
       if (stat.mtimeMs >= cutoff) continue;
-      await fsPromises.unlink(filePath);
+      if (entryMode === 'directory') await fsPromises.rm(filePath, { recursive: true, force: true });
+      if (entryMode === 'file') await fsPromises.unlink(filePath);
       removedIds.push(id);
     } catch {
     }

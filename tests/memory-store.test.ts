@@ -101,6 +101,16 @@ test('a canonical project lookup reuses its plan for fresh equal-content project
   assert.strictEqual(second, first);
 });
 
+test('store load drops tail rows for paths that no longer exist', () => {
+  const dir = tempDir();
+  const dbPath = dbPathFor(dir);
+  const db = createMemoryDb({ dbPath });
+  db.saveTailOffset({ path: path.join(dir, 'missing.jsonl'), size: 1, mtimeMs: 1, offset: 1, ts: START });
+  db.close();
+  const store = openStore(dir, { dbPath });
+  assert.deepEqual(store.tailState().files, {});
+});
+
 test('a canonical project lookup invalidates a plan when a known project array is mutated', () => {
   const planLookup = createCanonicalProjectLookupPlanner();
   const knownProjects = ['/repos/glissa'];

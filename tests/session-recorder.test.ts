@@ -394,6 +394,63 @@ test('retention never prunes the file just opened', async () => {
   }
 });
 
+test('retention evicts oldest recordings until the directory byte budget fits', async () => {
+  const baseDir = makeBaseDir();
+  try {
+    const old = path.join(baseDir, 'old-2026-01-01T00-00-00-000Z.jsonl');
+    const recent = path.join(baseDir, 'recent-2026-01-02T00-00-00-000Z.jsonl');
+    fs.writeFileSync(old, 'a'.repeat(80));
+    fs.writeFileSync(recent, 'b'.repeat(80));
+    fs.utimesSync(old, new Date('2026-01-01'), new Date('2026-01-01'));
+    fs.utimesSync(recent, new Date('2026-01-02'), new Date('2026-01-02'));
+    const recorder = new SessionRecorder({ name: 'current', baseDir, retainDays: 0, retainFiles: 0, retainBytes: 100 });
+    recorder.open();
+    await recorder.retentionDone;
+    await closeAndFlush(recorder);
+    assert.equal(fs.existsSync(old), false);
+    assert.equal(fs.existsSync(recent), true);
+  } finally {
+    fs.rmSync(baseDir, { recursive: true, force: true });
+  }
+});
+
+function whenStreamOpen(recorder: SessionRecorder): Promise<void> {
+  const stream = recorder._stream;
+  if (!stream || !stream.pending) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    stream.once('open', () => resolve());
+  });
+}
+
+test('the byte budget evicts a closed recording but never one another session still has open', async () => {
+  const baseDir = makeBaseDir();
+  const first = new SessionRecorder({ name: 'first', baseDir, retainDays: 0, retainFiles: 0, retainBytes: 50 });
+  const second = new SessionRecorder({ name: 'second', baseDir, retainDays: 0, retainFiles: 0, retainBytes: 50 });
+  try {
+    const closed = path.join(baseDir, 'closed-2026-01-01T00-00-00-000Z.jsonl');
+    fs.writeFileSync(closed, 'a'.repeat(400));
+    fs.utimesSync(closed, new Date('2026-01-01'), new Date('2026-01-01'));
+
+    first.open();
+    first.writeHeader({});
+    await first.retentionDone;
+    await whenStreamOpen(first);
+
+    second.open();
+    second.writeHeader({});
+    await second.retentionDone;
+    await whenStreamOpen(second);
+
+    assert.equal(fs.existsSync(closed), false, 'a closed over-budget recording is still evicted');
+    assert.equal(fs.existsSync(first._filepath as string), true, 'another live recorder file must survive');
+    assert.equal(fs.existsSync(second._filepath as string), true);
+  } finally {
+    await closeAndFlush(first);
+    await closeAndFlush(second);
+    fs.rmSync(baseDir, { recursive: true, force: true });
+  }
+});
+
 test('retention is skipped entirely when both bounds are disabled', async () => {
   const baseDir = makeBaseDir();
   try {
@@ -402,13 +459,66 @@ test('retention is skipped entirely when both bounds are disabled', async () => 
     const staleTime = new Date('2000-01-01T00:00:00.000Z');
     fs.utimesSync(staleFile, staleTime, staleTime);
 
+    const oversizedFile = path.join(baseDir, 'huge-session-2000-01-02T00-00-00-000Z.jsonl');
+    fs.writeFileSync(oversizedFile, '');
+    fs.truncateSync(oversizedFile, 128 * 1024 * 1024);
+    fs.utimesSync(oversizedFile, staleTime, staleTime);
+
     const recorder = new SessionRecorder({ name: 'no-retention', baseDir, retainDays: 0, retainFiles: 0 });
     recorder.open();
     await recorder.retentionDone;
     await closeAndFlush(recorder);
 
     assert.equal(fs.existsSync(staleFile), true, 'both bounds off must keep everything');
+    assert.equal(fs.existsSync(oversizedFile), true, 'both bounds off leaves no implicit byte budget to evict against');
   } finally {
+    fs.rmSync(baseDir, { recursive: true, force: true });
+  }
+});
+
+test('the default byte budget still applies when only one of the other bounds is disabled', async () => {
+  const baseDir = makeBaseDir();
+  try {
+    const oversizedFile = path.join(baseDir, 'huge-session-2000-01-02T00-00-00-000Z.jsonl');
+    fs.writeFileSync(oversizedFile, '');
+    fs.truncateSync(oversizedFile, 128 * 1024 * 1024);
+    const staleTime = new Date('2000-01-02T00:00:00.000Z');
+    fs.utimesSync(oversizedFile, staleTime, staleTime);
+
+    const recorder = new SessionRecorder({ name: 'byte-default', baseDir, retainDays: 0, retainFiles: 20 });
+    recorder.open();
+    await recorder.retentionDone;
+    await closeAndFlush(recorder);
+
+    assert.equal(fs.existsSync(oversizedFile), false, 'an unbounded directory is still capped by the default budget');
+  } finally {
+    fs.rmSync(baseDir, { recursive: true, force: true });
+  }
+});
+
+test('two recorders cleaning up back to back stop at the byte budget instead of emptying the directory', async () => {
+  const baseDir = makeBaseDir();
+  const first = new SessionRecorder({ name: 'first', baseDir, retainDays: 0, retainFiles: 0, retainBytes: 64 });
+  const second = new SessionRecorder({ name: 'second', baseDir, retainDays: 0, retainFiles: 0, retainBytes: 64 });
+  try {
+    const prior = ['01', '02', '03', '04', '05'].map((day) => {
+      const filepath = path.join(baseDir, `prior-2026-01-${day}T00-00-00-000Z.jsonl`);
+      fs.writeFileSync(filepath, 'a'.repeat(40));
+      const stamp = new Date(`2026-01-${day}T00:00:00.000Z`);
+      fs.utimesSync(filepath, stamp, stamp);
+      return filepath;
+    });
+
+    first.open();
+    second.open();
+    await first.retentionDone;
+    await second.retentionDone;
+
+    assert.equal(fs.existsSync(prior[4]), true, 'the newest prior recording fits the budget and must survive both passes');
+    assert.equal(fs.existsSync(prior[3]), false, 'the over-budget older recordings are still evicted');
+  } finally {
+    await closeAndFlush(first);
+    await closeAndFlush(second);
     fs.rmSync(baseDir, { recursive: true, force: true });
   }
 });

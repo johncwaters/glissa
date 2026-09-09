@@ -312,7 +312,7 @@ function buildFixPrompt(
 
 async function sweepReports(dir: string = REPORT_DIR, retain: number = REPORT_RETAIN_FILES): Promise<void> {
   try {
-    const names = (await fs.promises.readdir(dir)).filter((n) => n.endsWith('.html'));
+    const names = (await fs.promises.readdir(dir)).filter((n) => n.endsWith('.html') || n.endsWith('.md'));
     if (names.length <= retain) return;
     const stamped = await Promise.all(names.map(async (name) => {
       const full = path.join(dir, name);
@@ -686,6 +686,7 @@ function createPosthogWiring({
       return { verdict: 'ERROR', summary: String(failure.message || e), mode: core.JOB_MODES.investigate };
     } finally {
       if (resultFile) await resultFile.cleanup();
+      if (!resolveRepoPath(projectId)) await fs.promises.rm(path.join(WORK_DIR, issueId), { recursive: true, force: true }).catch(() => {});
     }
   }
 

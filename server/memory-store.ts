@@ -325,6 +325,8 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     if (projectTagMigration.applied) {
       log.note(`project tag migration remapped ${projectTagMigration.remapped} of ${projectTagMigration.examined} tagged record(s)`);
     }
+    const missingTailPaths = Object.keys(openedDb.tailState().files).filter((tailPath) => !fs.existsSync(tailPath));
+    if (missingTailPaths.length > 0) openedDb.forgetTails(missingTailPaths);
     const expired = core.expiredSegmentKeys(openedDb.segmentKeys(), { now: now(), retainDays: config.retainDays });
     const droppedRows = expired.length === 0 ? 0 : openedDb.deleteSegments(expired);
     openedDb.ensureSearchIndex();

@@ -31,6 +31,7 @@ import { createUsageWiring, resolveUsageConfig } from './usage-wiring.ts';
 import { createLaneLedger } from './usage-lane-ledger.ts';
 import { createTraceWiring } from './trace-wiring.ts';
 import { createTraceChangeBroadcast } from './trace-control.ts';
+import { createUploadsWiring } from './uploads-wiring.ts';
 import { createVisionsDispatcher, createVisionsSpawn } from './visions-dispatch.ts';
 import { createVisionsSetup } from './visions-setup.ts';
 import { createVisionsWiring } from './visions-wiring.ts';
@@ -220,6 +221,10 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
       debug: () => configStore.getSettings().debugMode === true,
     })
     : null;
+  const uploadsWiring = createUploadsWiring({
+    configPath: configStore.configPath,
+    liveSessionIds: () => new Set(allLiveSessions().map((session) => session.id)),
+  });
   const traceChangeBroadcast = traceWiring
     ? createTraceChangeBroadcast({ source: traceWiring, broadcast: broadcastControl })
     : null;
@@ -473,6 +478,7 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
       },
       () => packDistiller.start().catch((error: unknown) => logger.warn(`[distill] failed to start: ${errorMessage(error)}`)),
       () => traceWiring?.start().catch((error: unknown) => logger.warn(`[trace] start failed: ${errorMessage(error)}`)),
+      () => uploadsWiring.start().catch((error: unknown) => logger.warn(`[uploads] start failed: ${errorMessage(error)}`)),
       () => planReview?.start().catch((error: unknown) => logger.warn(`[plan-review] start failed: ${errorMessage(error)}`)),
     ];
     for (const start of startSteps) start();
@@ -527,6 +533,7 @@ function createBackendLanes(dependencies: BackendLaneDependencies) {
     startRuntimeLanes,
     tapIngestForSession,
     traceWiring,
+    uploadsWiring,
     traceChangeBroadcast,
     usage,
     visionsSessions,

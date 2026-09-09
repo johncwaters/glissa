@@ -595,6 +595,21 @@ test('sweepReports on a missing directory resolves quietly', async () => {
   await sweepReports(path.join(os.tmpdir(), 'glissa-phreports-does-not-exist'), 2);
 });
 
+test('sweepReports counts markdown reports with html reports', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-phreports-markdown-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'old.md'), 'report');
+    fs.writeFileSync(path.join(dir, 'new.html'), 'report');
+    fs.utimesSync(path.join(dir, 'old.md'), new Date(1000), new Date(1000));
+    fs.utimesSync(path.join(dir, 'new.html'), new Date(2000), new Date(2000));
+    await sweepReports(dir, 1);
+    assert.equal(fs.existsSync(path.join(dir, 'old.md')), false);
+    assert.equal(fs.existsSync(path.join(dir, 'new.html')), true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 function withResultFile<T>(contents: string | null, fn: (resultPath: string) => T): T {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-phresult-'));
   const p = path.join(dir, 'result.json');

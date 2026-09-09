@@ -26,6 +26,7 @@ import {
   projectVariantSlug,
   shouldReclaimPackArtifact,
   sourceSlug,
+  staleVariantPackNames,
   validatePackSpec,
   variantPackName,
 } from '../server/core/pack-core.ts';
@@ -54,6 +55,27 @@ function outputByPath(plan: { outputs: { relPath: string; content: string }[] },
 
 test('a well-formed spec validates', () => {
   assert.deepEqual(validatePackSpec(validSpec()), { ok: true, errors: [] });
+});
+
+test('staleVariantPackNames removes absent variant directories without touching unrelated packs', () => {
+  assert.deepEqual(
+    staleVariantPackNames(['memory', 'memory-live-12345678', 'memory-gone-12345678', 'other-gone-12345678'], ['memory', 'memory-live-12345678']),
+    ['memory-gone-12345678'],
+  );
+});
+
+test('a plan carrying no variant name sweeps nothing, so a build that saw no projects deletes no history', () => {
+  assert.deepEqual(staleVariantPackNames(['memory', 'memory-gone-12345678', 'memory-live-12345678'], ['memory']), []);
+});
+
+test('a dash-prefixed foreign group variant is only a candidate, left for the builder to filter by manifest owner', () => {
+  assert.deepEqual(
+    staleVariantPackNames(
+      ['memory', 'memory-notes', 'memory-notes-glissa-17fee7c4', 'memory-glissa-17fee7c4'],
+      ['memory', 'memory-glissa-17fee7c4'],
+    ),
+    ['memory-notes-glissa-17fee7c4'],
+  );
 });
 
 test('a spec without sources, name, or budget is rejected with one error each', () => {
