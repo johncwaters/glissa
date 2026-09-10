@@ -4,6 +4,8 @@ import { WebSocketServer } from 'ws';
 import type { WebSocket } from 'ws';
 import type { Session } from '../session/sessions.ts';
 import { CONTROL_FRAME_MAX_BYTES } from '../shared/contracts/control-messages.ts';
+import { parseDataClientMessage } from '../shared/contracts/data-messages.ts';
+import type { PtySizeFrame } from '../shared/contracts/data-messages.ts';
 import { STATES } from '../shared/states.ts';
 import { createReplayLog } from './control-replay-core.ts';
 import type { ControlMessageRecord, ReplayLog } from './control-replay-core.ts';
@@ -12,8 +14,9 @@ import { decideHostAllowed } from './core/host-policy.ts';
 import { classifyRequestOrigin, decideUpgradeAccess } from './core/request-trust.ts';
 import type { RequestTrust } from './core/request-trust.ts';
 import { classifyUpgradePath, dataSessionIdFromUrl, upgradeTokenFromUrl } from './core/upgrade-route.ts';
-import { isApplicableViewerSize, pickSizeAfterDeparture } from './core/viewer-size-core.ts';
+import { resolveSessionSize } from './core/viewer-size-core.ts';
 import { createWsSender } from './ws-sender.ts';
+import type { WsSender } from './ws-sender.ts';
 
 type ControlBroadcast = (message: ControlMessageRecord) => void;
 
@@ -67,6 +70,11 @@ function sendControlFrame(client: WebSocket, payload: string, type: string, logg
     return;
   }
   client.send(payload);
+}
+
+function sendPtySizeFrame(sender: WsSender, size: { cols: number; rows: number; seq: number }): void {
+  const frame: PtySizeFrame = { type: 'pty-size', cols: size.cols, rows: size.rows, seq: size.seq };
+  sender.sendOutOfBand(Buffer.from(JSON.stringify(frame), 'utf8'));
 }
 
 function frameType(stamped: ControlMessageRecord): string {
@@ -143,35 +151,40 @@ function createBackendWebSockets(dependencies: BackendWebSocketDependencies): Ba
       const viewerSizeMap = viewerSizes;
       viewerSizeMap.set(socket, null);
 
+      const applyResolvedSize = (departing: boolean): void => {
+        const resolved = resolveSessionSize({
+          viewers: viewerSizeMap,
+          ...(departing ? { departingKey: socket } : {}),
+          current: session.ptySize(),
+        });
+        if (!resolved.changed) return;
+        session.resize(resolved.cols, resolved.rows);
+      };
+
       const releaseViewerSize = (): void => {
         if (!viewerSizeMap.get(socket)) return;
         viewerSizeMap.set(socket, null);
         if (sessionDataClients.get(activeSessionId) !== viewerSizeMap) return;
-        const successor = pickSizeAfterDeparture(viewerSizeMap, socket);
-        if (!successor) return;
-        session.resize(successor.cols, successor.rows);
+        applyResolvedSize(true);
       };
 
-      const replay = session.getReplayBuffer();
-      const startOffset = session.getOutputOffset();
+      const snapshot = session.getScreenSnapshot();
       const sender = createWsSender(socket, {
         source: { getBufferSince: (offset: number) => session.getBufferSince(offset) },
-        startOffset,
+        startOffset: snapshot.offset,
       });
-      if (replay) sender.sendImmediate(replay);
+      sendPtySizeFrame(sender, session.ptySize());
+      if (snapshot.data) sender.sendImmediate(snapshot.data, 0);
 
       const dataListener = (data: string) => sender.onData(data);
       session.on('data', dataListener);
+      const resizeListener = (size: { cols: number; rows: number; seq: number }) => sendPtySizeFrame(sender, size);
+      session.on('resize', resizeListener);
       socket.on('message', (raw) => {
-        let message: Record<string, unknown> | null = null;
-        try {
-          message = JSON.parse(String(raw));
-        } catch {
-          return;
-        }
-        if (!message || typeof message !== 'object') return;
+        const message = parseDataClientMessage(String(raw));
+        if (!message) return;
 
-        if (message.type === 'input' && typeof message.data === 'string') {
+        if (message.type === 'input') {
           if (message.data.length > 16384) {
             logger.warn(`[data-ws] Rejected oversized input (${message.data.length} chars) for ${session.name}`);
             broadcastControl({
@@ -188,14 +201,10 @@ function createBackendWebSockets(dependencies: BackendWebSocketDependencies): Ba
           if (session.state === STATES.WAITING) session.transition('user_input');
           return;
         }
-        if (message.type === 'resize') {
-          const cols = Number(message.cols);
-          const rows = Number(message.rows);
-          if (isApplicableViewerSize(cols, rows)) {
-            nextViewerResizeSeq += 1;
-            viewerSizeMap.set(socket, { cols, rows, resizeSeq: nextViewerResizeSeq });
-            session.resize(cols, rows);
-          }
+        if (message.type === 'claim') {
+          nextViewerResizeSeq += 1;
+          viewerSizeMap.set(socket, { cols: message.cols, rows: message.rows, resizeSeq: nextViewerResizeSeq });
+          applyResolvedSize(false);
           return;
         }
         if (message.type === 'unview') releaseViewerSize();
@@ -216,6 +225,7 @@ function createBackendWebSockets(dependencies: BackendWebSocketDependencies): Ba
 
       socket.on('close', () => {
         session.removeListener('data', dataListener);
+        session.removeListener('resize', resizeListener);
         sender.destroy();
         releaseViewerSize();
         const clients = sessionDataClients.get(activeSessionId);

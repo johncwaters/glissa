@@ -4,6 +4,7 @@ import type { Terminal } from '@xterm/xterm';
 import type { PlanReviewState } from '#shared/contracts/plan-review.ts';
 import type { createPlanFace } from '../plan/plan-face.ts';
 import type { SessionCardFace } from './face-core.ts';
+import type { TerminalGrid } from './grid-core.ts';
 import type { DeliveredPack } from './pack-stale-core.ts';
 
 export type SessionCardElement = HTMLDivElement & { _cardHostClass?: string };
@@ -47,6 +48,7 @@ export interface SessionUi {
   activeAgents?: number;
   packs?: DeliveredPack[];
   resizeObserver?: ResizeObserver;
+  ptySize?: TerminalGrid | null;
 
   renameTargetEl?: HTMLElement | null;
 
@@ -56,12 +58,11 @@ export interface SessionUi {
 
   _dataWsRetryAttempt?: number;
   _inputQueue?: string[];
-  _repaintRafId?: number | null;
-  _applyFit?: (options?: { repaintRequested?: boolean }) => void;
-  _resetResizeCache?: () => void;
-  _unviewTerminal?: () => void;
+  _syncGrid?: (options?: { isActivationEdge?: boolean }) => void;
+  _resetGridClaim?: () => void;
+  _setActiveViewer?: (isActive: boolean) => void;
   _resetSoftKeyboardBuffer?: () => void;
-  _activateTerminalViewer?: () => void;
+  _ensureTerminalReady?: () => void;
   _setBorrowed?: (isBorrowed: boolean) => void;
   _showPreferredFace?: () => void;
   _showTerminalFace?: () => void;

@@ -8,9 +8,11 @@ import type { Server } from 'node:http';
 import WebSocket from 'ws';
 
 import { createBackend } from '../server/backend.ts';
+import { PtySizeFrame } from '../shared/contracts/data-messages.ts';
+import { SCREEN_RESET } from '../session/core/screen-keeper-core.ts';
 import type { Session } from '../session/sessions.ts';
-import { closeSocket, dashboardClient, openSocket } from './helpers/dashboard-ws.ts';
-import type { DashboardClient } from './helpers/dashboard-ws.ts';
+import { closeSocket, dashboardClient, openDataRecordingSocket } from './helpers/dashboard-ws.ts';
+import type { DashboardClient, DataRecordingSocket } from './helpers/dashboard-ws.ts';
 import { UNREACHABLE_PID } from './helpers/fake-pty.ts';
 import { boundPort, closeServer, listenOnLoopback } from './helpers/http-server.ts';
 import type { Backend } from './helpers/lanes.ts';
@@ -21,6 +23,8 @@ interface ResizeCall {
   cols: number;
   rows: number;
 }
+
+type Viewer = DataRecordingSocket;
 
 interface ResizeContext {
   tmpDir: string;
@@ -52,8 +56,14 @@ function attachFakePty(): void {
   ctx().session._ptyAlive = true;
 }
 
-function openViewer(): Promise<WebSocket> {
-  return openSocket(ctx().client, `/terminals/${SESSION_ID}`);
+function openViewer(): Promise<Viewer> {
+  return openDataRecordingSocket(ctx().client, `/terminals/${SESSION_ID}`);
+}
+
+function sizeFrames(viewer: Viewer): PtySizeFrame[] {
+  return viewer.frames
+    .filter((frame) => frame.binary)
+    .map((frame) => PtySizeFrame.parse(JSON.parse(frame.text)));
 }
 
 async function waitForResizeCount(expected: number): Promise<ResizeCall[]> {
@@ -64,9 +74,21 @@ async function waitForResizeCount(expected: number): Promise<ResizeCall[]> {
   return ptyResizes;
 }
 
-async function closeViewer(ws: WebSocket): Promise<void> {
-  if (ws.readyState === WebSocket.CLOSED) return;
-  await closeSocket(ws);
+async function waitForSizeFrames(viewer: Viewer, expected: number): Promise<PtySizeFrame[]> {
+  const deadline = Date.now() + 3000;
+  while (sizeFrames(viewer).length < expected && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return sizeFrames(viewer);
+}
+
+function claim(viewer: Viewer, cols: number, rows: number): void {
+  viewer.ws.send(JSON.stringify({ type: 'claim', cols, rows }));
+}
+
+async function closeViewer(viewer: Viewer): Promise<void> {
+  if (viewer.ws.readyState === WebSocket.CLOSED) return;
+  await closeSocket(viewer.ws);
 }
 
 function settle(ms = 100): Promise<void> {
@@ -110,21 +132,66 @@ test.after(async () => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-test('unview hands the PTY back to the viewer that is still watching', async () => {
+test('attach sends the authoritative size first, then one screen frame', async () => {
+  attachFakePty();
+  const viewer = await openViewer();
+  await waitForSizeFrames(viewer, 1);
+  await settle(50);
+
+  const first = viewer.frames[0];
+  assert.ok(first, 'the socket received something');
+  assert.equal(first.binary, true, 'the size frame is binary and arrives first');
+  const size = PtySizeFrame.parse(JSON.parse(first.text));
+  assert.equal(size.type, 'pty-size');
+  assert.ok(size.cols > 0 && size.rows > 0);
+
+  const second = viewer.frames[1];
+  assert.ok(second, 'the screen frame follows the size frame');
+  assert.equal(second.binary, false, 'PTY bytes stay text frames');
+  assert.ok(second.text.startsWith(SCREEN_RESET), 'the screen frame opens with the shared reset prefix');
+
+  await closeViewer(viewer);
+});
+
+test('every socket of the session is told about an accepted size change', async () => {
+  attachFakePty();
+  const desktop = await openViewer();
+  const phone = await openViewer();
+  await waitForSizeFrames(desktop, 1);
+  await waitForSizeFrames(phone, 1);
+
+  claim(phone, 100, 42);
+  await waitForResizeCount(1);
+  const desktopSizes = await waitForSizeFrames(desktop, 2);
+  const phoneSizes = await waitForSizeFrames(phone, 2);
+
+  assert.deepEqual(
+    { cols: desktopSizes[1]?.cols, rows: desktopSizes[1]?.rows },
+    { cols: 100, rows: 42 },
+    'a viewer that did not claim still learns the authoritative size',
+  );
+  assert.deepEqual({ cols: phoneSizes[1]?.cols, rows: phoneSizes[1]?.rows }, { cols: 100, rows: 42 });
+  assert.ok((phoneSizes[1]?.seq ?? 0) > (phoneSizes[0]?.seq ?? 0), 'the sequence climbs with every accepted change');
+
+  await closeViewer(phone);
+  await closeViewer(desktop);
+});
+
+test('the newest claimant wins while it is still watching', async () => {
   attachFakePty();
   const desktop = await openViewer();
   const phone = await openViewer();
 
-  desktop.send(JSON.stringify({ type: 'resize', cols: 200, rows: 50 }));
+  claim(desktop, 200, 50);
   await waitForResizeCount(1);
-  phone.send(JSON.stringify({ type: 'resize', cols: 40, rows: 30 }));
+  claim(phone, 40, 30);
   await waitForResizeCount(2);
   assert.deepEqual(ptyResizes.at(-1), { cols: 40, rows: 30 }, 'the newest active viewer still wins');
 
-  phone.send(JSON.stringify({ type: 'unview' }));
+  phone.ws.send(JSON.stringify({ type: 'unview' }));
   await waitForResizeCount(3);
   assert.deepEqual(ptyResizes.at(-1), { cols: 200, rows: 50 }, 'the desktop got its dimensions back');
-  assert.equal(phone.readyState, WebSocket.OPEN, 'unview leaves the connection open; bytes keep flowing');
+  assert.equal(phone.ws.readyState, WebSocket.OPEN, 'unview leaves the connection open; bytes keep flowing');
 
   await closeViewer(phone);
   await closeViewer(desktop);
@@ -135,9 +202,9 @@ test('a viewer that closes without unviewing hands the PTY back too', async () =
   const desktop = await openViewer();
   const phone = await openViewer();
 
-  desktop.send(JSON.stringify({ type: 'resize', cols: 180, rows: 48 }));
+  claim(desktop, 180, 48);
   await waitForResizeCount(1);
-  phone.send(JSON.stringify({ type: 'resize', cols: 40, rows: 30 }));
+  claim(phone, 40, 30);
   await waitForResizeCount(2);
 
   await closeViewer(phone);
@@ -150,10 +217,10 @@ test('a viewer that closes without unviewing hands the PTY back too', async () =
 test('the last viewer leaving does not resize the PTY', async () => {
   attachFakePty();
   const only = await openViewer();
-  only.send(JSON.stringify({ type: 'resize', cols: 120, rows: 40 }));
+  claim(only, 120, 40);
   await waitForResizeCount(1);
 
-  only.send(JSON.stringify({ type: 'unview' }));
+  only.ws.send(JSON.stringify({ type: 'unview' }));
   await closeViewer(only);
   await settle();
   assert.equal(ptyResizes.length, 1, 'nobody is left to speak for the PTY, so it keeps its size');
@@ -163,15 +230,15 @@ test('a repeated unview is a cheap no-op, not a re-apply', async () => {
   attachFakePty();
   const desktop = await openViewer();
   const phone = await openViewer();
-  desktop.send(JSON.stringify({ type: 'resize', cols: 200, rows: 50 }));
+  claim(desktop, 200, 50);
   await waitForResizeCount(1);
-  phone.send(JSON.stringify({ type: 'resize', cols: 40, rows: 30 }));
+  claim(phone, 40, 30);
   await waitForResizeCount(2);
 
-  phone.send(JSON.stringify({ type: 'unview' }));
+  phone.ws.send(JSON.stringify({ type: 'unview' }));
   await waitForResizeCount(3);
-  phone.send(JSON.stringify({ type: 'unview' }));
-  phone.send(JSON.stringify({ type: 'unview' }));
+  phone.ws.send(JSON.stringify({ type: 'unview' }));
+  phone.ws.send(JSON.stringify({ type: 'unview' }));
   await settle();
   assert.equal(ptyResizes.length, 3);
 
@@ -179,33 +246,72 @@ test('a repeated unview is a cheap no-op, not a re-apply', async () => {
   await closeViewer(desktop);
 });
 
-test('a same-size resize leaves the PTY untouched', async () => {
+test('a claim matching the size the PTY already has leaves it untouched', async () => {
   attachFakePty();
   const phone = await openViewer();
 
-  phone.send(JSON.stringify({ type: 'resize', cols: 150, rows: 44 }));
+  claim(phone, 150, 44);
   await waitForResizeCount(1);
+  await waitForSizeFrames(phone, 2);
   assert.deepEqual(ptyResizes, [{ cols: 150, rows: 44 }]);
 
-  phone.send(JSON.stringify({ type: 'resize', cols: 150, rows: 44 }));
+  claim(phone, 150, 44);
   await settle();
   assert.deepEqual(ptyResizes, [{ cols: 150, rows: 44 }]);
+  assert.equal(sizeFrames(phone).length, 2, 'one attach frame and one change frame, nothing for the no-op');
 
   await closeViewer(phone);
 });
 
-test('an out-of-range resize is ignored and claims nothing', async () => {
+test('an out-of-range claim is refused outright and claims nothing', async () => {
   attachFakePty();
   const desktop = await openViewer();
   const phone = await openViewer();
-  desktop.send(JSON.stringify({ type: 'resize', cols: 200, rows: 50 }));
+  claim(desktop, 200, 50);
   await waitForResizeCount(1);
 
-  phone.send(JSON.stringify({ type: 'resize', cols: 9999, rows: 30 }));
-  phone.send(JSON.stringify({ type: 'unview' }));
+  claim(phone, 9999, 30);
+  phone.ws.send(JSON.stringify({ type: 'unview' }));
   await settle();
   assert.equal(ptyResizes.length, 1, 'the refused size neither applied nor triggered a hand-back');
 
   await closeViewer(phone);
   await closeViewer(desktop);
+});
+
+test('the retired resize message and malformed frames are dropped, never fatal', async () => {
+  attachFakePty();
+  const viewer = await openViewer();
+  claim(viewer, 130, 41);
+  await waitForResizeCount(1);
+
+  viewer.ws.send(JSON.stringify({ type: 'resize', cols: 60, rows: 20 }));
+  viewer.ws.send('{ not json');
+  viewer.ws.send(JSON.stringify({ type: 'claim', cols: 'wide', rows: 20 }));
+  await settle();
+
+  assert.equal(ptyResizes.length, 1, 'the legacy resize branch is gone');
+  assert.equal(viewer.ws.readyState, WebSocket.OPEN, 'a malformed frame is dropped, not a reason to close');
+
+  await closeViewer(viewer);
+});
+
+test('a claim against a session with no live PTY is still echoed to every socket', async () => {
+  attachFakePty();
+  ctx().session.ptyProcess = null;
+  ctx().session._ptyAlive = false;
+
+  const viewer = await openViewer();
+  await waitForSizeFrames(viewer, 1);
+  claim(viewer, 96, 36);
+
+  const sizes = await waitForSizeFrames(viewer, 2);
+  assert.deepEqual(
+    { cols: sizes[1]?.cols, rows: sizes[1]?.rows },
+    { cols: 96, rows: 36 },
+    'the remembered size the next attacher would be told is the size the claimant hears back',
+  );
+  assert.equal(ptyResizes.length, 0, 'there was no PTY to accept it');
+
+  await closeViewer(viewer);
 });

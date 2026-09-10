@@ -5,7 +5,7 @@ import { isRenameInProgress } from '../session-card/card-dom.ts';
 import type { SessionUi } from '../session-card/card-registry.ts';
 import { sessionUIs } from '../session-card/card-registry.ts';
 import { onSessionTick, sessionElapsedText } from '../session-card/session-tick.ts';
-import { activateTerminalViewer, sendTerminalInput } from '../session-card/terminal.ts';
+import { sendTerminalInput, setTerminalActiveViewer } from '../session-card/terminal.ts';
 import { showErrorToast } from '../session-card/toast.ts';
 import { createMobileKeyStrip } from './mobile-key-strip.ts';
 
@@ -146,8 +146,9 @@ export function createTerminalScreen({ onBack }: { onBack?: () => void }) {
   }
 
   function unview() {
-    const ui = shownId ? sessionUIs.get(shownId) : null;
-    ui?._unviewTerminal?.();
+    const currentId = shownId;
+    if (!currentId) return;
+    setTerminalActiveViewer(sessionUIs.get(currentId), currentId, false);
   }
 
   function reveal() {
@@ -156,7 +157,7 @@ export function createTerminalScreen({ onBack }: { onBack?: () => void }) {
     if (!currentId) return;
     const ui = sessionUIs.get(currentId);
     if (!ui) return;
-    activateTerminalViewer(ui, currentId);
+    setTerminalActiveViewer(ui, currentId, true);
   }
 
   onSessionTick(() => {

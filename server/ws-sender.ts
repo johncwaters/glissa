@@ -1,9 +1,8 @@
 
 import type { OutputRingSlice } from '../session/core/output-ring.ts';
+import { SCREEN_RESET } from '../session/core/screen-keeper-core.ts';
 
 const OPEN = 1;
-
-const CLEAR = '\x1bc\x1b[2J\x1b[3J\x1b[H';
 
 const DEFAULTS = Object.freeze({
   maxSendBuffer: 65536,
@@ -15,7 +14,7 @@ const DEFAULTS = Object.freeze({
 interface WsSenderSocket {
   readonly readyState: number;
   readonly bufferedAmount: number;
-  send(data: string): void;
+  send(data: string | Uint8Array): void;
   close(code?: number, reason?: string): void;
 }
 
@@ -38,7 +37,8 @@ interface WsSenderOptions {
 interface WsSender {
   onData(data: string): void;
   markInputFlush(): void;
-  sendImmediate(payload: string): boolean;
+  sendImmediate(payload: string, rewindToOffset: number): boolean;
+  sendOutOfBand(payload: string | Uint8Array): boolean;
   destroy(): void;
 }
 
@@ -63,6 +63,7 @@ function createWsSender(ws: WsSenderSocket, opts: WsSenderOptions = {}): WsSende
   const initialOffset = opts.startOffset || 0;
   let sentOffset = initialOffset;
   let desynced = false;
+  let refusedOutOfBand: string | Uint8Array | null = null;
 
   const bufferedAmount = () => ws.bufferedAmount || 0;
   const isOpen = () => ws.readyState === OPEN;
@@ -74,6 +75,7 @@ function createWsSender(ws: WsSenderSocket, opts: WsSenderOptions = {}): WsSende
       stallTimer = null;
       if (destroyed) return;
       maybeBackfill();
+      flushRefusedOutOfBand();
       if (isOpen() && bufferedAmount() > cfg.lowWaterMark) {
         try { ws.close(1013, 'backpressure'); } catch {  }
       }
@@ -88,16 +90,25 @@ function createWsSender(ws: WsSenderSocket, opts: WsSenderOptions = {}): WsSende
     }
   }
 
+  function flushRefusedOutOfBand(): void {
+    if (refusedOutOfBand === null || destroyed || !isOpen()) return;
+    if (desynced || sendBuffer.length > 0 || overHighWater()) return;
+    const payload = refusedOutOfBand;
+    refusedOutOfBand = null;
+    ws.send(payload);
+  }
+
   function maybeBackfill(): void {
     if (!desynced || !source || destroyed || !isOpen()) return;
     if (overHighWater()) return;
     const { data, end, evicted } = source.getBufferSince(sentOffset);
-    if (evicted) ws.send(CLEAR + data);
+    if (evicted) ws.send(SCREEN_RESET + data);
     if (!evicted && data) ws.send(data);
     sentOffset = end;
     desynced = false;
     sendBuffer = '';
     clearStall();
+    flushRefusedOutOfBand();
   }
 
   function flushSend(): void {
@@ -115,6 +126,7 @@ function createWsSender(ws: WsSenderSocket, opts: WsSenderOptions = {}): WsSende
     sendBuffer = '';
     ws.send(buf);
     sentOffset += buf.length;
+    flushRefusedOutOfBand();
   }
 
   function scheduleFlush(): void {
@@ -146,18 +158,18 @@ function createWsSender(ws: WsSenderSocket, opts: WsSenderOptions = {}): WsSende
     flushNextData = true;
   }
 
-  function sendImmediate(payload: string): boolean {
+  function sendImmediate(payload: string, rewindToOffset: number): boolean {
     if (destroyed || !payload || !isOpen()) return false;
     if (overHighWater()) {
       if (source) {
         if (sentOffset !== initialOffset || sendBuffer.length !== 0) {
           console.error(
             '[ws-sender] sendImmediate drop on a non-fresh socket: sentOffset=%d ' +
-            'initialOffset=%d sendBuffer.length=%d, rewind base may be wrong; recovering anyway.',
+            'initialOffset=%d sendBuffer.length=%d, live bytes may be replayed twice; recovering anyway.',
             sentOffset, initialOffset, sendBuffer.length,
           );
         }
-        sentOffset -= payload.length;
+        sentOffset = rewindToOffset;
         desynced = true;
       }
       armStallClose();
@@ -168,15 +180,29 @@ function createWsSender(ws: WsSenderSocket, opts: WsSenderOptions = {}): WsSende
     return true;
   }
 
+  function sendOutOfBand(payload: string | Uint8Array): boolean {
+    if (destroyed || !isOpen()) return false;
+    flushSend();
+    if (destroyed || !isOpen()) return false;
+    if (desynced || sendBuffer.length > 0 || overHighWater()) {
+      refusedOutOfBand = payload;
+      armStallClose();
+      return false;
+    }
+    ws.send(payload);
+    return true;
+  }
+
   function destroy(): void {
     destroyed = true;
     clearStall();
+    refusedOutOfBand = null;
     sendBuffer = '';
     sendScheduled = false;
     flushNextData = false;
   }
 
-  return { onData, markInputFlush, sendImmediate, destroy };
+  return { onData, markInputFlush, sendImmediate, sendOutOfBand, destroy };
 }
 
 export { createWsSender, DEFAULTS };

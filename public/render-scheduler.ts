@@ -1,13 +1,21 @@
 const DEFAULT_BUDGET = 6;
 const DEFAULT_MAX_CHUNK = 256 * 1024;
+const WRITE_SLICE_BYTES = 16 * 1024;
+
+const ignoreDrain = () => {};
 
 export type TerminalSinkWrite = (data: string, onDrained: () => void) => void;
 
+interface PendingAction {
+  run: () => void;
+}
+
+type PendingEntry = string | PendingAction;
+
 interface TerminalSink {
   write: TerminalSinkWrite;
-  pending: string[];
+  pending: PendingEntry[];
   readIdx: number;
-  pendingBytes: number;
   inFlight: boolean;
   dirty: boolean;
   live: boolean;
@@ -18,6 +26,14 @@ export interface SchedulerOptions {
   maxChunkBytes?: number;
   requestFrame?: (callback: FrameRequestCallback) => number;
   cancelFrame?: (handle: number) => void;
+}
+
+function appendWriteSlices(writes: string[], entry: string) {
+  if (entry.length <= WRITE_SLICE_BYTES) {
+    writes.push(entry);
+    return;
+  }
+  for (let at = 0; at < entry.length; at += WRITE_SLICE_BYTES) writes.push(entry.slice(at, at + WRITE_SLICE_BYTES));
 }
 
 export function createScheduler({
@@ -38,8 +54,19 @@ export function createScheduler({
     if (frameId === null) frameId = raf(tick);
   }
 
+  function hasPending(s: TerminalSink): boolean {
+    return s.readIdx < s.pending.length;
+  }
+
+  function clearWhenDrained(s: TerminalSink): void {
+    if (hasPending(s)) return;
+    s.pending.length = 0;
+    s.readIdx = 0;
+    s.dirty = false;
+  }
+
   function serviceable(s: TerminalSink | undefined): s is TerminalSink {
-    return !!(s?.live && s.dirty && !s.inFlight && s.pendingBytes > 0);
+    return !!(s?.live && s.dirty && !s.inFlight && hasPending(s));
   }
 
   function anyServiceable() {
@@ -57,43 +84,53 @@ export function createScheduler({
       if (!serviceable(s)) continue;
 
       const COMPACT_THRESHOLD = 64;
-      let acc = '';
+      const writes: string[] = [];
       let consumed = 0;
       while (s.readIdx < s.pending.length) {
         const next = s.pending[s.readIdx];
-        const remaining = maxChunkBytes - acc.length;
-        if (acc.length + next.length <= maxChunkBytes) {
-          acc += next;
+        if (typeof next !== 'string') {
+          if (consumed > 0) break;
+          s.readIdx++;
+          next.run();
+          continue;
+        }
+        const remaining = maxChunkBytes - consumed;
+        if (consumed + next.length <= maxChunkBytes) {
+          appendWriteSlices(writes, next);
           consumed += next.length;
           s.readIdx++;
           continue;
         }
 
-        if (acc.length === 0) {
-          acc = next.slice(0, remaining);
+        if (consumed === 0) {
+          appendWriteSlices(writes, next.slice(0, remaining));
           consumed += remaining;
           s.pending[s.readIdx] = next.slice(remaining);
         }
 
         break;
       }
-      s.pendingBytes -= consumed;
 
-      if (s.pendingBytes === 0) {
-        s.pending.length = 0;
-        s.readIdx = 0;
-        s.dirty = false;
+
+      const lastWrite = writes.pop();
+      if (lastWrite === undefined) {
+        clearWhenDrained(s);
+        serviced++;
+        continue;
       }
-      if (s.pendingBytes > 0 && s.readIdx >= COMPACT_THRESHOLD) {
+
+      clearWhenDrained(s);
+      if (hasPending(s) && s.readIdx >= COMPACT_THRESHOLD) {
         s.pending.splice(0, s.readIdx);
         s.readIdx = 0;
       }
 
       s.inFlight = true;
-      s.write(acc, () => {
+      for (const slice of writes) s.write(slice, ignoreDrain);
+      s.write(lastWrite, () => {
         if (!s.live) return;
         s.inFlight = false;
-        if (s.pendingBytes > 0) {
+        if (hasPending(s)) {
           s.dirty = true;
           arm();
         }
@@ -112,7 +149,7 @@ export function createScheduler({
         existing.live = true;
         return;
       }
-      sinks.set(id, { write, pending: [], readIdx: 0, pendingBytes: 0, inFlight: false, dirty: false, live: true });
+      sinks.set(id, { write, pending: [], readIdx: 0, inFlight: false, dirty: false, live: true });
       order.push(id);
     },
     unregister(id: string) {
@@ -128,7 +165,13 @@ export function createScheduler({
       const s = sinks.get(id);
       if (!s || !data) return;
       s.pending.push(data);
-      s.pendingBytes += data.length;
+      s.dirty = true;
+      arm();
+    },
+    enqueueAction(id: string, run: () => void) {
+      const s = sinks.get(id);
+      if (!s) return;
+      s.pending.push({ run });
       s.dirty = true;
       arm();
     },

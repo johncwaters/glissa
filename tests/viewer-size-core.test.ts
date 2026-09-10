@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import type { ViewerSizeRecord } from '../server/core/viewer-size-core.ts';
-import { isApplicableViewerSize, pickSizeAfterDeparture } from '../server/core/viewer-size-core.ts';
+import { isApplicableViewerSize, pickSizeAfterDeparture, resolveSessionSize } from '../server/core/viewer-size-core.ts';
 
 function viewers(entries: [string, ViewerSizeRecord | null | undefined][]) {
   return new Map(entries);
@@ -75,4 +75,60 @@ test('no departing key means every recorded viewer competes', () => {
     ['phone', { cols: 40, rows: 30, resizeSeq: 2 }],
   ]));
   assert.deepEqual(size, { cols: 40, rows: 30 });
+});
+
+test('resolveSessionSize hands the newest claimant the PTY and reports the change', () => {
+  const resolved = resolveSessionSize({
+    viewers: viewers([
+      ['desktop', { cols: 200, rows: 50, resizeSeq: 1 }],
+      ['phone', { cols: 40, rows: 30, resizeSeq: 2 }],
+    ]),
+    current: { cols: 200, rows: 50 },
+  });
+  assert.deepEqual(resolved, { cols: 40, rows: 30, changed: true });
+});
+
+test('a claim that matches the size the PTY already has is not a change', () => {
+  const resolved = resolveSessionSize({
+    viewers: viewers([['phone', { cols: 120, rows: 40, resizeSeq: 9 }]]),
+    current: { cols: 120, rows: 40 },
+  });
+  assert.deepEqual(resolved, { cols: 120, rows: 40, changed: false });
+});
+
+test('a departure resolves to the most recent survivor, skipping the departing key', () => {
+  const resolved = resolveSessionSize({
+    viewers: viewers([
+      ['desktop', { cols: 200, rows: 50, resizeSeq: 1 }],
+      ['tab2', { cols: 180, rows: 48, resizeSeq: 2 }],
+      ['phone', { cols: 40, rows: 30, resizeSeq: 3 }],
+    ]),
+    departingKey: 'phone',
+    current: { cols: 40, rows: 30 },
+  });
+  assert.deepEqual(resolved, { cols: 180, rows: 48, changed: true });
+});
+
+test('no claimant leaves the current size in place and reports no change', () => {
+  const resolved = resolveSessionSize({
+    viewers: viewers([['phone', { cols: 40, rows: 30, resizeSeq: 1 }]]),
+    departingKey: 'phone',
+    current: { cols: 40, rows: 30 },
+  });
+  assert.deepEqual(resolved, { cols: 40, rows: 30, changed: false });
+  assert.deepEqual(
+    resolveSessionSize({ viewers: viewers([]), current: { cols: 80, rows: 24 } }),
+    { cols: 80, rows: 24, changed: false },
+  );
+});
+
+test('an out-of-range record never becomes the resolved size', () => {
+  const resolved = resolveSessionSize({
+    viewers: viewers([
+      ['sane', { cols: 200, rows: 50, resizeSeq: 1 }],
+      ['bogus', { cols: 9999, rows: 24, resizeSeq: 9 }],
+    ]),
+    current: { cols: 80, rows: 24 },
+  });
+  assert.deepEqual(resolved, { cols: 200, rows: 50, changed: true });
 });

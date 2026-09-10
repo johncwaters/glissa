@@ -1,5 +1,6 @@
 export * from './config.ts';
 export * from './control-messages.ts';
+export * from './data-messages.ts';
 export * from './hooks.ts';
 export * from './mill-metrics.ts';
 export * from './plan-review.ts';

@@ -31,6 +31,8 @@ import type { UserHook } from "./core/user-hooks-core.ts";
 import type { DecisionEntry } from "./core/decision-log.ts";
 import { createSessionObservability } from "./session-observability.ts";
 import { createSessionOutput } from "./session-output.ts";
+import type { ScreenSnapshot } from "./session-output.ts";
+import type { ScreenKeeperFactory } from "./screen-keeper.ts";
 import { createSessionPackDelivery } from "./session-pack-delivery.ts";
 import { createSessionHookLifecycle } from "./session-hook-lifecycle.ts";
 import type { HookRouterPort } from "./session-hook-lifecycle.ts";
@@ -138,6 +140,7 @@ interface SessionOptions {
   planLimits?: boolean;
   getUserHooks?: (() => UserHook[]) | null;
   ptySpawn?: PtySpawn | null;
+  screenKeeperFactory?: ScreenKeeperFactory | null;
   killProc?: KillProc | null;
   signalProc?: SignalProc | null;
   platform?: NodeJS.Platform;
@@ -207,6 +210,7 @@ class Session extends EventEmitter {
   _signalProc: SignalProc;
   _platform: NodeJS.Platform;
   _startPending: Promise<void> | null;
+  _resizeSeq: number;
   _titleSource: ReturnType<typeof createOscTitleSource>;
   _statusSource: ReturnType<typeof createStatusSource>;
 
@@ -275,6 +279,8 @@ class Session extends EventEmitter {
 
     ptySpawn = null,
 
+    screenKeeperFactory = null,
+
     killProc = null,
 
     signalProc = null,
@@ -330,6 +336,7 @@ class Session extends EventEmitter {
       on: (event, listener) => { this.on(event, listener); },
       once: (event, listener) => { this.once(event, listener); },
       off: (event, listener) => { this.off(event, listener); },
+      screenKeeperFactory,
     });
 
     const resolvedAdapter = adapter || resolveAdapter(agent, { label: `session:${name}` });
@@ -424,6 +431,7 @@ class Session extends EventEmitter {
     this._platform = platform;
 
     this._startPending = null;
+    this._resizeSeq = 0;
     this.worktreeLifecycle = createSessionWorktreeLifecycle({
       id: this.id,
       projectPath: this.path,
@@ -993,12 +1001,12 @@ class Session extends EventEmitter {
       agentArgs,
     });
 
-    const spawnSize = this._output.spawnSize();
+    const ptySize = this._output.ptySize();
     try {
       this.ptyProcess = this._ptySpawn(file, args, {
         name: "xterm-256color",
-        cols: spawnSize.cols,
-        rows: spawnSize.rows,
+        cols: ptySize.cols,
+        rows: ptySize.rows,
         cwd: this.effectiveCwd(),
         env,
       });
@@ -1045,8 +1053,8 @@ class Session extends EventEmitter {
       this._recorder.writeHeader({
         agent: this.agentId,
         hooksInjected: this._hooks.hasInjection(),
-        cols: spawnSize.cols,
-        rows: spawnSize.rows,
+        cols: ptySize.cols,
+        rows: ptySize.rows,
       });
     }
 
@@ -1163,8 +1171,13 @@ class Session extends EventEmitter {
     this.emit("exit", { exitCode, signal, reason });
   }
 
-  getReplayBuffer(): string {
-    return this._output.replay();
+  getScreenSnapshot(): ScreenSnapshot {
+    return this._output.snapshot();
+  }
+
+  ptySize(): { cols: number; rows: number; seq: number } {
+    const size = this._output.ptySize();
+    return { cols: size.cols, rows: size.rows, seq: this._resizeSeq };
   }
 
   getOutputOffset(): number {
@@ -1190,13 +1203,15 @@ class Session extends EventEmitter {
     if (this._recorder) {
       this._recorder.writeResize(cols, rows);
     }
-    if (!didSizeChange || !this.ptyProcess) return;
+    if (!didSizeChange) return;
 
-    try {
-      this.ptyProcess.resize(cols, rows);
-    } catch {
-
+    if (this.ptyProcess) {
+      try {
+        this.ptyProcess.resize(cols, rows);
+      } catch {}
     }
+    this._resizeSeq += 1;
+    this.emit("resize", { cols, rows, seq: this._resizeSeq });
   }
 
   _taskkill(pid: number | null, opts: Record<string, unknown> = {}): Promise<void> {
@@ -1479,6 +1494,7 @@ class Session extends EventEmitter {
       this._recorder.close();
     }
     this.worktreeLifecycle.stopWatching();
+    this._output.disposeScreenKeeper();
     this._titleSource.destroy();
     this._statusSource.destroy();
     this.emit("teardown", { id: this.id });

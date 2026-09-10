@@ -82,7 +82,8 @@ test('the borrowed card swaps to plan and release restores the terminal face thr
   const card = document.createElement('div') as SessionCardElement;
   grid.appendChild(card);
 
-  let fitCount = 0;
+  let terminalWiringCount = 0;
+  const activeViewerCalls: boolean[] = [];
   const button = document.createElement('button');
   const sessionUi: SessionUi = {
     term: Object.create(null) as Terminal,
@@ -123,13 +124,12 @@ test('the borrowed card swaps to plan and release restores the terminal face thr
       update: () => {},
     },
   };
-  sessionUi._applyFit = () => { fitCount++; };
-  sessionUi._activateTerminalViewer = () => { sessionUi._applyFit?.({ repaintRequested: true }); };
+  sessionUi._setActiveViewer = (isActive) => { activeViewerCalls.push(isActive); };
+  sessionUi._ensureTerminalReady = () => { terminalWiringCount++; };
   sessionUi._setBorrowed = (isBorrowed) => { sessionUi.isBorrowed = isBorrowed; };
   sessionUi._showPreferredFace = () => { sessionUi.face = 'plan'; };
   sessionUi._showTerminalFace = () => {
     sessionUi.face = 'terminal';
-    sessionUi._applyFit?.({ repaintRequested: true });
   };
 
   sessionUIs.set('session-a', sessionUi);
@@ -138,14 +138,16 @@ test('the borrowed card swaps to plan and release restores the terminal face thr
   assert.equal(sessionUi.face, 'plan');
   assert.equal(card.parentElement, slot);
   assert.equal(getBorrowedCardId(), 'session-a');
-  assert.equal(fitCount, 1);
+  assert.equal(terminalWiringCount, 1);
+  assert.deepEqual(activeViewerCalls, []);
 
   assert.equal(releaseCard(), 'session-a');
   assert.equal(sessionUi.isBorrowed, false);
   assert.equal(sessionUi.face, 'terminal');
   assert.equal(card.parentElement, grid);
   assert.equal(getBorrowedCardId(), null);
-  assert.equal(fitCount, 2);
+  assert.equal(terminalWiringCount, 1);
+  assert.deepEqual(activeViewerCalls, [false]);
   sessionUIs.clear();
 });
 

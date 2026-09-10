@@ -9,6 +9,7 @@ import type { ActivityRenderKind } from '../session-card/activity.ts';
 import { setActivityRenderer } from '../session-card/activity.ts';
 import type { SessionUi } from '../session-card/card-registry.ts';
 import { sessionIdOf, sessionUIs } from '../session-card/card-registry.ts';
+import { setTerminalActiveViewer } from '../session-card/terminal.ts';
 import { setSelectedId } from '../sidebar/selection.ts';
 import { getLastFocusedSessionId, getRailWidth, setLastFocusedSessionId, setRailWidth } from '../ui-prefs.ts';
 import { uiState } from '../ui-state-core.ts';
@@ -498,6 +499,7 @@ function flashAttention(id: string) {
 function borrowToCenter(ui: SessionUi, id: string) {
   if (!cardSlotEl) return;
   borrowCard(ui, id, cardSlotEl, { className: 'focus-centered' });
+  setTerminalActiveViewer(ui, id, true);
 }
 
 function releaseCenter() {

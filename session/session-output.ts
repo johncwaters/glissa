@@ -1,5 +1,8 @@
 import { createOutputRing } from "./core/output-ring.ts";
 import type { OutputRingSlice, OutputRingStats } from "./core/output-ring.ts";
+import { SCREEN_RESET } from "./core/screen-keeper-core.ts";
+import { createScreenKeeper } from "./screen-keeper.ts";
+import type { ScreenKeeperFactory } from "./screen-keeper.ts";
 import { STATES, RESTARTABLE_STATES } from "../shared/states.ts";
 import type { SessionState } from "../shared/states.ts";
 
@@ -30,6 +33,7 @@ interface SessionOutputOptions {
   on: SessionEventBinder;
   once: SessionEventBinder;
   off: SessionEventBinder;
+  screenKeeperFactory?: ScreenKeeperFactory | null;
 }
 
 type PasteResult = {
@@ -38,10 +42,15 @@ type PasteResult = {
   deferred?: boolean;
 };
 
+interface ScreenSnapshot {
+  data: string;
+  offset: number;
+}
+
 interface SessionOutput {
   push(chunk: string): void;
-  replay(): string;
   since(offset: number): OutputRingSlice;
+  snapshot(): ScreenSnapshot;
   reset(): void;
   setMax(bytes: number): void;
   stats(): OutputRingStats;
@@ -49,11 +58,15 @@ interface SessionOutput {
   pasteTextWhenReady(text: string, options?: { timeoutMs?: number }): PasteResult;
   clearPendingPaste(): void;
   rememberSize(cols: number, rows: number): boolean;
-  spawnSize(): { cols: number; rows: number };
+  ptySize(): { cols: number; rows: number };
+  disposeScreenKeeper(): void;
 }
 
 function createSessionOutput(options: SessionOutputOptions): SessionOutput {
   const ring = createOutputRing(options.maxBytes);
+  const keeperFactory = options.screenKeeperFactory || createScreenKeeper;
+  let keeper: ReturnType<ScreenKeeperFactory> | null = null;
+  let keeperBaseOffset = 0;
   let pendingPaste: {
     timer: NodeJS.Timeout;
     onStateChange: (change: StateChange) => void;
@@ -98,31 +111,63 @@ function createSessionOutput(options: SessionOutputOptions): SessionOutput {
     return { ok: true, deferred: true };
   }
 
+  function ptySize(): { cols: number; rows: number } {
+    return { cols: lastCols ?? 80, rows: lastRows ?? 24 };
+  }
+
+  function disposeScreenKeeper(): void {
+    if (!keeper) return;
+    keeper.dispose();
+    keeper = null;
+  }
+
   function rememberSize(cols: number, rows: number): boolean {
     const changed = lastCols !== cols || lastRows !== rows;
     lastCols = cols;
     lastRows = rows;
+    if (changed && keeper) keeper.resize(cols, rows);
     return changed;
   }
 
-  function spawnSize(): { cols: number; rows: number } {
-    return { cols: lastCols ?? 80, rows: lastRows ?? 24 };
+  function push(chunk: string): void {
+    if (!keeper) {
+      keeperBaseOffset = ring.stats().total;
+      keeper = keeperFactory(ptySize());
+    }
+    keeper.push(chunk);
+    ring.push(chunk);
   }
 
+  function reset(): void {
+    disposeScreenKeeper();
+    ring.reset();
+  }
+
+  function snapshot(): ScreenSnapshot {
+    const offset = ring.stats().total;
+    if (!keeper) return { data: SCREEN_RESET + ring.replay(), offset };
+    const tail = ring.since(keeperBaseOffset + keeper.parsedOffset());
+    if (tail.evicted) return { data: SCREEN_RESET + ring.replay(), offset };
+    return { data: SCREEN_RESET + keeper.serialize() + tail.data, offset };
+  }
+
+  options.on("exit", disposeScreenKeeper);
+
   return {
-    push: (chunk) => ring.push(chunk),
-    replay: () => ring.replay(),
+    push,
     since: (offset) => ring.since(offset),
-    reset: () => ring.reset(),
+    snapshot,
+    reset,
     setMax: (bytes) => ring.setMax(bytes),
     stats: () => ring.stats(),
     pasteText,
     pasteTextWhenReady,
     clearPendingPaste,
     rememberSize,
-    spawnSize,
+    ptySize,
+    disposeScreenKeeper,
   };
 }
 
 export { createSessionOutput };
-export type { SessionOutput, SessionOutputOptions, SessionEventBinder, PasteResult };
+export type { ScreenSnapshot, SessionOutput, SessionOutputOptions, SessionEventBinder, PasteResult };

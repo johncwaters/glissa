@@ -659,6 +659,15 @@ body {
   background-color: var(--bg-card);
 }
 
+.session-card[data-grid="following"] .terminal-wrap {
+  overflow: hidden;
+}
+
+.session-card[data-grid="following"] .terminal-wrap .xterm {
+  height: auto;
+  width: max-content;
+}
+
 .btn-action:focus-visible,
 .btn-dialog:focus-visible,
 .btn-settings-remove:focus-visible,

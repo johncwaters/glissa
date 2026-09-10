@@ -35,8 +35,7 @@ import { showErrorToast } from './toast.ts';
 
 import { refreshElapsed } from './session-tick.ts';
 import {
-  activateTerminalViewer,
-  cancelTerminalRepaint,
+  ensureTerminalReady,
   ensureTerminalSetup,
   setTerminalCursorBlink,
   setupTerminal,
@@ -256,7 +255,7 @@ export function createSessionCard(sessionId: unknown, sessionName: unknown, init
     sessionUi.termWrap.hidden = false;
     sessionUi.planFace.hide();
     updateButtonVisibility(sessionUi);
-    activateTerminalViewer(sessionUi, id);
+    ensureTerminalReady(sessionUi, id);
   }
   const planFace = createPlanFace({
     requestPlan: (requestedId, agentId, revision) => sendControlMsg({ type: 'session-plan', id: requestedId, agentId, revision }),
@@ -302,7 +301,7 @@ export function createSessionCard(sessionId: unknown, sessionName: unknown, init
     planReviewState: { reviews: [] },
     planFace,
   };
-  sessionUi._activateTerminalViewer = () => activateTerminalViewer(sessionUi, id);
+  sessionUi._ensureTerminalReady = () => ensureTerminalReady(sessionUi, id);
   sessionUi._showTerminalFace = showTerminalFace;
   sessionUi._showPreferredFace = () => {
     if (preferredFaceFor(sessionUi) === 'plan') {
@@ -615,7 +614,6 @@ export function removeSessionCard(sessionId: unknown) {
   if (ui.abortController) ui.abortController.abort();
   if (ui.dataWs && ui.dataWs.readyState <= WebSocket.OPEN) ui.dataWs.close();
   releaseWebgl(ui);
-  cancelTerminalRepaint(ui);
   if (ui.term) ui.term.dispose();
 
   ui.term = null;

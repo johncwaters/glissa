@@ -16,6 +16,7 @@ Session card modules, decomposed from the old monolithic session-card.js. Each s
 | `agent-core.ts` | Pure `agentBadgeText(agent)`: which agent adapter id earns a card chip (never the default one) |
 | `card-dom.ts` | Card builder, badge, inline rename, confirm dialog, debug overlay |
 | `terminal.ts` | xterm.js setup, data WebSocket, OSC-52 clipboard, key handling (consults `focus-view/focus-shortcuts.ts` for which Alt+keys bubble), phone soft-keyboard input takeover |
+| `grid-core.ts` | Pure `decideGridActions` (resize, claim, unview, follower flag; a non-finite or non-positive proposal claims nothing) and `readDataFrame` (text bytes versus a binary `pty-size` frame, first frame of a connection is the attach) |
 | `ime-core.ts` | Pure soft-keyboard edit to terminal bytes: shared-prefix diff of xterm's helper textarea, plus the inputType/keydown predicates the takeover in `terminal.ts` gates on |
 | `activity.ts` | Working-session heartbeat from output ARRIVAL timing only (no content reads); paints liveness/quiet on the Focus rail pill |
 | `session-tick.ts` | Shared 1s tick: elapsed clock + working-heartbeat poll (`refreshElapsed`); no per-session timers |
@@ -27,7 +28,7 @@ Session card modules, decomposed from the old monolithic session-card.js. Each s
 ## For AI Agents
 
 ### Working In This Directory
-- The data path is a dumb pipe: `activity.ts` may use byte-arrival TIMING, never byte CONTENT. Do not parse terminal output here.
+- ANSI is parsed in the browser for display and in the server keeper for attach, because raw bytes are only correct at the width that produced them; `activity.ts` may still use byte-arrival TIMING, never byte CONTENT.
 - One xterm per session; the Focus view re-parents the card node, so never assume a fixed parent container.
 - The plan is the card's second face and release always restores the terminal, so a grid tile never owns review UI (`tests/frontend-plan-face.test.ts`).
 - WebGL contexts are a scarce resource: always acquire through `webgl-pool.ts`.

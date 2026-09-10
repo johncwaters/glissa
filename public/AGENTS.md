@@ -4,7 +4,7 @@
 # public
 
 ## Purpose
-The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR on 5173, production build to `dist/`). Renders session cards with xterm.js terminals, primary views including Settings, a review sidebar, dialogs, themes, and notifications. The server is a dumb pipe; ALL ANSI rendering happens here.
+The browser dashboard frontend: ES modules bundled by Vite (dev server with HMR on 5173, production build to `dist/`). Renders session cards with xterm.js terminals, primary views including Settings, a review sidebar, dialogs, themes, and notifications. ANSI is parsed in the browser for display and in the server keeper for attach, because raw bytes are only correct at the width that produced them.
 
 ## Key Files
 

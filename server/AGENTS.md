@@ -144,5 +144,5 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - The dual WebSocket split is deliberate: do NOT merge the channels. They want opposite loss policies (data drops and backfills by offset, control JSON must not drop), `bufferedAmount` is per-socket so one buffer cannot tell which stalled, and one stream would let a PTY flood block a kill frame.
 - Control backpressure drops only what the next push repairs, and a type not listed as refreshable is never droppable, so a new frame cannot silently go stale under load.
 - Both servers are heartbeat-reaped: focus suppression and the Telegram zero-connections gate COUNT open connections, so a half-open socket silently blocks the channel of last resort.
-- Resize is arbitrated by ACTIVE VIEWER, not last write: one PTY has many viewers, and last-write-wins left a desktop stuck at a phone's column count forever.
-- xterm.js handles ALL ANSI rendering; the server is a dumb pipe.
+- Resize is arbitrated by ACTIVE VIEWER: a claim wins and a departure hands the PTY to the most recent survivor, since last-write-wins left a desktop stuck at a phone's column count forever.
+- ANSI is parsed in the browser for display and in the server keeper for attach, because raw bytes are only correct at the width that produced them.

@@ -11,7 +11,8 @@ import { buildWebSocketUrl } from '../ws-url-core.ts';
 import { clearPageToken, loadPageToken, withPageToken } from '../ws-token.ts';
 import { noteSessionOutput } from './activity.ts';
 import { findSessionUi, sessionUIs } from './card-registry.ts';
-import { decideFitAction } from './fit-core.ts';
+import type { DataFrameState, TerminalGrid } from './grid-core.ts';
+import { decideGridActions, isFollowingGrid, readDataFrame } from './grid-core.ts';
 import {
   bytesForBackwardDeletion,
   bytesForSoftKeyboardEdit,
@@ -25,6 +26,7 @@ import { reacquireWebglIfEvicted, tryLoadWebGL } from './webgl-pool.ts';
 
 
 const INPUT_QUEUE_MAX = 1024;
+const GRID_SETTLE_MS = 250;
 const MOBILE_WIDTH_QUERY = '(max-width: 768px)';
 const MOBILE_FONT_SIZE = 12;
 const DESKTOP_FONT_SIZE = 14;
@@ -54,20 +56,42 @@ function reportClipboardFailure(source: string, err: unknown) {
 function connectDataWs(sessionId: string, ui: SessionUi, term: Terminal) {
   const url = buildWebSocketUrl(location, withPageToken(`/terminals/${encodeURIComponent(sessionId)}`));
   const ws = new WebSocket(url);
+  ws.binaryType = 'arraybuffer';
   ui.dataWs = ws;
   let hasEverOpened = false;
+  const frameState: DataFrameState = { hasSeenSize: false, lastSeq: 0 };
 
   renderScheduler.register(sessionId, (data, cb) => term.write(data, cb));
 
   ws.addEventListener('message', (event) => {
-    noteSessionOutput(ui);
-    renderScheduler.enqueue(sessionId, event.data);
+    const frame = readDataFrame(event.data, frameState);
+    if (frame.kind === 'bytes') {
+      noteSessionOutput(ui);
+      renderScheduler.enqueue(sessionId, frame.data);
+      return;
+    }
+    if (frame.kind === 'attach-size') {
+      frameState.hasSeenSize = true;
+      frameState.lastSeq = frame.seq;
+      term.reset();
+      ui.ptySize = { cols: frame.cols, rows: frame.rows };
+      ui._syncGrid?.();
+      return;
+    }
+    if (frame.kind !== 'size') return;
+    frameState.lastSeq = frame.seq;
+    const nextSize = { cols: frame.cols, rows: frame.rows };
+    renderScheduler.enqueueAction(sessionId, () => {
+      ui.ptySize = nextSize;
+      ui._syncGrid?.();
+    });
   });
 
   ws.addEventListener('close', () => {
     if (ui.dataWs !== ws) return;
     renderScheduler.unregister(sessionId);
     ui.dataWs = null;
+    ui._resetGridClaim?.();
     if (!hasEverOpened) clearPageToken();
     const retryDelayMs = nextReconnectDelayMs(ui._dataWsRetryAttempt || 0);
     ui._dataWsRetryAttempt = (ui._dataWsRetryAttempt || 0) + 1;
@@ -83,9 +107,6 @@ function connectDataWs(sessionId: string, ui: SessionUi, term: Terminal) {
   ws.addEventListener('open', () => {
     hasEverOpened = true;
     ui._dataWsRetryAttempt = 0;
-    term.reset();
-    ui._resetResizeCache?.();
-    ui._applyFit?.();
 
     const queued = ui._inputQueue;
     if (queued && queued.length > 0) {
@@ -122,12 +143,6 @@ export function sendTerminalInput(ui: SessionUi | null | undefined, data: string
 }
 
 
-function measureTerminalCell(fitAddon: FitAddon, term: Terminal) {
-  if (fitAddon.proposeDimensions()) return true;
-  term.resize(term.cols, term.rows);
-  return !!fitAddon.proposeDimensions();
-}
-
 export function setupTerminal(termWrap: HTMLElement, ui: SessionUi) {
   const fontSize = window.matchMedia?.(MOBILE_WIDTH_QUERY).matches ? MOBILE_FONT_SIZE : DESKTOP_FONT_SIZE;
   const term = new Terminal({
@@ -150,59 +165,85 @@ export function setupTerminal(termWrap: HTMLElement, ui: SessionUi) {
   ui.webglAddon = null;
   ui.needsWebGLReload = false;
 
-  let fitRafId: number | null = null;
-  let lastSentCols = 0;
-  let lastSentRows = 0;
-  let lastFittedCols = 0;
-  let lastFittedRows = 0;
-  let hasClaimedViewerSize = false;
-  function applyFit({ repaintRequested = false } = {}) {
-    fitRafId = null;
-    const liveFitAddon = ui.fitAddon;
-    const liveTerm = ui.term;
-    if (!liveFitAddon || !liveTerm) return;
-    if (!ui.card.offsetParent) return;
-    const measured = measureTerminalCell(liveFitAddon, liveTerm);
-    if (measured) liveFitAddon.fit();
-    const { cols, rows } = liveTerm;
-    const action = decideFitAction({
-      measured, cols, rows, lastFittedCols, lastFittedRows, lastSentCols, lastSentRows,
-      repaintRequested,
-    });
-    if (action.repaint) {
-      lastFittedCols = cols;
-      lastFittedRows = rows;
-      scheduleTerminalRepaint(ui);
-    }
-    if (!action.send) return;
-    if (ui.dataWs?.readyState !== WebSocket.OPEN) return;
-    ui.dataWs.send(JSON.stringify({ type: 'resize', cols, rows }));
-    lastSentCols = cols;
-    lastSentRows = rows;
-    hasClaimedViewerSize = true;
+  let gridRafId: number | null = null;
+  let settleTimerId: ReturnType<typeof setTimeout> | null = null;
+  let isActiveViewer = false;
+  let lastClaim: TerminalGrid | null = null;
+
+  function cancelSettle() {
+    if (settleTimerId === null) return;
+    clearTimeout(settleTimerId);
+    settleTimerId = null;
   }
+
+  function measureProposal(): TerminalGrid | null {
+    if (!isActiveViewer) return null;
+    const liveFitAddon = ui.fitAddon;
+    if (!liveFitAddon) return null;
+    const proposed = liveFitAddon.proposeDimensions();
+    if (!proposed) return null;
+    return { cols: proposed.cols, rows: proposed.rows };
+  }
+
+  function sendGridClaim(grid: TerminalGrid) {
+    if (ui.dataWs?.readyState !== WebSocket.OPEN) return;
+    ui.dataWs.send(JSON.stringify({ type: 'claim', cols: grid.cols, rows: grid.rows }));
+    lastClaim = grid;
+    const following = isFollowingGrid({ authoritative: ui.ptySize ?? null, isActiveViewer, lastClaim });
+    ui.card.dataset.grid = following ? 'following' : 'exact';
+  }
+
+  function syncGrid({ isActivationEdge = false }: { isActivationEdge?: boolean } = {}) {
+    const liveTerm = ui.term;
+    if (!liveTerm) return;
+    const actions = decideGridActions({
+      authoritative: ui.ptySize ?? null,
+      applied: { cols: liveTerm.cols, rows: liveTerm.rows },
+      proposal: measureProposal(),
+      isActiveViewer,
+      isDataWsOpen: ui.dataWs?.readyState === WebSocket.OPEN,
+      lastClaim,
+    });
+    if (actions.resizeTo) liveTerm.resize(actions.resizeTo.cols, actions.resizeTo.rows);
+    ui.card.dataset.grid = actions.isFollowing ? 'following' : 'exact';
+    cancelSettle();
+    if (actions.sendUnview) {
+      lastClaim = null;
+      ui.dataWs?.send(JSON.stringify({ type: 'unview' }));
+    }
+    if (!actions.claim) return;
+    if (isActivationEdge) {
+      sendGridClaim(actions.claim);
+      return;
+    }
+    const settling = actions.claim;
+    settleTimerId = setTimeout(() => {
+      settleTimerId = null;
+      sendGridClaim(settling);
+    }, GRID_SETTLE_MS);
+  }
+
   const resizeObserver = new ResizeObserver(() => {
-    if (fitRafId !== null) return;
-    fitRafId = requestAnimationFrame(() => applyFit());
+    if (gridRafId !== null) return;
+    gridRafId = requestAnimationFrame(() => {
+      gridRafId = null;
+      syncGrid();
+    });
   });
   resizeObserver.observe(termWrap);
   ui.resizeObserver = resizeObserver;
-  ui._applyFit = applyFit;
-  const resetResizeCache = () => { lastSentCols = 0; lastSentRows = 0; };
-  ui._resetResizeCache = resetResizeCache;
-
-  ui._unviewTerminal = () => {
-    if (!hasClaimedViewerSize) return;
-    hasClaimedViewerSize = false;
-    resetResizeCache();
-    if (ui.dataWs?.readyState !== WebSocket.OPEN) return;
-    ui.dataWs.send(JSON.stringify({ type: 'unview' }));
+  ui._syncGrid = syncGrid;
+  ui._resetGridClaim = () => {
+    cancelSettle();
+    lastClaim = null;
   };
-
-  const firstRender = term.onRender(() => {
-    firstRender.dispose();
-    applyFit();
-  });
+  ui._setActiveViewer = (isActive: boolean) => {
+    if (isActiveViewer === isActive) return;
+    isActiveViewer = isActive;
+    cancelSettle();
+    if (isActive) reacquireWebglIfEvicted(ui);
+    syncGrid({ isActivationEdge: true });
+  };
 
   tryLoadWebGL(ui);
 
@@ -362,28 +403,17 @@ export function ensureTerminalSetup(ui: SessionUi, sessionId: string) {
   wireTerminalIO(ui, sessionId);
 }
 
-export function activateTerminalViewer(ui: SessionUi | null | undefined, sessionId: string) {
+export function ensureTerminalReady(ui: SessionUi | null | undefined, sessionId: string) {
   if (!ui) return;
   ensureTerminalSetup(ui, sessionId);
   reacquireWebglIfEvicted(ui);
-  ui._applyFit?.({ repaintRequested: true });
+  const term = ui.term;
+  if (!term) return;
+  term.refresh(0, term.rows - 1);
 }
 
-function scheduleTerminalRepaint(ui: SessionUi | null | undefined) {
+export function setTerminalActiveViewer(ui: SessionUi | null | undefined, sessionId: string, isActive: boolean) {
   if (!ui) return;
-  if (ui._repaintRafId != null) {
-    cancelAnimationFrame(ui._repaintRafId);
-    ui._repaintRafId = null;
-  }
-  ui._repaintRafId = requestAnimationFrame(() => {
-    ui._repaintRafId = null;
-    if (!ui.term) return;
-    ui.term.refresh(0, ui.term.rows - 1);
-  });
-}
-
-export function cancelTerminalRepaint(ui: SessionUi | null | undefined) {
-  if (ui?._repaintRafId == null) return;
-  cancelAnimationFrame(ui._repaintRafId);
-  ui._repaintRafId = null;
+  if (isActive) ensureTerminalSetup(ui, sessionId);
+  ui._setActiveViewer?.(isActive);
 }

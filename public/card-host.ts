@@ -20,7 +20,7 @@ export function borrowCard(ui: SessionUi | null | undefined, sessionId: string, 
   adoptElement(card, slotEl);
   uiState.dispatch('borrowCard', sessionId);
 
-  ui._activateTerminalViewer?.();
+  ui._ensureTerminalReady?.();
   ui._setBorrowed?.(true);
   ui._showPreferredFace?.();
 }
@@ -34,7 +34,7 @@ export function releaseCard() {
 
   ui?._showTerminalFace?.();
   ui?._setBorrowed?.(false);
-  ui?._unviewTerminal?.();
+  ui?._setActiveViewer?.(false);
   const card = ui?.card;
   if (!card) return releasedId;
 

@@ -12,6 +12,16 @@ interface RecordingSocket<TFrame> {
   received: TFrame[];
 }
 
+interface DataFrame {
+  binary: boolean;
+  text: string;
+}
+
+interface DataRecordingSocket {
+  ws: WebSocket;
+  frames: DataFrame[];
+}
+
 const DEFAULT_MESSAGE_WAIT_MS = 5000;
 
 async function fetchPageToken(port: number): Promise<string> {
@@ -62,6 +72,26 @@ function openRecordingSocket<TFrame>(
   });
 }
 
+function openDataRecordingSocket(client: DashboardClient, pathAndSearch: string): Promise<DataRecordingSocket> {
+  const ws = new WebSocket(client.url(pathAndSearch), client.options);
+  const frames: DataFrame[] = [];
+  ws.on('message', (raw: Buffer, isBinary: boolean) => {
+    frames.push({ binary: isBinary, text: raw.toString('utf8') });
+  });
+  return new Promise((resolve, reject) => {
+    ws.once('error', reject);
+    ws.once('open', () => resolve({ ws, frames }));
+  });
+}
+
+function binaryFramesOf(socket: DataRecordingSocket): string[] {
+  return socket.frames.filter((frame) => frame.binary).map((frame) => frame.text);
+}
+
+function textFramesOf(socket: DataRecordingSocket): string[] {
+  return socket.frames.filter((frame) => !frame.binary).map((frame) => frame.text);
+}
+
 function closeSocket(ws: WebSocket): Promise<void> {
   return new Promise((resolve) => {
     ws.once('close', () => resolve());
@@ -97,7 +127,7 @@ async function waitForMessage<TFrame>(
 }
 
 export {
-  closeSocket, dashboardClient, dashboardOrigin, fetchPageToken,
-  openRecordingSocket, openSocket, waitForMessage, withToken,
+  binaryFramesOf, closeSocket, dashboardClient, dashboardOrigin, fetchPageToken,
+  openDataRecordingSocket, openRecordingSocket, openSocket, textFramesOf, waitForMessage, withToken,
 };
-export type { DashboardClient, RecordingSocket };
+export type { DashboardClient, DataFrame, DataRecordingSocket, RecordingSocket };
