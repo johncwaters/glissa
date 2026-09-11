@@ -37,6 +37,8 @@ uploads/
 ita-test/
 # Ablation run output (session tails from a real billed run). Runtime output, not a deliverable.
 test/ablation/results/
+# Browser harness output (screenshots and traces from a real Chromium run). Runtime output, not a deliverable.
+test/browser/artifacts/
 
 # compiled-commit runner scratch
 .compiled-commit-tmp/

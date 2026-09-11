@@ -22,6 +22,7 @@
     ".claude/**",
     "dist/**",
     "node_modules/**",
-    "public/**"
+    "public/**",
+    "test/browser/**"
   ]
 }

@@ -46,7 +46,8 @@
     "start": "node dist/server/index.js",
     "lint": "biome check .",
     "test": "node --import ./tests/helpers/isolate-home.ts --test \"tests/**/*.test.ts\"",
-    "typecheck": "tsc --project tsconfig.json && tsc --project tsconfig.public.json",
+    "typecheck": "tsc --project tsconfig.json && tsc --project tsconfig.public.json && tsc --project tsconfig.browser-harness.json",
+    "test:browser": "node test/browser/harness.ts",
     "test:container": "docker build -f test/container/Dockerfile -t glissa-remote-test . && docker run --rm glissa-remote-test",
     "dev": "vite",
     "build": "node scripts/build.mjs",
@@ -70,6 +71,7 @@
     "@biomejs/biome": "^2.3.5",
     "@tailwindcss/vite": "^4.2.1",
     "@types/node": "^26.3.0",
+    "playwright-core": "1.62.1",
     "tailwindcss": "^4.2.1",
     "typescript": "^7.0.2",
     "vite": "^7.3.2"
