@@ -2,6 +2,8 @@ import { PHONE_MAX_WIDTH_PX, decideLayout } from '../../public/form-factor-core.
 
 export type ViewerId = 'a' | 'b';
 
+export type CardControl = 'plan-terminal';
+
 export type Step =
   | { kind: 'open'; viewer?: ViewerId }
   | { kind: 'back'; viewer?: ViewerId }
@@ -12,9 +14,13 @@ export type Step =
   | { kind: 'burst'; lines: number; viewer?: ViewerId }
   | { kind: 'offline'; viewer?: ViewerId }
   | { kind: 'online'; viewer?: ViewerId }
+  | { kind: 'foreground'; viewer?: ViewerId }
+  | { kind: 'wait'; durationMs: number; viewer?: ViewerId }
+  | { kind: 'background'; viewer?: ViewerId }
   | { kind: 'settle'; viewer?: ViewerId; expectGrid?: 'exact' | 'following' }
   | { kind: 'assert-grid'; viewer?: ViewerId; tickOffset?: number }
   | { kind: 'expect-face'; value: 'plan' | 'terminal'; viewer?: ViewerId }
+  | { kind: 'click'; control: CardControl; viewer?: ViewerId }
   | { kind: 'shot'; name: string; viewer?: ViewerId };
 
 export type ResolvedStep = Exclude<Step, { kind: 'resize-by' }>;
@@ -37,6 +43,7 @@ export interface Scenario {
   fullMatrix?: boolean;
   optional?: boolean;
   companionViewport?: string;
+  viewports?: readonly string[];
   proveFailure?: boolean;
 }
 
@@ -71,9 +78,12 @@ export const VIEWPORTS: readonly Viewport[] = [
   { name: 'desktop-800', width: 800, height: 600, hasTouch: false, isMobile: false },
   { name: 'desktop-1280', width: 1280, height: 720, hasTouch: false, isMobile: false },
   { name: 'desktop-1920', width: 1920, height: 1080, hasTouch: false, isMobile: false },
+  { name: 'touch-1024', width: 1024, height: 768, hasTouch: true, isMobile: false },
 ];
 
 export const PAIR_VIEWPORTS: readonly [string, string] = ['phone-393', 'desktop-1280'];
+
+const WITHIN_GRID_SETTLE_MS = 60;
 
 const RESIZE_STORM_STEPS: readonly Step[] = [
   { kind: 'resize-by', deltaHeight: -40 },
@@ -139,6 +149,8 @@ export const SCENARIOS: readonly Scenario[] = [
       { kind: 'open', viewer: 'b' },
       { kind: 'settle', viewer: 'b', expectGrid: 'exact' },
       { kind: 'settle', viewer: 'a', expectGrid: 'following' },
+      { kind: 'background', viewer: 'b' },
+      { kind: 'settle', viewer: 'b', expectGrid: 'exact' },
       { kind: 'shot', name: 'both' },
       { kind: 'back', viewer: 'a' },
       { kind: 'settle', viewer: 'b', expectGrid: 'exact' },
@@ -178,6 +190,135 @@ export const SCENARIOS: readonly Scenario[] = [
       { kind: 'expect-face', value: 'plan' },
       { kind: 'settle' },
       { kind: 'shot', name: 'plan' },
+    ],
+  },
+  {
+    name: 'h1-desktop-first',
+    companionViewport: 'desktop-1280',
+    steps: [
+      { kind: 'open', viewer: 'b' },
+      { kind: 'settle', viewer: 'b', expectGrid: 'exact' },
+      { kind: 'open', viewer: 'a' },
+      { kind: 'settle', viewer: 'a', expectGrid: 'exact' },
+      { kind: 'settle', viewer: 'b', expectGrid: 'following' },
+    ],
+  },
+  {
+    name: 'h2-companion-reconnect',
+    companionViewport: 'desktop-1280',
+    steps: [
+      { kind: 'open', viewer: 'b' },
+      { kind: 'settle', viewer: 'b', expectGrid: 'exact' },
+      { kind: 'background', viewer: 'b' },
+      { kind: 'open', viewer: 'a' },
+      { kind: 'settle', viewer: 'a', expectGrid: 'exact' },
+      { kind: 'offline', viewer: 'b' },
+      { kind: 'online', viewer: 'b' },
+      { kind: 'settle', viewer: 'a', expectGrid: 'exact' },
+    ],
+  },
+  {
+    name: 'h2-viewer-reconnect',
+    companionViewport: 'desktop-1280',
+    steps: [
+      { kind: 'open', viewer: 'b' },
+      { kind: 'settle', viewer: 'b', expectGrid: 'exact' },
+      { kind: 'open', viewer: 'a' },
+      { kind: 'settle', viewer: 'a', expectGrid: 'exact' },
+      { kind: 'offline', viewer: 'a' },
+      { kind: 'online', viewer: 'a' },
+      { kind: 'settle', viewer: 'a', expectGrid: 'exact' },
+    ],
+  },
+  {
+    name: 'h3-reopen-with-companion',
+    companionViewport: 'desktop-1280',
+    steps: [
+      { kind: 'open', viewer: 'a' },
+      { kind: 'settle', viewer: 'a', expectGrid: 'exact' },
+      { kind: 'open', viewer: 'b' },
+      { kind: 'settle', viewer: 'b', expectGrid: 'exact' },
+      { kind: 'back', viewer: 'a' },
+      { kind: 'open', viewer: 'a' },
+      { kind: 'settle', viewer: 'a', expectGrid: 'exact' },
+    ],
+  },
+  {
+    name: 'h4-companion-resize',
+    companionViewport: 'desktop-1280',
+    steps: [
+      { kind: 'open', viewer: 'b' },
+      { kind: 'settle', viewer: 'b', expectGrid: 'exact' },
+      { kind: 'background', viewer: 'b' },
+      { kind: 'open', viewer: 'a' },
+      { kind: 'settle', viewer: 'a', expectGrid: 'exact' },
+      { kind: 'resize', width: 1100, height: 700, viewer: 'b' },
+      { kind: 'settle', viewer: 'a', expectGrid: 'exact' },
+    ],
+  },
+  {
+    name: 'h6-layout-flip',
+    viewports: ['touch-1024'],
+    steps: [
+      { kind: 'open' },
+      { kind: 'settle', expectGrid: 'exact' },
+      { kind: 'resize', width: 393, height: 852 },
+      { kind: 'settle', expectGrid: 'exact' },
+    ],
+  },
+  {
+    name: 'h8-plan-face-return',
+    companionViewport: 'desktop-1280',
+    steps: [
+      { kind: 'open', viewer: 'b' },
+      { kind: 'settle', viewer: 'b', expectGrid: 'exact' },
+      { kind: 'open', viewer: 'a' },
+      { kind: 'settle', viewer: 'a', expectGrid: 'exact' },
+      { kind: 'resize', width: 1100, height: 700, viewer: 'b' },
+      { kind: 'settle', viewer: 'a', expectGrid: 'following' },
+      { kind: 'type', text: 'plan', viewer: 'a' },
+      { kind: 'expect-face', value: 'plan', viewer: 'a' },
+      { kind: 'click', control: 'plan-terminal', viewer: 'a' },
+      { kind: 'expect-face', value: 'terminal', viewer: 'a' },
+      { kind: 'settle', viewer: 'a', expectGrid: 'exact' },
+    ],
+  },
+  {
+    name: 'h9-desktop-refocus',
+    companionViewport: 'desktop-1280',
+    steps: [
+      { kind: 'open', viewer: 'b' },
+      { kind: 'settle', viewer: 'b', expectGrid: 'exact' },
+      { kind: 'background', viewer: 'b' },
+      { kind: 'open', viewer: 'a' },
+      { kind: 'settle', viewer: 'a', expectGrid: 'exact' },
+      { kind: 'settle', viewer: 'b', expectGrid: 'following' },
+      { kind: 'background', viewer: 'a' },
+      { kind: 'foreground', viewer: 'b' },
+      { kind: 'settle', viewer: 'b', expectGrid: 'exact' },
+      { kind: 'settle', viewer: 'a', expectGrid: 'following' },
+      { kind: 'background', viewer: 'b' },
+      { kind: 'foreground', viewer: 'a' },
+      { kind: 'settle', viewer: 'a', expectGrid: 'exact' },
+      { kind: 'settle', viewer: 'b', expectGrid: 'following' },
+    ],
+  },
+  {
+    name: 'h10-blur-during-settle',
+    companionViewport: 'desktop-1280',
+    steps: [
+      { kind: 'open', viewer: 'b' },
+      { kind: 'settle', viewer: 'b', expectGrid: 'exact' },
+      { kind: 'background', viewer: 'b' },
+      { kind: 'open', viewer: 'a' },
+      { kind: 'settle', viewer: 'a', expectGrid: 'exact' },
+      { kind: 'foreground', viewer: 'b' },
+      { kind: 'settle', viewer: 'b', expectGrid: 'exact' },
+      { kind: 'resize', width: 1100, height: 700, viewer: 'b' },
+      { kind: 'wait', durationMs: WITHIN_GRID_SETTLE_MS, viewer: 'b' },
+      { kind: 'background', viewer: 'b' },
+      { kind: 'foreground', viewer: 'a' },
+      { kind: 'settle', viewer: 'a', expectGrid: 'exact' },
     ],
   },
   {
@@ -237,6 +378,7 @@ function scenarioRunsOnViewport(scenario: Scenario, viewport: Viewport, layout: 
   if (scenario.proveFailure === true && !proveFailure) return false;
   if (scenario.phoneOnly === true && layout !== 'phone') return false;
   if (needsSoftKeyboard(scenario) && viewport.keyboardHeight === undefined) return false;
+  if (scenario.viewports) return scenario.viewports.includes(viewport.name);
   if (scenario.fullMatrix === true) return true;
   return PAIR_VIEWPORTS.includes(viewport.name);
 }

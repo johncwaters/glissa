@@ -117,3 +117,40 @@ export function pillIds(): string[] {
   }
   return found;
 }
+
+export interface EngagementReading {
+  hasFocus: boolean;
+  visibilityState: string;
+}
+
+type EngagementWindow = Window & { __glissaHarnessEngaged?: boolean };
+
+export function setDocumentEngagement(engaged: boolean): void {
+  const host: EngagementWindow = window;
+  if (host.__glissaHarnessEngaged === undefined) {
+    Object.defineProperty(document, 'hasFocus', {
+      configurable: true,
+      value: () => host.__glissaHarnessEngaged !== false,
+    });
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => (host.__glissaHarnessEngaged === false ? 'hidden' : 'visible'),
+    });
+    Object.defineProperty(document, 'hidden', {
+      configurable: true,
+      get: () => host.__glissaHarnessEngaged === false,
+    });
+  }
+  host.__glissaHarnessEngaged = engaged;
+  if (engaged) {
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('focus'));
+    return;
+  }
+  window.dispatchEvent(new Event('blur'));
+  document.dispatchEvent(new Event('visibilitychange'));
+}
+
+export function readDocumentEngagement(): EngagementReading {
+  return { hasFocus: document.hasFocus(), visibilityState: document.visibilityState };
+}

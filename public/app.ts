@@ -4,6 +4,7 @@ import './tailwind.css';
 import type { ServerMessage } from '#shared/contracts/control-messages.ts';
 import { shouldShowServerAction } from '#shared/client-trust.ts';
 import { STATES } from '#shared/states.ts';
+import { getBorrowedCardId } from './card-host.ts';
 import { checkControlLiveness, connectControl, onControlMessage, sendControlMsg, sendControlRequest, setConnectionStateCallback } from './control-ws.ts';
 import { createAddSessionDialog } from './dialogs.ts';
 import { observeHeaderHeight, queryTag, writeClipboardText } from './dom-helpers.ts';
@@ -23,13 +24,13 @@ import { acknowledgePrAttention, applyPrStatus, mountPrView, setPrActivityCallba
 import { UPDATES_ACTIONS_SETTING_ID, UPDATES_SECTION_ID, updateBannerText } from './radar-core.ts';
 import { acknowledgeRadarAttention, applyHealthSnapshot as applyRadarHealth, applyInvestigationActivity, applyInvestigationFinished, applyPosthogStatus, applyPrStatus as applyRadarPrStatus, applyUpdateAvailable as applyRadarUpdate, mountRadarView, setRadarActivityCallback, setRadarNavigateToPrs } from './radar-panel.ts';
 import { handleDebugStateRefresh, handleDebugStateResponse, onDebugModeChanged } from './session-card/card-dom.ts';
-import { sessionUIs } from './session-card/card-registry.ts';
+import { findSessionUi, sessionUIs } from './session-card/card-registry.ts';
 import type { PlanResponse } from './plan/plan-face.ts';
 import type { SessionPlanChangedMessage, SessionPlanDraftMessage } from './session-card/lifecycle.ts';
 import { applyPlanConnectionState, applySessionPlanChanged, applySessionPlanDraft, applySessionPlanError, applySessionPlanResponse, applyState, applyTerminalSettings, createSessionCard, getSessionCount, hasSession, notePackVersion, removeSessionCard, renameSessionCard, seedSessionMergeStatus, setLatestPackVersions, setSessionAgent, setSessionAgents, setSessionDiff, setSessionEffectiveBase, setSessionHasPlan, setSessionMergeStatus, setSessionPacks, setSessionPostTurn, setSessionPrompt, setSessionResume, setSessionUsage, setSessionWakeup, setSessionWorktree, updateAggregateStatus } from './session-card/lifecycle.ts';
 import { resolvePlanTarget } from './plan/plan-link.ts';
 import { openConfirmDialog } from './session-card/modal.ts';
-import { reconnectDataWs } from './session-card/terminal.ts';
+import { reconnectDataWs, syncGridOnEngagementEdge } from './session-card/terminal.ts';
 import { showErrorToast } from './session-card/toast.ts';
 import { activateSettingsSection, applySettingsBroadcast, applySettingsProjectReport, applySettingsProjects, applySettingsUpdateProgress, applySettingsUpdateStatus, clearSettingsUpdateRequest, mountSettingsView, refreshSettingsStatus, resolveSettingsTarget } from './settings-panel.ts';
 import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar, resolveSelectedSession, resyncSelectedSession, setReviewBranchSync } from './sidebar/review-sidebar.ts';
@@ -926,9 +927,14 @@ function sendFocusState() {
   }, 150);
 }
 
-window.addEventListener('focus', sendFocusState);
-window.addEventListener('blur', sendFocusState);
-document.addEventListener('visibilitychange', sendFocusState);
+function noteViewerFocusEdge() {
+  sendFocusState();
+  syncGridOnEngagementEdge(findSessionUi(getBorrowedCardId()));
+}
+
+window.addEventListener('focus', noteViewerFocusEdge);
+window.addEventListener('blur', noteViewerFocusEdge);
+document.addEventListener('visibilitychange', noteViewerFocusEdge);
 
 let _wakeLivenessCheckRunning = false;
 

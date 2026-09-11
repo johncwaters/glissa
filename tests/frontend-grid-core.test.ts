@@ -5,13 +5,14 @@ import {
   VIEWER_MAX_ROWS,
 } from '../shared/contracts/data-messages.ts';
 import type { DataFrameState, GridDecisionInput } from '../public/session-card/grid-core.ts';
-import { decideGridActions, isFollowingGrid, readDataFrame } from '../public/session-card/grid-core.ts';
+import { decideGridActions, decideGridEngagementEdge, isFollowingGrid, readDataFrame } from '../public/session-card/grid-core.ts';
 
 const IDLE_VIEWER: GridDecisionInput = {
   authoritative: null,
   applied: { cols: 80, rows: 24 },
   proposal: null,
   isActiveViewer: false,
+  isDocumentEngaged: true,
   isDataWsOpen: true,
   lastClaim: null,
 };
@@ -58,6 +59,76 @@ test('a repeated identical proposal does not re-claim', () => {
     lastClaim: { cols: 100, rows: 30 },
   });
   assert.equal(actions.claim, null);
+});
+
+test('an unengaged viewer claims nothing, whether its measurement moved or is its first', () => {
+  const movedMeasurement = decide({
+    isActiveViewer: true,
+    isDocumentEngaged: false,
+    proposal: { cols: 100, rows: 31 },
+    lastClaim: { cols: 100, rows: 30 },
+  });
+  assert.equal(movedMeasurement.claim, null);
+  const firstMeasurement = decide({
+    isActiveViewer: true,
+    isDocumentEngaged: false,
+    proposal: { cols: 100, rows: 30 },
+  });
+  assert.equal(firstMeasurement.claim, null);
+});
+
+test('an unengaged viewer still resizes to the grid the pty took', () => {
+  const actions = decide({
+    isActiveViewer: true,
+    isDocumentEngaged: false,
+    authoritative: { cols: 120, rows: 40 },
+    applied: { cols: 80, rows: 24 },
+  });
+  assert.deepEqual(actions.resizeTo, { cols: 120, rows: 40 });
+  assert.equal(actions.isFollowing, true);
+});
+
+test('an engagement edge re-bids for a following viewer and only re-syncs the exact owner', () => {
+  const followingViewer = {
+    authoritative: { cols: 120, rows: 40 },
+    lastClaim: { cols: 80, rows: 24 },
+    isActiveViewer: true,
+    isDocumentEngaged: true,
+    isDataWsOpen: true,
+  };
+  assert.equal(decideGridEngagementEdge(followingViewer), 'rebid');
+  assert.equal(decideGridEngagementEdge({ ...followingViewer, lastClaim: { cols: 120, rows: 40 } }), 'resync');
+});
+
+test('an engagement edge asks nothing of a viewer that cannot bid', () => {
+  const followingViewer = {
+    authoritative: { cols: 120, rows: 40 },
+    lastClaim: { cols: 80, rows: 24 },
+    isActiveViewer: true,
+    isDocumentEngaged: true,
+    isDataWsOpen: true,
+  };
+  assert.equal(decideGridEngagementEdge({ ...followingViewer, isActiveViewer: false }), 'none');
+  assert.equal(decideGridEngagementEdge({ ...followingViewer, isDocumentEngaged: false }), 'none');
+  assert.equal(decideGridEngagementEdge({ ...followingViewer, isDataWsOpen: false }), 'none');
+});
+
+test('the exact owner re-syncing on an engagement edge claims only a measurement that moved', () => {
+  const owned = { cols: 100, rows: 30 };
+  const unmoved = decide({
+    isActiveViewer: true,
+    authoritative: owned,
+    lastClaim: owned,
+    proposal: owned,
+  });
+  assert.equal(unmoved.claim, null);
+  const moved = decide({
+    isActiveViewer: true,
+    authoritative: owned,
+    lastClaim: owned,
+    proposal: { cols: 100, rows: 28 },
+  });
+  assert.deepEqual(moved.claim, { cols: 100, rows: 28 });
 });
 
 test('a proposal changing on one axis re-claims', () => {

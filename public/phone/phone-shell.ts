@@ -403,6 +403,11 @@ export function activatePhoneShell({ sessionId }: { sessionId?: string } = {}) {
   if (sessionId) terminalScreen.show(sessionId);
   const startScreen = adoptInheritedHistory();
   refreshPhoneBoard();
+  if (sessionId && startScreen === BOARD) {
+    uiState.dispatch('setPhoneScreen', BOARD);
+    showScreen('terminal');
+    return;
+  }
   applyScreen(startScreen);
 }
 

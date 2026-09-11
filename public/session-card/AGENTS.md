@@ -16,7 +16,7 @@ Session card modules, decomposed from the old monolithic session-card.js. Each s
 | `agent-core.ts` | Pure `agentBadgeText(agent)`: which agent adapter id earns a card chip (never the default one) |
 | `card-dom.ts` | Card builder, badge, inline rename, confirm dialog, debug overlay |
 | `terminal.ts` | xterm.js setup, data WebSocket, OSC-52 clipboard, key handling (consults `focus-view/focus-shortcuts.ts` for which Alt+keys bubble), phone soft-keyboard input takeover |
-| `grid-core.ts` | Pure `decideGridActions` (resize, claim, unview, follower flag; a non-finite or non-positive proposal claims nothing) and `readDataFrame` (text bytes versus a binary `pty-size` frame, first frame of a connection is the attach) |
+| `grid-core.ts` | Pure `decideGridActions` (resize, claim, unview, follower flag; a non-finite or non-positive proposal claims nothing, and an unengaged document claims nothing) plus `decideGridEngagementEdge` (none, resync or rebid on a focus/visibility edge) and `readDataFrame` (text bytes versus a binary `pty-size` frame, first frame of a connection is the attach) |
 | `ime-core.ts` | Pure soft-keyboard edit to terminal bytes: shared-prefix diff of xterm's helper textarea, plus the inputType/keydown predicates the takeover in `terminal.ts` gates on |
 | `activity.ts` | Working-session heartbeat from output ARRIVAL timing only (no content reads); paints liveness/quiet on the Focus rail pill |
 | `session-tick.ts` | Shared 1s tick: elapsed clock + working-heartbeat poll (`refreshElapsed`); no per-session timers |
@@ -30,6 +30,7 @@ Session card modules, decomposed from the old monolithic session-card.js. Each s
 ### Working In This Directory
 - ANSI is parsed in the browser for display and in the server keeper for attach, because raw bytes are only correct at the width that produced them; `activity.ts` may still use byte-arrival TIMING, never byte CONTENT.
 - One xterm per session; the Focus view re-parents the card node, so never assume a fixed parent container.
+- The pty holds one grid and the newest claimant wins, so a viewer bids only while its own document is focused and visible, checked when the claim is sent as well as when it is decided, and every active viewer re-syncs on its engagement edge, dropping its stored claim only when it is following; without all of that a background tab steals the phone's grid on any resize, reattach or settle that outlives its focus, and the phone can never win it back.
 - The plan is the card's second face and release always restores the terminal, so a grid tile never owns review UI (`tests/frontend-plan-face.test.ts`).
 - WebGL contexts are a scarce resource: always acquire through `webgl-pool.ts`.
 - No per-session `setInterval`: ride `session-tick.ts`.

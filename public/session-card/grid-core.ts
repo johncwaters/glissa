@@ -17,6 +17,7 @@ export interface GridDecisionInput {
   applied: TerminalGrid | null;
   proposal: TerminalGrid | null;
   isActiveViewer: boolean;
+  isDocumentEngaged: boolean;
   isDataWsOpen: boolean;
   lastClaim: TerminalGrid | null;
 }
@@ -27,6 +28,8 @@ export interface GridActions {
   sendUnview: boolean;
   isFollowing: boolean;
 }
+
+export type GridEngagementEdgeAction = 'none' | 'resync' | 'rebid';
 
 export interface DataFrameState {
   hasSeenSize: boolean;
@@ -66,17 +69,34 @@ export function isFollowingGrid({
   return !(isActiveViewer && isSameGrid(authoritative, lastClaim));
 }
 
+export function decideGridEngagementEdge({
+  authoritative,
+  isActiveViewer,
+  isDocumentEngaged,
+  isDataWsOpen,
+  lastClaim,
+}: Omit<GridDecisionInput, 'applied' | 'proposal'>): GridEngagementEdgeAction {
+  if (!isActiveViewer || !isDocumentEngaged || !isDataWsOpen) return 'none';
+  if (isFollowingGrid({ authoritative, isActiveViewer, lastClaim })) return 'rebid';
+  return 'resync';
+}
+
 export function decideGridActions({
   authoritative,
   applied,
   proposal,
   isActiveViewer,
+  isDocumentEngaged,
   isDataWsOpen,
   lastClaim,
 }: GridDecisionInput): GridActions {
   const needsResize = !!authoritative && !isSameGrid(authoritative, applied);
   const claimable = isUsableGrid(proposal) ? clampGridToContract(proposal) : null;
-  const canClaim = isActiveViewer && isDataWsOpen && !!claimable && !isSameGrid(claimable, lastClaim);
+  const canClaim = isActiveViewer
+    && isDocumentEngaged
+    && isDataWsOpen
+    && !!claimable
+    && !isSameGrid(claimable, lastClaim);
   return {
     resizeTo: needsResize ? authoritative : null,
     claim: canClaim ? claimable : null,

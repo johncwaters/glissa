@@ -16,8 +16,8 @@ import {
 import type { HarnessCase, Scenario, Step, Viewport } from '../test/browser/cases-core.ts';
 import { BURST_CAP } from '../test/browser/frame-core.ts';
 
-const DEFAULT_CASE_COUNT = 28;
-const PROVE_FAILURE_CASE_COUNT = 30;
+const DEFAULT_CASE_COUNT = 47;
+const PROVE_FAILURE_CASE_COUNT = 49;
 
 function viewportNamed(name: string): Viewport {
   const found = VIEWPORTS.find((viewport) => viewport.name === name);
@@ -255,7 +255,24 @@ test('cases come out in viewport order then scenario order', () => {
     'offline-online',
     'burst-during-resize',
     'plan-face',
+    'h1-desktop-first',
+    'h2-companion-reconnect',
+    'h2-viewer-reconnect',
+    'h3-reopen-with-companion',
+    'h4-companion-resize',
+    'h8-plan-face-return',
+    'h9-desktop-refocus',
+    'h10-blur-during-settle',
   ]);
+});
+
+test('a scenario pinned to named viewports runs on those and nowhere else', () => {
+  const pinned = scenarioNamed('h6-layout-flip');
+  assert.deepEqual(pinned.viewports, ['touch-1024']);
+  const ran = casesFor({ proveFailure: true })
+    .filter((harnessCase) => harnessCase.scenario.name === pinned.name)
+    .map((harnessCase) => harnessCase.viewport.name);
+  assert.deepEqual(ran, ['touch-1024']);
 });
 
 test('every scenario name is unique and every viewport name is unique', () => {

@@ -12,7 +12,7 @@ import { clearPageToken, loadPageToken, withPageToken } from '../ws-token.ts';
 import { noteSessionOutput } from './activity.ts';
 import { findSessionUi, sessionUIs } from './card-registry.ts';
 import type { DataFrameState, TerminalGrid } from './grid-core.ts';
-import { decideGridActions, isFollowingGrid, readDataFrame } from './grid-core.ts';
+import { decideGridActions, decideGridEngagementEdge, isFollowingGrid, readDataFrame } from './grid-core.ts';
 import {
   bytesForBackwardDeletion,
   bytesForSoftKeyboardEdit,
@@ -38,6 +38,10 @@ export function setTerminalCursorBlink(v: boolean) {
   _terminalCursorBlink = v;
 }
 
+
+function isDocumentEngaged() {
+  return document.hasFocus() && document.visibilityState === 'visible';
+}
 
 function decodeOsc52Payload(b64: string) {
   const bin = atob(b64);
@@ -186,6 +190,7 @@ export function setupTerminal(termWrap: HTMLElement, ui: SessionUi) {
   }
 
   function sendGridClaim(grid: TerminalGrid) {
+    if (!isDocumentEngaged()) return;
     if (ui.dataWs?.readyState !== WebSocket.OPEN) return;
     ui.dataWs.send(JSON.stringify({ type: 'claim', cols: grid.cols, rows: grid.rows }));
     lastClaim = grid;
@@ -201,6 +206,7 @@ export function setupTerminal(termWrap: HTMLElement, ui: SessionUi) {
       applied: { cols: liveTerm.cols, rows: liveTerm.rows },
       proposal: measureProposal(),
       isActiveViewer,
+      isDocumentEngaged: isDocumentEngaged(),
       isDataWsOpen: ui.dataWs?.readyState === WebSocket.OPEN,
       lastClaim,
     });
@@ -236,6 +242,19 @@ export function setupTerminal(termWrap: HTMLElement, ui: SessionUi) {
   ui._resetGridClaim = () => {
     cancelSettle();
     lastClaim = null;
+  };
+  ui._syncGridOnEngagementEdge = () => {
+    const edge = decideGridEngagementEdge({
+      authoritative: ui.ptySize ?? null,
+      isActiveViewer,
+      isDocumentEngaged: isDocumentEngaged(),
+      isDataWsOpen: ui.dataWs?.readyState === WebSocket.OPEN,
+      lastClaim,
+    });
+    cancelSettle();
+    if (edge === 'none') return;
+    if (edge === 'rebid') lastClaim = null;
+    syncGrid({ isActivationEdge: true });
   };
   ui._setActiveViewer = (isActive: boolean) => {
     if (isActiveViewer === isActive) return;
@@ -403,6 +422,10 @@ export function ensureTerminalSetup(ui: SessionUi, sessionId: string) {
   wireTerminalIO(ui, sessionId);
 }
 
+export function syncGridOnEngagementEdge(ui: SessionUi | null | undefined) {
+  ui?._syncGridOnEngagementEdge?.();
+}
+
 export function ensureTerminalReady(ui: SessionUi | null | undefined, sessionId: string) {
   if (!ui) return;
   ensureTerminalSetup(ui, sessionId);
@@ -410,6 +433,7 @@ export function ensureTerminalReady(ui: SessionUi | null | undefined, sessionId:
   const term = ui.term;
   if (!term) return;
   term.refresh(0, term.rows - 1);
+  syncGridOnEngagementEdge(ui);
 }
 
 export function setTerminalActiveViewer(ui: SessionUi | null | undefined, sessionId: string, isActive: boolean) {

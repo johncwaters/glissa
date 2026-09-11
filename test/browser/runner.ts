@@ -5,9 +5,9 @@ import type { Browser, BrowserContext, ConsoleMessage, Page } from 'playwright-c
 
 import { safeTextTail } from '../support/backend-harness.ts';
 import { heightWithKeyboardUp, layoutFor } from './cases-core.ts';
-import type { HarnessCase, Layout, ResolvedStep, Step, ViewerId, Viewport } from './cases-core.ts';
+import type { CardControl, HarnessCase, Layout, ResolvedStep, Step, ViewerId, Viewport } from './cases-core.ts';
 import { expectedRows, parseStatusRow } from './frame-core.ts';
-import { CARD_REGISTRY_URL, boardRowIds, dropDataSocket, pillIds, readGrid, readLayout } from './probe.ts';
+import { CARD_REGISTRY_URL, boardRowIds, dropDataSocket, pillIds, readDocumentEngagement, readGrid, readLayout, setDocumentEngagement } from './probe.ts';
 import type { GridReading } from './probe.ts';
 import { caseKey } from './report-core.ts';
 import type { CaseRecord, GridSnapshot, Outcome, StepRecord } from './report-core.ts';
@@ -51,7 +51,11 @@ const WEB_SOCKET_OPEN = 1;
 const PHONE_CARD_SLOT = '.phone-card-slot';
 const DESKTOP_CARD_SLOT = '.focus-card-slot';
 const DESKTOP_LEAVE_FOCUS_SELECTOR = '#tab-settings';
+const DESKTOP_ENTER_FOCUS_SELECTOR = '#tab-focus';
 const PHONE_BACK_SELECTOR = 'button.phone-back';
+const SELECTOR_BY_CONTROL: Record<CardControl, string> = {
+  'plan-terminal': 'button.plan-terminal-button:not(.plan-read-button)',
+};
 
 interface RowMismatch {
   index: number;
@@ -153,8 +157,10 @@ function describeStep(step: Step): string {
   if (step.kind === 'type') return `type ${step.text}`;
   if (step.kind === 'burst') return `burst ${step.lines}`;
   if (step.kind === 'settle') return `settle ${step.expectGrid ?? 'exact'}`;
+  if (step.kind === 'wait') return `wait ${step.durationMs}ms`;
   if (step.kind === 'assert-grid') return `assert-grid tick+${step.tickOffset ?? 0}`;
   if (step.kind === 'expect-face') return `expect-face ${step.value}`;
+  if (step.kind === 'click') return `click ${step.control}`;
   if (step.kind === 'shot') return `shot ${step.name}`;
   return step.kind;
 }
@@ -274,15 +280,19 @@ async function waitForPageReady(viewer: Viewer, expectedLayout: Layout, deadline
 }
 
 async function runOpen(viewer: Viewer, sessionId: string, deadlines: Deadlines): Promise<StepOutcome> {
-  const selector = rosterSelector(viewer, sessionId);
+  const rosterEntry = viewer.page.locator(rosterSelector(viewer, sessionId)).first();
   const listed = await pollUntil(async () => {
-    const count = await viewer.page.locator(selector).count();
-    if (count > 0) return { ok: true, detail: 'the session is listed' };
+    const isListed = await rosterEntry.count() > 0;
+    if (isListed && await rosterEntry.isVisible()) return { ok: true, detail: 'the session is listed' };
+    if (isListed && viewer.layout === 'desktop') {
+      await viewer.page.locator(DESKTOP_ENTER_FOCUS_SELECTOR).first().click();
+      return { ok: false, detail: 'the roster is listed behind another view' };
+    }
     const ids = await listedIds(viewer);
     return { ok: false, detail: `${sessionId} is missing from ${ids.length} listed sessions` };
   }, { label: `session listed for viewer ${viewer.id}`, timeoutMs: deadlines.stepMs, intervalMs: deadlines.pollIntervalMs });
   if (!listed.ok) return failedOutcome('session-listed', listed.detail);
-  await viewer.page.locator(selector).first().click();
+  await rosterEntry.click();
   const live = await pollUntil(
     () => probeCardLive(viewer, sessionId),
     { label: `card live for viewer ${viewer.id}`, timeoutMs: deadlines.stepMs, intervalMs: deadlines.pollIntervalMs },
@@ -354,6 +364,17 @@ async function runOnline(viewer: Viewer, sessionId: string, deadlines: Deadlines
     { label: `viewer ${viewer.id} reattached`, timeoutMs: deadlines.reattachMs, intervalMs: deadlines.pollIntervalMs },
   );
   return outcomeFor('socket-reattached', reattached);
+}
+
+async function runEngagement(viewer: Viewer, engaged: boolean): Promise<StepOutcome> {
+  if (engaged) await viewer.page.bringToFront();
+  await viewer.page.evaluate(setDocumentEngagement, engaged);
+  const reading = await viewer.page.evaluate(readDocumentEngagement);
+  const predicate = engaged ? 'viewer-foregrounded' : 'viewer-backgrounded';
+  const detail = `hasFocus ${reading.hasFocus}, visibilityState ${reading.visibilityState}`;
+  const isEngaged = reading.hasFocus && reading.visibilityState === 'visible';
+  if (isEngaged !== engaged) return failedOutcome(predicate, detail);
+  return passedOutcome(predicate, detail);
 }
 
 async function readTick(viewer: Viewer, sessionId: string): Promise<number | null> {
@@ -442,6 +463,22 @@ async function runExpectFace(
     return { ok: true, reading, detail: `face is ${value}` };
   }, { label: `face ${value} for viewer ${viewer.id}`, timeoutMs: deadlines.stepMs, intervalMs: deadlines.pollIntervalMs });
   return outcomeFor('card-face', faced);
+}
+
+async function runClick(
+  viewer: Viewer,
+  control: CardControl,
+  deadlines: Deadlines,
+): Promise<StepOutcome> {
+  const button = viewer.page.locator(`${cardSlotSelector(viewer)} ${SELECTOR_BY_CONTROL[control]}`).first();
+  const shown = await pollUntil(async () => {
+    if (await button.count() === 0) return { ok: false, detail: `${control} is not on the card` };
+    if (!await button.isVisible()) return { ok: false, detail: `${control} is on the card but hidden` };
+    return { ok: true, detail: `${control} is clickable` };
+  }, { label: `${control} for viewer ${viewer.id}`, timeoutMs: deadlines.stepMs, intervalMs: deadlines.pollIntervalMs });
+  if (!shown.ok) return failedOutcome('control-clickable', shown.detail);
+  await button.click();
+  return passedOutcome('control-clicked', `clicked ${control}`);
 }
 
 async function takeShot(viewer: Viewer, artifacts: ArtifactPaths, key: string, name: string): Promise<StepOutcome> {
@@ -566,6 +603,12 @@ export async function runCase({
     }
     if (step.kind === 'offline') return runOffline(viewer, sessionId, deadlines);
     if (step.kind === 'online') return runOnline(viewer, sessionId, deadlines);
+    if (step.kind === 'foreground') return runEngagement(viewer, true);
+    if (step.kind === 'wait') {
+      await sleep(step.durationMs);
+      return passedOutcome('waited', `${step.durationMs}ms passed`);
+    }
+    if (step.kind === 'background') return runEngagement(viewer, false);
     if (step.kind === 'settle') {
       const tickMustExceed = tickToPassAtNextSettleByViewer.get(viewer.id) ?? null;
       tickToPassAtNextSettleByViewer.delete(viewer.id);
@@ -575,6 +618,7 @@ export async function runCase({
       return runAssertGrid(viewer, sessionId, step.tickOffset ?? 0, artifacts, key);
     }
     if (step.kind === 'expect-face') return runExpectFace(viewer, sessionId, step.value, deadlines);
+    if (step.kind === 'click') return runClick(viewer, step.control, deadlines);
     const shot = await takeShot(viewer, artifacts, key, step.name);
     if (shot.shot) shots.push(shot.shot);
     return shot;
