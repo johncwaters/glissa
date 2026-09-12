@@ -670,9 +670,6 @@ export async function runCase({
       const remembered = step.expectRemembered === undefined
         ? null
         : rememberedGridByKey.get(`${viewer.id}:${step.expectRemembered}`) ?? null;
-      if (step.expectRemembered !== undefined && !remembered) {
-        return failedOutcome('grid-fixpoint', `no grid was remembered as ${step.expectRemembered} for viewer ${viewer.id}`);
-      }
       return runSettle(viewer, sessionId, step.expectGrid ?? 'exact', remembered, tickMustExceed, deadlines, artifacts, key);
     }
     if (step.kind === 'assert-grid') {

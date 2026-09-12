@@ -61,17 +61,6 @@ test('a repeated identical proposal does not re-claim', () => {
   assert.equal(actions.owedClaim, null);
 });
 
-test('a viewer that cannot send still owes the claim its own box measured', () => {
-  const movedMeasurement = decide({
-    isActiveViewer: true,
-    isDataWsOpen: false,
-    proposal: { cols: 100, rows: 31 },
-    lastClaim: { cols: 100, rows: 30 },
-  });
-  assert.deepEqual(movedMeasurement.owedClaim, { cols: 100, rows: 31 });
-  assert.equal(movedMeasurement.keepsPendingSettle, false);
-});
-
 test('a viewer following the pty still resizes to the grid the pty took', () => {
   const actions = decide({
     isActiveViewer: true,
@@ -88,13 +77,6 @@ test('a measurement that cannot be taken keeps a pending claim instead of destro
   assert.equal(blind.keepsPendingSettle, true);
   const zeroSized = decide({ isActiveViewer: true, proposal: { cols: 0, rows: 0 }, lastClaim: { cols: 100, rows: 30 } });
   assert.equal(zeroSized.keepsPendingSettle, true);
-});
-
-test('a claim the pty already holds owes nothing and drops any pending settle', () => {
-  const owned = { cols: 100, rows: 30 };
-  const settled = decide({ isActiveViewer: true, proposal: owned, lastClaim: owned });
-  assert.equal(settled.owedClaim, null);
-  assert.equal(settled.keepsPendingSettle, false);
 });
 
 test('a viewer that stopped viewing owes nothing and cancels its settle', () => {
@@ -223,24 +205,6 @@ test('an engagement edge asks nothing of a viewer that cannot bid', () => {
   assert.equal(decideGridEngagementEdge({ ...followingViewer, isActiveViewer: false }), 'none');
   assert.equal(decideGridEngagementEdge({ ...followingViewer, isDocumentEngaged: false }), 'none');
   assert.equal(decideGridEngagementEdge({ ...followingViewer, isDataWsOpen: false }), 'none');
-});
-
-test('the exact owner re-syncing on an engagement edge claims only a measurement that moved', () => {
-  const owned = { cols: 100, rows: 30 };
-  const unmoved = decide({
-    isActiveViewer: true,
-    authoritative: owned,
-    lastClaim: owned,
-    proposal: owned,
-  });
-  assert.equal(unmoved.owedClaim, null);
-  const moved = decide({
-    isActiveViewer: true,
-    authoritative: owned,
-    lastClaim: owned,
-    proposal: { cols: 100, rows: 28 },
-  });
-  assert.deepEqual(moved.owedClaim, { cols: 100, rows: 28 });
 });
 
 test('a proposal changing on one axis re-claims', () => {

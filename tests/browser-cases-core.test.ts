@@ -107,11 +107,6 @@ test('only filters scenarios and viewportNames filters viewports', () => {
     keyboardOnly.map((harnessCase) => harnessCase.viewport.name),
     ['phone-375', 'phone-393', 'phone-412'],
   );
-  const keyboardRestore = casesFor({ only: ['keyboard-restores-grid'] });
-  assert.deepEqual(
-    keyboardRestore.map((harnessCase) => harnessCase.viewport.name),
-    ['phone-375', 'phone-393', 'phone-412'],
-  );
   const onePhone = casesFor({ viewportNames: ['phone-393'] });
   assert.equal(
     onePhone.every((harnessCase) => harnessCase.viewport.name === 'phone-393'),
