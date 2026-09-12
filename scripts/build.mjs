@@ -63,4 +63,8 @@ fs.writeFileSync(path.join(distDir, 'package.json'), `${JSON.stringify({ type: '
 const missing = REQUIRED_OUTPUTS.filter((relativePath) => !fs.existsSync(path.join(distDir, relativePath)));
 if (missing.length > 0) fail(`missing from dist/: ${missing.join(', ')}`);
 
+const declaredBin = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).bin;
+const declaredBins = typeof declaredBin === 'string' ? [declaredBin] : Object.values(declaredBin ?? {});
+for (const relativePath of declaredBins) fs.chmodSync(path.join(repoRoot, relativePath), 0o755);
+
 console.log(`build: dist/ complete (${REQUIRED_OUTPUTS.length} load-bearing outputs present)`);
