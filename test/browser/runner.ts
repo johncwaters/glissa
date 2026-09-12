@@ -7,7 +7,7 @@ import { safeTextTail } from '../support/backend-harness.ts';
 import { heightWithKeyboardUp, layoutFor } from './cases-core.ts';
 import type { CardControl, HarnessCase, Layout, ResolvedStep, Step, ViewerId, Viewport } from './cases-core.ts';
 import { expectedRows, parseStatusRow } from './frame-core.ts';
-import { CARD_REGISTRY_URL, boardRowIds, dropDataSocket, pillIds, readDocumentEngagement, readGrid, readLayout, setDocumentEngagement } from './probe.ts';
+import { CARD_REGISTRY_URL, boardRowIds, dispatchWindowBlur, dropDataSocket, pillIds, readDocumentEngagement, readGrid, readLayout, readTerminalFocus, setDocumentEngagement } from './probe.ts';
 import type { GridReading } from './probe.ts';
 import { caseKey } from './report-core.ts';
 import type { CaseRecord, GridSnapshot, Outcome, StepRecord } from './report-core.ts';
@@ -56,6 +56,11 @@ const PHONE_BACK_SELECTOR = 'button.phone-back';
 const SELECTOR_BY_CONTROL: Record<CardControl, string> = {
   'plan-terminal': 'button.plan-terminal-button:not(.plan-read-button)',
 };
+
+interface RememberedGrid {
+  cols: number;
+  rows: number;
+}
 
 interface RowMismatch {
   index: number;
@@ -156,7 +161,13 @@ function describeStep(step: Step): string {
   if (step.kind === 'keyboard') return `keyboard ${step.state}`;
   if (step.kind === 'type') return `type ${step.text}`;
   if (step.kind === 'burst') return `burst ${step.lines}`;
-  if (step.kind === 'settle') return `settle ${step.expectGrid ?? 'exact'}`;
+  if (step.kind === 'settle') {
+    const at = step.expectRemembered === undefined ? '' : ` at ${step.expectRemembered}`;
+    return `settle ${step.expectGrid ?? 'exact'}${at}`;
+  }
+  if (step.kind === 'remember') return `remember ${step.label}`;
+  if (step.kind === 'background') return step.quiet === true ? 'background quiet' : 'background';
+  if (step.kind === 'foreground') return step.quiet === true ? 'foreground quiet' : 'foreground';
   if (step.kind === 'wait') return `wait ${step.durationMs}ms`;
   if (step.kind === 'assert-grid') return `assert-grid tick+${step.tickOffset ?? 0}`;
   if (step.kind === 'expect-face') return `expect-face ${step.value}`;
@@ -219,9 +230,17 @@ async function probeSettled(
   viewer: Viewer,
   sessionId: string,
   expectGrid: 'exact' | 'following',
+  remembered: RememberedGrid | null,
 ): Promise<ProbeResult> {
   const reading = await readGridOf(viewer, sessionId);
   if (!reading) return { ok: false, detail: 'the session card carries no terminal yet', reading: null };
+  if (remembered && (reading.cols !== remembered.cols || reading.rows !== remembered.rows)) {
+    return {
+      ok: false,
+      reading,
+      detail: `grid is ${reading.cols}x${reading.rows}, wanted the remembered ${remembered.cols}x${remembered.rows}`,
+    };
+  }
   const authoritative = reading.ptySize;
   if (!authoritative) return { ok: false, detail: 'no authoritative pty size has arrived', reading };
   if (authoritative.cols !== reading.cols || authoritative.rows !== reading.rows) {
@@ -366,15 +385,46 @@ async function runOnline(viewer: Viewer, sessionId: string, deadlines: Deadlines
   return outcomeFor('socket-reattached', reattached);
 }
 
-async function runEngagement(viewer: Viewer, engaged: boolean): Promise<StepOutcome> {
-  if (engaged) await viewer.page.bringToFront();
-  await viewer.page.evaluate(setDocumentEngagement, engaged);
+async function runEngagement(viewer: Viewer, engaged: boolean, quiet: boolean): Promise<StepOutcome> {
+  if (engaged && !quiet) await viewer.page.bringToFront();
+  await viewer.page.evaluate(setDocumentEngagement, { engaged, quiet });
   const reading = await viewer.page.evaluate(readDocumentEngagement);
   const predicate = engaged ? 'viewer-foregrounded' : 'viewer-backgrounded';
   const detail = `hasFocus ${reading.hasFocus}, visibilityState ${reading.visibilityState}`;
   const isEngaged = reading.hasFocus && reading.visibilityState === 'visible';
   if (isEngaged !== engaged) return failedOutcome(predicate, detail);
   return passedOutcome(predicate, detail);
+}
+
+async function runWindowBlur(viewer: Viewer): Promise<StepOutcome> {
+  await viewer.page.evaluate(setDocumentEngagement, { engaged: false, quiet: true });
+  await viewer.page.evaluate(dispatchWindowBlur);
+  const reading = await viewer.page.evaluate(readDocumentEngagement);
+  const detail = `hasFocus ${reading.hasFocus}, visibilityState ${reading.visibilityState}`;
+  if (reading.hasFocus || reading.visibilityState !== 'visible') return failedOutcome('window-blurred', detail);
+  return passedOutcome('window-blurred', detail);
+}
+
+async function runTapTerminal(viewer: Viewer, deadlines: Deadlines): Promise<StepOutcome> {
+  await viewer.page.locator(cardSlotSelector(viewer)).first().click();
+  const focused = await pollUntil(async () => {
+    const inTerminal = await viewer.page.evaluate(readTerminalFocus);
+    if (!inTerminal) return { ok: false, detail: 'focus is outside the terminal wrapper' };
+    return { ok: true, detail: 'the terminal holds focus' };
+  }, { label: `terminal focus for viewer ${viewer.id}`, timeoutMs: deadlines.stepMs, intervalMs: deadlines.pollIntervalMs });
+  return outcomeFor('terminal-focused', focused);
+}
+
+async function runRemember(
+  viewer: Viewer,
+  sessionId: string,
+  label: string,
+  rememberedByKey: Map<string, RememberedGrid>,
+): Promise<StepOutcome> {
+  const reading = await readGridOf(viewer, sessionId);
+  if (!reading) return failedOutcome('grid-remembered', 'the session card carries no terminal to remember');
+  rememberedByKey.set(`${viewer.id}:${label}`, { cols: reading.cols, rows: reading.rows });
+  return passedOutcome('grid-remembered', `${label} is ${reading.cols}x${reading.rows}`);
 }
 
 async function readTick(viewer: Viewer, sessionId: string): Promise<number | null> {
@@ -389,6 +439,7 @@ async function runSettle(
   viewer: Viewer,
   sessionId: string,
   expectGrid: 'exact' | 'following',
+  remembered: RememberedGrid | null,
   tickMustExceed: number | null,
   deadlines: Deadlines,
   artifacts: ArtifactPaths,
@@ -397,7 +448,7 @@ async function runSettle(
   let heldKey = '';
   let heldSince = 0;
   const settled = await pollUntil(async () => {
-    const attempt = await probeSettled(viewer, sessionId, expectGrid);
+    const attempt = await probeSettled(viewer, sessionId, expectGrid, remembered);
     if (!attempt.ok) {
       heldKey = '';
       return attempt;
@@ -579,6 +630,7 @@ export async function runCase({
   };
 
   const tickToPassAtNextSettleByViewer = new Map<ViewerId, number>();
+  const rememberedGridByKey = new Map<string, RememberedGrid>();
 
   const runStep = async (step: ResolvedStep): Promise<StepOutcome> => {
     const viewer = await viewerFor(step.viewer ?? 'a');
@@ -603,16 +655,25 @@ export async function runCase({
     }
     if (step.kind === 'offline') return runOffline(viewer, sessionId, deadlines);
     if (step.kind === 'online') return runOnline(viewer, sessionId, deadlines);
-    if (step.kind === 'foreground') return runEngagement(viewer, true);
+    if (step.kind === 'foreground') return runEngagement(viewer, true, step.quiet === true);
     if (step.kind === 'wait') {
       await sleep(step.durationMs);
       return passedOutcome('waited', `${step.durationMs}ms passed`);
     }
-    if (step.kind === 'background') return runEngagement(viewer, false);
+    if (step.kind === 'background') return runEngagement(viewer, false, step.quiet === true);
+    if (step.kind === 'window-blur') return runWindowBlur(viewer);
+    if (step.kind === 'tap-terminal') return runTapTerminal(viewer, deadlines);
+    if (step.kind === 'remember') return runRemember(viewer, sessionId, step.label, rememberedGridByKey);
     if (step.kind === 'settle') {
       const tickMustExceed = tickToPassAtNextSettleByViewer.get(viewer.id) ?? null;
       tickToPassAtNextSettleByViewer.delete(viewer.id);
-      return runSettle(viewer, sessionId, step.expectGrid ?? 'exact', tickMustExceed, deadlines, artifacts, key);
+      const remembered = step.expectRemembered === undefined
+        ? null
+        : rememberedGridByKey.get(`${viewer.id}:${step.expectRemembered}`) ?? null;
+      if (step.expectRemembered !== undefined && !remembered) {
+        return failedOutcome('grid-fixpoint', `no grid was remembered as ${step.expectRemembered} for viewer ${viewer.id}`);
+      }
+      return runSettle(viewer, sessionId, step.expectGrid ?? 'exact', remembered, tickMustExceed, deadlines, artifacts, key);
     }
     if (step.kind === 'assert-grid') {
       return runAssertGrid(viewer, sessionId, step.tickOffset ?? 0, artifacts, key);

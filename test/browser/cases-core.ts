@@ -14,10 +14,13 @@ export type Step =
   | { kind: 'burst'; lines: number; viewer?: ViewerId }
   | { kind: 'offline'; viewer?: ViewerId }
   | { kind: 'online'; viewer?: ViewerId }
-  | { kind: 'foreground'; viewer?: ViewerId }
+  | { kind: 'foreground'; quiet?: boolean; viewer?: ViewerId }
   | { kind: 'wait'; durationMs: number; viewer?: ViewerId }
-  | { kind: 'background'; viewer?: ViewerId }
-  | { kind: 'settle'; viewer?: ViewerId; expectGrid?: 'exact' | 'following' }
+  | { kind: 'background'; quiet?: boolean; viewer?: ViewerId }
+  | { kind: 'window-blur'; viewer?: ViewerId }
+  | { kind: 'tap-terminal'; viewer?: ViewerId }
+  | { kind: 'remember'; label: string; viewer?: ViewerId }
+  | { kind: 'settle'; viewer?: ViewerId; expectGrid?: 'exact' | 'following'; expectRemembered?: string }
   | { kind: 'assert-grid'; viewer?: ViewerId; tickOffset?: number }
   | { kind: 'expect-face'; value: 'plan' | 'terminal'; viewer?: ViewerId }
   | { kind: 'click'; control: CardControl; viewer?: ViewerId }
@@ -84,6 +87,7 @@ export const VIEWPORTS: readonly Viewport[] = [
 export const PAIR_VIEWPORTS: readonly [string, string] = ['phone-393', 'desktop-1280'];
 
 const WITHIN_GRID_SETTLE_MS = 60;
+const PAST_GRID_SETTLE_MS = 600;
 
 const RESIZE_STORM_STEPS: readonly Step[] = [
   { kind: 'resize-by', deltaHeight: -40 },
@@ -319,6 +323,88 @@ export const SCENARIOS: readonly Scenario[] = [
       { kind: 'background', viewer: 'b' },
       { kind: 'foreground', viewer: 'a' },
       { kind: 'settle', viewer: 'a', expectGrid: 'exact' },
+    ],
+  },
+  {
+    name: 'keyboard-restores-grid',
+    phoneOnly: true,
+    fullMatrix: true,
+    steps: [
+      { kind: 'open' },
+      { kind: 'settle' },
+      { kind: 'remember', label: 'phone-box' },
+      { kind: 'tap-terminal' },
+      { kind: 'keyboard', state: 'up' },
+      { kind: 'settle' },
+      { kind: 'keyboard', state: 'down' },
+      { kind: 'settle', expectRemembered: 'phone-box' },
+    ],
+  },
+  {
+    name: 'keyboard-down-while-unengaged',
+    phoneOnly: true,
+    steps: [
+      { kind: 'open' },
+      { kind: 'settle' },
+      { kind: 'remember', label: 'phone-box' },
+      { kind: 'keyboard', state: 'up' },
+      { kind: 'settle' },
+      { kind: 'background' },
+      { kind: 'keyboard', state: 'down' },
+      { kind: 'wait', durationMs: PAST_GRID_SETTLE_MS },
+      { kind: 'foreground' },
+      { kind: 'settle', expectRemembered: 'phone-box' },
+      { kind: 'shot', name: 'keyboard-down-unengaged' },
+    ],
+  },
+  {
+    name: 'reconnect-while-backgrounded',
+    phoneOnly: true,
+    companionViewport: 'desktop-1280',
+    steps: [
+      { kind: 'open', viewer: 'a' },
+      { kind: 'settle', viewer: 'a' },
+      { kind: 'remember', label: 'phone-box', viewer: 'a' },
+      { kind: 'background', viewer: 'a' },
+      { kind: 'open', viewer: 'b' },
+      { kind: 'settle', viewer: 'b', expectGrid: 'exact' },
+      { kind: 'offline', viewer: 'a' },
+      { kind: 'online', viewer: 'a' },
+      { kind: 'foreground', viewer: 'a' },
+      { kind: 'settle', viewer: 'a', expectRemembered: 'phone-box' },
+      { kind: 'shot', name: 'reattached-unengaged' },
+    ],
+  },
+  {
+    name: 'keyboard-down-with-focus-in-card',
+    phoneOnly: true,
+    steps: [
+      { kind: 'open' },
+      { kind: 'settle' },
+      { kind: 'remember', label: 'phone-box' },
+      { kind: 'tap-terminal' },
+      { kind: 'keyboard', state: 'up' },
+      { kind: 'settle' },
+      { kind: 'background', quiet: true },
+      { kind: 'keyboard', state: 'down' },
+      { kind: 'settle', expectRemembered: 'phone-box' },
+      { kind: 'shot', name: 'keyboard-down-focused' },
+    ],
+  },
+  {
+    name: 'blurred-viewer-never-steals',
+    companionViewport: 'desktop-1280',
+    steps: [
+      { kind: 'open', viewer: 'b' },
+      { kind: 'settle', viewer: 'b', expectGrid: 'exact' },
+      { kind: 'tap-terminal', viewer: 'b' },
+      { kind: 'window-blur', viewer: 'b' },
+      { kind: 'open', viewer: 'a' },
+      { kind: 'settle', viewer: 'a', expectGrid: 'exact' },
+      { kind: 'offline', viewer: 'b' },
+      { kind: 'online', viewer: 'b' },
+      { kind: 'settle', viewer: 'a', expectGrid: 'exact' },
+      { kind: 'settle', viewer: 'b', expectGrid: 'following' },
     ],
   },
   {

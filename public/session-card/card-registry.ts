@@ -60,6 +60,7 @@ export interface SessionUi {
   _inputQueue?: string[];
   _syncGrid?: (options?: { isActivationEdge?: boolean }) => void;
   _resetGridClaim?: () => void;
+  _retryOwedGridClaim?: () => void;
   _syncGridOnEngagementEdge?: () => void;
   _setActiveViewer?: (isActive: boolean) => void;
   _resetSoftKeyboardBuffer?: () => void;

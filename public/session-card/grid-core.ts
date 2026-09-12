@@ -17,16 +17,31 @@ export interface GridDecisionInput {
   applied: TerminalGrid | null;
   proposal: TerminalGrid | null;
   isActiveViewer: boolean;
-  isDocumentEngaged: boolean;
   isDataWsOpen: boolean;
   lastClaim: TerminalGrid | null;
 }
 
 export interface GridActions {
   resizeTo: TerminalGrid | null;
-  claim: TerminalGrid | null;
+  owedClaim: TerminalGrid | null;
+  keepsPendingSettle: boolean;
   sendUnview: boolean;
   isFollowing: boolean;
+}
+
+export interface ViewerEngagementInput {
+  isDocumentVisible: boolean;
+  isDocumentFocused: boolean;
+  hasFocusInsideCard: boolean;
+  hasWindowBlurredSinceFocus: boolean;
+}
+
+export interface GridEngagementEdgeInput {
+  authoritative: TerminalGrid | null;
+  isActiveViewer: boolean;
+  isDocumentEngaged: boolean;
+  isDataWsOpen: boolean;
+  lastClaim: TerminalGrid | null;
 }
 
 export type GridEngagementEdgeAction = 'none' | 'resync' | 'rebid';
@@ -69,13 +84,24 @@ export function isFollowingGrid({
   return !(isActiveViewer && isSameGrid(authoritative, lastClaim));
 }
 
+export function isViewerEngaged({
+  isDocumentVisible,
+  isDocumentFocused,
+  hasFocusInsideCard,
+  hasWindowBlurredSinceFocus,
+}: ViewerEngagementInput): boolean {
+  if (!isDocumentVisible) return false;
+  if (isDocumentFocused) return true;
+  return hasFocusInsideCard && !hasWindowBlurredSinceFocus;
+}
+
 export function decideGridEngagementEdge({
   authoritative,
   isActiveViewer,
   isDocumentEngaged,
   isDataWsOpen,
   lastClaim,
-}: Omit<GridDecisionInput, 'applied' | 'proposal'>): GridEngagementEdgeAction {
+}: GridEngagementEdgeInput): GridEngagementEdgeAction {
   if (!isActiveViewer || !isDocumentEngaged || !isDataWsOpen) return 'none';
   if (isFollowingGrid({ authoritative, isActiveViewer, lastClaim })) return 'rebid';
   return 'resync';
@@ -86,20 +112,16 @@ export function decideGridActions({
   applied,
   proposal,
   isActiveViewer,
-  isDocumentEngaged,
   isDataWsOpen,
   lastClaim,
 }: GridDecisionInput): GridActions {
   const needsResize = !!authoritative && !isSameGrid(authoritative, applied);
   const claimable = isUsableGrid(proposal) ? clampGridToContract(proposal) : null;
-  const canClaim = isActiveViewer
-    && isDocumentEngaged
-    && isDataWsOpen
-    && !!claimable
-    && !isSameGrid(claimable, lastClaim);
+  const isClaimOwed = isActiveViewer && !!claimable && !isSameGrid(claimable, lastClaim);
   return {
     resizeTo: needsResize ? authoritative : null,
-    claim: canClaim ? claimable : null,
+    owedClaim: isClaimOwed ? claimable : null,
+    keepsPendingSettle: isActiveViewer && !claimable,
     sendUnview: !isActiveViewer && isDataWsOpen && !!lastClaim,
     isFollowing: isFollowingGrid({ authoritative, isActiveViewer, lastClaim }),
   };

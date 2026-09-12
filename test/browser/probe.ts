@@ -123,25 +123,39 @@ export interface EngagementReading {
   visibilityState: string;
 }
 
-type EngagementWindow = Window & { __glissaHarnessEngaged?: boolean };
+export interface EngagementRequest {
+  engaged: boolean;
+  quiet: boolean;
+}
 
-export function setDocumentEngagement(engaged: boolean): void {
+type EngagementWindow = Window & {
+  __glissaHarnessOverridden?: boolean;
+  __glissaHarnessFocused?: boolean;
+  __glissaHarnessVisible?: boolean;
+};
+
+export function setDocumentEngagement({ engaged, quiet }: EngagementRequest): void {
   const host: EngagementWindow = window;
-  if (host.__glissaHarnessEngaged === undefined) {
+  if (!host.__glissaHarnessOverridden) {
+    host.__glissaHarnessOverridden = true;
+    host.__glissaHarnessFocused = true;
+    host.__glissaHarnessVisible = true;
     Object.defineProperty(document, 'hasFocus', {
       configurable: true,
-      value: () => host.__glissaHarnessEngaged !== false,
+      value: () => host.__glissaHarnessFocused !== false && host.__glissaHarnessVisible !== false,
     });
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
-      get: () => (host.__glissaHarnessEngaged === false ? 'hidden' : 'visible'),
+      get: () => (host.__glissaHarnessVisible === false ? 'hidden' : 'visible'),
     });
     Object.defineProperty(document, 'hidden', {
       configurable: true,
-      get: () => host.__glissaHarnessEngaged === false,
+      get: () => host.__glissaHarnessVisible === false,
     });
   }
-  host.__glissaHarnessEngaged = engaged;
+  host.__glissaHarnessFocused = engaged;
+  if (quiet) return;
+  host.__glissaHarnessVisible = engaged;
   if (engaged) {
     document.dispatchEvent(new Event('visibilitychange'));
     window.dispatchEvent(new Event('focus'));
@@ -151,6 +165,16 @@ export function setDocumentEngagement(engaged: boolean): void {
   document.dispatchEvent(new Event('visibilitychange'));
 }
 
+export function dispatchWindowBlur(): void {
+  window.dispatchEvent(new Event('blur'));
+}
+
 export function readDocumentEngagement(): EngagementReading {
   return { hasFocus: document.hasFocus(), visibilityState: document.visibilityState };
+}
+
+export function readTerminalFocus(): boolean {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement)) return false;
+  return active.closest('.terminal-wrap') !== null;
 }

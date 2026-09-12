@@ -16,8 +16,8 @@ import {
 import type { HarnessCase, Scenario, Step, Viewport } from '../test/browser/cases-core.ts';
 import { BURST_CAP } from '../test/browser/frame-core.ts';
 
-const DEFAULT_CASE_COUNT = 47;
-const PROVE_FAILURE_CASE_COUNT = 49;
+const DEFAULT_CASE_COUNT = 55;
+const PROVE_FAILURE_CASE_COUNT = 57;
 
 function viewportNamed(name: string): Viewport {
   const found = VIEWPORTS.find((viewport) => viewport.name === name);
@@ -57,6 +57,21 @@ test('every scenario reaches a fixpoint before the harness stops looking', () =>
   }
 });
 
+test('every settle that demands a remembered grid names one the same viewer recorded earlier', () => {
+  for (const scenario of SCENARIOS) {
+    const recorded = new Set<string>();
+    for (const step of scenario.steps) {
+      const viewer = step.viewer ?? 'a';
+      if (step.kind === 'remember') recorded.add(`${viewer}:${step.label}`);
+      if (step.kind !== 'settle' || step.expectRemembered === undefined) continue;
+      assert.ok(
+        recorded.has(`${viewer}:${step.expectRemembered}`),
+        `${scenario.name} settles at ${step.expectRemembered} before viewer ${viewer} remembered it`,
+      );
+    }
+  }
+});
+
 test('a phone-only scenario is never paired with a desktop layout viewport', () => {
   for (const harnessCase of casesFor({ proveFailure: true })) {
     if (harnessCase.scenario.phoneOnly !== true) continue;
@@ -90,6 +105,11 @@ test('only filters scenarios and viewportNames filters viewports', () => {
   const keyboardOnly = casesFor({ only: ['keyboard'] });
   assert.deepEqual(
     keyboardOnly.map((harnessCase) => harnessCase.viewport.name),
+    ['phone-375', 'phone-393', 'phone-412'],
+  );
+  const keyboardRestore = casesFor({ only: ['keyboard-restores-grid'] });
+  assert.deepEqual(
+    keyboardRestore.map((harnessCase) => harnessCase.viewport.name),
     ['phone-375', 'phone-393', 'phone-412'],
   );
   const onePhone = casesFor({ viewportNames: ['phone-393'] });
@@ -263,6 +283,11 @@ test('cases come out in viewport order then scenario order', () => {
     'h8-plan-face-return',
     'h9-desktop-refocus',
     'h10-blur-during-settle',
+    'keyboard-restores-grid',
+    'keyboard-down-while-unengaged',
+    'reconnect-while-backgrounded',
+    'keyboard-down-with-focus-in-card',
+    'blurred-viewer-never-steals',
   ]);
 });
 

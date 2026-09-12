@@ -12,7 +12,7 @@ import { clearPageToken, loadPageToken, withPageToken } from '../ws-token.ts';
 import { noteSessionOutput } from './activity.ts';
 import { findSessionUi, sessionUIs } from './card-registry.ts';
 import type { DataFrameState, TerminalGrid } from './grid-core.ts';
-import { decideGridActions, decideGridEngagementEdge, isFollowingGrid, readDataFrame } from './grid-core.ts';
+import { decideGridActions, decideGridEngagementEdge, isFollowingGrid, isViewerEngaged, readDataFrame } from './grid-core.ts';
 import {
   bytesForBackwardDeletion,
   bytesForSoftKeyboardEdit,
@@ -39,8 +39,19 @@ export function setTerminalCursorBlink(v: boolean) {
 }
 
 
-function isDocumentEngaged() {
-  return document.hasFocus() && document.visibilityState === 'visible';
+let _hasWindowBlurredSinceFocus = false;
+
+window.addEventListener('blur', () => { _hasWindowBlurredSinceFocus = true; });
+window.addEventListener('focus', () => { _hasWindowBlurredSinceFocus = false; });
+
+function isViewerEngagedAt(card: HTMLElement) {
+  const activeElement = document.activeElement;
+  return isViewerEngaged({
+    isDocumentVisible: document.visibilityState === 'visible',
+    isDocumentFocused: document.hasFocus(),
+    hasFocusInsideCard: activeElement instanceof Node && card.contains(activeElement),
+    hasWindowBlurredSinceFocus: _hasWindowBlurredSinceFocus,
+  });
 }
 
 function decodeOsc52Payload(b64: string) {
@@ -112,6 +123,8 @@ function connectDataWs(sessionId: string, ui: SessionUi, term: Terminal) {
     hasEverOpened = true;
     ui._dataWsRetryAttempt = 0;
 
+    ui._retryOwedGridClaim?.();
+
     const queued = ui._inputQueue;
     if (queued && queued.length > 0) {
       setTimeout(() => {
@@ -173,6 +186,7 @@ export function setupTerminal(termWrap: HTMLElement, ui: SessionUi) {
   let settleTimerId: ReturnType<typeof setTimeout> | null = null;
   let isActiveViewer = false;
   let lastClaim: TerminalGrid | null = null;
+  let owedClaim: TerminalGrid | null = null;
 
   function cancelSettle() {
     if (settleTimerId === null) return;
@@ -189,13 +203,30 @@ export function setupTerminal(termWrap: HTMLElement, ui: SessionUi) {
     return { cols: proposed.cols, rows: proposed.rows };
   }
 
-  function sendGridClaim(grid: TerminalGrid) {
-    if (!isDocumentEngaged()) return;
-    if (ui.dataWs?.readyState !== WebSocket.OPEN) return;
+  function sendGridClaim(grid: TerminalGrid): boolean {
+    if (!isViewerEngagedAt(ui.card)) return false;
+    if (ui.dataWs?.readyState !== WebSocket.OPEN) return false;
     ui.dataWs.send(JSON.stringify({ type: 'claim', cols: grid.cols, rows: grid.rows }));
     lastClaim = grid;
+    owedClaim = null;
     const following = isFollowingGrid({ authoritative: ui.ptySize ?? null, isActiveViewer, lastClaim });
     ui.card.dataset.grid = following ? 'following' : 'exact';
+    return true;
+  }
+
+  function settleThenClaim(grid: TerminalGrid) {
+    cancelSettle();
+    owedClaim = grid;
+    settleTimerId = setTimeout(() => {
+      settleTimerId = null;
+      sendGridClaim(grid);
+    }, GRID_SETTLE_MS);
+  }
+
+  function retryOwedClaim() {
+    if (!owedClaim) return;
+    if (settleTimerId !== null) return;
+    sendGridClaim(owedClaim);
   }
 
   function syncGrid({ isActivationEdge = false }: { isActivationEdge?: boolean } = {}) {
@@ -206,27 +237,37 @@ export function setupTerminal(termWrap: HTMLElement, ui: SessionUi) {
       applied: { cols: liveTerm.cols, rows: liveTerm.rows },
       proposal: measureProposal(),
       isActiveViewer,
-      isDocumentEngaged: isDocumentEngaged(),
       isDataWsOpen: ui.dataWs?.readyState === WebSocket.OPEN,
       lastClaim,
     });
     if (actions.resizeTo) liveTerm.resize(actions.resizeTo.cols, actions.resizeTo.rows);
     ui.card.dataset.grid = actions.isFollowing ? 'following' : 'exact';
-    cancelSettle();
+    if (!actions.keepsPendingSettle) {
+      cancelSettle();
+      owedClaim = null;
+    }
     if (actions.sendUnview) {
       lastClaim = null;
       ui.dataWs?.send(JSON.stringify({ type: 'unview' }));
-    }
-    if (!actions.claim) return;
-    if (isActivationEdge) {
-      sendGridClaim(actions.claim);
       return;
     }
-    const settling = actions.claim;
-    settleTimerId = setTimeout(() => {
-      settleTimerId = null;
-      sendGridClaim(settling);
-    }, GRID_SETTLE_MS);
+    if (!actions.owedClaim) return;
+    if (isActivationEdge && sendGridClaim(actions.owedClaim)) return;
+    settleThenClaim(actions.owedClaim);
+  }
+
+  function handleEngagementEdge() {
+    const edge = decideGridEngagementEdge({
+      authoritative: ui.ptySize ?? null,
+      isActiveViewer,
+      isDocumentEngaged: isViewerEngagedAt(ui.card),
+      isDataWsOpen: ui.dataWs?.readyState === WebSocket.OPEN,
+      lastClaim,
+    });
+    if (edge === 'none') return;
+    cancelSettle();
+    if (edge === 'rebid') lastClaim = null;
+    syncGrid({ isActivationEdge: true });
   }
 
   const resizeObserver = new ResizeObserver(() => {
@@ -243,26 +284,20 @@ export function setupTerminal(termWrap: HTMLElement, ui: SessionUi) {
     cancelSettle();
     lastClaim = null;
   };
-  ui._syncGridOnEngagementEdge = () => {
-    const edge = decideGridEngagementEdge({
-      authoritative: ui.ptySize ?? null,
-      isActiveViewer,
-      isDocumentEngaged: isDocumentEngaged(),
-      isDataWsOpen: ui.dataWs?.readyState === WebSocket.OPEN,
-      lastClaim,
-    });
-    cancelSettle();
-    if (edge === 'none') return;
-    if (edge === 'rebid') lastClaim = null;
-    syncGrid({ isActivationEdge: true });
-  };
+  ui._retryOwedGridClaim = retryOwedClaim;
+  ui._syncGridOnEngagementEdge = handleEngagementEdge;
   ui._setActiveViewer = (isActive: boolean) => {
     if (isActiveViewer === isActive) return;
     isActiveViewer = isActive;
     cancelSettle();
+    owedClaim = null;
     if (isActive) reacquireWebglIfEvicted(ui);
     syncGrid({ isActivationEdge: true });
   };
+  ui.card.addEventListener('focusin', () => {
+    _hasWindowBlurredSinceFocus = false;
+    handleEngagementEdge();
+  }, { signal: ui.abortController.signal });
 
   tryLoadWebGL(ui);
 

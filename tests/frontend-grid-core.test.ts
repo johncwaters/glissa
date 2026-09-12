@@ -5,14 +5,13 @@ import {
   VIEWER_MAX_ROWS,
 } from '../shared/contracts/data-messages.ts';
 import type { DataFrameState, GridDecisionInput } from '../public/session-card/grid-core.ts';
-import { decideGridActions, decideGridEngagementEdge, isFollowingGrid, readDataFrame } from '../public/session-card/grid-core.ts';
+import { decideGridActions, decideGridEngagementEdge, isFollowingGrid, isViewerEngaged, readDataFrame } from '../public/session-card/grid-core.ts';
 
 const IDLE_VIEWER: GridDecisionInput = {
   authoritative: null,
   applied: { cols: 80, rows: 24 },
   proposal: null,
   isActiveViewer: false,
-  isDocumentEngaged: true,
   isDataWsOpen: true,
   lastClaim: null,
 };
@@ -32,7 +31,7 @@ function freshFrameState(): DataFrameState {
 test('a follower resizes to the authoritative grid and claims nothing', () => {
   const actions = decide({ authoritative: { cols: 120, rows: 40 }, applied: { cols: 80, rows: 24 } });
   assert.deepEqual(actions.resizeTo, { cols: 120, rows: 40 });
-  assert.equal(actions.claim, null);
+  assert.equal(actions.owedClaim, null);
   assert.equal(actions.isFollowing, true);
 });
 
@@ -48,7 +47,8 @@ test('no authoritative size resizes nothing', () => {
 
 test('the active viewer claims a valid proposal once', () => {
   const actions = decide({ isActiveViewer: true, proposal: { cols: 100, rows: 30 } });
-  assert.deepEqual(actions.claim, { cols: 100, rows: 30 });
+  assert.deepEqual(actions.owedClaim, { cols: 100, rows: 30 });
+  assert.equal(actions.keepsPendingSettle, false);
   assert.equal(actions.sendUnview, false);
 });
 
@@ -58,34 +58,146 @@ test('a repeated identical proposal does not re-claim', () => {
     proposal: { cols: 100, rows: 30 },
     lastClaim: { cols: 100, rows: 30 },
   });
-  assert.equal(actions.claim, null);
+  assert.equal(actions.owedClaim, null);
 });
 
-test('an unengaged viewer claims nothing, whether its measurement moved or is its first', () => {
+test('a viewer that cannot send still owes the claim its own box measured', () => {
   const movedMeasurement = decide({
     isActiveViewer: true,
-    isDocumentEngaged: false,
+    isDataWsOpen: false,
     proposal: { cols: 100, rows: 31 },
     lastClaim: { cols: 100, rows: 30 },
   });
-  assert.equal(movedMeasurement.claim, null);
-  const firstMeasurement = decide({
-    isActiveViewer: true,
-    isDocumentEngaged: false,
-    proposal: { cols: 100, rows: 30 },
-  });
-  assert.equal(firstMeasurement.claim, null);
+  assert.deepEqual(movedMeasurement.owedClaim, { cols: 100, rows: 31 });
+  assert.equal(movedMeasurement.keepsPendingSettle, false);
 });
 
-test('an unengaged viewer still resizes to the grid the pty took', () => {
+test('a viewer following the pty still resizes to the grid the pty took', () => {
   const actions = decide({
     isActiveViewer: true,
-    isDocumentEngaged: false,
     authoritative: { cols: 120, rows: 40 },
     applied: { cols: 80, rows: 24 },
   });
   assert.deepEqual(actions.resizeTo, { cols: 120, rows: 40 });
   assert.equal(actions.isFollowing, true);
+});
+
+test('a measurement that cannot be taken keeps a pending claim instead of destroying it', () => {
+  const blind = decide({ isActiveViewer: true, proposal: null, lastClaim: { cols: 100, rows: 30 } });
+  assert.equal(blind.owedClaim, null);
+  assert.equal(blind.keepsPendingSettle, true);
+  const zeroSized = decide({ isActiveViewer: true, proposal: { cols: 0, rows: 0 }, lastClaim: { cols: 100, rows: 30 } });
+  assert.equal(zeroSized.keepsPendingSettle, true);
+});
+
+test('a claim the pty already holds owes nothing and drops any pending settle', () => {
+  const owned = { cols: 100, rows: 30 };
+  const settled = decide({ isActiveViewer: true, proposal: owned, lastClaim: owned });
+  assert.equal(settled.owedClaim, null);
+  assert.equal(settled.keepsPendingSettle, false);
+});
+
+test('a viewer that stopped viewing owes nothing and cancels its settle', () => {
+  const departed = decide({ isActiveViewer: false, proposal: { cols: 100, rows: 30 }, lastClaim: { cols: 100, rows: 30 } });
+  assert.equal(departed.owedClaim, null);
+  assert.equal(departed.keepsPendingSettle, false);
+  assert.equal(departed.sendUnview, true);
+});
+
+test('a hidden document is never engaged, however the card holds focus', () => {
+  assert.equal(
+    isViewerEngaged({
+      isDocumentVisible: false,
+      isDocumentFocused: true,
+      hasFocusInsideCard: true,
+      hasWindowBlurredSinceFocus: false,
+    }),
+    false,
+  );
+  assert.equal(
+    isViewerEngaged({
+      isDocumentVisible: false,
+      isDocumentFocused: false,
+      hasFocusInsideCard: false,
+      hasWindowBlurredSinceFocus: false,
+    }),
+    false,
+  );
+  assert.equal(
+    isViewerEngaged({
+      isDocumentVisible: false,
+      isDocumentFocused: false,
+      hasFocusInsideCard: true,
+      hasWindowBlurredSinceFocus: true,
+    }),
+    false,
+  );
+});
+
+test('a visible document with focus inside the card is engaged even when the window reports no focus', () => {
+  assert.equal(
+    isViewerEngaged({
+      isDocumentVisible: true,
+      isDocumentFocused: false,
+      hasFocusInsideCard: true,
+      hasWindowBlurredSinceFocus: false,
+    }),
+    true,
+  );
+  assert.equal(
+    isViewerEngaged({
+      isDocumentVisible: true,
+      isDocumentFocused: true,
+      hasFocusInsideCard: false,
+      hasWindowBlurredSinceFocus: false,
+    }),
+    true,
+  );
+  assert.equal(
+    isViewerEngaged({
+      isDocumentVisible: true,
+      isDocumentFocused: false,
+      hasFocusInsideCard: false,
+      hasWindowBlurredSinceFocus: false,
+    }),
+    false,
+  );
+});
+
+test('a card still holding focus after a window blur is not engaged', () => {
+  assert.equal(
+    isViewerEngaged({
+      isDocumentVisible: true,
+      isDocumentFocused: false,
+      hasFocusInsideCard: true,
+      hasWindowBlurredSinceFocus: true,
+    }),
+    false,
+  );
+});
+
+test('focus landing inside the card again after a window blur restores engagement', () => {
+  assert.equal(
+    isViewerEngaged({
+      isDocumentVisible: true,
+      isDocumentFocused: false,
+      hasFocusInsideCard: true,
+      hasWindowBlurredSinceFocus: false,
+    }),
+    true,
+  );
+});
+
+test('a window that says it holds focus is engaged whatever the stale blur flag says', () => {
+  assert.equal(
+    isViewerEngaged({
+      isDocumentVisible: true,
+      isDocumentFocused: true,
+      hasFocusInsideCard: true,
+      hasWindowBlurredSinceFocus: true,
+    }),
+    true,
+  );
 });
 
 test('an engagement edge re-bids for a following viewer and only re-syncs the exact owner', () => {
@@ -121,14 +233,14 @@ test('the exact owner re-syncing on an engagement edge claims only a measurement
     lastClaim: owned,
     proposal: owned,
   });
-  assert.equal(unmoved.claim, null);
+  assert.equal(unmoved.owedClaim, null);
   const moved = decide({
     isActiveViewer: true,
     authoritative: owned,
     lastClaim: owned,
     proposal: { cols: 100, rows: 28 },
   });
-  assert.deepEqual(moved.claim, { cols: 100, rows: 28 });
+  assert.deepEqual(moved.owedClaim, { cols: 100, rows: 28 });
 });
 
 test('a proposal changing on one axis re-claims', () => {
@@ -137,18 +249,18 @@ test('a proposal changing on one axis re-claims', () => {
     proposal: { cols: 100, rows: 31 },
     lastClaim: { cols: 100, rows: 30 },
   });
-  assert.deepEqual(actions.claim, { cols: 100, rows: 31 });
+  assert.deepEqual(actions.owedClaim, { cols: 100, rows: 31 });
 });
 
 test('a NaN proposal claims nothing', () => {
   const actions = decide({ isActiveViewer: true, proposal: { cols: Number.NaN, rows: Number.NaN } });
-  assert.equal(actions.claim, null);
+  assert.equal(actions.owedClaim, null);
   assert.equal(actions.sendUnview, false);
 });
 
 test('a zero or negative proposal claims nothing', () => {
-  assert.equal(decide({ isActiveViewer: true, proposal: { cols: 0, rows: 24 } }).claim, null);
-  assert.equal(decide({ isActiveViewer: true, proposal: { cols: 80, rows: -1 } }).claim, null);
+  assert.equal(decide({ isActiveViewer: true, proposal: { cols: 0, rows: 24 } }).owedClaim, null);
+  assert.equal(decide({ isActiveViewer: true, proposal: { cols: 80, rows: -1 } }).owedClaim, null);
 });
 
 test('losing active-viewer status unviews exactly once', () => {
@@ -162,14 +274,14 @@ test('a viewer that never claimed does not unview', () => {
   assert.equal(decide({ isActiveViewer: false, lastClaim: null }).sendUnview, false);
 });
 
-test('a closed socket neither claims nor unviews but still resizes', () => {
+test('a closed socket owes its claim, unviews nothing, and still resizes', () => {
   const claimant = decide({
     isDataWsOpen: false,
     isActiveViewer: true,
     proposal: { cols: 100, rows: 30 },
     authoritative: { cols: 120, rows: 40 },
   });
-  assert.equal(claimant.claim, null);
+  assert.deepEqual(claimant.owedClaim, { cols: 100, rows: 30 });
   assert.deepEqual(claimant.resizeTo, { cols: 120, rows: 40 });
   const departed = decide({ isDataWsOpen: false, isActiveViewer: false, lastClaim: { cols: 100, rows: 30 } });
   assert.equal(departed.sendUnview, false);
@@ -225,7 +337,7 @@ test('a proposal past the contract maximum claims the maximum instead of being d
     isActiveViewer: true,
     proposal: { cols: VIEWER_MAX_COLS + 110, rows: VIEWER_MAX_ROWS + 40 },
   });
-  assert.deepEqual(actions.claim, { cols: VIEWER_MAX_COLS, rows: VIEWER_MAX_ROWS });
+  assert.deepEqual(actions.owedClaim, { cols: VIEWER_MAX_COLS, rows: VIEWER_MAX_ROWS });
 });
 
 test('a proposal exactly at the contract bound claims unchanged', () => {
@@ -233,7 +345,7 @@ test('a proposal exactly at the contract bound claims unchanged', () => {
     isActiveViewer: true,
     proposal: { cols: VIEWER_MAX_COLS, rows: VIEWER_MAX_ROWS },
   });
-  assert.deepEqual(actions.claim, { cols: VIEWER_MAX_COLS, rows: VIEWER_MAX_ROWS });
+  assert.deepEqual(actions.owedClaim, { cols: VIEWER_MAX_COLS, rows: VIEWER_MAX_ROWS });
 });
 
 test('a viewer whose clamped claim is already the last claim does not re-claim', () => {
@@ -242,7 +354,7 @@ test('a viewer whose clamped claim is already the last claim does not re-claim',
     proposal: { cols: VIEWER_MAX_COLS + 110, rows: VIEWER_MAX_ROWS + 40 },
     lastClaim: { cols: VIEWER_MAX_COLS, rows: VIEWER_MAX_ROWS },
   });
-  assert.equal(actions.claim, null);
+  assert.equal(actions.owedClaim, null);
 });
 
 test('a viewer whose claim matches the pty grid reads as exact without waiting for an echo', () => {
