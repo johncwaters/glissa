@@ -607,7 +607,7 @@ function compareEvictionPriority(left: MemoryRecord, right: MemoryRecord): numbe
 function enforceKindCaps(
   records: unknown,
   { maxPerKind = MAX_RECORDS_PER_KIND }: { maxPerKind?: number } = {},
-): { records: MemoryRecord[]; dropped: number } {
+): { records: MemoryRecord[]; dropped: number; droppedRecords: MemoryRecord[] } {
   const byKind = new Map<string, MemoryRecord[]>();
   for (const record of Array.isArray(records) ? (records as MemoryRecord[]) : []) {
     const bucket = byKind.get(record.kind) || [];
@@ -615,15 +615,18 @@ function enforceKindCaps(
     byKind.set(record.kind, bucket);
   }
   const kept: MemoryRecord[] = [];
-  let dropped = 0;
+  const droppedRecords: MemoryRecord[] = [];
   for (const bucket of byKind.values()) {
-    bucket.sort(compareEvictionPriority);
-    const overflow = Math.max(0, bucket.length - maxPerKind);
-    dropped += overflow;
-    for (const record of bucket.slice(overflow)) kept.push(record);
+    const lockedRecords = bucket.filter((record) => record.locked === true);
+    const evictableRecords = bucket.filter((record) => record.locked !== true);
+    evictableRecords.sort(compareEvictionPriority);
+    const overflow = Math.min(evictableRecords.length, Math.max(0, bucket.length - maxPerKind));
+    droppedRecords.push(...evictableRecords.slice(0, overflow));
+    for (const record of evictableRecords.slice(overflow)) kept.push(record);
+    for (const record of lockedRecords) kept.push(record);
   }
   kept.sort(compareRecords);
-  return { records: kept, dropped };
+  return { records: kept, dropped: droppedRecords.length, droppedRecords };
 }
 
 function segmentKeyForTs(ts: unknown): string {

@@ -25,6 +25,7 @@ const FILE_MODE = 0o600;
 const MAX_DELIVERED_HASHES = 2000;
 const SEARCH_CANDIDATE_FACTOR = 10;
 const SEARCH_CANDIDATE_FLOOR = 100;
+const STORE_PRUNE_INTERVAL_MS = 60000;
 
 interface ProjectionFile {
   relPath: string;
@@ -176,6 +177,7 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
   let records: MemoryRecord[] = [];
   let cachedDataVersion: number | null = null;
   let cachedLastAppendAt = 0;
+  let lastStorePruneAt: number | null = null;
   let stopped = false;
   let mutationChain: Promise<unknown> = Promise.resolve();
   let projectionChain: Promise<unknown> = Promise.resolve();
@@ -293,7 +295,7 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     }
     const capped = core.enforceKindCaps(core.applySupersessions(loaded), { maxPerKind: config.maxRecordsPerKind });
     return {
-      records: capped.records, dropped: capped.dropped, invalid, demoted,
+      records: capped.records, dropped: capped.dropped, droppedRecords: capped.droppedRecords, invalid, demoted,
     };
   }
 
@@ -316,6 +318,41 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     return records;
   }
 
+  function runStorePrune(pruneAt = now()) {
+    const versionBeforeSnapshot = openedDb.dataVersion();
+    const beforePrune = assembleRecords(openedDb.listRecords());
+    const expiredSegmentKeys = core.expiredSegmentKeys(openedDb.segmentKeys(), {
+      now: pruneAt, retainDays: config.retainDays,
+    });
+    const outcome = openedDb.pruneStore({
+      recordIds: beforePrune.droppedRecords.map((record) => record.id),
+      segmentKeys: expiredSegmentKeys,
+    });
+    if (!outcome.checkpointed) log.debugNote(() => 'wal checkpoint refused after pruning');
+    const removedRecordIds = new Set(outcome.removedRecordIds);
+    records = beforePrune.records.filter((record) => !removedRecordIds.has(record.id));
+    cachedDataVersion = versionBeforeSnapshot;
+    lastStorePruneAt = pruneAt;
+    return { expiredSegmentKeys, outcome, invalid: beforePrune.invalid, demoted: beforePrune.demoted };
+  }
+
+  function pruneStoreAfterAppend(recordsAfterAppend: MemoryRecord[]): void {
+    const pruneAt = now();
+    if (lastStorePruneAt === null || pruneAt - lastStorePruneAt >= STORE_PRUNE_INTERVAL_MS) {
+      try {
+        runStorePrune(pruneAt);
+        return;
+      } catch (error) {
+        if (isBusyError(error)) log.warn('the memory database is busy: pruning waits for the next append');
+        if (!isBusyError(error)) log.warn(`pruning after an append failed: ${errorMessage(error)}`);
+      }
+    }
+    const capped = core.enforceKindCaps(core.applySupersessions(recordsAfterAppend), {
+      maxPerKind: config.maxRecordsPerKind,
+    });
+    records = capped.records;
+  }
+
   function load(): void {
     signingKey = readOrMintSigningKey();
     const projectTagMigration = openedDb.migrateProjectTags((record) => {
@@ -330,15 +367,13 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
     }
     const missingTailPaths = Object.keys(openedDb.tailState().files).filter((tailPath) => !fs.existsSync(tailPath));
     if (missingTailPaths.length > 0) openedDb.forgetTails(missingTailPaths);
-    const expired = core.expiredSegmentKeys(openedDb.segmentKeys(), { now: now(), retainDays: config.retainDays });
-    const droppedRows = expired.length === 0 ? 0 : openedDb.deleteSegments(expired);
     openedDb.ensureSearchIndex();
-    const assembled = refreshFromDb();
+    const pruned = runStorePrune();
     cachedLastAppendAt = openedDb.lastAppendAt();
     log.note(
-      `loaded ${records.length} record(s): ${expired.length} expired segment(s) dropped `
-      + `(${droppedRows} record(s)), ${assembled.dropped} over cap, `
-      + `${assembled.invalid} invalid, ${assembled.demoted} demoted`,
+      `loaded ${records.length} record(s): ${pruned.expiredSegmentKeys.length} expired segment(s) dropped `
+      + `(${pruned.outcome.removedByRetention} record(s)), ${pruned.outcome.removedByCap} over cap, `
+      + `${pruned.invalid} invalid, ${pruned.demoted} demoted`,
     );
   }
 
@@ -526,9 +561,7 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
       const canonicalInputs: unknown[] = [];
       for (const input of list) canonicalInputs.push(await canonicalizeInputProject(input));
       currentRecords();
-      const observedBefore = cachedDataVersion;
       const written: MemoryRecord[] = [];
-      let observedInside = observedBefore;
       let stored: (MemoryRecord | null)[] = [];
       try {
         stored = openedDb.transaction(() => {
@@ -546,7 +579,6 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
             written.push(stamped);
           }
           if (written.length > 0) openedDb.setLastAppendAt(now());
-          observedInside = openedDb.dataVersion();
           return out;
         });
       } catch (error) {
@@ -554,11 +586,7 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
         log.warn('the memory database is busy: nothing was appended');
         return { records: list.map(() => null), refused: true };
       }
-      if (observedInside !== observedBefore) refreshFromDb();
-      if (observedInside === observedBefore && written.length > 0) {
-        records = core.applySupersessions([...records, ...written]);
-        cachedDataVersion = observedInside;
-      }
+      pruneStoreAfterAppend([...records, ...written]);
       if (written.length === 0) return { records: stored, refused: false };
       cachedLastAppendAt = openedDb.lastAppendAt();
       scheduleProjection();

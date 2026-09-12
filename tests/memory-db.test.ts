@@ -17,8 +17,8 @@ function tempDbPath(): string {
   return path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memdb-')), 'glissa.db');
 }
 
-function openDb(dbPath: string): MemoryDb {
-  const db = createMemoryDb({ dbPath });
+function openDb(dbPath: string, busyTimeoutMs?: number): MemoryDb {
+  const db = createMemoryDb({ dbPath, busyTimeoutMs });
   opened.push(db);
   return db;
 }
@@ -138,9 +138,42 @@ test('a month is deleted by key, which is how append-only storage and pruning co
   db.insertRecord(record());
   db.insertRecord(record({ id: 'm-0000000000000002', ts: Date.UTC(2025, 0, 15), text: 'an older fact' }));
   assert.deepEqual(db.segmentKeys().sort(), ['202501', '202608']);
-  assert.equal(db.deleteSegments(['202501']), 1);
+  assert.deepEqual(db.pruneStore({ segmentKeys: ['202501'] }), {
+    checkpointed: true,
+    removedByCap: 0,
+    removedByRetention: 1,
+    removedRecordIds: ['m-0000000000000002'],
+  });
   assert.deepEqual(db.listRecords().map((entry) => entry.id), ['m-0000000000000001']);
   assert.equal(foundIds(db.searchIds(['older'], 10)).length, 0, 'the index went with the month');
+});
+
+test('a truncate checkpoint succeeds on a fresh database', () => {
+  const db = openDb(tempDbPath());
+  assert.equal(db.checkpoint(), true);
+});
+
+test('a checkpoint another reader pins is reported refused, and succeeds once that reader commits', () => {
+  const dbPath = tempDbPath();
+  const db = openDb(dbPath, 50);
+  db.insertRecord(record());
+  assert.equal(db.checkpoint(), true, 'nothing pins the log yet');
+  db.insertRecord(record({ id: 'm-0000000000000002', text: 'a fact written behind the reader' }));
+
+  const reader = new DatabaseSync(dbPath);
+  try {
+    reader.exec('PRAGMA busy_timeout = 50');
+    reader.exec('BEGIN');
+    reader.prepare('SELECT count(*) AS total FROM memory_records').get();
+    assert.equal(db.checkpoint(), false, 'a pinned log is still on disk, so the truncate is a refusal');
+    assert.ok(fs.statSync(`${dbPath}-wal`).size > 0);
+    reader.exec('COMMIT');
+  } finally {
+    reader.close();
+  }
+
+  assert.equal(db.checkpoint(), true);
+  assert.equal(fs.statSync(`${dbPath}-wal`).size, 0, 'the reclaimed log is truncated to nothing');
 });
 
 test('the search index is derived, so a count that disagrees with the canon is rebuilt', () => {

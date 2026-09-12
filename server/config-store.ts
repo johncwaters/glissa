@@ -6,6 +6,7 @@ import os from 'node:os';
 import { canonicalizePath, equalsIgnoringCaseOnWindows } from '../shared/paths.ts';
 import { DEFAULT_BRANCH_GC_PREFIXES } from './core/branch-gc-core.ts';
 import { decideConfigPath, glissaHomeDir as resolveGlissaHomeDir } from './core/config-path-core.ts';
+import { readEnvSecrets, withEnvSecrets, withoutEnvSecrets } from './core/config-secrets-core.ts';
 import { BranchGcFileSettings, Config, configIssueMessage, RUNTIME_CONFIG_SCALAR_KEYS } from '../shared/contracts/index.ts';
 import { isPlainObject } from './core/usage-number-core.ts';
 import {
@@ -228,7 +229,7 @@ function loadConfigFile(configPath: string, { exitOnError = true }: { exitOnErro
   const loadedContent = fs.readFileSync(configPath, 'utf8');
   try {
     const parsed = normalizeConfigFile(JSON.parse(loadedContent));
-    return { config: parsed, loadedContent };
+    return { config: withEnvSecrets(parsed, readEnvSecrets(process.env)), loadedContent };
   } catch (err) {
     const invalidBackupPath = `${configPath}.invalid.bak`;
     try {
@@ -343,6 +344,7 @@ function createConfigStore({ settingsDefaults }: { settingsDefaults?: Partial<De
   const launchDefaultKeys = new Set(Object.keys(settingsDefaults || {}));
 
   const isLocalConfig = configPath === path.join(packageRoot, 'config.json');
+  const envSecrets = readEnvSecrets(process.env);
   const loadedConfig = loadConfigFile(configPath);
   const config = loadedConfig.config;
   writeBackupContent(`${configPath}.boot.bak`, loadedConfig.loadedContent);
@@ -351,7 +353,7 @@ function createConfigStore({ settingsDefaults }: { settingsDefaults?: Partial<De
 
   if (Array.isArray(config.projects) && ensureProjectIds(config.projects)) {
     try {
-      writeJsonAtomicSync(configPath, config, { mode: CONFIG_FILE_MODE });
+      writeJsonAtomicSync(configPath, withoutEnvSecrets(config, envSecrets), { mode: CONFIG_FILE_MODE });
       console.log('[config] Auto-assigned IDs to projects missing them');
     } catch (err) {
       console.warn('[config] Failed to persist auto-assigned project IDs:', errorMessage(err));
@@ -385,13 +387,14 @@ function createConfigStore({ settingsDefaults }: { settingsDefaults?: Partial<De
       return null;
     }
     mutatorFn(freshConfig);
-    const mutatedValidation = validateConfig(freshConfig);
+    const effectiveConfig = withEnvSecrets(freshConfig, envSecrets);
+    const mutatedValidation = validateConfig(effectiveConfig);
     if (!mutatedValidation.ok) {
       warnInvalidConfig('save config.json', mutatedValidation);
       return null;
     }
     try {
-      const nextContent = JSON.stringify(freshConfig, null, 2);
+      const nextContent = JSON.stringify(withoutEnvSecrets(effectiveConfig, envSecrets), null, 2);
       if (freshContent !== nextContent) writeBackupContent(`${configPath}.bak`, freshContent);
 
       _lastWrittenContent = nextContent;
@@ -403,7 +406,7 @@ function createConfigStore({ settingsDefaults }: { settingsDefaults?: Partial<De
       console.warn('[config] Failed to write config.json:', errorCode(err));
       return null;
     }
-    return freshConfig;
+    return effectiveConfig;
   }
 
   function getSettings() {
@@ -506,7 +509,7 @@ function createConfigStore({ settingsDefaults }: { settingsDefaults?: Partial<De
       if (_lastAppliedContent !== null && data === _lastAppliedContent) return;
       let newConfig: GlissaConfig;
       try {
-        newConfig = normalizeConfigFile(JSON.parse(data));
+        newConfig = withEnvSecrets(normalizeConfigFile(JSON.parse(data)), envSecrets);
       } catch (parseErr) {
         console.warn('[config] Invalid config.json:', errorMessage(parseErr));
         return;

@@ -83,13 +83,24 @@ interface TailEntry {
   ts: number;
 }
 
+interface PruneStoreOptions {
+  recordIds?: Iterable<string>;
+  segmentKeys?: Iterable<string>;
+}
+
+interface PruneStoreOutcome {
+  checkpointed: boolean;
+  removedByCap: number;
+  removedByRetention: number;
+  removedRecordIds: string[];
+}
+
 interface MemoryDb {
   checkpoint(): boolean;
   close(): void;
   dataVersion(): number;
   dbPath: string;
   deleteRecord(id: string): void;
-  deleteSegments(keys: Iterable<string>): number;
   deliveredCount(): number;
   distillCursorSeq(): number;
   distillFailures(): number;
@@ -104,6 +115,7 @@ interface MemoryDb {
     migrateRecord: (record: MemoryRecord) => MemoryRecord | null,
   ): { applied: boolean; examined: number; remapped: number };
   noteDelivered(hashes: Iterable<string>, options?: { maxHashes?: number }): number;
+  pruneStore(options?: PruneStoreOptions): PruneStoreOutcome;
   rebuildSearchIndex(): number;
   recordCount(): number;
   saveTailOffset(entry: TailEntry, options?: { maxEntries?: number }): void;
@@ -184,6 +196,10 @@ function createMemoryDb({ dbPath, busyTimeoutMs }: { dbPath: string; busyTimeout
   const db = openDatabase(dbPath, { busyTimeoutMs });
   ensureSeqColumn(db);
   applySchema(db, SCHEMA);
+  db.exec(`CREATE TEMP TABLE IF NOT EXISTS memory_prune_ids (
+    id TEXT PRIMARY KEY,
+    reason TEXT NOT NULL
+  ) WITHOUT ROWID`);
 
   const statements = {
     listRecords: db.prepare('SELECT * FROM memory_records ORDER BY ts, id'),
@@ -202,7 +218,6 @@ function createMemoryDb({ dbPath, busyTimeoutMs }: { dbPath: string; busyTimeout
     countRecords: db.prepare('SELECT count(*) AS total FROM memory_records'),
     maxSeq: db.prepare('SELECT coalesce(max(seq), 0) AS high FROM memory_records'),
     segmentKeys: db.prepare('SELECT DISTINCT segment_key FROM memory_records'),
-    deleteSegment: db.prepare('DELETE FROM memory_records WHERE segment_key = ?'),
     insertFts: db.prepare('INSERT INTO memory_records_fts (id, body) VALUES (?, ?)'),
     deleteFts: db.prepare('DELETE FROM memory_records_fts WHERE id = ?'),
     clearFts: db.prepare('DELETE FROM memory_records_fts'),
@@ -210,6 +225,18 @@ function createMemoryDb({ dbPath, busyTimeoutMs }: { dbPath: string; busyTimeout
     countFts: db.prepare('SELECT count(*) AS total FROM memory_records_fts'),
     search: db.prepare(`SELECT id FROM memory_records_fts WHERE memory_records_fts MATCH ?
       ORDER BY bm25(memory_records_fts) LIMIT ?`),
+    walCheckpointTruncate: db.prepare('PRAGMA wal_checkpoint(TRUNCATE)'),
+    clearPruneIds: db.prepare('DELETE FROM memory_prune_ids'),
+    insertCapPruneId: db.prepare(`INSERT OR IGNORE INTO memory_prune_ids (id, reason)
+      SELECT id, 'cap' FROM memory_records WHERE id = ? AND locked = 0`),
+    insertRetentionPruneIds: db.prepare(`INSERT INTO memory_prune_ids (id, reason)
+      SELECT id, 'retention' FROM memory_records WHERE segment_key = ? AND locked = 0
+      ON CONFLICT(id) DO UPDATE SET reason = 'retention'`),
+    countCapPruneIds: db.prepare("SELECT count(*) AS total FROM memory_prune_ids WHERE reason = 'cap'"),
+    countRetentionPruneIds: db.prepare("SELECT count(*) AS total FROM memory_prune_ids WHERE reason = 'retention'"),
+    listPruneIds: db.prepare('SELECT id FROM memory_prune_ids ORDER BY id'),
+    deletePrunedFts: db.prepare('DELETE FROM memory_records_fts WHERE id IN (SELECT id FROM memory_prune_ids)'),
+    deletePrunedRecords: db.prepare('DELETE FROM memory_records WHERE id IN (SELECT id FROM memory_prune_ids)'),
     listTails: db.prepare('SELECT * FROM memory_tail_state'),
     saveTail: db.prepare(`INSERT INTO memory_tail_state (path, size, mtime_ms, read_offset, ts)
       VALUES ($path, $size, $mtime_ms, $read_offset, $ts)
@@ -319,11 +346,35 @@ function createMemoryDb({ dbPath, busyTimeoutMs }: { dbPath: string; busyTimeout
 
   function checkpoint(): boolean {
     try {
-      db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
-      return true;
+      const row = statements.walCheckpointTruncate.get();
+      if (!row) return false;
+      return Number(row.busy) === 0 && Number(row.log) === Number(row.checkpointed);
     } catch {
       return false;
     }
+  }
+
+  function pruneStore({ recordIds = [], segmentKeys = [] }: PruneStoreOptions = {}): PruneStoreOutcome {
+    let removedByCap = 0;
+    let removedByRetention = 0;
+    let removedRecordIds: string[] = [];
+    transaction(() => {
+      statements.clearPruneIds.run();
+      for (const id of recordIds) statements.insertCapPruneId.run(id);
+      for (const key of segmentKeys) statements.insertRetentionPruneIds.run(key);
+      removedByCap = Number(requiredAggregateRow(statements.countCapPruneIds.get()).total);
+      removedByRetention = Number(requiredAggregateRow(statements.countRetentionPruneIds.get()).total);
+      removedRecordIds = statements.listPruneIds.all().map((row) => String(row.id));
+      if (removedByCap + removedByRetention > 0) {
+        statements.deletePrunedFts.run();
+        statements.deletePrunedRecords.run();
+      }
+      statements.clearPruneIds.run();
+    });
+    if (removedByCap + removedByRetention === 0) {
+      return { checkpointed: true, removedByCap, removedByRetention, removedRecordIds };
+    }
+    return { checkpointed: checkpoint(), removedByCap, removedByRetention, removedRecordIds };
   }
 
   function searchIds(terms: unknown, limit: number): string[] | null {
@@ -395,18 +446,6 @@ function createMemoryDb({ dbPath, busyTimeoutMs }: { dbPath: string; busyTimeout
     dataVersion: () => dataVersion(db),
     dbPath,
     deleteRecord,
-    deleteSegments(keys: Iterable<string>) {
-      let removed = 0;
-      transaction(() => {
-        for (const key of keys) {
-          const outcome = statements.deleteSegment.run(key);
-          removed += Number(outcome.changes);
-        }
-        rebuildSearchIndex();
-      });
-      checkpoint();
-      return removed;
-    },
     deliveredCount: () => Number(requiredAggregateRow(statements.countDelivered.get()).total),
     distillCursorSeq: () => readMetaInteger(DISTILL_CURSOR_KEY),
     distillFailures: () => readMetaInteger(DISTILL_FAILURE_KEY),
@@ -423,6 +462,7 @@ function createMemoryDb({ dbPath, busyTimeoutMs }: { dbPath: string; busyTimeout
     listRecords: () => statements.listRecords.all().map((row) => rowToRecord(asMemoryRow(row))),
     migrateProjectTags,
     noteDelivered,
+    pruneStore,
     rebuildSearchIndex,
     recordCount: () => Number(requiredAggregateRow(statements.countRecords.get()).total),
     saveTailOffset,
@@ -452,4 +492,4 @@ export {
   recordToRow,
   rowToRecord,
 };
-export type { MemoryDb, MemoryRow, ResultRow, TailEntry };
+export type { MemoryDb, MemoryRow, PruneStoreOptions, PruneStoreOutcome, ResultRow, TailEntry };

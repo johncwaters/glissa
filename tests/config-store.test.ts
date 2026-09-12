@@ -9,6 +9,7 @@ import {
   CONFIG_FILE_MODE, SECRET_PRESENCE_SUFFIX,
 } from '../server/config-store.ts';
 import type { ConfigStore, DefaultConfig, GlissaConfig } from '../server/config-store.ts';
+import { ENV_SECRET_BINDINGS } from '../server/core/config-secrets-core.ts';
 import { ConfigUpdate } from '../shared/contracts/index.ts';
 import { SECRET_PRESENCE_SUFFIX as CLIENT_SECRET_PRESENCE_SUFFIX } from '../public/settings-view-core.ts';
 
@@ -47,6 +48,23 @@ function richConfig(overrides: ConfigFileContent = {}): ConfigFileContent {
     projects: [{ id: 'p1', name: 'proj', path: '/repo/proj' }],
     ...overrides,
   };
+}
+
+const SECRET_ENV_VARIABLE_NAMES = ENV_SECRET_BINDINGS.map((binding) => binding.environmentVariable);
+
+function withSecretEnv<T>(values: Record<string, string>, fn: () => T): T {
+  const previous = new Map(SECRET_ENV_VARIABLE_NAMES.map((name) => [name, process.env[name]]));
+  for (const name of SECRET_ENV_VARIABLE_NAMES) delete process.env[name];
+  for (const [name, value] of Object.entries(values)) process.env[name] = value;
+  try {
+    return fn();
+  } finally {
+    for (const name of SECRET_ENV_VARIABLE_NAMES) {
+      const restored = previous.get(name);
+      delete process.env[name];
+      if (restored != null) process.env[name] = restored;
+    }
+  }
 }
 
 function withStore<T>(
@@ -413,6 +431,59 @@ test('getSettings redacts the telegram bot token and the PostHog api key to pres
     const cleared = store.getSettings();
     assert.equal(block(cleared.telegram).botTokenConfigured, false, 'an empty string is not a stored credential');
     assert.equal(block(cleared.posthog).apiKeyConfigured, false);
+  });
+});
+
+test('a secret from the environment wins over the one stored in config.json', () => {
+  withSecretEnv({ GLISSA_POSTHOG_API_KEY: 'phx-from-env', GLISSA_TELEGRAM_BOT_TOKEN: 'bot-from-env' }, () => {
+    const stored = {
+      projects: [],
+      posthog: { enabled: true, apiKey: 'phx-from-file' },
+      telegram: { botToken: 'bot-from-file', chatId: '123' },
+    };
+    withStore(stored, (store) => {
+      assert.equal(block(store.config.posthog).apiKey, 'phx-from-env');
+      assert.equal(block(store.config.telegram).botToken, 'bot-from-env');
+      assert.equal(block(store.config.telegram).chatId, '123', 'the rest of the block is untouched');
+    });
+  });
+});
+
+test('a save leaves out every secret the environment provides', () => {
+  withSecretEnv({ GLISSA_POSTHOG_API_KEY: 'phx-from-env' }, () => {
+    const stored = { projects: [], posthog: { enabled: true, apiKey: 'phx-from-file' } };
+    withStore(stored, (store, configPath) => {
+      const saved = store.save((config) => {
+        config.posthog = { ...block(config.posthog), enabled: false, apiKey: 'phx-from-dashboard' };
+      });
+
+      const written = readJson(configPath);
+      assert.equal(Object.hasOwn(block(written.posthog), 'apiKey'), false, 'the file carries no api key');
+      assert.equal(fs.readFileSync(configPath, 'utf8').includes('phx-'), false, 'no api key anywhere in the file');
+      assert.equal(block(written.posthog).enabled, false, 'the rest of the block still persists');
+      assert.equal(block(saved?.posthog).apiKey, 'phx-from-env', 'the environment still wins in memory');
+    });
+  });
+});
+
+test('a dashboard secret still persists when the environment provides none', () => {
+  withSecretEnv({}, () => {
+    withStore({ projects: [] }, (store, configPath) => {
+      store.save((config) => { config.telegram = { botToken: 'bot-from-dashboard', chatId: '123' }; });
+
+      assert.equal(block(readJson(configPath).telegram).botToken, 'bot-from-dashboard');
+    });
+  });
+});
+
+test('getSettings reports a secret the environment alone provides as configured', () => {
+  withSecretEnv({ GLISSA_TELEGRAM_BOT_TOKEN: 'bot-from-env' }, () => {
+    withStore({ projects: [], telegram: { chatId: '123' } }, (store) => {
+      const settings = store.getSettings();
+
+      assert.equal(block(settings.telegram).botTokenConfigured, true);
+      assert.equal(JSON.stringify(settings).includes('bot-from-env'), false, 'the projection still redacts it');
+    });
   });
 });
 

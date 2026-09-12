@@ -184,6 +184,13 @@ On first run, Glissa creates `~/.glissa/config.json` with defaults. You can also
 
 This is a minimal starting example. The full key list (`integrationBranch`, `autoResume`, `prReview`, `posthog`, `detectBackgroundAgents`, `recordSignals`, and more) is documented in the dashboard's Settings dialog and can also be edited directly in `config.json`.
 
+Two credentials can come from the environment instead, which keeps them out of `config.json` altogether:
+
+- `GLISSA_POSTHOG_API_KEY` supplies `posthog.apiKey`.
+- `GLISSA_TELEGRAM_BOT_TOKEN` supplies `telegram.botToken`.
+
+Either one overrides the stored value, and Glissa strips that key from `config.json` on every write, so a save from the dashboard cannot put it back. The systemd unit installed by the dotfiles reads both from `~/.glissa/secrets.env` when that file exists.
+
 ## Requirements
 
 - **Node.js** >= 22.18.0 to run Glissa (clone path), which is where type stripping is on by default, so the `.ts` sources and the `.test.ts` suite run unbuilt; `node:sqlite` FTS5 for the long-term memory store lands earlier, at 22.16.0. The standalone CLI install needs **Node.js >= 22.22.2**, because it goes through npm 12 and that is npm 12's own engine floor (`npx npm@12` fails the same check on an older Node). Distro-packaged Node is usually far older than either floor; use nodesource or nvm.

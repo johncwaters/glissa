@@ -229,6 +229,16 @@ function knowledge(text: string, project: string | null = '/repos/glissa'): Know
   };
 }
 
+function operatorKnowledge(text: string): KnowledgeInput {
+  return {
+    kind: 'knowledge',
+    layer: 'semantic',
+    project: '/repos/glissa',
+    source: { kind: 'operator', vendor: 'glissa', sessionId: null },
+    text,
+  };
+}
+
 function durableRecord(overrides: Partial<MemoryRecord> = {}): MemoryRecord {
   return {
     id: 'm-1111111111111111',
@@ -587,7 +597,9 @@ test('an expired month is deleted whole on load and a live one is kept', async (
     const seed = openStore(dir);
     await seed.append(knowledge('a recent fact about the worktree engine'));
     await seed.stop();
-    plantRow(dir, { ...forgedRecord('a fact from an expired month'), id: 'm-1111111111111111', ts: Date.UTC(2025, 3, 2) });
+    plantRow(dir, {
+      ...forgedRecord('a fact from an expired month'), id: 'm-1111111111111111', locked: false, ts: Date.UTC(2025, 3, 2),
+    });
     assert.equal(readCanon(dir).length, 2);
 
     const reopened = openStore(dir, { config: { retainDays: 30 } });
@@ -595,6 +607,162 @@ test('an expired month is deleted whole on load and a live one is kept', async (
     assert.equal(reopened.records().length, 1);
     assert.equal(reopened.records()[0].text.includes('worktree engine'), true);
     await reopened.stop();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an expired month is deleted after append without another boot', async () => {
+  const dir = tempDir();
+  try {
+    let currentTime = START;
+    const store = openStore(dir, { config: { retainDays: 30 }, now: () => currentTime });
+    const expired = { ...forgedRecord('a fact from an expired month'), locked: false };
+    plantRow(dir, { ...expired, ts: Date.UTC(2025, 3, 2) });
+    assert.equal(readCanon(dir).length, 1);
+
+    currentTime += 60000;
+    await store.append(knowledge('a recent fact about the worktree engine'));
+
+    assert.equal(readCanon(dir).length, 1);
+    assert.equal(store.records()[0].text.includes('worktree engine'), true);
+    assert.deepEqual(store.search('expired'), []);
+    await store.stop();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('append pruning keeps the persisted table at the per-kind cap', async () => {
+  const dir = tempDir();
+  try {
+    let currentTime = START;
+    const store = openStore(dir, { config: { maxRecordsPerKind: 2 }, now: () => currentTime });
+    await store.append(knowledge('knowledge fact number one'));
+    currentTime += 1;
+    await store.append(knowledge('knowledge fact number two'));
+    currentTime += 60000;
+    await store.append(knowledge('knowledge fact number three'));
+
+    withRawDb(dir, (raw) => {
+      assert.equal(raw.prepare("SELECT count(*) AS total FROM memory_records WHERE kind = 'knowledge'").get()?.total, 2);
+      assert.equal(raw.prepare('SELECT count(*) AS total FROM memory_records_fts').get()?.total, 2);
+    });
+    assert.deepEqual(store.records().map((record) => record.text), [
+      'knowledge fact number two',
+      'knowledge fact number three',
+    ]);
+    await store.stop();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('append pruning runs at most once per minute while the in-memory cap remains immediate', async () => {
+  const dir = tempDir();
+  let currentTime = START;
+  let pruneCalls = 0;
+  try {
+    const store = openStore(dir, {
+      config: { maxRecordsPerKind: 1 },
+      now: () => currentTime,
+      extra: {
+        openDb(options) {
+          const db = createMemoryDb(options);
+          return {
+            ...db,
+            pruneStore(pruneOptions) {
+              pruneCalls += 1;
+              return db.pruneStore(pruneOptions);
+            },
+          };
+        },
+      },
+    });
+    await store.append(knowledge('knowledge fact number one'));
+    currentTime += 1;
+    await store.append(knowledge('knowledge fact number two'));
+    assert.equal(pruneCalls, 1);
+    assert.deepEqual(store.records().map((record) => record.text), ['knowledge fact number two']);
+
+    currentTime += 60000;
+    await store.append(knowledge('knowledge fact number three'));
+    assert.equal(pruneCalls, 2);
+    assert.deepEqual(readCanon(dir).map((record) => record.text), ['knowledge fact number three']);
+    await store.stop();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a prune that fails after the append committed still leaves the written row visible', async () => {
+  const dir = tempDir();
+  let currentTime = START;
+  const lines: string[] = [];
+  try {
+    const store = openStore(dir, {
+      now: () => currentTime,
+      logger: { log(message) { lines.push(message); }, warn(message) { lines.push(message); } },
+      extra: {
+        openDb(options) {
+          const db = createMemoryDb(options);
+          let bootPruneDone = false;
+          return {
+            ...db,
+            pruneStore(pruneOptions) {
+              if (bootPruneDone) throw new Error('database or disk is full');
+              bootPruneDone = true;
+              return db.pruneStore(pruneOptions);
+            },
+          };
+        },
+      },
+    });
+    currentTime += 60000;
+    const written = requireRecord(await store.append(knowledge('the poller ticks every 15 minutes')), 'appended record');
+    assert.deepEqual(store.records().map((record) => record.id), [written.id]);
+    assert.deepEqual(readCanon(dir).map((record) => record.id), [written.id]);
+    assert.equal(lines.some((line) => line.includes('pruning after an append failed')), true);
+    await store.stop();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a foreign commit landing after the prune commit is still reloaded on the next read', async () => {
+  const dir = tempDir();
+  try {
+    const seed = openStore(dir);
+    await seed.append(knowledge('the poller ticks every 15 minutes'));
+    await seed.stop();
+
+    let foreignAppends = 0;
+    const store = openStore(dir, {
+      extra: {
+        openDb(options) {
+          const db = createMemoryDb(options);
+          return {
+            ...db,
+            pruneStore(pruneOptions) {
+              const outcome = db.pruneStore(pruneOptions);
+              if (foreignAppends > 0) return outcome;
+              foreignAppends += 1;
+              const signingKey = fs.readFileSync(path.join(dir, 'hmac-key'), 'utf8').trim();
+              plantRow(dir, withSignature(durableRecord({
+                id: 'm-5555555555555555', text: 'a second connection committed this fact',
+              }), signingKey));
+              return outcome;
+            },
+          };
+        },
+      },
+    });
+    assert.equal(foreignAppends, 1);
+    assert.deepEqual(
+      store.records().map((record) => record.text).sort(),
+      ['a second connection committed this fact', 'the poller ticks every 15 minutes'],
+    );
+    await store.stop();
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -1193,26 +1361,104 @@ test('forget scans every row, so one stamped with a month its ts does not name i
   }
 });
 
-test('forget expunges a row the kind cap evicted, so it cannot resurface in dist/ after a later boot', async () => {
+test('boot pruning deletes over-cap rows from the canon and search mirror while never evicting a locked record', async () => {
   const dir = tempDir();
   try {
     const seed = openStore(dir);
-    await seed.append(knowledge('the staging deploy passphrase was pasted into the prompt'));
-    await seed.append(knowledge('the poller ticks every 15 minutes'));
+    const locked = requireRecord(await seed.append({
+      ...operatorKnowledge('the operator locked this knowledge record'),
+      locked: true,
+    }), 'locked knowledge');
+    await seed.append(operatorKnowledge('the staging deploy passphrase was pasted into the prompt'));
+    const recent = requireRecord(
+      await seed.append(operatorKnowledge('the poller ticks every 15 minutes')), 'recent knowledge',
+    );
     await seed.stop();
 
-    const store = openStore(dir, { config: { maxRecordsPerKind: 1 } });
-    assert.equal(store.records().length, 1);
-    assert.equal(store.records()[0].text.includes('passphrase'), false, 'the doomed row is not resident');
-    const result = requireForget(await store.forget('passphrase'));
-    assert.equal(result.ok, true);
-    assert.equal(readCanon(dir).some((record) => record.text.includes('passphrase')), false);
+    const lines: string[] = [];
+    const store = openStore(dir, {
+      config: { maxRecordsPerKind: 2 },
+      logger: { log(message) { lines.push(message); }, warn(message) { lines.push(message); } },
+    });
+    assert.deepEqual(store.records().map((record) => record.id).sort(), [locked.id, recent.id].sort());
+    withRawDb(dir, (raw) => {
+      assert.equal(raw.prepare("SELECT count(*) AS total FROM memory_records WHERE kind = 'knowledge'").get()?.total, 2);
+      assert.equal(raw.prepare('SELECT count(*) AS total FROM memory_records_fts').get()?.total, 2);
+      assert.equal(raw.prepare('SELECT count(*) AS total FROM memory_records WHERE id = ?').get(locked.id)?.total, 1);
+    });
+    assert.deepEqual(store.search('passphrase'), []);
+    assert.equal(recordById(store, locked.id).locked, true);
+    assert.equal(lines.some((line) => line.includes('1 over cap')), true);
     await store.stop();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
-    const reopened = openStore(dir);
-    await reopened.flushProjection();
-    assert.equal(projectionText(dir).includes('passphrase'), false);
-    await reopened.stop();
+test('a re-minted key demotes every locked row, and the table still refuses to prune one over cap', SKIP_ON_WINDOWS, async () => {
+  const dir = tempDir();
+  try {
+    let clock = START;
+    const seed = openStore(dir, { now: () => clock++ });
+    const first = requireRecord(
+      await seed.append({ ...operatorKnowledge('the operator locked the first fact'), locked: true }), 'first locked',
+    );
+    const second = requireRecord(
+      await seed.append({ ...operatorKnowledge('the operator locked the second fact'), locked: true }), 'second locked',
+    );
+    const third = requireRecord(
+      await seed.append({ ...operatorKnowledge('the operator locked the third fact'), locked: true }), 'third locked',
+    );
+    await seed.stop();
+    fs.chmodSync(path.join(dir, 'hmac-key'), 0o644);
+
+    const lines: string[] = [];
+    const store = openStore(dir, {
+      config: { maxRecordsPerKind: 1 },
+      logger: { log(message) { lines.push(message); }, warn(message) { lines.push(message); } },
+    });
+    assert.equal(lines.some((line) => line.includes('3 demoted')), true, 'the widened key demotes every signed row');
+    assert.deepEqual(
+      readCanon(dir).map((record) => record.id).sort(),
+      [first.id, second.id, third.id].sort(),
+      'a row the table still calls locked survives a cap prune the demoted view asked for',
+    );
+    withRawDb(dir, (raw) => {
+      assert.equal(raw.prepare('SELECT count(*) AS total FROM memory_records WHERE locked = 1').get()?.total, 3);
+      assert.equal(raw.prepare('SELECT count(*) AS total FROM memory_records_fts').get()?.total, 3);
+    });
+    await store.stop();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an expired month keeps its locked record while the unlocked one beside it is pruned on boot', async () => {
+  const dir = tempDir();
+  try {
+    let expiredMonthClock = Date.UTC(2025, 3, 2);
+    const seed = openStore(dir, { now: () => expiredMonthClock++ });
+    const lockedInExpiredMonth = requireRecord(await seed.append({
+      ...operatorKnowledge('the operator locked this fact in an expired month'),
+      locked: true,
+    }), 'locked knowledge');
+    const unlockedInExpiredMonth = requireRecord(
+      await seed.append(operatorKnowledge('an unlocked fact from the same expired month')), 'unlocked knowledge',
+    );
+    await seed.stop();
+
+    const store = openStore(dir, { config: { retainDays: 30 } });
+    assert.deepEqual(store.records().map((entry) => entry.id), [lockedInExpiredMonth.id], 'the view keeps the locked one');
+    assert.equal(recordById(store, lockedInExpiredMonth.id).locked, true);
+    assert.deepEqual(readCanon(dir).map((entry) => entry.id), [lockedInExpiredMonth.id], 'so does the table');
+    withRawDb(dir, (raw) => {
+      assert.equal(
+        raw.prepare('SELECT count(*) AS total FROM memory_records_fts WHERE id = ?').get(unlockedInExpiredMonth.id)?.total,
+        0,
+        'the unlocked sibling went with its mirror row',
+      );
+    });
+    await store.stop();
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
