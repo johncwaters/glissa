@@ -47,15 +47,15 @@ class HookRouter {
     this._sessions = new Map();
   }
 
-  register(glissaId: string, { token, onSignal, onEvent = null, hooks = claudeCode.hooks }: HookRegistration): void {
-    if (!glissaId || !token || typeof onSignal !== 'function') {
-      throw new Error('HookRouter.register requires glissaId, token, onSignal');
+  register(glimmervoidId: string, { token, onSignal, onEvent = null, hooks = claudeCode.hooks }: HookRegistration): void {
+    if (!glimmervoidId || !token || typeof onSignal !== 'function') {
+      throw new Error('HookRouter.register requires glimmervoidId, token, onSignal');
     }
-    this._sessions.set(glissaId, { token, onSignal, onEvent, hooks });
+    this._sessions.set(glimmervoidId, { token, onSignal, onEvent, hooks });
   }
 
-  unregister(glissaId: string): void {
-    this._sessions.delete(glissaId);
+  unregister(glimmervoidId: string): void {
+    this._sessions.delete(glimmervoidId);
   }
 
   handle(envelope: unknown): HookHandleResult {
@@ -64,8 +64,8 @@ class HookRouter {
       console.warn(`[hook-source] Dropped invalid hook envelope: ${parsedEnvelope.error.issues[0]?.message || 'invalid payload'}`);
       return { status: 400, signal: null, reason: 'invalid-envelope' };
     }
-    const { glissaId, event, token, payload } = parsedEnvelope.data;
-    const entry = this._sessions.get(glissaId);
+    const { glimmervoidId, event, token, payload } = parsedEnvelope.data;
+    const entry = this._sessions.get(glimmervoidId);
     if (!entry) {
       return { status: 404, signal: null, reason: 'unknown-session' };
     }
@@ -81,7 +81,7 @@ class HookRouter {
       try {
         entry.onEvent(event, mappedPayload);
       } catch (err) {
-        console.warn(`[hook-source] onEvent threw for ${glissaId}: ${err instanceof Error ? err.message : String(err)}`);
+        console.warn(`[hook-source] onEvent threw for ${glimmervoidId}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
     if (!signal) {
@@ -97,7 +97,7 @@ class HookRouter {
         ts: Date.now(), event, payload: mappedPayload,
       });
     } catch (err) {
-      console.warn(`[hook-source] onSignal threw for ${glissaId}: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[hook-source] onSignal threw for ${glimmervoidId}: ${err instanceof Error ? err.message : String(err)}`);
     }
     return { status: 200, signal, reason: 'ok' };
   }

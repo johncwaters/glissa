@@ -288,7 +288,7 @@ function pushHistoryFor(screenId: string) {
     history.back();
     return;
   }
-  const state = { glissaScreen: screenId };
+  const state = { glimmervoidScreen: screenId };
   if (pushedHistoryEntry) {
     history.replaceState(state, '');
     return;
@@ -315,7 +315,7 @@ function surrenderHistoryEntry() {
 }
 
 function screenIdFromHistoryState(state: unknown): string | null {
-  const named = (state as { glissaScreen?: unknown } | null)?.glissaScreen;
+  const named = (state as { glimmervoidScreen?: unknown } | null)?.glimmervoidScreen;
   return typeof named === 'string' ? named : null;
 }
 

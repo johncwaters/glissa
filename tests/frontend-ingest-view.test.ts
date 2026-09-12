@@ -22,7 +22,7 @@ function event(seq: number, overrides: WireActivityEvent = {}): WireActivityEven
     kind: 'output',
     ts: NOW,
     seq,
-    scope: { root: '/home/johnw/glissa', sessionId: 's1' },
+    scope: { root: '/home/johnw/glimmervoid', sessionId: 's1' },
     summary: `event ${seq}`,
     ...overrides,
   };
@@ -37,7 +37,7 @@ test('a wire event normalizes to the flat shape the rows render from', async () 
     kind: 'output',
     ts: NOW,
     summary: 'event 7',
-    root: '/home/johnw/glissa',
+    root: '/home/johnw/glimmervoid',
     sessionId: 's1',
   });
 });
@@ -74,9 +74,9 @@ test('activity age reads in seconds, because a terminal event is interesting for
 test('an event with no root is labelled machine, and one with a root shows its last segment', async () => {
   const { activityScopeText } = await importCore();
   assert.equal(activityScopeText({ root: null }), 'machine');
-  assert.equal(activityScopeText({ root: '/home/johnw/glissa' }), 'glissa');
-  assert.equal(activityScopeText({ root: 'C:\\Users\\johnw\\Projects\\glissa\\' }), 'glissa');
-  assert.equal(activityScopeText({ root: 'glissa' }), 'glissa');
+  assert.equal(activityScopeText({ root: '/home/johnw/glimmervoid' }), 'glimmervoid');
+  assert.equal(activityScopeText({ root: 'C:\\Users\\johnw\\Projects\\glimmervoid\\' }), 'glimmervoid');
+  assert.equal(activityScopeText({ root: 'glimmervoid' }), 'glimmervoid');
 });
 
 test('a delta merges into the standing list, newest first', async () => {

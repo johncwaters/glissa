@@ -14,7 +14,7 @@ import {
 import { main } from '../session/command-hook-relay.ts';
 
 test('SessionStart is command-only while every other built-in event stays http', () => {
-  const settings = buildHookSettings({ port: 4321, glissaId: 'sess-1', token: 'tok-abc' });
+  const settings = buildHookSettings({ port: 4321, glimmervoidId: 'sess-1', token: 'tok-abc' });
   const [sessionStart] = settings.hooks.SessionStart[0].hooks;
   assert.deepEqual(Object.keys(sessionStart).sort(), ['command', 'timeout', 'type']);
   assert.equal(sessionStart.type, 'command');

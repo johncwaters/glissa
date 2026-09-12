@@ -18,7 +18,6 @@ type CheckForUpdate = (options: {
 
 interface BackendUpdateDependencies {
   config: { checkForUpdates?: boolean; updateChannel?: UpdateChannel };
-  isLocalConfig: boolean;
   currentVersion: string;
   platform?: NodeJS.Platform;
   checkForUpdate: CheckForUpdate | undefined;
@@ -161,7 +160,7 @@ function createBackendUpdateCheck(dependencies: BackendUpdateDependencies): Back
     const currentRelease = status.current || shortSha(status.currentSha) || 'unknown';
     const latestRelease = status.latest || shortSha(status.latestSha) || 'unknown';
     dependencies.logger.log(
-      `[update] A newer glissa is available: ${currentRelease} -> ${latestRelease}. Update: ${status.command}`,
+      `[update] A newer glimmervoid is available: ${currentRelease} -> ${latestRelease}. Update: ${status.command}`,
     );
   }
 
@@ -221,7 +220,6 @@ function createBackendUpdateCheck(dependencies: BackendUpdateDependencies): Back
 
   function start(): void {
     if (dependencies.config.checkForUpdates === false) return;
-    if (dependencies.isLocalConfig) return;
     void runCheck();
     updateRecheckInterval = setInterval(() => {
       if (dependencies.getControlClientCount() === 0) return;

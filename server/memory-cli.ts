@@ -3,7 +3,7 @@ import { loadConfigFile, resolveConfigPath } from './config-store.ts';
 import { resolveMemoryConfig } from './core/memory-core.ts';
 import { resolveDistillConfig } from './core/memory-distill-core.ts';
 import { createGitWorkspace, createGitWorkspaceSync } from './git-workspace.ts';
-import { dbPathForConfig } from './glissa-db.ts';
+import { dbPathForConfig } from './glimmervoid-db.ts';
 import { createMemoryDistiller } from './memory-distill.ts';
 import { createMemoryIngest, earliestLaneEntryMs } from './memory-ingest-wiring.ts';
 import { createMemoryStore } from './memory-store.ts';
@@ -11,7 +11,7 @@ import { configSiblingPath } from './pairings-store.ts';
 import { createLaneLedger } from './usage-lane-ledger.ts';
 
 const USAGE = [
-  'Usage: glissa memory <command>',
+  'Usage: glimmervoid memory <command>',
   '',
   'Commands:',
   '  forget <id|pattern>  Expunge a remembered record, or the matched text in every record',

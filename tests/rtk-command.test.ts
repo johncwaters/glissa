@@ -35,11 +35,11 @@ test('buildRtkHookEntry quotes a forward-slash hook command containing spaces', 
   });
 });
 
-test('resolveRtkPath prefers the Glissa managed bin directory before PATH', () => {
-  const glissaHome = path.join('C:\\Users', 'johnw', '.glissa');
-  const bundled = path.join(glissaHome, 'bin', 'rtk.exe');
+test('resolveRtkPath prefers the Glimmervoid managed bin directory before PATH', () => {
+  const glimmervoidHome = path.join('C:\\Users', 'johnw', '.glimmervoid');
+  const bundled = path.join(glimmervoidHome, 'bin', 'rtk.exe');
   const resolved = resolveRtkPath({
-    glissaHome,
+    glimmervoidHome,
     platform: 'win32',
     fsApi: fsWithFiles([bundled]),
     exec: () => {
@@ -49,11 +49,11 @@ test('resolveRtkPath prefers the Glissa managed bin directory before PATH', () =
   assert.equal(resolved, path.resolve(bundled));
 });
 
-test('resolveRtkPath probes extensionless Glissa bin candidate for non-Windows installs', () => {
-  const glissaHome = '/home/jw/.glissa';
-  const bundled = path.join(glissaHome, 'bin', 'rtk');
+test('resolveRtkPath probes extensionless Glimmervoid bin candidate for non-Windows installs', () => {
+  const glimmervoidHome = '/home/jw/.glimmervoid';
+  const bundled = path.join(glimmervoidHome, 'bin', 'rtk');
   const resolved = resolveRtkPath({
-    glissaHome,
+    glimmervoidHome,
     platform: 'linux',
     fsApi: fsWithFiles([bundled]),
     exec: () => {
@@ -65,7 +65,7 @@ test('resolveRtkPath probes extensionless Glissa bin candidate for non-Windows i
 
 test('resolveRtkPath falls back to the first PATH match', () => {
   const resolved = resolveRtkPath({
-    glissaHome: 'C:\\Users\\johnw\\.glissa',
+    glimmervoidHome: 'C:\\Users\\johnw\\.glimmervoid',
     platform: 'win32',
     fsApi: fsWithFiles([]),
     exec: () => 'C:\\tools\\rtk.exe\r\nC:\\other\\rtk.exe\r\n',
@@ -76,7 +76,7 @@ test('resolveRtkPath falls back to the first PATH match', () => {
 test('resolveRtkPath falls back to command -v when which is missing on posix', () => {
   const commands: string[] = [];
   const resolved = resolveRtkPath({
-    glissaHome: '/home/jw/.glissa',
+    glimmervoidHome: '/home/jw/.glimmervoid',
     platform: 'linux',
     fsApi: fsWithFiles([]),
     exec(command: string) {
@@ -94,7 +94,7 @@ test('resolveRtkPath falls back to command -v when which is missing on posix', (
 test('resolveRtkPath falls back to command -v when which returns no matches', () => {
   const commands: string[] = [];
   const resolved = resolveRtkPath({
-    glissaHome: '/home/jw/.glissa',
+    glimmervoidHome: '/home/jw/.glimmervoid',
     platform: 'linux',
     fsApi: fsWithFiles([]),
     exec(command: string) {
@@ -110,7 +110,7 @@ test('resolveRtkPath falls back to command -v when which returns no matches', ()
 
 test('resolveRtkPath returns null when neither managed bin nor PATH resolves', () => {
   const resolved = resolveRtkPath({
-    glissaHome: 'C:\\Users\\johnw\\.glissa',
+    glimmervoidHome: 'C:\\Users\\johnw\\.glimmervoid',
     platform: 'win32',
     fsApi: fsWithFiles([]),
     exec: () => {

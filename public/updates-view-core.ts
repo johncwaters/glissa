@@ -192,16 +192,13 @@ export function latestUpdateDetails(status: UpdateStatusView | null | undefined)
 export function lastUpdateCheckText({
   status,
   checkForUpdates,
-  isLocalConfig,
   relativeTime,
 }: {
   status?: UpdateStatusView | null;
   checkForUpdates?: unknown;
-  isLocalConfig?: unknown;
   relativeTime: string;
 }): string {
   if (checkForUpdates === false) return 'Update checks are off.';
-  if (isLocalConfig === true) return 'Update checks are off for local config.';
   if (!status) return 'No update check has run.';
   const reason = nonemptyText(status.reason);
   if (reason) return CHECK_FAILURE_TEXT[reason] ?? `The last update check failed: ${reason}.`;

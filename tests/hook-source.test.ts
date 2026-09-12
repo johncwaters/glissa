@@ -63,9 +63,9 @@ test('HookRouter attaches promptKind for permission/elicitation, omits it otherw
   const r = new HookRouter();
   const got: HookSignal[] = [];
   r.register('s1', { token: 'tok', onSignal: (s) => got.push(s) });
-  r.handle({ glissaId: 's1', event: 'PermissionRequest', token: 'tok', payload: {} });
-  r.handle({ glissaId: 's1', event: 'Notification', token: 'tok', payload: { notification_type: 'elicitation_form' } });
-  r.handle({ glissaId: 's1', event: 'Stop', token: 'tok', payload: {} });
+  r.handle({ glimmervoidId: 's1', event: 'PermissionRequest', token: 'tok', payload: {} });
+  r.handle({ glimmervoidId: 's1', event: 'Notification', token: 'tok', payload: { notification_type: 'elicitation_form' } });
+  r.handle({ glimmervoidId: 's1', event: 'Stop', token: 'tok', payload: {} });
   assert.equal(got.length, 3);
   assert.equal(got[0].promptKind, 'permission');
   assert.equal(got[1].promptKind, 'elicitation');
@@ -76,8 +76,8 @@ test('HookRouter passes the low-confidence override for idle_prompt, none for St
   const r = new HookRouter();
   const got: HookSignal[] = [];
   r.register('s1', { token: 'tok', onSignal: (s) => got.push(s) });
-  r.handle({ glissaId: 's1', event: 'Notification', token: 'tok', payload: { notification_type: 'idle_prompt' } });
-  r.handle({ glissaId: 's1', event: 'Stop', token: 'tok', payload: {} });
+  r.handle({ glimmervoidId: 's1', event: 'Notification', token: 'tok', payload: { notification_type: 'idle_prompt' } });
+  r.handle({ glimmervoidId: 's1', event: 'Stop', token: 'tok', payload: {} });
   assert.equal(got.length, 2);
   assert.equal(got[0].signal, 'ready');
   assert.equal(got[0].confidence, 'low');
@@ -87,7 +87,7 @@ test('HookRouter passes the low-confidence override for idle_prompt, none for St
 
 test('HookRouter rejects unknown session (404)', () => {
   const r = new HookRouter();
-  const res = r.handle({ glissaId: 'nope', event: 'Stop', token: 'x', payload: {} });
+  const res = r.handle({ glimmervoidId: 'nope', event: 'Stop', token: 'x', payload: {} });
   assert.equal(res.status, 404);
   assert.equal(res.signal, null);
 });
@@ -96,7 +96,7 @@ test('HookRouter rejects bad token (403)', () => {
   const r = new HookRouter();
   const got: HookSignal[] = [];
   r.register('s1', { token: 'good', onSignal: (s) => got.push(s) });
-  const res = r.handle({ glissaId: 's1', event: 'Stop', token: 'bad', payload: {} });
+  const res = r.handle({ glimmervoidId: 's1', event: 'Stop', token: 'bad', payload: {} });
   assert.equal(res.status, 403);
   assert.equal(got.length, 0);
 });
@@ -105,7 +105,7 @@ test('HookRouter dispatches valid signal to onSignal', () => {
   const r = new HookRouter();
   const got: HookSignal[] = [];
   r.register('s1', { token: 'good', onSignal: (s) => got.push(s) });
-  const res = r.handle({ glissaId: 's1', event: 'Stop', token: 'good', payload: {} });
+  const res = r.handle({ glimmervoidId: 's1', event: 'Stop', token: 'good', payload: {} });
   assert.equal(res.status, 200);
   assert.equal(res.signal, 'ready');
   assert.equal(got.length, 1);
@@ -116,7 +116,7 @@ test('HookRouter dispatches valid signal to onSignal', () => {
 test('HookRouter ignores unmapped events with 200', () => {
   const r = new HookRouter();
   r.register('s1', { token: 'good', onSignal: () => {} });
-  const res = r.handle({ glissaId: 's1', event: 'PreToolUse', token: 'good', payload: {} });
+  const res = r.handle({ glimmervoidId: 's1', event: 'PreToolUse', token: 'good', payload: {} });
   assert.equal(res.status, 200);
   assert.equal(res.signal, null);
 });
@@ -130,9 +130,9 @@ test('HookRouter observes mapped and ignored events after authentication', () =>
     onEvent: (event, payload) => events.push({ event, payload }),
   });
   const ignored = router.handle({
-    glissaId: 's1', event: 'PostToolUse', token: 'good', payload: { tool_name: 'Read' },
+    glimmervoidId: 's1', event: 'PostToolUse', token: 'good', payload: { tool_name: 'Read' },
   });
-  router.handle({ glissaId: 's1', event: 'Stop', token: 'good', payload: { reason: 'done' } });
+  router.handle({ glimmervoidId: 's1', event: 'Stop', token: 'good', payload: { reason: 'done' } });
   assert.equal(ignored.reason, 'ignored-event');
   assert.deepEqual(events, [
     { event: 'PostToolUse', payload: { tool_name: 'Read' } },
@@ -152,7 +152,7 @@ test('a throwing observer cannot cost the mapped status signal', () => {
       onSignal: (signal) => signals.push(signal),
       onEvent: () => { throw new Error('observer failed'); },
     });
-    const response = router.handle({ glissaId: 's1', event: 'Stop', token: 'good', payload: {} });
+    const response = router.handle({ glimmervoidId: 's1', event: 'Stop', token: 'good', payload: {} });
     assert.equal(response.signal, 'ready');
     assert.equal(signals.length, 1);
     assert.equal(warnings.length, 1);
@@ -166,8 +166,8 @@ test('HookRouter never observes an unknown session or a bad token', () => {
   const router = new HookRouter();
   const events: unknown[][] = [];
   router.register('s1', { token: 'good', onSignal: () => {}, onEvent: (...args) => events.push(args) });
-  router.handle({ glissaId: 'missing', event: 'Stop', token: 'good', payload: {} });
-  router.handle({ glissaId: 's1', event: 'Stop', token: 'bad', payload: {} });
+  router.handle({ glimmervoidId: 'missing', event: 'Stop', token: 'good', payload: {} });
+  router.handle({ glimmervoidId: 's1', event: 'Stop', token: 'bad', payload: {} });
   assert.deepEqual(events, []);
 });
 
@@ -176,13 +176,13 @@ test('unregister stops dispatch', () => {
   const got: HookSignal[] = [];
   r.register('s1', { token: 'good', onSignal: (s) => got.push(s) });
   r.unregister('s1');
-  const res = r.handle({ glissaId: 's1', event: 'Stop', token: 'good', payload: {} });
+  const res = r.handle({ glimmervoidId: 's1', event: 'Stop', token: 'good', payload: {} });
   assert.equal(res.status, 404);
   assert.equal(got.length, 0);
 });
 
-test('buildHookSettings produces http hooks with glissaId + token in URL', () => {
-  const s = buildHookSettings({ port: 1234, glissaId: 'abc', token: 'tok', timeoutSec: 5 });
+test('buildHookSettings produces http hooks with glimmervoidId + token in URL', () => {
+  const s = buildHookSettings({ port: 1234, glimmervoidId: 'abc', token: 'tok', timeoutSec: 5 });
   assert.ok(s.hooks.Stop);
   const url = s.hooks.Stop[0].hooks[0].url;
   assert.ok(url, 'the Stop hook carries a URL');
@@ -193,7 +193,7 @@ test('buildHookSettings produces http hooks with glissaId + token in URL', () =>
 });
 
 test('buildHookSettings merges permissions.deny when provided, omits it otherwise', () => {
-  const base = { port: 1234, glissaId: 'g1', token: 't1' };
+  const base = { port: 1234, glimmervoidId: 'g1', token: 't1' };
   const permissions = { deny: ['Bash(gh pr merge:*)', 'Write(.github/workflows/**)'] };
   const withDeny = buildHookSettings({ ...base, permissions });
   assert.ok(withDeny.permissions && Array.isArray(withDeny.permissions.deny));
@@ -206,7 +206,7 @@ test('buildHookSettings merges permissions.deny when provided, omits it otherwis
 });
 
 test('buildHookSettings adds enableAllProjectMcpServers only when opted in', () => {
-  const base = { port: 1234, glissaId: 'g1', token: 't1' };
+  const base = { port: 1234, glimmervoidId: 'g1', token: 't1' };
   assert.equal(buildHookSettings(base).enableAllProjectMcpServers, undefined, 'absent by default');
   const on = buildHookSettings({ ...base, enableProjectMcp: true });
   assert.equal(on.enableAllProjectMcpServers, true, 'pre-trusts project MCP when opted in');
@@ -214,22 +214,22 @@ test('buildHookSettings adds enableAllProjectMcpServers only when opted in', () 
 });
 
 test('buildHookSettings adds the rtk PreToolUse hook only when an rtk path is supplied', () => {
-  const base = { port: 1234, glissaId: 'g1', token: 't1' };
+  const base = { port: 1234, glimmervoidId: 'g1', token: 't1' };
   const off = buildHookSettings(base);
   assert.equal('PreToolUse' in off.hooks, false, 'no empty PreToolUse key when rtk is off');
 
-  const on = buildHookSettings({ ...base, rtkPath: 'C:\\Users\\johnw\\.glissa\\bin\\rtk.exe' });
+  const on = buildHookSettings({ ...base, rtkPath: 'C:\\Users\\johnw\\.glimmervoid\\bin\\rtk.exe' });
   assert.deepEqual(on.hooks.PreToolUse, [{
     matcher: 'Bash',
-    hooks: [{ type: 'command', command: 'C:/Users/johnw/.glissa/bin/rtk.exe hook claude' }],
+    hooks: [{ type: 'command', command: 'C:/Users/johnw/.glimmervoid/bin/rtk.exe hook claude' }],
   }]);
 });
 
 test('writeSessionSettings writes file and cleanup removes it', () => {
-  const baseDir = path.join(os.tmpdir(), `glissa-test-${Date.now()}`);
+  const baseDir = path.join(os.tmpdir(), `glimmervoid-test-${Date.now()}`);
   const { settingsPath, dir, token, cleanup } = writeSessionSettings({
     port: 5173,
-    glissaId: 'sess-1',
+    glimmervoidId: 'sess-1',
     baseDir,
   });
   assert.ok(fs.existsSync(settingsPath));
@@ -243,10 +243,10 @@ test('writeSessionSettings writes file and cleanup removes it', () => {
 });
 
 test('writeSessionSettings writes the rtk PreToolUse block when opted in', () => {
-  const baseDir = path.join(os.tmpdir(), `glissa-rtk-${Date.now()}`);
+  const baseDir = path.join(os.tmpdir(), `glimmervoid-rtk-${Date.now()}`);
   const { settingsPath, cleanup } = writeSessionSettings({
     port: 5173,
-    glissaId: 'sess-rtk',
+    glimmervoidId: 'sess-rtk',
     baseDir,
     rtkPath: 'C:\\Program Files\\rtk\\rtk.exe',
   });
@@ -268,9 +268,9 @@ test('safeDirSegment strips path-illegal chars (Windows) but keeps plain ids int
 });
 
 test('writeSessionSettings handles colon-namespaced ids without ENOENT (Windows-safe dir)', () => {
-  const baseDir = path.join(os.tmpdir(), `glissa-colon-${Date.now()}`);
-  const glissaId = 'setup:marketing:bb78afb5-e527-48da-9632-580c00153a1b';
-  const { settingsPath, dir, cleanup } = writeSessionSettings({ port: 5173, glissaId, baseDir });
+  const baseDir = path.join(os.tmpdir(), `glimmervoid-colon-${Date.now()}`);
+  const glimmervoidId = 'setup:marketing:bb78afb5-e527-48da-9632-580c00153a1b';
+  const { settingsPath, dir, cleanup } = writeSessionSettings({ port: 5173, glimmervoidId, baseDir });
   assert.ok(fs.existsSync(settingsPath));
   assert.equal(path.basename(dir).includes(':'), false);
   const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
@@ -282,9 +282,9 @@ test('writeSessionSettings handles colon-namespaced ids without ENOENT (Windows-
 });
 
 test('sweepOrphans removes stale dirs only', () => {
-  const baseDir = path.join(os.tmpdir(), `glissa-sweep-${Date.now()}`);
-  const fresh = writeSessionSettings({ port: 1, glissaId: 'fresh', baseDir });
-  const stale = writeSessionSettings({ port: 1, glissaId: 'stale', baseDir });
+  const baseDir = path.join(os.tmpdir(), `glimmervoid-sweep-${Date.now()}`);
+  const fresh = writeSessionSettings({ port: 1, glimmervoidId: 'fresh', baseDir });
+  const stale = writeSessionSettings({ port: 1, glimmervoidId: 'stale', baseDir });
 
   const old = Date.now() - 48 * 60 * 60 * 1000;
   fs.utimesSync(stale.dir, new Date(old), new Date(old));
@@ -304,7 +304,7 @@ function captureWarnings<T>(fn: () => T): { result: T; warnings: string[] } {
 }
 
 test('sweepOrphans on a missing base dir returns 0 and says nothing', () => {
-  const baseDir = path.join(os.tmpdir(), `glissa-sweep-absent-${Date.now()}`);
+  const baseDir = path.join(os.tmpdir(), `glimmervoid-sweep-absent-${Date.now()}`);
   const { result, warnings } = captureWarnings(() => sweepOrphans(baseDir, 24 * 60 * 60 * 1000));
   assert.equal(result, 0);
   assert.equal(fs.existsSync(baseDir), false, 'the sweep never creates the dir; the first write does');
@@ -312,9 +312,9 @@ test('sweepOrphans on a missing base dir returns 0 and says nothing', () => {
 });
 
 test('sweepOrphans refuses a base dir that is a symlink, deleting nothing behind it', () => {
-  const realDir = path.join(os.tmpdir(), `glissa-sweep-target-${Date.now()}`);
-  const linkDir = path.join(os.tmpdir(), `glissa-sweep-link-${Date.now()}`);
-  const stale = writeSessionSettings({ port: 1, glissaId: 'stale', baseDir: realDir });
+  const realDir = path.join(os.tmpdir(), `glimmervoid-sweep-target-${Date.now()}`);
+  const linkDir = path.join(os.tmpdir(), `glimmervoid-sweep-link-${Date.now()}`);
+  const stale = writeSessionSettings({ port: 1, glimmervoidId: 'stale', baseDir: realDir });
   const old = Date.now() - 48 * 60 * 60 * 1000;
   fs.utimesSync(stale.dir, new Date(old), new Date(old));
 
@@ -362,7 +362,7 @@ test('end-to-end: real HTTP POST through router validates token and dispatches',
       let payload = {};
       try { payload = JSON.parse(body); } catch {}
       const out = r.handle({
-        glissaId: decodeURIComponent(m[1]),
+        glimmervoidId: decodeURIComponent(m[1]),
         event: m[2],
         token: m[3] ? decodeURIComponent(m[3]) : null,
         payload,

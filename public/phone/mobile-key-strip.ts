@@ -66,7 +66,7 @@ export function createMobileKeyStrip({ send, getSessionId }: { send: (data: stri
 
   async function uploadFile(sessionId: string, file: File, btn: HTMLButtonElement | null) {
     if (btn) btn.disabled = true;
-    const headers: Record<string, string> = { 'x-glissa-upload-name': encodeURIComponent(file.name) };
+    const headers: Record<string, string> = { 'x-glimmervoid-upload-name': encodeURIComponent(file.name) };
     if (file.type) headers['content-type'] = file.type;
     try {
       const res = await fetch(`/upload/${encodeURIComponent(sessionId)}`, {

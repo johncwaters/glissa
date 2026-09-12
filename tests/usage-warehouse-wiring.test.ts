@@ -30,7 +30,7 @@ const pricingTable = normalizePricingTable({
 });
 
 async function makeTempRoot(): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), 'glissa-usage-warehouse-'));
+  return fs.mkdtemp(path.join(os.tmpdir(), 'glimmervoid-usage-warehouse-'));
 }
 
 function makeScanner(root: string, overrides: UsageScannerOptions = {}): Scanner {
@@ -39,7 +39,7 @@ function makeScanner(root: string, overrides: UsageScannerOptions = {}): Scanner
     pricingTable,
     nowFn: () => NOW,
     retainDays: 90,
-    warehousePath: path.join(root, '.glissa', 'usage-warehouse.json'),
+    warehousePath: path.join(root, '.glimmervoid', 'usage-warehouse.json'),
     ...overrides,
   });
 }
@@ -73,7 +73,7 @@ async function writeTranscript(root: string, name: string, lines: string[]): Pro
 }
 
 async function readWarehouse(root: string): Promise<WarehouseFile> {
-  const text = await fs.readFile(path.join(root, '.glissa', 'usage-warehouse.json'), 'utf8');
+  const text = await fs.readFile(path.join(root, '.glimmervoid', 'usage-warehouse.json'), 'utf8');
   const parsed: unknown = JSON.parse(text);
   if (typeof parsed !== 'object' || parsed === null) throw new Error('the warehouse file is not a JSON object');
   const { version, updatedAt, records } = parsed as { version?: number; updatedAt?: unknown; records?: unknown };
@@ -83,7 +83,7 @@ async function readWarehouse(root: string): Promise<WarehouseFile> {
 
 async function warehouseExists(root: string): Promise<boolean> {
   try {
-    await fs.access(path.join(root, '.glissa', 'usage-warehouse.json'));
+    await fs.access(path.join(root, '.glimmervoid', 'usage-warehouse.json'));
     return true;
   } catch {
     return false;
@@ -106,8 +106,8 @@ test('a completed pass writes per-day per-model records atomically', async () =>
   assert.equal(stored.records[0].model, 'claude-sonnet-4-20250514');
   assert.equal(stored.records[0].tokens, 1100);
   assert.equal(stored.records[1].tokens, 1200);
-  const glissaDir = await fs.readdir(path.join(root, '.glissa'));
-  assert.deepEqual(glissaDir, ['usage-warehouse.json']);
+  const glimmervoidDir = await fs.readdir(path.join(root, '.glimmervoid'));
+  assert.deepEqual(glimmervoidDir, ['usage-warehouse.json']);
 });
 
 test('a partial pass writes nothing at all', async () => {
@@ -124,12 +124,12 @@ test('an unchanged rescan does not rewrite the file', async () => {
   await writeTranscript(root, 'a.jsonl', [claudeLine({ messageId: 'm1', day: '2026-08-17' })]);
   const scanner = makeScanner(root);
   await scanner.runPass();
-  const first = (await fs.stat(path.join(root, '.glissa', 'usage-warehouse.json'))).mtimeMs;
-  const firstBody = await fs.readFile(path.join(root, '.glissa', 'usage-warehouse.json'), 'utf8');
+  const first = (await fs.stat(path.join(root, '.glimmervoid', 'usage-warehouse.json'))).mtimeMs;
+  const firstBody = await fs.readFile(path.join(root, '.glimmervoid', 'usage-warehouse.json'), 'utf8');
   await scanner.runPass();
-  const second = await fs.readFile(path.join(root, '.glissa', 'usage-warehouse.json'), 'utf8');
+  const second = await fs.readFile(path.join(root, '.glimmervoid', 'usage-warehouse.json'), 'utf8');
   assert.equal(second, firstBody, 'identical records mean identical bytes');
-  assert.ok((await fs.stat(path.join(root, '.glissa', 'usage-warehouse.json'))).mtimeMs >= first);
+  assert.ok((await fs.stat(path.join(root, '.glimmervoid', 'usage-warehouse.json'))).mtimeMs >= first);
 });
 
 test('a deleted transcript keeps its day in the report, marked as history', async () => {
@@ -182,8 +182,8 @@ test('a day the live scan still covers wins over the stored copy', async () => {
 
 test('retention prunes days past warehouseRetainDays', async () => {
   const root = await makeTempRoot();
-  await fs.mkdir(path.join(root, '.glissa'), { recursive: true });
-  await fs.writeFile(path.join(root, '.glissa', 'usage-warehouse.json'), JSON.stringify({
+  await fs.mkdir(path.join(root, '.glimmervoid'), { recursive: true });
+  await fs.writeFile(path.join(root, '.glimmervoid', 'usage-warehouse.json'), JSON.stringify({
     version: 1,
     records: [
       { day: '2020-01-01', model: 'claude-sonnet-4-20250514', tokens: 5, costUSD: 1 },
@@ -201,15 +201,15 @@ test('retention prunes days past warehouseRetainDays', async () => {
 
 test('a corrupt warehouse starts empty, warns, and never crashes the pass', async () => {
   const root = await makeTempRoot();
-  await fs.mkdir(path.join(root, '.glissa'), { recursive: true });
-  await fs.writeFile(path.join(root, '.glissa', 'usage-warehouse.json'), '{ not json at all');
+  await fs.mkdir(path.join(root, '.glimmervoid'), { recursive: true });
+  await fs.writeFile(path.join(root, '.glimmervoid', 'usage-warehouse.json'), '{ not json at all');
   await writeTranscript(root, 'a.jsonl', [claudeLine({ messageId: 'm1', day: '2026-08-18' })]);
 
   const warnings: string[] = [];
   const scanner = makeScanner(root, { logger: { warn: (message: string) => { warnings.push(message); } } });
   const pass = await scanner.runPass();
   assert.equal(pass.partial, false, 'the pass completed regardless');
-  const warehousePath = path.join(root, '.glissa', 'usage-warehouse.json');
+  const warehousePath = path.join(root, '.glimmervoid', 'usage-warehouse.json');
   const movedTo = `${warehousePath}.corrupt-${NOW}`;
   assert.equal(await fs.readFile(movedTo, 'utf8'), '{ not json at all');
   assert.ok(warnings.some((message) => message.includes('warehouse quarantined') && message.includes(warehousePath) && message.includes(movedTo)), `warned: ${warnings.join(' | ')}`);
@@ -219,7 +219,7 @@ test('a corrupt warehouse starts empty, warns, and never crashes the pass', asyn
 
 test('an unreadable warehouse warns, keeps its bytes, and never rewrites them', async () => {
   const root = await makeTempRoot();
-  const warehousePath = path.join(root, '.glissa', 'usage-warehouse.json');
+  const warehousePath = path.join(root, '.glimmervoid', 'usage-warehouse.json');
   const original = '{ recoverable later';
   await fs.mkdir(path.dirname(warehousePath), { recursive: true });
   await fs.writeFile(warehousePath, original);
@@ -241,7 +241,7 @@ test('an unwritable warehouse path degrades to a warning, not a failed scan', as
   await writeTranscript(root, 'a.jsonl', [claudeLine({ messageId: 'm1', day: '2026-08-18' })]);
   const warnings: string[] = [];
   const scanner = makeScanner(root, {
-    warehousePath: path.join(root, '.glissa', 'usage-warehouse.json'),
+    warehousePath: path.join(root, '.glimmervoid', 'usage-warehouse.json'),
     logger: { warn: (message: string) => { warnings.push(message); } },
     fsPromises: brokenWriteFs(),
   });

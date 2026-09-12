@@ -167,7 +167,7 @@ test('even unbatched, a storm of per-file events cannot push the fs ring past it
 
 test('the watcher ignore list carries every name in the three shapes a nested copy needs', () => {
   const patterns = buildIgnorePatterns();
-  for (const name of ['.git', 'node_modules', '.glissa']) {
+  for (const name of ['.git', 'node_modules', '.glimmervoid']) {
     assert.ok(patterns.includes(name), `${name} must be ignored at the root`);
     assert.ok(patterns.includes(`**/${name}`), `a nested ${name} directory must be ignored`);
     assert.ok(patterns.includes(`**/${name}/**`), `everything under a nested ${name} must be ignored`);

@@ -97,7 +97,7 @@ interface PlanReviewWiringOptions {
 }
 
 interface PlanHookEvent {
-  glissaId: string;
+  glimmervoidId: string;
   event: string;
   payload: Record<string, unknown>;
   accepted: boolean;
@@ -633,14 +633,14 @@ function createPlanReviewWiring({
   }
 
   function onHookEvent(
-    { glissaId, event, payload, accepted, signal }: PlanHookEvent,
+    { glimmervoidId, event, payload, accepted, signal }: PlanHookEvent,
   ): Promise<Record<string, unknown> | null> | null {
     if (hasStopped || !accepted) return null;
-    if (isPlanHookEvent(event)) return holdPlanReply(glissaId, payload, signal ?? null);
+    if (isPlanHookEvent(event)) return holdPlanReply(glimmervoidId, payload, signal ?? null);
     const name = event.toLowerCase();
     if (!LIFECYCLE_HOOK_EVENTS.has(name)) return null;
-    exclusive(async () => { noteLifecycleEvent(glissaId, name, payload); })
-      .catch((error: unknown) => { warn(`${name} handling failed for ${glissaId}: ${errorMessage(error)}`); });
+    exclusive(async () => { noteLifecycleEvent(glimmervoidId, name, payload); })
+      .catch((error: unknown) => { warn(`${name} handling failed for ${glimmervoidId}: ${errorMessage(error)}`); });
     return null;
   }
 

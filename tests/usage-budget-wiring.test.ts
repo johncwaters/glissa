@@ -97,7 +97,7 @@ const TODAY = '2026-08-19';
 const MONTH = '2026-08';
 
 async function makeTempRoot(): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), 'glissa-usage-budget-'));
+  return fs.mkdtemp(path.join(os.tmpdir(), 'glimmervoid-usage-budget-'));
 }
 
 interface HarnessOptions {
@@ -138,7 +138,7 @@ function harness({ root, usage = {}, telegram = null, telegramNotifications = fa
     setIntervalFn: inertInterval,
     clearIntervalFn: (handle) => clearTimeout(handle),
     logger: { warn: (message) => { warnings.push(String(message)); }, log: () => {} },
-    budgetStatePath: path.join(root, '.glissa', 'usage-budget-state.json'),
+    budgetStatePath: path.join(root, '.glimmervoid', 'usage-budget-state.json'),
     fsPromises,
     sendTelegram: sendTelegram ?? (async (args) => {
       telegrams.push(args);
@@ -156,7 +156,7 @@ function harness({ root, usage = {}, telegram = null, telegramNotifications = fa
     warnings,
     spendCalls,
     alerts: (): BudgetAlert[] => sent.filter(isBudgetAlert),
-    statePath: path.join(root, '.glissa', 'usage-budget-state.json'),
+    statePath: path.join(root, '.glimmervoid', 'usage-budget-state.json'),
   };
 }
 
@@ -240,8 +240,8 @@ test('the fired state survives a restart', async () => {
 
 test('a new period re-arms the ladder and drops the old marks', async () => {
   const root = await makeTempRoot();
-  await fs.mkdir(path.join(root, '.glissa'), { recursive: true });
-  await fs.writeFile(path.join(root, '.glissa', 'usage-budget-state.json'), JSON.stringify({
+  await fs.mkdir(path.join(root, '.glimmervoid'), { recursive: true });
+  await fs.writeFile(path.join(root, '.glimmervoid', 'usage-budget-state.json'), JSON.stringify({
     version: 1,
     fired: { daily: { '2026-08-18': [50, 75, 100] }, monthly: { '2026-07': [50] } },
   }));
@@ -263,8 +263,8 @@ test('both scopes are independent', async () => {
 
 test('a corrupt state file starts empty, warns, and still alerts', async () => {
   const root = await makeTempRoot();
-  await fs.mkdir(path.join(root, '.glissa'), { recursive: true });
-  await fs.writeFile(path.join(root, '.glissa', 'usage-budget-state.json'), '{ not json');
+  await fs.mkdir(path.join(root, '.glimmervoid'), { recursive: true });
+  await fs.writeFile(path.join(root, '.glimmervoid', 'usage-budget-state.json'), '{ not json');
   const h = harness({ root, usage: { budget: { dailyUsd: 16 } }, spend: { todayUsd: 12.4, monthUsd: 12.4 } });
   await h.wiring.start();
   assert.equal(h.alerts().length, 1);
@@ -276,7 +276,7 @@ test('a corrupt state file starts empty, warns, and still alerts', async () => {
 
 test('an unreadable budget state warns, keeps its bytes, and never rewrites them', async () => {
   const root = await makeTempRoot();
-  const statePath = path.join(root, '.glissa', 'usage-budget-state.json');
+  const statePath = path.join(root, '.glimmervoid', 'usage-budget-state.json');
   const original = '{ recoverable later';
   await fs.mkdir(path.dirname(statePath), { recursive: true });
   await fs.writeFile(statePath, original);
@@ -295,7 +295,7 @@ test('an unreadable budget state warns, keeps its bytes, and never rewrites them
 
 test('a budget state that becomes readable keeps the marks that fired while it was not', async () => {
   const root = await makeTempRoot();
-  const statePath = path.join(root, '.glissa', 'usage-budget-state.json');
+  const statePath = path.join(root, '.glimmervoid', 'usage-budget-state.json');
   await fs.mkdir(statePath, { recursive: true });
   const h = harness({ root, usage: { budget: { dailyUsd: 16 } }, spend: { todayUsd: 12.4, monthUsd: 12.4 } });
   await h.wiring.start();
@@ -311,7 +311,7 @@ test('a budget state that becomes readable keeps the marks that fired while it w
 
 test('a budget state that goes missing after an unreadable read keeps the marks that fired while it was not', async () => {
   const root = await makeTempRoot();
-  const statePath = path.join(root, '.glissa', 'usage-budget-state.json');
+  const statePath = path.join(root, '.glimmervoid', 'usage-budget-state.json');
   await fs.mkdir(statePath, { recursive: true });
   const h = harness({ root, usage: { budget: { dailyUsd: 16 } }, spend: { todayUsd: 12.4, monthUsd: 12.4 } });
   await h.wiring.start();
@@ -340,12 +340,12 @@ test('an unwritable state path degrades to a warning, not a failed pass', async 
     setIntervalFn: inertInterval,
     clearIntervalFn: (handle) => clearTimeout(handle),
     logger: { warn: () => {}, log: () => {} },
-    budgetStatePath: path.join(root, '.glissa', 'usage-budget-state.json'),
+    budgetStatePath: path.join(root, '.glimmervoid', 'usage-budget-state.json'),
     fsPromises: { ...fs, writeFile: async () => { throw new Error('EACCES simulated'); } },
   });
   await wiring.start();
   assert.equal(sent.filter(isBudgetAlert).length, 1);
-  assert.equal(await exists(path.join(root, '.glissa', 'usage-budget-state.json')), false);
+  assert.equal(await exists(path.join(root, '.glimmervoid', 'usage-budget-state.json')), false);
 });
 
 test('a partial pass never evaluates budgets', async () => {
@@ -365,11 +365,11 @@ test('a partial pass never evaluates budgets', async () => {
     setIntervalFn: inertInterval,
     clearIntervalFn: (handle) => clearTimeout(handle),
     logger: { warn: () => {}, log: () => {} },
-    budgetStatePath: path.join(root, '.glissa', 'usage-budget-state.json'),
+    budgetStatePath: path.join(root, '.glimmervoid', 'usage-budget-state.json'),
   });
   await wiring.start();
   assert.equal(sent.filter(isBudgetAlert).length, 0);
-  assert.equal(await exists(path.join(root, '.glissa', 'usage-budget-state.json')), false);
+  assert.equal(await exists(path.join(root, '.glimmervoid', 'usage-budget-state.json')), false);
 });
 
 test('an io-failed pass never evaluates budgets', async () => {
@@ -391,12 +391,12 @@ test('an io-failed pass never evaluates budgets', async () => {
     setIntervalFn: inertInterval,
     clearIntervalFn: (handle) => clearTimeout(handle),
     logger: { warn: () => {}, log: () => {} },
-    budgetStatePath: path.join(root, '.glissa', 'usage-budget-state.json'),
+    budgetStatePath: path.join(root, '.glimmervoid', 'usage-budget-state.json'),
   });
 
   await wiring.start();
   assert.equal(budgetSpendCalls, 0);
-  assert.equal(await exists(path.join(root, '.glissa', 'usage-budget-state.json')), false);
+  assert.equal(await exists(path.join(root, '.glimmervoid', 'usage-budget-state.json')), false);
   await wiring.stop();
 });
 

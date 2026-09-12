@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 
 import { buildSetupGuide, commandLine, recipeIds, relayInvocation } from '../server/core/editor-setup-core.ts';
 
-const ON_PATH = relayInvocation({ glissaOnPath: true });
-const OFF_PATH = relayInvocation({ glissaOnPath: false, cliPath: '/opt/glissa/bin/glissa.js', nodePath: '/usr/bin/node' });
+const ON_PATH = relayInvocation({ glimmervoidOnPath: true });
+const OFF_PATH = relayInvocation({ glimmervoidOnPath: false, cliPath: '/opt/glimmervoid/bin/glimmervoid.js', nodePath: '/usr/bin/node' });
 
 test('the invocation prefers the CLI on PATH and falls back to node plus the entry point', () => {
-  assert.equal(commandLine(ON_PATH), 'glissa visions relay');
-  assert.equal(commandLine(OFF_PATH), '/usr/bin/node /opt/glissa/bin/glissa.js visions relay');
+  assert.equal(commandLine(ON_PATH), 'glimmervoid visions relay');
+  assert.equal(commandLine(OFF_PATH), '/usr/bin/node /opt/glimmervoid/bin/glimmervoid.js visions relay');
 });
 
 test('every recipe carries the resolved invocation, whichever form it took', () => {
@@ -35,7 +35,7 @@ test('every editor recipe targets markdown, since that is all the lane sweeps', 
 test('one editor can be asked for by id, and an unknown one refuses', () => {
   const helix = buildSetupGuide({ editorId: 'helix', invocation: ON_PATH });
   assert.deepEqual(helix.sections.map((section) => section.id), ['helix']);
-  assert.match(helix.sections[0].snippet, /\[language-server\.glissa-visions\]/);
+  assert.match(helix.sections[0].snippet, /\[language-server\.glimmervoid-visions\]/);
 
   const unknown = buildSetupGuide({ editorId: 'notepad', invocation: ON_PATH });
   assert.equal(unknown.ok, false);

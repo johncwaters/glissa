@@ -134,7 +134,7 @@ test('start installs one watcher per source root and builds every spec once', as
   await h.service.start();
 
   assert.deepEqual(h.watchers.map((w) => w.dir), ['/packs/sources/alpha', '/packs/skills/alpha-skill', '/packs/sources/beta']);
-  assert.deepEqual(h.builds, ['alpha', 'beta'], 'the boot sweep covers a source edited while Glissa was down');
+  assert.deepEqual(h.builds, ['alpha', 'beta'], 'the boot sweep covers a source edited while Glimmervoid was down');
   assert.equal(h.intervalMs, 15 * 60000);
 });
 
@@ -404,7 +404,7 @@ test('stop stays permanent: a later restartIfConsumersChanged installs nothing',
   await h.service.stop();
   h.builds.length = 0;
 
-  projects = [{ id: 'p1', name: 'glissa', path: '/repos/a/glissa' }];
+  projects = [{ id: 'p1', name: 'glimmervoid', path: '/repos/a/glimmervoid' }];
   await h.service.restartIfConsumersChanged();
 
   assert.deepEqual(h.builds, []);
@@ -430,7 +430,7 @@ test('a project change racing the boot sweep queues behind it rather than orphan
 
   const started = h.service.start();
   await flush();
-  projects = [{ id: 'p1', name: 'glissa', path: '/repos/a/glissa' }];
+  projects = [{ id: 'p1', name: 'glimmervoid', path: '/repos/a/glimmervoid' }];
   const restarted = h.service.restartIfConsumersChanged();
   await started;
   await restarted;
@@ -445,7 +445,7 @@ test('a restart racing stop() installs no watcher into the emptied array', async
   let projects: ProjectRecord[] = [];
   const h = harness({ variantProjects: () => projects });
   await h.service.start();
-  projects = [{ id: 'p1', name: 'glissa', path: '/repos/a/glissa' }];
+  projects = [{ id: 'p1', name: 'glimmervoid', path: '/repos/a/glimmervoid' }];
   const restarted = h.service.restartIfConsumersChanged();
   const stopping = h.service.stop();
   await Promise.all([restarted, stopping]);
@@ -456,7 +456,7 @@ test('a restart racing stop() installs no watcher into the emptied array', async
 function groupReport(name: string, overrides: Partial<BuildReport> = {}): BuildReport {
   return okReport(name, {
     variants: [
-      okReport(`${name}-glissa-12345678`, { version: `v-${name}-a` }),
+      okReport(`${name}-glimmervoid-12345678`, { version: `v-${name}-a` }),
       okReport(`${name}-other-87654321`, { version: `v-${name}-b`, unchanged: true }),
     ],
     ...overrides,
@@ -469,11 +469,11 @@ test('a derived pack gets its own version and its own pack-updated, like any oth
 
   assert.deepEqual(h.service.getVersions(), {
     alpha: 'v-alpha-1',
-    'alpha-glissa-12345678': 'v-alpha-a',
+    'alpha-glimmervoid-12345678': 'v-alpha-a',
     'alpha-other-87654321': 'v-alpha-b',
   });
 
-  assert.deepEqual(h.updates.map((update) => update.name), ['alpha', 'alpha-glissa-12345678']);
+  assert.deepEqual(h.updates.map((update) => update.name), ['alpha', 'alpha-glimmervoid-12345678']);
   await h.service.stop();
 });
 
@@ -482,7 +482,7 @@ test('a failed variant is warned about and leaves its group build reported as ok
   const h = harness({
     specs: [SPECS[0]],
     reportFor: (name) => groupReport(name, {
-      variants: [{ ...okReport(`${name}-glissa-12345678`), ok: false, errors: ['budget'] }],
+      variants: [{ ...okReport(`${name}-glimmervoid-12345678`), ok: false, errors: ['budget'] }],
     }),
   });
   h.service.on('pack-updated', (update: PackUpdate) => warnings.push(update.name));
@@ -494,7 +494,7 @@ test('a failed variant is warned about and leaves its group build reported as ok
 });
 
 test('the projects a build derives variants from are read live, per build', async () => {
-  let projects: ProjectRecord[] = [{ id: 'p1', name: 'glissa', path: '/repos/a/glissa' }];
+  let projects: ProjectRecord[] = [{ id: 'p1', name: 'glimmervoid', path: '/repos/a/glimmervoid' }];
   const h = harness({ variantProjects: () => projects });
   await h.service.start();
   assert.deepEqual(h.buildCalls[0].projects, projects);
@@ -507,7 +507,7 @@ test('the projects a build derives variants from are read live, per build', asyn
 });
 
 test('a project moving path restarts the loops: the derived pack set moved even though the names did not', async () => {
-  let projects: ProjectRecord[] = [{ id: 'p1', name: 'glissa', path: '/repos/a/glissa' }];
+  let projects: ProjectRecord[] = [{ id: 'p1', name: 'glimmervoid', path: '/repos/a/glimmervoid' }];
   const h = harness({ variantProjects: () => projects });
   await h.service.start();
   h.builds.length = 0;
@@ -515,7 +515,7 @@ test('a project moving path restarts the loops: the derived pack set moved even 
   await h.service.restartIfConsumersChanged();
   assert.deepEqual(h.builds, [], 'nothing moved, so nothing was rebuilt');
 
-  projects = [{ id: 'p1', name: 'glissa', path: '/repos/moved/glissa' }];
+  projects = [{ id: 'p1', name: 'glimmervoid', path: '/repos/moved/glimmervoid' }];
   await h.service.restartIfConsumersChanged();
   assert.deepEqual(h.builds, ['alpha', 'beta'], 'the variants for the new path are built without a server restart');
   await h.service.stop();

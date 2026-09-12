@@ -24,7 +24,7 @@ const REPO_ROOT = path.join(import.meta.dirname, '..');
 const RESUME_ID = '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5';
 
 function tmpHooksDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-adapter-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-adapter-'));
 }
 
 test('the registry exposes claude-code as the default and refuses an unknown id', () => {
@@ -113,7 +113,7 @@ test('spawn argv for a fully featured session is byte-identical to the pre-extra
     assert.equal(args.length, 11);
     assert.equal(env.CLAUDE_CODE_NO_FLICKER, '1');
     assert.equal('CLAUDECODE' in env, false);
-    assert.equal('GLISSA_PORT' in env, false);
+    assert.equal('GLIMMERVOID_PORT' in env, false);
     assert.equal('CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD' in env, false, 'no packs delivered');
   } finally {
     session.destroy();
@@ -141,7 +141,7 @@ test('the settings file a session injects is byte-identical to the injector run 
     const token = written.match(/\?t=([a-f0-9]+)/)?.[1];
     const expected = writeSessionSettings({
       port: 41234,
-      glissaId: 'settings-session',
+      glimmervoidId: 'settings-session',
       baseDir: expectedBaseDir,
       token,
       permissions: null,
@@ -164,7 +164,7 @@ test('the settings file a session injects is byte-identical to the injector run 
 });
 
 test('a rejected spawn cleans before PTY exit without double-cleaning on a late exit', async () => {
-  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-rejected-spawn-'));
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-rejected-spawn-'));
   const hooksBaseDir = tmpHooksDir();
   let unregisterCalls = 0;
   const hookRouter = {
@@ -250,7 +250,7 @@ test('HookRouter translates with the registered session adapter, defaulting to c
   router.register('s1', { token: 'tok', onSignal: (s) => seen.push(s) });
   router.register('s2', { token: 'tok', onSignal: (s) => seen.push(s), hooks: claudeCode.hooks });
   for (const id of ['s1', 's2']) {
-    const out = router.handle({ glissaId: id, event: 'Notification', token: 'tok', payload: { notification_type: 'idle_prompt' } });
+    const out = router.handle({ glimmervoidId: id, event: 'Notification', token: 'tok', payload: { notification_type: 'idle_prompt' } });
     assert.equal(out.signal, 'ready');
   }
   assert.deepEqual(seen.map((s) => [s.signal, s.confidence]), [['ready', 'low'], ['ready', 'low']]);

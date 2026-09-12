@@ -5,7 +5,7 @@ import path from "node:path";
 import grok from "../session/adapters/grok.ts";
 import { renderGrokHooksFile, classifyGrokHooksFile } from "../session/core/grok-hooks-file-core.ts";
 
-const USAGE = "Usage: glissa agent setup grok";
+const USAGE = "Usage: glimmervoid agent setup grok";
 
 type SetupFileSystem = Pick<
   typeof fs,

@@ -46,7 +46,7 @@ function computeRuntimePaths({ moduleFile, hasPackageJson }: RuntimePathsInput):
     clientDir: path.join(distDir, 'client'),
     extensionDir: path.join(assetRoot, 'tools', 'vscode-visions'),
     packsDir: path.join(assetRoot, 'packs'),
-    cliPath: path.join(assetRoot, 'bin', `glissa${sourceExtension}`),
+    cliPath: path.join(assetRoot, 'bin', `glimmervoid${sourceExtension}`),
     relayPath: (relayName: string) => path.join(assetRoot, 'session', `${relayName}${sourceExtension}`),
   };
 }

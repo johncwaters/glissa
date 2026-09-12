@@ -7,7 +7,7 @@ import type { HookRouter } from '../detection/hook-source.ts';
 import { Session } from '../session/sessions.ts';
 import type { SessionOptions } from '../session/sessions.ts';
 import { execFileAsync } from './child-process-safe.ts';
-import { glissaHomeDir } from './config-store.ts';
+import { glimmervoidHomeDir } from './config-store.ts';
 import { millPackNames } from './core/pack-core.ts';
 import { appendTrailStep, createInvestigationTrail, trailStepFromHook } from './core/investigation-trail-core.ts';
 import type { InvestigationTrail } from './core/investigation-trail-core.ts';
@@ -58,7 +58,7 @@ const FIX_DENY = {
 };
 
 const REPORT_DIR = DEFAULT_POSTHOG_REPORT_DIR;
-const WORK_DIR = path.join(glissaHomeDir(), 'posthog-work');
+const WORK_DIR = path.join(glimmervoidHomeDir(), 'posthog-work');
 const REPORT_RETAIN_FILES = 20;
 const FORCE_TICK_DEBOUNCE_MS = 3000;
 
@@ -165,7 +165,7 @@ function promptIssueUrl(host: unknown, projectId: unknown, issueId: unknown): st
 }
 
 function createResultFileFor(kind: string, projectId: unknown, issueId: unknown): Promise<JobResultFile> {
-  return createJobResultFile(`glissa-posthog-${kind}${safeIssueId(projectId)}-${safeIssueId(issueId)}`);
+  return createJobResultFile(`glimmervoid-posthog-${kind}${safeIssueId(projectId)}-${safeIssueId(issueId)}`);
 }
 
 function newFixDiscriminator(): string {
@@ -266,9 +266,9 @@ function buildFixPrompt(
     '',
     'Hard rules:',
     '- READ ONLY against PostHog. Never resolve, assign, merge, suppress, or otherwise mutate an issue.',
-    '- COMMIT ONLY. Never push, never run `gh`, never contact GitHub. Glissa pushes this branch and',
+    '- COMMIT ONLY. Never push, never run `gh`, never contact GitHub. Glimmervoid pushes this branch and',
     '  opens the pull request from what you commit; you have no path to do either and no need for one.',
-    '- NEVER edit anything under .github/workflows/. Glissa refuses to push a branch that does, so a',
+    '- NEVER edit anything under .github/workflows/. Glimmervoid refuses to push a branch that does, so a',
     '  workflow edit throws the whole fix away.',
     '- Work only in this worktree. Do not touch another checkout of this repository.',
     '',
@@ -290,7 +290,7 @@ function buildFixPrompt(
     '5. Run the project\'s test suite and its linter (read CLAUDE.md / AGENTS.md for the commands and the',
     '   house conventions). Do not proceed with a red suite.',
     `6. Commit your work on branch ${branch} with a conventional-commit message. Stop there: the push`,
-    '   and the pull request are Glissa\'s, and it opens the pull request from the title and body below.',
+    '   and the pull request are Glimmervoid\'s, and it opens the pull request from the title and body below.',
     `7. Write the result as JSON to ${resultPath}:`,
     '   {"verdict":"FIXED|NEEDS_HUMAN|TRANSIENT|ERROR","reproduced":true|false,',
     '   "prTitle":"<one line>","prBody":"<markdown>","summary":"<one line>"}',
@@ -301,7 +301,7 @@ function buildFixPrompt(
     '   - ERROR: you could not get there. Say why.',
     '   - `prTitle` is one conventional-commit-style line. `prBody` states: what breaks, whether you',
     '     reproduced it and how, the root cause, what you changed, and how it was verified. Say plainly',
-    '     if you could not reproduce. Both are used verbatim on the pull request Glissa opens.',
+    '     if you could not reproduce. Both are used verbatim on the pull request Glimmervoid opens.',
     '   - Write your own one-line summary. Never copy fetched text into it verbatim.',
     '',
     'Style: terse. Short declarative sentences, every claim anchored to a file and line, no filler, no',
@@ -409,7 +409,7 @@ function fallbackPrBody(
   { issueUrl, reproduced, summary }: { issueUrl: string; reproduced: unknown; summary: unknown },
 ): string {
   return [
-    'Automated fix from the Glissa Radar lane. Reviewed by nobody yet.',
+    'Automated fix from the Glimmervoid Radar lane. Reviewed by nobody yet.',
     '',
     `Issue: ${issueUrl}`,
     `Reproduced before the fix: ${reproduced ? 'yes' : 'no'}`,
@@ -552,7 +552,7 @@ function createPosthogWiring({
   }
 
   function worktreeBaseFor(repoPath: string): string {
-    return config.worktreeRoot || path.join(path.dirname(path.resolve(repoPath)), '.glissa-worktrees');
+    return config.worktreeRoot || path.join(path.dirname(path.resolve(repoPath)), '.glimmervoid-worktrees');
   }
 
   const waitForExit = (sess: Session, signal: AbortSignal | null | undefined) => awaitSessionExit(sess, { signal, spawnGate });
@@ -690,7 +690,7 @@ function createPosthogWiring({
     }
   }
 
-  const posthogStatePath = path.join(glissaHomeDir(), 'posthog-state.json');
+  const posthogStatePath = path.join(glimmervoidHomeDir(), 'posthog-state.json');
   async function readPosthogState(): Promise<PosthogState> {
     try { return JSON.parse(fs.readFileSync(posthogStatePath, 'utf8')); }
     catch { return {}; }

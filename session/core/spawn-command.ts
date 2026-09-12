@@ -76,23 +76,23 @@ function resolveAgentCommand(
   if (typeof exec !== "function") throw new TypeError("resolveAgentCommand requires an exec function");
   const matches = resolvePathCommandMatches(name, { platform, exec });
   if (matches.length === 0) {
-    console.warn(`[glissa] could not resolve '${name}' on PATH`);
+    console.warn(`[glimmervoid] could not resolve '${name}' on PATH`);
     return { path: null, kind: "unresolved" };
   }
   const resolvedPath = matches[0];
 
-  if (process.env.GLISSA_DEBUG_SPAWN) {
-    console.log(`[glissa] resolved '${name}' (first match wins): ${resolvedPath}`);
+  if (process.env.GLIMMERVOID_DEBUG_SPAWN) {
+    console.log(`[glimmervoid] resolved '${name}' (first match wins): ${resolvedPath}`);
   }
   if (matches.length > 1) {
     console.warn(
-      `[glissa] multiple '${name}' on PATH (Bun shim risk):\n  ${matches.join("\n  ")}`,
+      `[glimmervoid] multiple '${name}' on PATH (Bun shim risk):\n  ${matches.join("\n  ")}`,
     );
   }
   const kind = classifyCommandKind(resolvedPath);
   if (platform === "win32") {
     console.log(
-      `[glissa] ${name} spawn strategy: ${kind === "exe" ? "direct exe" : "cmd.exe shim fallback"}`,
+      `[glimmervoid] ${name} spawn strategy: ${kind === "exe" ? "direct exe" : "cmd.exe shim fallback"}`,
     );
   }
   return { path: resolvedPath, kind };

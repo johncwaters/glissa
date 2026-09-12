@@ -20,7 +20,7 @@ import type { WsSender } from './ws-sender.ts';
 
 type ControlBroadcast = (message: ControlMessageRecord) => void;
 
-type ControlSocket = WebSocket & { glissaTrust?: RequestTrust };
+type ControlSocket = WebSocket & { glimmervoidTrust?: RequestTrust };
 
 type UpgradeSocket = Duplex & { localPort?: number };
 
@@ -115,7 +115,7 @@ function createBackendWebSockets(dependencies: BackendWebSocketDependencies): Ba
     const stamped = controlReplayLog.stamp({ ...message });
     const payload = JSON.stringify(stamped);
     for (const client of controlClients()) {
-      if (client.glissaTrust === 'remote') continue;
+      if (client.glimmervoidTrust === 'remote') continue;
       sendControlFrame(client, payload, frameType(stamped), logger);
     }
   }
@@ -274,7 +274,7 @@ function createBackendWebSockets(dependencies: BackendWebSocketDependencies): Ba
 
     if (route === 'control') {
       controlWss.handleUpgrade(request, socket, head, (webSocket) => {
-        (webSocket as ControlSocket).glissaTrust = trust;
+        (webSocket as ControlSocket).glimmervoidTrust = trust;
         controlWss.emit('connection', webSocket, request);
       });
       return;

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "generatedAt": "2026-05-31T00:00:00Z",
-  "title": "Design System: Glissa",
+  "title": "Design System: Glimmervoid",
   "extensions": {
     "colorMeta": {
       "accent": {
@@ -81,7 +81,7 @@
       "state-initializing": { "role": "tertiary", "displayName": "Signal Slate", "canonical": "oklch(0.52 0.02 270)" }
     },
     "typographyMeta": {
-      "headline": { "displayName": "Headline", "purpose": "GLISSA wordmark and top bar titles. Widest tracking in the system." },
+      "headline": { "displayName": "Headline", "purpose": "GLIMMERVOID wordmark and top bar titles. Widest tracking in the system." },
       "title": { "displayName": "Title", "purpose": "Dialog titles, panel names, empty-state titles." },
       "body": { "displayName": "Body", "purpose": "Base reading size, the document default." },
       "caption": { "displayName": "Caption", "purpose": "Descriptions, summaries, secondary metadata in dense panels." },
@@ -194,7 +194,7 @@
   ],
   "narrative": {
     "northStar": "The Phyrexian Console",
-    "overview": "Glissa is a machine intelligence watching its constructs through the night. The surface is deep oil-black tinted toward violet; a single iridescent orchid accent is the only chromatic voice in the chrome. State surfaces as cold, exact glints, only when something actually changes. The console is precise, unsentimental, and a little uncanny: it never blinks and never raises its voice. Everything is monospace, density is welcome where it pays for itself, and chrome recedes so the terminal output (the real product) holds the eye. It rejects the generic AI-SaaS dashboard, the IDE clone, the toy aesthetic, and the corporate committee look.",
+    "overview": "Glimmervoid is a machine intelligence watching its constructs through the night. The surface is deep oil-black tinted toward violet; a single iridescent orchid accent is the only chromatic voice in the chrome. State surfaces as cold, exact glints, only when something actually changes. The console is precise, unsentimental, and a little uncanny: it never blinks and never raises its voice. Everything is monospace, density is welcome where it pays for itself, and chrome recedes so the terminal output (the real product) holds the eye. It rejects the generic AI-SaaS dashboard, the IDE clone, the toy aesthetic, and the corporate committee look.",
     "keyCharacteristics": [
       "Mono-forward: one typeface family carries headings, labels, data, and body.",
       "Oil-black violet surfaces with one iridescent accent used sparingly.",
@@ -225,7 +225,7 @@
     ],
     "donts": [
       "Don't build the generic AI-SaaS dashboard: no gradient hero, no rounded glass cards, no purple-to-blue gradient, no Inter.",
-      "Don't make it look like a VS Code or IDE clone. Glissa is a monitor, not an editor.",
+      "Don't make it look like a VS Code or IDE clone. Glimmervoid is a monitor, not an editor.",
       "Don't use a children's or toy aesthetic: no cartoonish rounded-everything, no primary-color palette.",
       "Don't fall back to safe corporate enterprise design (IBM-blue committee look).",
       "Don't use gradient text. Emphasis comes from weight and color.",

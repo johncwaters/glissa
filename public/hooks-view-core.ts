@@ -1,6 +1,6 @@
-export const HOOKS_HINT = 'Claude Code hooks injected into every session Glissa spawns.';
+export const HOOKS_HINT = 'Claude Code hooks injected into every session Glimmervoid spawns.';
 export const HOOKS_LOADING_TEXT = 'Loading hooks';
-export const HOOKS_EMPTY_TEXT = 'No hooks yet. A hook runs a command, or calls a URL, when a Claude Code event fires in a Glissa session. Start from one of these, or add your own.';
+export const HOOKS_EMPTY_TEXT = 'No hooks yet. A hook runs a command, or calls a URL, when a Claude Code event fires in a Glimmervoid session. Start from one of these, or add your own.';
 export const TEMPLATES_LABEL = 'Start from';
 export const FILTER_PLACEHOLDER = 'Filter by name, event or command';
 export const FILTER_EMPTY_TEXT = 'Nothing matches that filter.';
@@ -13,7 +13,7 @@ export const SHORTCUT_HINT = 'Esc cancels. Ctrl+Enter saves.';
 
 export const FILTER_MIN_COUNT = 4;
 export const HOOKS_APPLY_NOTE = 'A change reaches a session at its next start or restart. Claude Code sessions only; Codex and Grok sessions do not read this file.';
-export const BUILTIN_TITLE = "Glissa's own hooks";
+export const BUILTIN_TITLE = "Glimmervoid's own hooks";
 export const BUILTIN_HINT = 'Always present, read-only. Status detection depends on them.';
 export const YOUR_HOOKS_TITLE = 'Your hooks';
 export const NEW_HOOK_TITLE = 'New hook';

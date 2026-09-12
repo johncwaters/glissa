@@ -39,7 +39,7 @@ test('one stale pack names it, both versions, and the re-read guidance', () => {
   const notice = buildPackNotice([{ name: 'house-rules', version: 'aaaaaaaaaaaabbbb' }], { 'house-rules': 'ccccccccccccdddd' });
   assert.equal(
     notice,
-    '[glissa] Context pack updated since this session started: "house-rules" (version aaaaaaaaaaaa is now cccccccccccc). '
+    '[glimmervoid] Context pack updated since this session started: "house-rules" (version aaaaaaaaaaaa is now cccccccccccc). '
     + 'The pack CLAUDE.md and rules text loaded at spawn may be out of date. '
     + 'Re-read the files under the pack directory added to this session if they matter for this turn.',
   );
@@ -59,7 +59,7 @@ test('several stale packs list together, only the stale ones', () => {
     { a: 'v2', b: 'v1', c: 'v3' },
   );
   assert.ok(notice);
-  assert.match(notice, /^\[glissa\] Context packs updated since this session started: "a" \(version v1 is now v2\); "c" \(version v1 is now v3\)\./);
+  assert.match(notice, /^\[glimmervoid\] Context packs updated since this session started: "a" \(version v1 is now v2\); "c" \(version v1 is now v3\)\./);
   assert.doesNotMatch(notice, /"b"/, 'a pack still on its delivered version is not listed');
 });
 
@@ -92,9 +92,9 @@ test('the notice is hard-capped well under the additionalContext limit', () => {
   assert.match(notice, / \(truncated\)$/);
 });
 
-test('the notice carries no pack content, only names, versions and Glissa wording', () => {
+test('the notice carries no pack content, only names, versions and Glimmervoid wording', () => {
   const notice = buildPackNotice([{ name: 'secrets', version: 'v1' }], { secrets: 'v2' });
   assert.ok(notice);
-  assert.ok(notice.startsWith('[glissa] '), 'always attributed to Glissa');
+  assert.ok(notice.startsWith('[glimmervoid] '), 'always attributed to Glimmervoid');
   assert.ok(!notice.includes('\n'), 'a single line, so nothing can be smuggled as fenced content');
 });

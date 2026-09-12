@@ -2,7 +2,7 @@ import path from "node:path";
 
 import { SAFE_PATH_RE } from "./hook-command-core.ts";
 
-const PACK_DIRECTIVE = "Glissa context packs are available at these index files. Read each relevant CLAUDE.md before working";
+const PACK_DIRECTIVE = "Glimmervoid context packs are available at these index files. Read each relevant CLAUDE.md before working";
 const CURRENT_POINTER_DIRECTORY = "current";
 const CURRENT_POINTER_FILE = "version";
 const VERSIONS_DIRECTORY = "versions";

@@ -8,12 +8,12 @@ import { buildTitleClearSequence, buildTitleSequence } from './core/terminal-tit
 import { createLifecycle } from './server-lifecycle.ts';
 
 const bind = decideBindHost({
-  envHost: process.env.GLISSA_HOST,
-  insecureBind: process.env.GLISSA_INSECURE_BIND === '1',
+  envHost: process.env.GLIMMERVOID_HOST,
+  insecureBind: process.env.GLIMMERVOID_INSECURE_BIND === '1',
 });
 if (!bind.allowed) {
-  console.error(`Refusing to bind ${bind.host}: Glissa has no authentication on the local listener.`);
-  console.error('Use remote mode (config.remote) behind a reverse proxy, or set GLISSA_INSECURE_BIND=1 if you truly mean it.');
+  console.error(`Refusing to bind ${bind.host}: Glimmervoid has no authentication on the local listener.`);
+  console.error('Use remote mode (config.remote) behind a reverse proxy, or set GLIMMERVOID_INSECURE_BIND=1 if you truly mean it.');
   process.exit(1);
 }
 
@@ -21,8 +21,8 @@ const server = http.createServer();
 
 function isBootRefusal(error: unknown): error is Error {
   if (!(error instanceof Error)) return false;
-  if (!('glissaBoot' in error)) return false;
-  return error.glissaBoot === true;
+  if (!('glimmervoidBoot' in error)) return false;
+  return error.glimmervoidBoot === true;
 }
 
 function createBackendOrExit(): ReturnType<typeof createBackend> {
@@ -57,7 +57,7 @@ function isPortInUse(error: unknown): boolean {
 
 server.on('error', (err) => {
   if (isPortInUse(err)) {
-    console.error(`Another Glissa is already running on port ${port} - exiting.`);
+    console.error(`Another Glimmervoid is already running on port ${port} - exiting.`);
     process.exit(1);
   }
   throw err;
@@ -65,10 +65,10 @@ server.on('error', (err) => {
 
 server.listen(port, bind.host, () => {
   const boundPort = listeningPort(server, port);
-  console.log(`Glissa server listening on http://${bind.host}:${boundPort}`);
-  writeTerminalTitle(buildTitleSequence(`glissa :${boundPort}`));
+  console.log(`Glimmervoid server listening on http://${bind.host}:${boundPort}`);
+  writeTerminalTitle(buildTitleSequence(`glimmervoid :${boundPort}`));
   if (bind.reason === 'insecure-bind') {
-    console.warn(`WARNING: bound ${bind.host} with GLISSA_INSECURE_BIND=1 - this listener has NO authentication.`);
+    console.warn(`WARNING: bound ${bind.host} with GLIMMERVOID_INSECURE_BIND=1 - this listener has NO authentication.`);
   }
 });
 
@@ -84,17 +84,17 @@ if (backend.remote.enabled) {
     throw err;
   });
   if (backend.remote.port === null) {
-    throw Object.assign(new Error('remote.enabled requires remote.port; refusing to bind an ephemeral port'), { glissaBoot: true });
+    throw Object.assign(new Error('remote.enabled requires remote.port; refusing to bind an ephemeral port'), { glimmervoidBoot: true });
   }
   remoteServer.listen(backend.remote.port, bind.host, () => {
-    console.log(`Glissa remote listener on http://${bind.host}:${backend.remote.port} (paired devices only)`);
+    console.log(`Glimmervoid remote listener on http://${bind.host}:${backend.remote.port} (paired devices only)`);
     const publicHost = backend.remote.publicHost || '(remote.publicHost not set)';
-    console.log(`  proxy target for ${publicHost}; pair a device with: glissa pair`);
+    console.log(`  proxy target for ${publicHost}; pair a device with: glimmervoid pair`);
   });
   remoteServers.push(remoteServer);
 }
 if (!backend.remote.enabled) {
-  console.log('Glissa remote mode is disabled (set remote.enabled in config.json to turn it on)');
+  console.log('Glimmervoid remote mode is disabled (set remote.enabled in config.json to turn it on)');
 }
 
 function exitWithClearedTerminalTitle(code?: number): never {

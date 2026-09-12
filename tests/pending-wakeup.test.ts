@@ -84,7 +84,7 @@ test('PostToolUse maps by tool_name; unknown tools are ignored', () => {
 });
 
 test('buildHookSettings emits a matched PostToolUse group by default and none when switched off', () => {
-  const base = { port: 1234, glissaId: 'abc', token: 'tok', timeoutSec: 5 };
+  const base = { port: 1234, glimmervoidId: 'abc', token: 'tok', timeoutSec: 5 };
   const on = buildHookSettings(base);
   assert.equal(on.hooks.PostToolUse.length, 1);
   assert.equal(on.hooks.PostToolUse[0].matcher, WAKEUP_TOOL_MATCHER, 'matcher is mandatory: matcher-less would POST every tool call');

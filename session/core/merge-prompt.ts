@@ -44,7 +44,7 @@ function buildMergePrompt(
     for (const f of files) lines.push(`  - ${f}`);
   }
   lines.push("");
-  lines.push(`Glissa merges by rebasing "${br}" onto ${tgt} and then fast-forwarding ${tgt}. To unblock it:`);
+  lines.push(`Glimmervoid merges by rebasing "${br}" onto ${tgt} and then fast-forwarding ${tgt}. To unblock it:`);
   lines.push(`  1. From this worktree${worktreeDir ? ` (${worktreeDir})` : ""}, run: git rebase ${tgt}`);
   lines.push(
     `  2. Resolve the conflicts${files.length ? " in the files listed above" : ""}, ` +

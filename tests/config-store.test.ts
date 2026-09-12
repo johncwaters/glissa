@@ -8,7 +8,7 @@ import {
   createConfigStore, ensureProjectIds, validateConfig, loadConfigFile, DEFAULT_CONFIG,
   CONFIG_FILE_MODE, SECRET_PRESENCE_SUFFIX,
 } from '../server/config-store.ts';
-import type { ConfigStore, DefaultConfig, GlissaConfig } from '../server/config-store.ts';
+import type { ConfigStore, DefaultConfig, GlimmervoidConfig } from '../server/config-store.ts';
 import { ENV_SECRET_BINDINGS } from '../server/core/config-secrets-core.ts';
 import { ConfigUpdate } from '../shared/contracts/index.ts';
 import { SECRET_PRESENCE_SUFFIX as CLIENT_SECRET_PRESENCE_SUFFIX } from '../public/settings-view-core.ts';
@@ -31,7 +31,7 @@ function readJson(filePath: string): Record<string, unknown> {
 }
 
 function writeTmpConfig(cfg: ConfigFileContent): { dir: string; p: string } {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-cfgstore-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-cfgstore-'));
   const p = path.join(dir, 'config.json');
   fs.writeFileSync(p, JSON.stringify(cfg, null, 2), 'utf8');
   return { dir, p };
@@ -73,13 +73,13 @@ function withStore<T>(
   storeOpts?: StoreOptions,
 ): T {
   const { dir, p } = writeTmpConfig(cfg);
-  const prev = process.env.GLISSA_CONFIG;
-  process.env.GLISSA_CONFIG = p;
+  const prev = process.env.GLIMMERVOID_CONFIG;
+  process.env.GLIMMERVOID_CONFIG = p;
   try {
     return fn(createConfigStore(storeOpts), p);
   } finally {
-    if (prev == null) delete process.env.GLISSA_CONFIG;
-    if (prev != null) process.env.GLISSA_CONFIG = prev;
+    if (prev == null) delete process.env.GLIMMERVOID_CONFIG;
+    if (prev != null) process.env.GLIMMERVOID_CONFIG = prev;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
@@ -176,8 +176,8 @@ test('save writes an invalid.bak copy when the fresh read is corrupt JSON', () =
 
 test('createConfigStore persists auto-assigned ids, stable across reloads', () => {
   const { dir, p } = writeTmpConfig({ projects: [{ name: 'proj', path: 'C:/proj' }] });
-  const prev = process.env.GLISSA_CONFIG;
-  process.env.GLISSA_CONFIG = p;
+  const prev = process.env.GLIMMERVOID_CONFIG;
+  process.env.GLIMMERVOID_CONFIG = p;
   try {
     const first = createConfigStore();
     const id = first.config.projects[0].id;
@@ -188,8 +188,8 @@ test('createConfigStore persists auto-assigned ids, stable across reloads', () =
     const second = createConfigStore();
     assert.equal(second.config.projects[0].id, id, 'same id on reload (stable session identity)');
   } finally {
-    if (prev == null) delete process.env.GLISSA_CONFIG;
-    if (prev != null) process.env.GLISSA_CONFIG = prev;
+    if (prev == null) delete process.env.GLIMMERVOID_CONFIG;
+    if (prev != null) process.env.GLIMMERVOID_CONFIG = prev;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -197,14 +197,14 @@ test('createConfigStore persists auto-assigned ids, stable across reloads', () =
 test('createConfigStore writes a boot snapshot of the loaded config', () => {
   const original = { projects: [{ name: 'proj', path: 'C:/proj' }] };
   const { dir, p } = writeTmpConfig(original);
-  const prev = process.env.GLISSA_CONFIG;
-  process.env.GLISSA_CONFIG = p;
+  const prev = process.env.GLIMMERVOID_CONFIG;
+  process.env.GLIMMERVOID_CONFIG = p;
   try {
     createConfigStore();
     assert.deepEqual(readJson(`${p}.boot.bak`), original);
   } finally {
-    if (prev == null) delete process.env.GLISSA_CONFIG;
-    if (prev != null) process.env.GLISSA_CONFIG = prev;
+    if (prev == null) delete process.env.GLIMMERVOID_CONFIG;
+    if (prev != null) process.env.GLIMMERVOID_CONFIG = prev;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -263,7 +263,7 @@ test('save writes a rolling backup before replacing changed config content', () 
 });
 
 test('loadConfigFile saves corrupt JSON aside and returns the startup error when requested', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-cfgstore-corrupt-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-cfgstore-corrupt-'));
   const p = path.join(dir, 'config.json');
   fs.writeFileSync(p, '{ not json', 'utf8');
   try {
@@ -435,7 +435,7 @@ test('getSettings redacts the telegram bot token and the PostHog api key to pres
 });
 
 test('a secret from the environment wins over the one stored in config.json', () => {
-  withSecretEnv({ GLISSA_POSTHOG_API_KEY: 'phx-from-env', GLISSA_TELEGRAM_BOT_TOKEN: 'bot-from-env' }, () => {
+  withSecretEnv({ GLIMMERVOID_POSTHOG_API_KEY: 'phx-from-env', GLIMMERVOID_TELEGRAM_BOT_TOKEN: 'bot-from-env' }, () => {
     const stored = {
       projects: [],
       posthog: { enabled: true, apiKey: 'phx-from-file' },
@@ -450,7 +450,7 @@ test('a secret from the environment wins over the one stored in config.json', ()
 });
 
 test('a save leaves out every secret the environment provides', () => {
-  withSecretEnv({ GLISSA_POSTHOG_API_KEY: 'phx-from-env' }, () => {
+  withSecretEnv({ GLIMMERVOID_POSTHOG_API_KEY: 'phx-from-env' }, () => {
     const stored = { projects: [], posthog: { enabled: true, apiKey: 'phx-from-file' } };
     withStore(stored, (store, configPath) => {
       const saved = store.save((config) => {
@@ -477,7 +477,7 @@ test('a dashboard secret still persists when the environment provides none', () 
 });
 
 test('getSettings reports a secret the environment alone provides as configured', () => {
-  withSecretEnv({ GLISSA_TELEGRAM_BOT_TOKEN: 'bot-from-env' }, () => {
+  withSecretEnv({ GLIMMERVOID_TELEGRAM_BOT_TOKEN: 'bot-from-env' }, () => {
     withStore({ projects: [], telegram: { chatId: '123' } }, (store) => {
       const settings = store.getSettings();
 
@@ -630,20 +630,20 @@ async function withStoreAsync<T>(
   fn: (store: ConfigStore, configPath: string) => Promise<T>,
 ): Promise<T> {
   const { dir, p } = writeTmpConfig(cfg);
-  const prev = process.env.GLISSA_CONFIG;
-  process.env.GLISSA_CONFIG = p;
+  const prev = process.env.GLIMMERVOID_CONFIG;
+  process.env.GLIMMERVOID_CONFIG = p;
   try {
     return await fn(createConfigStore(), p);
   } finally {
-    if (prev == null) delete process.env.GLISSA_CONFIG;
-    if (prev != null) process.env.GLISSA_CONFIG = prev;
+    if (prev == null) delete process.env.GLIMMERVOID_CONFIG;
+    if (prev != null) process.env.GLIMMERVOID_CONFIG = prev;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
 
 test('watchForChanges still sees a hand-edit after a save replaced the file inode', async () => {
   await withStoreAsync({ projects: [] }, async (store, p) => {
-    const reloads: GlissaConfig[] = [];
+    const reloads: GlimmervoidConfig[] = [];
     const stop = store.watchForChanges((cfg) => { reloads.push(cfg); });
     try {
       store.save((cfg) => { cfg.projects.push({ id: 'from-save', name: 's', path: 'C:/s' }); });
@@ -662,7 +662,7 @@ test('watchForChanges still sees a hand-edit after a save replaced the file inod
 
 test('watchForChanges rejects invalid and wiped config edits', async () => {
   await withStoreAsync(richConfig(), async (store, p) => {
-    const reloads: GlissaConfig[] = [];
+    const reloads: GlimmervoidConfig[] = [];
     const stop = store.watchForChanges((cfg) => { reloads.push(cfg); });
     try {
       fs.writeFileSync(p, JSON.stringify({ projects: [{ id: 'bad' }] }, null, 2), 'utf8');
@@ -684,7 +684,7 @@ test('watchForChanges rejects invalid and wiped config edits', async () => {
 
 test('watchForChanges ignores directory events for other files', async () => {
   await withStoreAsync({ projects: [] }, async (store, p) => {
-    const reloads: GlissaConfig[] = [];
+    const reloads: GlimmervoidConfig[] = [];
     const stop = store.watchForChanges((cfg) => { reloads.push(cfg); });
     try {
       fs.writeFileSync(`${p}.tmp.9999`, 'not the config', 'utf8');
@@ -708,7 +708,7 @@ test('watchForChanges returns a closer that releases the fs.watch handle', () =>
 
 test('a hand-edit landing immediately after a self-write is applied, not swallowed', async () => {
   await withStoreAsync({ projects: [] }, async (store, p) => {
-    const reloads: GlissaConfig[] = [];
+    const reloads: GlimmervoidConfig[] = [];
     const stop = store.watchForChanges((cfg) => { reloads.push(cfg); });
     try {
       store.save((cfg) => { cfg.projects.push({ id: 'from-save', name: 's', path: 'C:/s' }); });
@@ -726,7 +726,7 @@ test('a hand-edit landing immediately after a self-write is applied, not swallow
 
 test('a self-write is still suppressed, however many events it produces', async () => {
   await withStoreAsync({ projects: [] }, async (store) => {
-    const reloads: GlissaConfig[] = [];
+    const reloads: GlimmervoidConfig[] = [];
     const stop = store.watchForChanges((cfg) => { reloads.push(cfg); });
     try {
       store.save((cfg) => { cfg.projects.push({ id: 'a', name: 'a', path: 'C:/a' }); });
@@ -742,7 +742,7 @@ test('a self-write is still suppressed, however many events it produces', async 
 
 test('reverting a hand-edit back to previously written bytes still reloads', async () => {
   await withStoreAsync({ projects: [] }, async (store, p) => {
-    const reloads: GlissaConfig[] = [];
+    const reloads: GlimmervoidConfig[] = [];
     const stop = store.watchForChanges((cfg) => { reloads.push(cfg); });
     try {
       store.save((cfg) => { cfg.projects.push({ id: 'from-save', name: 's', path: 'C:/s' }); });
@@ -766,7 +766,7 @@ test('reverting a hand-edit back to previously written bytes still reloads', asy
 
 test('a duplicate event for content already applied is not re-applied', async () => {
   await withStoreAsync({ projects: [] }, async (store, p) => {
-    const reloads: GlissaConfig[] = [];
+    const reloads: GlimmervoidConfig[] = [];
     const stop = store.watchForChanges((cfg) => { reloads.push(cfg); });
     try {
       const edited = JSON.stringify({ projects: [{ id: 'hand', name: 'h', path: 'C:/h' }] }, null, 2);
@@ -795,7 +795,7 @@ test('phoneEscalationMs is a settable timeout key with the five-minute default',
 
 test('reverting to bytes that were applied before a save still reloads', async () => {
   await withStoreAsync({ projects: [] }, async (store, p) => {
-    const reloads: GlissaConfig[] = [];
+    const reloads: GlimmervoidConfig[] = [];
     const stop = store.watchForChanges((cfg) => { reloads.push(cfg); });
     try {
       const handEdited = JSON.stringify({

@@ -14,10 +14,10 @@ const GIT = hasGit();
 type GitWorkspace = ReturnType<typeof createGitWorkspace>;
 
 function initRepoOnDevelop(seedFile?: string, seedContent?: string): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-rebase-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-rebase-'));
   try { git(['init', '-b', 'main'], dir); } catch { git(['init'], dir); }
   git(['config', 'user.email', 'test@example.com'], dir);
-  git(['config', 'user.name', 'Glissa Test'], dir);
+  git(['config', 'user.name', 'Glimmervoid Test'], dir);
   git(['config', 'commit.gpgsign', 'false'], dir);
   fs.writeFileSync(path.join(dir, 'README.md'), '# repo\n', 'utf8');
   if (seedFile && seedContent) fs.writeFileSync(path.join(dir, seedFile), seedContent, 'utf8');

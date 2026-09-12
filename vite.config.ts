@@ -6,20 +6,20 @@ import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 import type { Plugin, ViteDevServer } from 'vite';
 
-type GlissaBackend = ReturnType<typeof import('./server/backend.ts').createBackend>;
+type GlimmervoidBackend = ReturnType<typeof import('./server/backend.ts').createBackend>;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const pkg = require('./package.json') as { version: string };
 
-function glissaBackendPlugin(): Plugin {
-  let backend: GlissaBackend | null = null;
+function glimmervoidBackendPlugin(): Plugin {
+  let backend: GlimmervoidBackend | null = null;
 
   return {
-    name: 'glissa-backend',
+    name: 'glimmervoid-backend',
     configureServer(server: ViteDevServer) {
       const httpServer = server.httpServer;
-      if (!(httpServer instanceof http.Server)) throw new Error('The Glissa dev backend needs Vite\'s plain HTTP server; middleware mode and HTTP/2 have none.');
+      if (!(httpServer instanceof http.Server)) throw new Error('The Glimmervoid dev backend needs Vite\'s plain HTTP server; middleware mode and HTTP/2 have none.');
       const { createBackend } = require('./server/backend.ts') as typeof import('./server/backend.ts');
       backend = createBackend(httpServer, {
         staticDir: null,
@@ -45,7 +45,7 @@ function glissaBackendPlugin(): Plugin {
 export default defineConfig({
   plugins: [
     tailwindcss(),
-    glissaBackendPlugin(),
+    glimmervoidBackendPlugin(),
   ],
 
   define: {

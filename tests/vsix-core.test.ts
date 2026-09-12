@@ -8,10 +8,10 @@ import path from 'node:path';
 import { buildVsix, buildZip, crc32, extensionIdOf, vsixManifestXml } from '../server/core/vsix-core.ts';
 
 const MANIFEST = {
-  name: 'glissa-visions',
+  name: 'glimmervoid-visions',
   publisher: 'johnwaters',
   version: '0.2.0',
-  displayName: 'Glissa Visions',
+  displayName: 'Glimmervoid Visions',
   description: 'Mirrors markdown buffers',
   engines: { vscode: '^1.85.0' },
 };
@@ -41,7 +41,7 @@ test('buildZip lays entries out in order and unzip accepts the archive', () => {
   ]);
   assert.deepEqual(entryNames(zip), ['a.txt', 'nested/b.txt']);
 
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-zip-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-zip-'));
   const archive = path.join(dir, 'out.zip');
   fs.writeFileSync(archive, zip);
   execFileSync('unzip', ['-o', '-q', archive, '-d', dir]);
@@ -64,11 +64,11 @@ test('the vsix manifest names the identity the editor installs under', () => {
     description: MANIFEST.description,
     engine: MANIFEST.engines.vscode,
   });
-  assert.match(xml, /Id="glissa-visions"/);
+  assert.match(xml, /Id="glimmervoid-visions"/);
   assert.match(xml, /Publisher="johnwaters"/);
   assert.match(xml, /Version="0\.2\.0"/);
   assert.match(xml, /Microsoft\.VisualStudio\.Code\.Engine" Value="\^1\.85\.0"/);
-  assert.equal(extensionIdOf(MANIFEST), 'johnwaters.glissa-visions');
+  assert.equal(extensionIdOf(MANIFEST), 'johnwaters.glimmervoid-visions');
 });
 
 test('escaping keeps a quote in the description from breaking the manifest', () => {

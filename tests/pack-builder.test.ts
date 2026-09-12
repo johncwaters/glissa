@@ -21,7 +21,7 @@ interface SpecFixture {
 type ProjectRecord = Record<string, unknown>;
 
 interface BuildOverrides {
-  glissaHome?: string | null;
+  glimmervoidHome?: string | null;
   projects?: ProjectRecord[];
   now?: () => number;
   builtRoot?: string;
@@ -75,7 +75,7 @@ async function withFixture<T>(
   run: (context: FixtureContext) => Promise<T>,
   { spec = baseSpec(), seed = null }: FixtureOptions = {},
 ): Promise<T> {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-packs-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-packs-'));
   const packsDir = path.join(root, 'packs');
   const builtRoot = path.join(root, 'built');
   try {
@@ -124,12 +124,12 @@ test('listPackSpecs finds every .pack.json and sorts it by name', async () => {
 });
 
 test('listPackSpecs returns nothing for a missing specs dir rather than throwing', async () => {
-  const specs = await listPackSpecs({ specsDir: path.join(os.tmpdir(), 'glissa-packs-does-not-exist') });
+  const specs = await listPackSpecs({ specsDir: path.join(os.tmpdir(), 'glimmervoid-packs-does-not-exist') });
   assert.deepEqual(specs, []);
 });
 
 test('distillOutputPath refuses symlinks at the target and in every existing parent segment', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-distill-output-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-distill-output-'));
   const packsDir = path.join(root, 'packs');
   const outsideDir = path.join(root, 'outside');
   try {
@@ -332,11 +332,11 @@ test('a skill dir is copied into .claude/skills, keeping its tree', async () => 
 });
 
 test('a memory directory cannot be delivered as a skill', async () => {
-  const spec = baseSpec({ skills: [{ dir: '{{glissaHome}}/memory/dist/current' }] });
+  const spec = baseSpec({ skills: [{ dir: '{{glimmervoidHome}}/memory/dist/current' }] });
   await withFixture(async ({ root, build, builtRoot }) => {
-    const glissaHome = path.join(root, 'glissa-home');
-    writeFile(glissaHome, 'memory/dist/current/MEMORY.md', 'private memory\n');
-    const report = await build({ glissaHome });
+    const glimmervoidHome = path.join(root, 'glimmervoid-home');
+    writeFile(glimmervoidHome, 'memory/dist/current/MEMORY.md', 'private memory\n');
+    const report = await build({ glimmervoidHome });
 
     assert.equal(report.ok, false);
     assert.equal(report.errors.some((error) => error.includes('instruction-tier')), true);
@@ -437,7 +437,7 @@ test('a write failure leaves the pointed build byte-identical', async () => {
 
 test('publishing nested outputs syncs every created ancestor directory', async (t) => {
   if (process.platform === 'win32') t.skip('directory sync is unsupported on Windows');
-  const builtRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-sync-'));
+  const builtRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-pack-sync-'));
   const originalOpen = fsp.open;
   const syncedDirectories: string[] = [];
   t.mock.method(fsp, 'open', async (target: fs.PathLike, ...args: never[]) => {
@@ -520,7 +520,7 @@ test('a reclaimed publish lock from a crashed cleanup is swept before the next b
 });
 
 test('two publishers racing serialize cleanup and pointer flips', async () => {
-  const builtRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-publish-race-'));
+  const builtRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-pack-publish-race-'));
   const firstOutputs = [
     { relPath: 'owner.txt', content: 'first' },
     { relPath: 'payload.txt', content: 'a'.repeat(2 * 1024 * 1024) },
@@ -548,7 +548,7 @@ test('two publishers racing serialize cleanup and pointer flips', async () => {
 });
 
 test('a publish lock owned by a dead process is reclaimed', async () => {
-  const builtRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-stale-lock-'));
+  const builtRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-pack-stale-lock-'));
   const packDir = path.join(builtRoot, 'demo');
   fs.mkdirSync(packDir, { recursive: true });
   fs.writeFileSync(path.join(packDir, 'publish.lock'), `${JSON.stringify({
@@ -566,7 +566,7 @@ test('a publish lock owned by a dead process is reclaimed', async () => {
 });
 
 test('a waiter keeps retrying after the prior lock wait while its live owner holds the lock', async () => {
-  const builtRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-live-lock-'));
+  const builtRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-pack-live-lock-'));
   const packDir = path.join(builtRoot, 'demo');
   const lockPath = path.join(packDir, 'publish.lock');
   fs.mkdirSync(packDir, { recursive: true });
@@ -597,7 +597,7 @@ test('a waiter keeps retrying after the prior lock wait while its live owner hol
 });
 
 test('a publish failure survives a release failure', async () => {
-  const builtRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-release-failure-'));
+  const builtRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-pack-release-failure-'));
   const packDir = path.join(builtRoot, 'demo');
   const lockPath = path.join(packDir, 'publish.lock');
   const originalRename = fsp.rename;
@@ -630,7 +630,7 @@ test('a publish failure survives a release failure', async () => {
 });
 
 test('two publishers atomically contend to reclaim one stale lock', async () => {
-  const builtRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-reclaim-race-'));
+  const builtRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-pack-reclaim-race-'));
   const packDir = path.join(builtRoot, 'demo');
   const lockPath = path.join(packDir, 'publish.lock');
   fs.mkdirSync(packDir, { recursive: true });
@@ -739,12 +739,12 @@ test('readBuiltManifest reads a built pack and null for one never built', async 
 });
 
 test('every spec the repo ships builds from its own spec file', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-proof-pack-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-proof-pack-'));
   try {
     const specs = await listPackSpecs({ specsDir: path.join(import.meta.dirname, '..', 'packs', 'specs') });
     assert.ok(specs.length > 0);
     for (const spec of specs) {
-      const report = await buildPack({ specPath: spec.specPath, builtRoot: root, glissaHome: path.join(root, 'home') });
+      const report = await buildPack({ specPath: spec.specPath, builtRoot: root, glimmervoidHome: path.join(root, 'home') });
       assert.equal(report.ok, true, `${spec.name}: ${report.errors.join('; ')}`);
       assert.ok(report.budgetTokens !== null && report.tokenEstimate <= report.budgetTokens);
       assert.ok(report.currentDir !== null && fs.existsSync(path.join(report.currentDir, 'CLAUDE.md')));
@@ -870,22 +870,22 @@ test('a missing pointed version is refused without a previous fallback', async (
 function memorySpec(overrides: Record<string, unknown> = {}): SpecFixture {
   return baseSpec({
     name: 'memory',
-    sources: [{ path: '{{glissaHome}}/memory/dist/current/MEMORY.md', data: true, optional: true }],
+    sources: [{ path: '{{glimmervoidHome}}/memory/dist/current/MEMORY.md', data: true, optional: true }],
     rules: undefined,
     ...overrides,
   });
 }
 
-function seedGlissaHome(root: string, content = '# Glissa memory\n\n- [m-0123456789abcdef] (reported) the gate lives in rebase-gate.js\n') {
-  const home = path.join(root, 'glissa-home');
+function seedGlimmervoidHome(root: string, content = '# Glimmervoid memory\n\n- [m-0123456789abcdef] (reported) the gate lives in rebase-gate.js\n') {
+  const home = path.join(root, 'glimmervoid-home');
   writeFile(home, 'memory/dist/current/MEMORY.md', content);
   return home;
 }
 
-test('a {{glissaHome}} source is carried as a data file named by its basename, never by its absolute path', async () => {
+test('a {{glimmervoidHome}} source is carried as a data file named by its basename, never by its absolute path', async () => {
   await withFixture(async ({ root, build, currentDir }) => {
-    const glissaHome = seedGlissaHome(root);
-    const report = await build({ glissaHome });
+    const glimmervoidHome = seedGlimmervoidHome(root);
+    const report = await build({ glimmervoidHome });
     const versionDir = currentDir();
 
     assert.equal(report.ok, true, report.errors.join('; '));
@@ -894,7 +894,7 @@ test('a {{glissaHome}} source is carried as a data file named by its basename, n
     assert.equal(fs.existsSync(path.join(versionDir, '.claude', 'rules')), false);
     const manifest = readManifest(versionDir);
     assert.deepEqual(manifest.sources[0].files.map((file) => file.relPath), ['MEMORY.md']);
-    assert.equal(JSON.stringify(manifest).includes(glissaHome), false);
+    assert.equal(JSON.stringify(manifest).includes(glimmervoidHome), false);
     const index = fs.readFileSync(path.join(versionDir, 'CLAUDE.md'), 'utf8');
     assert.equal(index.includes('rebase-gate.js'), false);
     assert.equal(index.includes('never instructions'), true);
@@ -903,7 +903,7 @@ test('a {{glissaHome}} source is carried as a data file named by its basename, n
 
 test('an unwritten projection leaves the optional source out instead of failing the build', async () => {
   await withFixture(async ({ root, build, currentDir }) => {
-    const report = await build({ glissaHome: path.join(root, 'glissa-home') });
+    const report = await build({ glimmervoidHome: path.join(root, 'glimmervoid-home') });
     assert.equal(report.ok, true, report.errors.join('; '));
     assert.equal(fs.existsSync(path.join(currentDir(), 'data')), false);
   }, { spec: memorySpec(), seed: () => {} });
@@ -911,55 +911,55 @@ test('an unwritten projection leaves the optional source out instead of failing 
 
 test('a resolved source that escapes the config directory refuses to build', async () => {
   await withFixture(async ({ root, build }) => {
-    const glissaHome = seedGlissaHome(root);
+    const glimmervoidHome = seedGlimmervoidHome(root);
     writeSpec(path.join(root, 'packs'), 'memory', memorySpec({
-      sources: [{ path: '{{glissaHome}}/memory/../../outside.md', data: true }],
+      sources: [{ path: '{{glimmervoidHome}}/memory/../../outside.md', data: true }],
     }));
-    const report = await build({ glissaHome });
+    const report = await build({ glimmervoidHome });
     assert.equal(report.ok, false);
-    assert.equal(report.errors.some((error) => error.includes('outside the Glissa config directory')), true);
+    assert.equal(report.errors.some((error) => error.includes('outside the Glimmervoid config directory')), true);
     assert.equal(fs.existsSync(path.join(root, 'built', 'memory')), false);
   }, { spec: memorySpec(), seed: () => {} });
 });
 
 test('the published projection directory is one of the pack watch roots', async () => {
   await withFixture(async ({ root }) => {
-    const glissaHome = seedGlissaHome(root);
-    const roots = await packWatchRoots(memorySpec(), { baseDir: path.join(root, 'packs'), glissaHome });
-    assert.deepEqual(roots, [path.join(glissaHome, 'memory/dist/current').replace(/\\/g, '/')]);
+    const glimmervoidHome = seedGlimmervoidHome(root);
+    const roots = await packWatchRoots(memorySpec(), { baseDir: path.join(root, 'packs'), glimmervoidHome });
+    assert.deepEqual(roots, [path.join(glimmervoidHome, 'memory/dist/current').replace(/\\/g, '/')]);
   }, { spec: memorySpec(), seed: () => {} });
 });
 
 test('a source whose root IS the config directory resolves as inside it', async () => {
   await withFixture(async ({ root, build, currentDir }) => {
-    const glissaHome = seedGlissaHome(root);
+    const glimmervoidHome = seedGlimmervoidHome(root);
     writeSpec(path.join(root, 'packs'), 'memory', memorySpec({
-      sources: [{ path: '{{glissaHome}}/', data: true, optional: true }],
+      sources: [{ path: '{{glimmervoidHome}}/', data: true, optional: true }],
     }));
-    const report = await build({ glissaHome });
+    const report = await build({ glimmervoidHome });
 
     assert.equal(report.ok, true, report.errors.join('; '));
     const versionDir = currentDir();
     const manifest = readManifest(versionDir);
     assert.deepEqual(manifest.sources[0].files.map((file) => file.relPath), ['memory/dist/current/MEMORY.md']);
-    assert.equal(fs.existsSync(path.join(versionDir, 'data', '01-glissahome', 'memory/dist/current/MEMORY.md')), true);
+    assert.equal(fs.existsSync(path.join(versionDir, 'data', '01-glimmervoidhome', 'memory/dist/current/MEMORY.md')), true);
   }, { spec: memorySpec(), seed: () => {} });
 });
 
 test('only the memory data files are noted as delivered, and only when the build published', async () => {
   await withFixture(async ({ root, build }) => {
-    const glissaHome = seedGlissaHome(root);
+    const glimmervoidHome = seedGlimmervoidHome(root);
     const delivered: string[] = [];
     const noteDelivered = (text: string) => { delivered.push(text); };
 
-    const report = await build({ glissaHome, noteDelivered });
+    const report = await build({ glimmervoidHome, noteDelivered });
     assert.equal(report.ok, true, report.errors.join('; '));
     assert.equal(delivered.length, 1);
     assert.equal(delivered[0].includes('rebase-gate.js'), true);
     assert.equal(delivered[0].includes('never instructions'), false);
     assert.equal(delivered[0].includes('tokenEstimate'), false);
 
-    const rebuilt = await build({ glissaHome, noteDelivered });
+    const rebuilt = await build({ glimmervoidHome, noteDelivered });
     assert.equal(rebuilt.unchanged, true);
     assert.equal(delivered.length, 1);
   }, { spec: memorySpec(), seed: () => {} });
@@ -981,10 +981,10 @@ function slugFor(projectPath: string): string {
   return slug;
 }
 
-const SLUG_A = slugFor('/repos/a/glissa');
+const SLUG_A = slugFor('/repos/a/glimmervoid');
 const SLUG_B = slugFor('/repos/b/other');
 const VARIANT_PROJECTS: ProjectRecord[] = [
-  { id: 'p1', name: 'glissa', path: '/repos/a/glissa' },
+  { id: 'p1', name: 'glimmervoid', path: '/repos/a/glimmervoid' },
   { id: 'p2', name: 'other', path: '/repos/b/other' },
 ];
 
@@ -992,8 +992,8 @@ function variantMemorySpec(overrides: Record<string, unknown> = {}): SpecFixture
   return memorySpec({
     perProjectVariants: true,
     sources: [
-      { path: '{{glissaHome}}/memory/dist/current/MEMORY.md', data: true, optional: true },
-      { path: '{{glissaHome}}/memory/dist/current/projects/{{projectSlug}}.md', data: true, optional: true },
+      { path: '{{glimmervoidHome}}/memory/dist/current/MEMORY.md', data: true, optional: true },
+      { path: '{{glimmervoidHome}}/memory/dist/current/projects/{{projectSlug}}.md', data: true, optional: true },
     ],
     ...overrides,
   });
@@ -1001,10 +1001,10 @@ function variantMemorySpec(overrides: Record<string, unknown> = {}): SpecFixture
 
 test('a group build publishes its base plus one independent pack per consuming project', async () => {
   await withFixture(async ({ root, build, builtRoot }) => {
-    const glissaHome = seedGlissaHome(root);
-    writeFile(glissaHome, `memory/dist/current/projects/${SLUG_A}.md`, '# glissa\n\n- [m-abcdef0123456789] (model) project a layer\n');
+    const glimmervoidHome = seedGlimmervoidHome(root);
+    writeFile(glimmervoidHome, `memory/dist/current/projects/${SLUG_A}.md`, '# glimmervoid\n\n- [m-abcdef0123456789] (model) project a layer\n');
 
-    const report = await build({ glissaHome, projects: VARIANT_PROJECTS });
+    const report = await build({ glimmervoidHome, projects: VARIANT_PROJECTS });
     assert.equal(report.ok, true, report.errors.join('; '));
     assert.deepEqual(report.variants.map((variant) => variant.name), [`memory-${SLUG_A}`, `memory-${SLUG_B}`]);
     assert.equal(report.variants.every((variant) => variant.ok), true);
@@ -1027,11 +1027,11 @@ test('a group build publishes its base plus one independent pack per consuming p
 
 test('each per-project memory variant notes its own delivered layer', async () => {
   await withFixture(async ({ root, build }) => {
-    const glissaHome = seedGlissaHome(root);
-    writeFile(glissaHome, `memory/dist/current/projects/${SLUG_A}.md`, '# glissa\n\n- [m-abcdef0123456789] (model) project a layer\n');
+    const glimmervoidHome = seedGlimmervoidHome(root);
+    writeFile(glimmervoidHome, `memory/dist/current/projects/${SLUG_A}.md`, '# glimmervoid\n\n- [m-abcdef0123456789] (model) project a layer\n');
     const delivered: string[] = [];
 
-    const report = await build({ glissaHome, projects: VARIANT_PROJECTS, noteDelivered: (text: string) => { delivered.push(text); } });
+    const report = await build({ glimmervoidHome, projects: VARIANT_PROJECTS, noteDelivered: (text: string) => { delivered.push(text); } });
 
     assert.equal(report.ok, true, report.errors.join('; '));
     assert.equal(delivered.length, 4);
@@ -1044,11 +1044,11 @@ test('each per-project memory variant notes its own delivered layer', async () =
 
 test('a build that plans no project variant sweeps nothing, so a config load failure cannot wipe the variants', async () => {
   await withFixture(async ({ root, build, builtRoot }) => {
-    const glissaHome = seedGlissaHome(root);
-    await build({ glissaHome, projects: VARIANT_PROJECTS });
+    const glimmervoidHome = seedGlimmervoidHome(root);
+    await build({ glimmervoidHome, projects: VARIANT_PROJECTS });
     assert.equal(fs.existsSync(path.join(builtRoot, `memory-${SLUG_A}`)), true);
 
-    const report = await build({ glissaHome, projects: [] });
+    const report = await build({ glimmervoidHome, projects: [] });
 
     assert.equal(report.ok, true, report.errors.join('; '));
     assert.equal(fs.existsSync(path.join(builtRoot, `memory-${SLUG_A}`)), true);
@@ -1058,20 +1058,20 @@ test('a build that plans no project variant sweeps nothing, so a config load fai
 
 test('the stale sweep removes its own dropped variant and leaves a group whose name shares it as a dash prefix', async () => {
   await withFixture(async ({ root, packsDir, build, builtRoot }) => {
-    const glissaHome = seedGlissaHome(root);
+    const glimmervoidHome = seedGlimmervoidHome(root);
     writeSpec(packsDir, 'memory-notes', variantMemorySpec({ name: 'memory-notes' }));
-    await build({ glissaHome, projects: VARIANT_PROJECTS });
+    await build({ glimmervoidHome, projects: VARIANT_PROJECTS });
     const notes = await buildPack({
       specPath: path.join(packsDir, 'specs', 'memory-notes.pack.json'),
       baseDir: packsDir,
       builtRoot,
-      glissaHome,
+      glimmervoidHome,
       projects: VARIANT_PROJECTS,
     });
     assert.equal(notes.ok, true, notes.errors.join('; '));
     assert.equal(fs.existsSync(path.join(builtRoot, `memory-notes-${SLUG_B}`)), true);
 
-    await build({ glissaHome, projects: [VARIANT_PROJECTS[0]] });
+    await build({ glimmervoidHome, projects: [VARIANT_PROJECTS[0]] });
 
     assert.equal(fs.existsSync(path.join(builtRoot, `memory-${SLUG_B}`)), false, 'its own dropped variant is swept');
     assert.equal(fs.existsSync(path.join(builtRoot, `memory-notes-${SLUG_A}`)), true);
@@ -1081,8 +1081,8 @@ test('the stale sweep removes its own dropped variant and leaves a group whose n
 
 test('a project with no layer yet still gets a variant: a missing per-project source is skipped, not an error', async () => {
   await withFixture(async ({ root, build, builtRoot }) => {
-    const glissaHome = seedGlissaHome(root);
-    const report = await build({ glissaHome, projects: VARIANT_PROJECTS });
+    const glimmervoidHome = seedGlimmervoidHome(root);
+    const report = await build({ glimmervoidHome, projects: VARIANT_PROJECTS });
 
     assert.equal(report.ok, true, report.errors.join('; '));
     assert.equal(report.variants.every((variant) => variant.ok), true, report.variants.map((v) => v.errors.join('; ')).join(' | '));
@@ -1093,8 +1093,8 @@ test('a project with no layer yet still gets a variant: a missing per-project so
 
 test('the group base declares perProjectVariants, which is what a spawn resolves a variant from', async () => {
   await withFixture(async ({ root, build, builtRoot }) => {
-    const glissaHome = seedGlissaHome(root);
-    await build({ glissaHome, projects: VARIANT_PROJECTS });
+    const glimmervoidHome = seedGlimmervoidHome(root);
+    await build({ glimmervoidHome, projects: VARIANT_PROJECTS });
 
     const base = await resolveBuiltPack('memory', { builtRoot });
     assert.equal(base.perProjectVariants, true);
@@ -1108,10 +1108,10 @@ test('the group base declares perProjectVariants, which is what a spawn resolves
 
 test('a rebuild that changes nothing republishes no variant either', async () => {
   await withFixture(async ({ root, build, builtRoot }) => {
-    const glissaHome = seedGlissaHome(root);
-    writeFile(glissaHome, `memory/dist/current/projects/${SLUG_A}.md`, '# glissa\n\n- [m-abcdef0123456789] (model) project a layer\n');
-    await build({ glissaHome, projects: VARIANT_PROJECTS });
-    const again = await build({ glissaHome, projects: VARIANT_PROJECTS });
+    const glimmervoidHome = seedGlimmervoidHome(root);
+    writeFile(glimmervoidHome, `memory/dist/current/projects/${SLUG_A}.md`, '# glimmervoid\n\n- [m-abcdef0123456789] (model) project a layer\n');
+    await build({ glimmervoidHome, projects: VARIANT_PROJECTS });
+    const again = await build({ glimmervoidHome, projects: VARIANT_PROJECTS });
 
     assert.equal(again.unchanged, true);
     assert.equal(again.variants.every((variant) => variant.unchanged), true);
@@ -1121,20 +1121,20 @@ test('a rebuild that changes nothing republishes no variant either', async () =>
 
 test('buildPacks lists every derived pack beside its group', async () => {
   await withFixture(async ({ root, packsDir, specsDir, builtRoot }) => {
-    const glissaHome = seedGlissaHome(root);
-    const reports = await buildPacks({ specsDir, baseDir: packsDir, builtRoot, glissaHome, projects: VARIANT_PROJECTS });
+    const glimmervoidHome = seedGlimmervoidHome(root);
+    const reports = await buildPacks({ specsDir, baseDir: packsDir, builtRoot, glimmervoidHome, projects: VARIANT_PROJECTS });
     assert.deepEqual(reports.map((report) => report.name), ['memory', `memory-${SLUG_A}`, `memory-${SLUG_B}`]);
   }, { spec: variantMemorySpec(), seed: () => {} });
 });
 
 test('a per-project pattern is watched as a wildcard, so a first layer file is seen', async () => {
   await withFixture(async ({ root }) => {
-    const glissaHome = seedGlissaHome(root);
-    fs.mkdirSync(path.join(glissaHome, 'memory/dist/current/projects'), { recursive: true });
-    const roots = await packWatchRoots(variantMemorySpec(), { baseDir: path.join(root, 'packs'), glissaHome });
+    const glimmervoidHome = seedGlimmervoidHome(root);
+    fs.mkdirSync(path.join(glimmervoidHome, 'memory/dist/current/projects'), { recursive: true });
+    const roots = await packWatchRoots(variantMemorySpec(), { baseDir: path.join(root, 'packs'), glimmervoidHome });
     assert.deepEqual(roots, [
-      path.join(glissaHome, 'memory/dist/current').replace(/\\/g, '/'),
-      path.join(glissaHome, 'memory/dist/current/projects').replace(/\\/g, '/'),
+      path.join(glimmervoidHome, 'memory/dist/current').replace(/\\/g, '/'),
+      path.join(glimmervoidHome, 'memory/dist/current/projects').replace(/\\/g, '/'),
     ]);
   }, { spec: variantMemorySpec(), seed: () => {} });
 });
@@ -1143,16 +1143,16 @@ test('a variant that would carry another project layer fails and publishes nothi
   const spec = memorySpec({
     perProjectVariants: true,
     sources: [
-      { path: '{{glissaHome}}/memory/dist/current/projects/{{projectSlug}}.md', data: true, optional: true },
-      { glob: '{{glissaHome}}/memory/dist/current/projects/*.md', data: true, optional: true },
+      { path: '{{glimmervoidHome}}/memory/dist/current/projects/{{projectSlug}}.md', data: true, optional: true },
+      { glob: '{{glimmervoidHome}}/memory/dist/current/projects/*.md', data: true, optional: true },
     ],
   });
   await withFixture(async ({ root, build, builtRoot }) => {
-    const glissaHome = seedGlissaHome(root);
-    writeFile(glissaHome, `memory/dist/current/projects/${SLUG_A}.md`, '# a\n\nlayer a\n');
-    writeFile(glissaHome, `memory/dist/current/projects/${SLUG_B}.md`, '# b\n\nlayer b\n');
+    const glimmervoidHome = seedGlimmervoidHome(root);
+    writeFile(glimmervoidHome, `memory/dist/current/projects/${SLUG_A}.md`, '# a\n\nlayer a\n');
+    writeFile(glimmervoidHome, `memory/dist/current/projects/${SLUG_B}.md`, '# b\n\nlayer b\n');
 
-    const report = await build({ glissaHome, projects: VARIANT_PROJECTS });
+    const report = await build({ glimmervoidHome, projects: VARIANT_PROJECTS });
     const variant = report.variants.find((entry) => entry.name === `memory-${SLUG_A}`);
     if (!variant) throw new Error('the group build planned no variant for this project');
     assert.equal(variant.ok, false);
@@ -1166,19 +1166,19 @@ test('a variant rejects a retired project layer selected by an exclude placehold
   const spec = memorySpec({
     perProjectVariants: true,
     sources: [
-      { path: '{{glissaHome}}/memory/dist/current/MEMORY.md', data: true, optional: true },
+      { path: '{{glimmervoidHome}}/memory/dist/current/MEMORY.md', data: true, optional: true },
       {
-        glob: '{{glissaHome}}/memory/dist/current/projects/*.md',
-        exclude: ['{{glissaHome}}/memory/dist/current/projects/{{projectSlug}}.md'],
+        glob: '{{glimmervoidHome}}/memory/dist/current/projects/*.md',
+        exclude: ['{{glimmervoidHome}}/memory/dist/current/projects/{{projectSlug}}.md'],
         data: true,
         optional: true,
       },
     ],
   });
   await withFixture(async ({ root, build, builtRoot }) => {
-    const glissaHome = seedGlissaHome(root);
-    writeFile(glissaHome, `memory/dist/current/projects/${retiredSlug}.md`, 'retired layer\n');
-    const report = await build({ glissaHome, projects: [VARIANT_PROJECTS[0]] });
+    const glimmervoidHome = seedGlimmervoidHome(root);
+    writeFile(glimmervoidHome, `memory/dist/current/projects/${retiredSlug}.md`, 'retired layer\n');
+    const report = await build({ glimmervoidHome, projects: [VARIANT_PROJECTS[0]] });
     const variant = report.variants.find((entry) => entry.name === `memory-${SLUG_A}`);
     if (!variant) throw new Error('the group build planned no variant for this project');
     assert.equal(variant.ok, false);
@@ -1201,10 +1201,10 @@ test('the manifest records every source root packs-relative, distill sources inc
   }, { spec });
 });
 
-test('a source root under the Glissa config dir is left out of the manifest entirely', async () => {
+test('a source root under the Glimmervoid config dir is left out of the manifest entirely', async () => {
   await withFixture(async ({ root, build, currentDir }) => {
-    const glissaHome = seedGlissaHome(root);
-    const report = await build({ glissaHome });
+    const glimmervoidHome = seedGlimmervoidHome(root);
+    const report = await build({ glimmervoidHome });
     assert.equal(report.ok, true, report.errors.join('; '));
     assert.deepEqual(readManifest(currentDir()).sourceRoots, []);
   }, { spec: memorySpec(), seed: () => {} });

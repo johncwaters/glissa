@@ -1,10 +1,10 @@
 > Historical document, superseded. This was the working design-context doc before the current product definition was written. Current behavior: see the root `PRODUCT.md`.
 
-# Glissa: Design Context
+# Glimmervoid: Design Context
 
 ## Users
 
-Glissa is a shared open-source package. The primary user is a developer who runs Glissa as their **primary focus window** while orchestrating multiple Claude Code sessions. They are watching several live agent sessions, glancing between terminal output, state indicators, and alerts. The interface must reward sustained attention — this is not a glanceable widget, it is a workstation.
+Glimmervoid is a shared open-source package. The primary user is a developer who runs Glimmervoid as their **primary focus window** while orchestrating multiple Claude Code sessions. They are watching several live agent sessions, glancing between terminal output, state indicators, and alerts. The interface must reward sustained attention — this is not a glanceable widget, it is a workstation.
 
 Secondary users: other developers who install the package and expect it to work well out of the box without customization.
 
@@ -12,7 +12,7 @@ Secondary users: other developers who install the package and expect it to work 
 
 **Precise. Unblinking. Quiet.**
 
-Glissa behaves like a calm operator console in a control room. It is information-first. It does not demand attention — it earns it by being trustworthy and legible at 2am. Ornament is suspicious; density is welcome when it pays for itself. The tool shows state honestly and gets out of the way.
+Glimmervoid behaves like a calm operator console in a control room. It is information-first. It does not demand attention — it earns it by being trustworthy and legible at 2am. Ornament is suspicious; density is welcome when it pays for itself. The tool shows state honestly and gets out of the way.
 
 Emotional target: the user should feel *in command*, not *entertained*.
 
@@ -22,7 +22,7 @@ Emotional target: the user should feel *in command*, not *entertained*.
 
 ### Anti-references (explicitly NOT)
 - **Generic AI SaaS dashboards** — no gradient hero, no rounded glass cards, no purple-to-blue gradient, no Inter
-- **VS Code / IDE clones** — Glissa is a monitor, not an editor; do not pretend otherwise
+- **VS Code / IDE clones** — Glimmervoid is a monitor, not an editor; do not pretend otherwise
 - **Children's / toy aesthetics** — no cartoonish rounded-everything, no primary-color palettes
 - **Corporate enterprise** — no safe IBM-blue committee design
 

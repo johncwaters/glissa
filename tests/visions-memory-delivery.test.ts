@@ -29,12 +29,12 @@ function dispatchAt(dispatches: DispatchArgs[], index: number): DispatchArgs {
 }
 
 const PROJECT_ID = 'e1f4c0de-0000-4000-8000-000000000002';
-const PROJECT_PATH = '/tmp/glissa-memory-delivery';
+const PROJECT_PATH = '/tmp/glimmervoid-memory-delivery';
 const MARKDOWN_URI = `file://${PROJECT_PATH}/plan.md`;
 const SCOPE_PROJECTS = [{ id: PROJECT_ID, path: PROJECT_PATH }];
 const BUFFER = '# Plan\n\nThe merge gate is what this section is about.\n';
 const FIXED_TS = Date.UTC(2026, 7, 22, 12, 0, 0);
-const RESULT_PATH = '/tmp/glissa-visions-result.json';
+const RESULT_PATH = '/tmp/glimmervoid-visions-result.json';
 const QUIET = { log() {}, warn() {} };
 
 function fakeTimers() {
@@ -103,11 +103,11 @@ async function runDispatch(driver: { connection: { handleFrame: (raw: string) =>
 }
 
 async function withStore<T>(fn: (store: MemoryStore) => Promise<T>, { seed = [] }: { seed?: object[] } = {}): Promise<T> {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memory-delivery-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-memory-delivery-'));
   let clock = FIXED_TS;
   const store = createMemoryStore({
     dir,
-    dbPath: path.join(dir, 'glissa.db'),
+    dbPath: path.join(dir, 'glimmervoid.db'),
     config: { ...resolveMemoryConfig(null), enabled: true },
     logger: QUIET,
     now: () => clock++,
@@ -166,7 +166,7 @@ test('records for the active project and the global layer ride in their own fenc
       assert.equal(memory.count, 2);
       assert.equal(memory.version, manifest.version);
       const prompt = promptOf(dispatchAt(driver.dispatches, 0));
-      const marker = /GLISSA-MEMORY-[0-9A-Z-]+/.exec(prompt)?.[0];
+      const marker = /GLIMMERVOID-MEMORY-[0-9A-Z-]+/.exec(prompt)?.[0];
       assert.ok(marker, 'the prompt fenced the memory section');
       assert.equal(prompt.includes(`Long-term memory for this project (projection ${manifest.version.slice(0, 12)}): 2 recorded observation(s).`), true);
       const fenced = prompt.slice(prompt.indexOf(`<<<${marker}`), prompt.indexOf(`>>>${marker}`));

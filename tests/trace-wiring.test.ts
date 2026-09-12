@@ -14,7 +14,7 @@ import {
   MAX_TRANSCRIPT_READ_BYTES,
 } from '../server/core/trace-tail-core.ts';
 
-const claudeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-trace-home-'));
+const claudeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-trace-home-'));
 process.env.CLAUDE_CONFIG_DIR = claudeHome;
 const projectsRoot = path.join(claudeHome, 'projects');
 fs.mkdirSync(projectsRoot, { recursive: true });
@@ -36,7 +36,7 @@ function silentLogger(): Pick<Console, 'log' | 'warn'> {
 }
 
 function makeWorkspace(name: string): { configDirectory: string; projectDirectory: string } {
-  const configDirectory = fs.mkdtempSync(path.join(os.tmpdir(), `glissa-trace-${name}-`));
+  const configDirectory = fs.mkdtempSync(path.join(os.tmpdir(), `glimmervoid-trace-${name}-`));
   const projectDirectory = fs.mkdtempSync(path.join(projectsRoot, `${name}-`));
   return { configDirectory, projectDirectory };
 }
@@ -74,8 +74,8 @@ function createHarness(
     timers,
     poll: () => fire(POLL_MS),
     firePrune: () => fire(PRUNE_MS),
-    tracePath: (glissaSessionId: string) => path.join(configDirectory, 'traces', `${glissaSessionId}.jsonl`),
-    checkpointPath: (glissaSessionId: string) => path.join(configDirectory, 'traces', `${glissaSessionId}.checkpoint.json`),
+    tracePath: (glimmervoidSessionId: string) => path.join(configDirectory, 'traces', `${glimmervoidSessionId}.jsonl`),
+    checkpointPath: (glimmervoidSessionId: string) => path.join(configDirectory, 'traces', `${glimmervoidSessionId}.checkpoint.json`),
   };
 }
 
@@ -157,14 +157,14 @@ function writeSubagentTranscript(projectDirectory: string, text: string): string
   return subagentPath;
 }
 
-test('main and subagent transcript records append under the Glissa session id', async () => {
+test('main and subagent transcript records append under the Glimmervoid session id', async () => {
   const { configDirectory, projectDirectory } = makeWorkspace('capture');
   const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
   fs.writeFileSync(transcriptPath, '', 'utf8');
   const subagentPath = writeSubagentTranscript(projectDirectory, 'subagent answer');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
   const appendedIds: string[] = [];
   harness.wiring.on('trace-appended', ({ id }: { id: string }) => appendedIds.push(id));
@@ -176,14 +176,14 @@ test('main and subagent transcript records append under the Glissa session id', 
   session.emit('hook-event', subagentStop(subagentPath));
   await harness.wiring.whenIdle();
 
-  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const records = readTrace(harness.tracePath('glimmervoid-session-id'));
   assert.deepEqual(records.map((record) => record.kind), ['session', 'prompt', 'assistant']);
   assert.equal(records[0].kind === 'session' ? records[0].transcriptPath : null, transcriptPath);
   assert.equal(records[2].agentId, 'a1');
   assert.equal(records[2].agentType, 'general-purpose');
-  assert.deepEqual(appendedIds, ['glissa-session-id', 'glissa-session-id', 'glissa-session-id']);
+  assert.deepEqual(appendedIds, ['glimmervoid-session-id', 'glimmervoid-session-id', 'glimmervoid-session-id']);
 
-  const checkpoint = readCheckpoint(harness.checkpointPath('glissa-session-id'));
+  const checkpoint = readCheckpoint(harness.checkpointPath('glimmervoid-session-id'));
   assert.equal(checkpoint.offset, fs.statSync(transcriptPath).size);
   assert.deepEqual(checkpoint.ingestedSubagentPaths, []);
   assert.equal(checkpoint.subagentOffsetByPath[subagentPath], fs.statSync(subagentPath).size);
@@ -202,7 +202,7 @@ test('a draining poll logs debug details only when it appends transcript records
     warn: () => {},
   }, true);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
@@ -213,7 +213,7 @@ test('a draining poll logs debug details only when it appends transcript records
 
   const offset = Buffer.byteLength(record);
   assert.deepEqual(notes, [
-    `[trace] drained session=glissa-session-id records=1 bytes=${offset} offset=${offset}`,
+    `[trace] drained session=glimmervoid-session-id records=1 bytes=${offset} offset=${offset}`,
   ]);
 
   notes.length = 0;
@@ -231,7 +231,7 @@ test('a second SubagentStop appends only records added since the first stop', as
   const subagentPath = writeSubagentTranscript(projectDirectory, 'subagent answer');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
@@ -243,7 +243,7 @@ test('a second SubagentStop appends only records added since the first stop', as
   session.emit('hook-event', subagentStop(subagentPath));
   await harness.wiring.whenIdle();
 
-  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const records = readTrace(harness.tracePath('glimmervoid-session-id'));
   assert.deepEqual(records.map((record) => record.kind), ['session', 'prompt', 'assistant', 'assistant']);
   assert.equal(records[1].kind === 'prompt' ? records[1].text : null, 'launched an agent');
   assert.deepEqual(records.slice(2).map((record) => record.uuid), ['subagent-answer', 'subagent-answer-two']);
@@ -267,18 +267,18 @@ test('a subagent transcript larger than one chunk reaches EOF in one stop', asyn
   fs.writeFileSync(subagentPath, transcript, 'utf8');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   session.emit('hook-event', subagentStop(subagentPath));
   await harness.wiring.whenIdle();
 
-  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const records = readTrace(harness.tracePath('glimmervoid-session-id'));
   const assistantRecords = records.filter((record) => record.kind === 'assistant');
   assert.equal(assistantRecords.length, lineCount);
   assert.equal(new Set(assistantRecords.map((record) => record.uuid)).size, lineCount);
-  assert.equal(readCheckpoint(harness.checkpointPath('glissa-session-id')).subagentOffsetByPath[subagentPath], Buffer.byteLength(transcript));
+  assert.equal(readCheckpoint(harness.checkpointPath('glimmervoid-session-id')).subagentOffsetByPath[subagentPath], Buffer.byteLength(transcript));
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });
@@ -295,7 +295,7 @@ test('a subagent line half-written at one stop is traced once when the next stop
   fs.writeFileSync(subagentPath, `${settledLine}${flushingLine.slice(0, halfway)}`, 'utf8');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
@@ -303,11 +303,11 @@ test('a subagent line half-written at one stop is traced once when the next stop
   await harness.wiring.whenIdle();
 
   assert.deepEqual(
-    readTrace(harness.tracePath('glissa-session-id')).map((record) => record.kind),
+    readTrace(harness.tracePath('glimmervoid-session-id')).map((record) => record.kind),
     ['session', 'assistant'],
   );
   assert.equal(
-    readCheckpoint(harness.checkpointPath('glissa-session-id')).subagentOffsetByPath[subagentPath],
+    readCheckpoint(harness.checkpointPath('glimmervoid-session-id')).subagentOffsetByPath[subagentPath],
     Buffer.byteLength(settledLine),
   );
 
@@ -315,7 +315,7 @@ test('a subagent line half-written at one stop is traced once when the next stop
   session.emit('hook-event', subagentStop(subagentPath));
   await harness.wiring.whenIdle();
 
-  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const records = readTrace(harness.tracePath('glimmervoid-session-id'));
   const assistantRecords = records.filter((record) => record.kind === 'assistant');
   assert.deepEqual(
     assistantRecords.map((record) => record.uuid),
@@ -325,7 +325,7 @@ test('a subagent line half-written at one stop is traced once when the next stop
   assert.equal(flushed && flushed.kind === 'assistant' ? flushed.text : null, 'answer completed between stops');
   assert.equal(records.some((record) => record.kind === 'raw'), false);
   assert.equal(
-    readCheckpoint(harness.checkpointPath('glissa-session-id')).subagentOffsetByPath[subagentPath],
+    readCheckpoint(harness.checkpointPath('glimmervoid-session-id')).subagentOffsetByPath[subagentPath],
     fs.statSync(subagentPath).size,
   );
 
@@ -350,14 +350,14 @@ test('a multibyte character spanning a subagent chunk boundary is traced intact'
   fs.writeFileSync(subagentPath, `${paddingLine}${accentedLine}`, 'utf8');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   session.emit('hook-event', subagentStop(subagentPath));
   await harness.wiring.whenIdle();
 
-  const assistantRecords = readTrace(harness.tracePath('glissa-session-id'))
+  const assistantRecords = readTrace(harness.tracePath('glimmervoid-session-id'))
     .filter((record) => record.kind === 'assistant');
   assert.deepEqual(
     assistantRecords.map((record) => record.uuid),
@@ -380,21 +380,21 @@ test('a skipped oversized subagent line is not re-read as a fragment on the next
   fs.writeFileSync(subagentPath, `${'x'.repeat(skippedBytes + 1)}\n${answerAfterTheSkip}`, 'utf8');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   session.emit('hook-event', subagentStop(subagentPath));
   await harness.wiring.whenIdle();
 
-  const firstRecords = readTrace(harness.tracePath('glissa-session-id'));
+  const firstRecords = readTrace(harness.tracePath('glimmervoid-session-id'));
   assert.deepEqual(firstRecords.map((record) => record.kind), ['session', 'notice', 'assistant']);
   assert.equal(
     firstRecords[1] && firstRecords[1].kind === 'notice' ? firstRecords[1].text : null,
     `skipped ${skippedBytes} bytes of agent-a1.jsonl`,
   );
   assert.equal(
-    readCheckpoint(harness.checkpointPath('glissa-session-id')).subagentOffsetByPath[subagentPath],
+    readCheckpoint(harness.checkpointPath('glimmervoid-session-id')).subagentOffsetByPath[subagentPath],
     fs.statSync(subagentPath).size,
   );
 
@@ -402,7 +402,7 @@ test('a skipped oversized subagent line is not re-read as a fragment on the next
   session.emit('hook-event', subagentStop(subagentPath));
   await harness.wiring.whenIdle();
 
-  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const records = readTrace(harness.tracePath('glimmervoid-session-id'));
   assert.deepEqual(records.map((record) => record.kind), ['session', 'notice', 'assistant', 'assistant']);
   assert.deepEqual(
     records.filter((record) => record.kind === 'assistant').map((record) => record.uuid),
@@ -422,7 +422,7 @@ test('an oversized subagent line still unterminated at the stop end never resume
   fs.writeFileSync(subagentPath, 'x'.repeat(skippedBytes + 1), 'utf8');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
@@ -430,7 +430,7 @@ test('an oversized subagent line still unterminated at the stop end never resume
   await harness.wiring.whenIdle();
 
   assert.deepEqual(
-    readTrace(harness.tracePath('glissa-session-id')).map((record) => record.kind),
+    readTrace(harness.tracePath('glimmervoid-session-id')).map((record) => record.kind),
     ['session', 'notice'],
   );
 
@@ -439,14 +439,14 @@ test('an oversized subagent line still unterminated at the stop end never resume
   session.emit('hook-event', subagentStop(subagentPath));
   await harness.wiring.whenIdle();
 
-  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const records = readTrace(harness.tracePath('glimmervoid-session-id'));
   assert.equal(records.some((record) => record.kind === 'raw'), false);
   assert.deepEqual(
     records.filter((record) => record.kind === 'assistant').map((record) => record.uuid),
     ['subagent-answer-after'],
   );
   assert.equal(
-    readCheckpoint(harness.checkpointPath('glissa-session-id')).subagentOffsetByPath[subagentPath],
+    readCheckpoint(harness.checkpointPath('glimmervoid-session-id')).subagentOffsetByPath[subagentPath],
     fs.statSync(subagentPath).size,
   );
 
@@ -463,7 +463,7 @@ test('a subagent transcript truncated to zero is read from the start once it reg
   const sizeBeforeTruncation = fs.statSync(subagentPath).size;
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
@@ -471,7 +471,7 @@ test('a subagent transcript truncated to zero is read from the start once it reg
   await harness.wiring.whenIdle();
 
   assert.equal(
-    readCheckpoint(harness.checkpointPath('glissa-session-id')).subagentOffsetByPath[subagentPath],
+    readCheckpoint(harness.checkpointPath('glimmervoid-session-id')).subagentOffsetByPath[subagentPath],
     sizeBeforeTruncation,
   );
 
@@ -479,7 +479,7 @@ test('a subagent transcript truncated to zero is read from the start once it reg
   session.emit('hook-event', subagentStop(subagentPath));
   await harness.wiring.whenIdle();
 
-  assert.equal(readCheckpoint(harness.checkpointPath('glissa-session-id')).subagentOffsetByPath[subagentPath], 0);
+  assert.equal(readCheckpoint(harness.checkpointPath('glimmervoid-session-id')).subagentOffsetByPath[subagentPath], 0);
 
   fs.writeFileSync(subagentPath, subagentAnswer('answer two', 'subagent-answer-two'), 'utf8');
   assert.equal(fs.statSync(subagentPath).size, sizeBeforeTruncation);
@@ -487,7 +487,7 @@ test('a subagent transcript truncated to zero is read from the start once it reg
   await harness.wiring.whenIdle();
 
   assert.deepEqual(
-    readTrace(harness.tracePath('glissa-session-id'))
+    readTrace(harness.tracePath('glimmervoid-session-id'))
       .filter((record) => record.kind === 'assistant')
       .map((record) => record.uuid),
     ['subagent-answer-one', 'subagent-answer-two'],
@@ -504,13 +504,13 @@ test('a legacy checkpoint with no remembered offset resumes the subagent transcr
   const subagentPath = writeSubagentTranscript(projectDirectory, 'already ingested answer');
   const first = createHarness(configDirectory);
   await first.wiring.start();
-  const firstSession = new TestTraceSession('glissa-session-id');
+  const firstSession = new TestTraceSession('glimmervoid-session-id');
   first.wiring.attachSession(firstSession);
   firstSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   await first.wiring.whenIdle();
   await first.wiring.stop();
 
-  const checkpoint = readCheckpoint(first.checkpointPath('glissa-session-id'));
+  const checkpoint = readCheckpoint(first.checkpointPath('glimmervoid-session-id'));
   const legacyCheckpoint = {
     transcriptPath: checkpoint.transcriptPath,
     vendorSessionId: checkpoint.vendorSessionId,
@@ -519,21 +519,21 @@ test('a legacy checkpoint with no remembered offset resumes the subagent transcr
     offsetByTranscriptPath: checkpoint.offsetByTranscriptPath,
     subagentOffsetByPath: {},
   };
-  fs.writeFileSync(first.checkpointPath('glissa-session-id'), JSON.stringify(legacyCheckpoint), 'utf8');
+  fs.writeFileSync(first.checkpointPath('glimmervoid-session-id'), JSON.stringify(legacyCheckpoint), 'utf8');
   const sizeAtResume = fs.statSync(subagentPath).size;
 
   const second = createHarness(configDirectory);
   await second.wiring.start();
-  const secondSession = new TestTraceSession('glissa-session-id');
+  const secondSession = new TestTraceSession('glimmervoid-session-id');
   second.wiring.attachSession(secondSession);
   secondSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   await second.wiring.whenIdle();
   secondSession.emit('hook-event', subagentStop(subagentPath));
   await second.wiring.whenIdle();
 
-  assert.equal(readTrace(second.tracePath('glissa-session-id')).filter((record) => record.kind === 'assistant').length, 0);
+  assert.equal(readTrace(second.tracePath('glimmervoid-session-id')).filter((record) => record.kind === 'assistant').length, 0);
   assert.equal(
-    readCheckpoint(second.checkpointPath('glissa-session-id')).subagentOffsetByPath[subagentPath],
+    readCheckpoint(second.checkpointPath('glimmervoid-session-id')).subagentOffsetByPath[subagentPath],
     sizeAtResume,
   );
 
@@ -548,13 +548,13 @@ test('a legacy union checkpoint ignores paths already held in offsets and tails 
   const subagentPath = writeSubagentTranscript(projectDirectory, 'retained answer');
   const first = createHarness(configDirectory);
   await first.wiring.start();
-  const firstSession = new TestTraceSession('glissa-session-id');
+  const firstSession = new TestTraceSession('glimmervoid-session-id');
   first.wiring.attachSession(firstSession);
   firstSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   await first.wiring.whenIdle();
   await first.wiring.stop();
 
-  const checkpoint = readCheckpoint(first.checkpointPath('glissa-session-id'));
+  const checkpoint = readCheckpoint(first.checkpointPath('glimmervoid-session-id'));
   const legacyCheckpoint = {
     transcriptPath: checkpoint.transcriptPath,
     vendorSessionId: checkpoint.vendorSessionId,
@@ -563,27 +563,27 @@ test('a legacy union checkpoint ignores paths already held in offsets and tails 
     offsetByTranscriptPath: checkpoint.offsetByTranscriptPath,
     subagentOffsetByPath: { [subagentPath]: fs.statSync(subagentPath).size },
   };
-  fs.writeFileSync(first.checkpointPath('glissa-session-id'), JSON.stringify(legacyCheckpoint), 'utf8');
+  fs.writeFileSync(first.checkpointPath('glimmervoid-session-id'), JSON.stringify(legacyCheckpoint), 'utf8');
 
   const second = createHarness(configDirectory);
   await second.wiring.start();
-  const secondSession = new TestTraceSession('glissa-session-id');
+  const secondSession = new TestTraceSession('glimmervoid-session-id');
   second.wiring.attachSession(secondSession);
   secondSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   await second.wiring.whenIdle();
   secondSession.emit('hook-event', subagentStop(subagentPath));
   await second.wiring.whenIdle();
-  assert.equal(readTrace(second.tracePath('glissa-session-id')).filter((record) => record.kind === 'assistant').length, 0);
+  assert.equal(readTrace(second.tracePath('glimmervoid-session-id')).filter((record) => record.kind === 'assistant').length, 0);
 
   fs.appendFileSync(subagentPath, subagentAnswer('new answer', 'subagent-answer-new'), 'utf8');
   secondSession.emit('hook-event', subagentStop(subagentPath));
   await second.wiring.whenIdle();
 
-  const assistantRecords = readTrace(second.tracePath('glissa-session-id'))
+  const assistantRecords = readTrace(second.tracePath('glimmervoid-session-id'))
     .filter((record) => record.kind === 'assistant');
   assert.deepEqual(assistantRecords.map((record) => record.uuid), ['subagent-answer-new']);
   assert.equal(
-    readCheckpoint(second.checkpointPath('glissa-session-id')).subagentOffsetByPath[subagentPath],
+    readCheckpoint(second.checkpointPath('glimmervoid-session-id')).subagentOffsetByPath[subagentPath],
     fs.statSync(subagentPath).size,
   );
 
@@ -601,7 +601,7 @@ test('a subagent path evicted from the remembered offsets is tailed again instea
   );
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
@@ -619,7 +619,7 @@ test('a subagent path evicted from the remembered offsets is tailed again instea
   session.emit('hook-event', subagentStop(newcomerPath));
   await harness.wiring.whenIdle();
 
-  const afterCrowding = readCheckpoint(harness.checkpointPath('glissa-session-id'));
+  const afterCrowding = readCheckpoint(harness.checkpointPath('glimmervoid-session-id'));
   assert.equal(afterCrowding.subagentOffsetByPath[evictedPath], undefined);
   assert.deepEqual(afterCrowding.ingestedSubagentPaths, []);
 
@@ -627,9 +627,9 @@ test('a subagent path evicted from the remembered offsets is tailed again instea
   session.emit('hook-event', subagentStop(evictedPath));
   await harness.wiring.whenIdle();
 
-  const uuids = readTrace(harness.tracePath('glissa-session-id')).map((record) => record.uuid);
+  const uuids = readTrace(harness.tracePath('glimmervoid-session-id')).map((record) => record.uuid);
   assert.equal(uuids.includes('subagent-answer-after'), true);
-  const afterReturn = readCheckpoint(harness.checkpointPath('glissa-session-id'));
+  const afterReturn = readCheckpoint(harness.checkpointPath('glimmervoid-session-id'));
   assert.equal(afterReturn.subagentOffsetByPath[evictedPath], fs.statSync(evictedPath).size);
   assert.deepEqual(afterReturn.ingestedSubagentPaths, []);
 
@@ -650,19 +650,19 @@ test('a subagent transcript outside the bound session directory is refused', asy
     warn: (message) => { warnings.push(String(message)); },
   });
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   session.emit('hook-event', subagentStop(strayPath));
   await harness.wiring.whenIdle();
 
-  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const records = readTrace(harness.tracePath('glimmervoid-session-id'));
   assert.deepEqual(records.map((record) => record.kind), ['session', 'notice']);
   assert.equal(records[1].kind === 'notice' ? records[1].text : null, 'refused agent-a1.jsonl: outside-root');
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /^\[trace\] subagent transcript refused /);
-  assert.match(warnings[0], /session=glissa-session-id/);
+  assert.match(warnings[0], /session=glimmervoid-session-id/);
   assert.match(warnings[0], /reason=outside-root/);
 
   await harness.wiring.stop();
@@ -683,7 +683,7 @@ test('a missing subagent leaves no record while another refusal in the same sess
     warn: (message) => { warnings.push(String(message)); },
   });
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
@@ -692,7 +692,7 @@ test('a missing subagent leaves no record while another refusal in the same sess
   session.emit('hook-event', subagentStop(strayPath));
   await harness.wiring.whenIdle();
 
-  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const records = readTrace(harness.tracePath('glimmervoid-session-id'));
   assert.deepEqual(records.map((record) => record.kind), ['session', 'notice']);
   assert.equal(records[1].kind === 'notice' ? records[1].text : null, 'refused agent-a1.jsonl: outside-root');
   assert.equal(warnings.filter((warning) => /reason=missing/.test(warning)).length, 1);
@@ -716,7 +716,7 @@ test('a repeated refused subagent transcript warns once for its reason', async (
     warn: (message) => { warnings.push(String(message)); },
   });
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
@@ -726,7 +726,7 @@ test('a repeated refused subagent transcript warns once for its reason', async (
 
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /reason=outside-root/);
-  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const records = readTrace(harness.tracePath('glimmervoid-session-id'));
   assert.deepEqual(records.map((record) => record.kind), ['session', 'notice']);
   assert.equal(records[1].kind === 'notice' ? records[1].text : null, 'refused agent-a1.jsonl: outside-root');
 
@@ -746,7 +746,7 @@ test('a missing subagent transcript is refused as missing', async () => {
     warn: (message) => { warnings.push(String(message)); },
   });
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
@@ -756,33 +756,33 @@ test('a missing subagent transcript is refused as missing', async () => {
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /reason=missing/);
   assert.doesNotMatch(warnings[0], /reason=outside-root/);
-  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const records = readTrace(harness.tracePath('glimmervoid-session-id'));
   assert.deepEqual(records.map((record) => record.kind), ['session']);
 
   session.emit('hook-event', subagentStop(subagentPath));
   await harness.wiring.whenIdle();
   assert.equal(warnings.length, 1);
-  assert.deepEqual(readTrace(harness.tracePath('glissa-session-id')).map((record) => record.kind), ['session']);
+  assert.deepEqual(readTrace(harness.tracePath('glimmervoid-session-id')).map((record) => record.kind), ['session']);
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });
 });
 
 test('a bound transcript outside the Claude projects root leaves no record and is never read', async () => {
-  const configDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-trace-outside-'));
-  const strayDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-trace-stray-'));
+  const configDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-trace-outside-'));
+  const strayDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-trace-stray-'));
   const strayTranscript = path.join(strayDirectory, 'vendor-session.jsonl');
   fs.writeFileSync(strayTranscript, mainPrompt('secret prompt', 'prompt-id'), 'utf8');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath: strayTranscript });
   await harness.wiring.whenIdle();
   await harness.poll();
 
-  assert.equal(fs.existsSync(harness.tracePath('glissa-session-id')), false);
+  assert.equal(fs.existsSync(harness.tracePath('glimmervoid-session-id')), false);
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });
@@ -798,13 +798,13 @@ test('a transcript bound before file creation starts tracing when the file appea
     warn: (message) => { warnings.push(String(message)); },
   });
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   await harness.wiring.whenIdle();
   await harness.poll();
-  assert.equal(fs.existsSync(harness.tracePath('glissa-session-id')), false);
+  assert.equal(fs.existsSync(harness.tracePath('glimmervoid-session-id')), false);
   assert.deepEqual(warnings, []);
 
   fs.writeFileSync(transcriptPath, mainPrompt('first prompt', 'prompt-one'), 'utf8');
@@ -812,23 +812,23 @@ test('a transcript bound before file creation starts tracing when the file appea
   fs.appendFileSync(transcriptPath, mainPrompt('second prompt', 'prompt-two'), 'utf8');
   await harness.poll();
 
-  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const records = readTrace(harness.tracePath('glimmervoid-session-id'));
   assert.deepEqual(records.map((record) => record.kind), ['session', 'prompt', 'prompt']);
   assert.equal(records[1].kind === 'prompt' ? records[1].text : null, 'first prompt');
   assert.equal(records[2].kind === 'prompt' ? records[2].text : null, 'second prompt');
-  assert.equal(readCheckpoint(harness.checkpointPath('glissa-session-id')).offset, fs.statSync(transcriptPath).size);
+  assert.equal(readCheckpoint(harness.checkpointPath('glimmervoid-session-id')).offset, fs.statSync(transcriptPath).size);
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });
 });
 
 test('a nonexistent transcript outside the Claude projects root is refused', async () => {
-  const configDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-trace-missing-outside-'));
-  const strayDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-trace-missing-stray-'));
+  const configDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-trace-missing-outside-'));
+  const strayDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-trace-missing-stray-'));
   const transcriptPath = path.join(strayDirectory, 'vendor-session.jsonl');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
@@ -836,7 +836,7 @@ test('a nonexistent transcript outside the Claude projects root is refused', asy
   fs.writeFileSync(transcriptPath, mainPrompt('secret prompt', 'prompt-id'), 'utf8');
   await harness.poll();
 
-  assert.equal(fs.existsSync(harness.tracePath('glissa-session-id')), false);
+  assert.equal(fs.existsSync(harness.tracePath('glimmervoid-session-id')), false);
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });
@@ -852,17 +852,17 @@ test('a nonexistent transcript with a separator in its basename is refused', asy
     warn: (message) => { warnings.push(String(message)); },
   });
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   await harness.wiring.whenIdle();
   await harness.poll();
 
-  assert.equal(fs.existsSync(harness.tracePath('glissa-session-id')), false);
+  assert.equal(fs.existsSync(harness.tracePath('glimmervoid-session-id')), false);
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /^\[trace\] transcript refused /);
-  assert.match(warnings[0], /session=glissa-session-id/);
+  assert.match(warnings[0], /session=glimmervoid-session-id/);
   assert.match(warnings[0], /reason=outside-root/);
 
   await harness.wiring.stop();
@@ -879,17 +879,17 @@ test('a named pipe under the projects root is refused without wedging the lane',
     warn: (message) => { warnings.push(String(message)); },
   });
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath: fifoPath });
   await harness.wiring.whenIdle();
   await harness.poll();
 
-  assert.equal(fs.existsSync(harness.tracePath('glissa-session-id')), false);
+  assert.equal(fs.existsSync(harness.tracePath('glimmervoid-session-id')), false);
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /^\[trace\] transcript refused /);
-  assert.match(warnings[0], /session=glissa-session-id/);
+  assert.match(warnings[0], /session=glimmervoid-session-id/);
   assert.match(warnings[0], /reason=not-a-regular-file/);
 
   await harness.wiring.stop();
@@ -906,17 +906,17 @@ test('a directory at the transcript path is refused instead of left pending', as
     warn: (message) => { warnings.push(String(message)); },
   });
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath: directoryPath });
   await harness.wiring.whenIdle();
   await harness.poll();
 
-  assert.equal(fs.existsSync(harness.tracePath('glissa-session-id')), false);
+  assert.equal(fs.existsSync(harness.tracePath('glimmervoid-session-id')), false);
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /^\[trace\] transcript refused /);
-  assert.match(warnings[0], /session=glissa-session-id/);
+  assert.match(warnings[0], /session=glimmervoid-session-id/);
   assert.match(warnings[0], /reason=not-a-regular-file/);
 
   await harness.wiring.stop();
@@ -929,7 +929,7 @@ test('a restart resumes at the checkpoint instead of replaying retained history'
   fs.writeFileSync(transcriptPath, mainPrompt('stored prompt', 'prompt-id'), 'utf8');
   const first = createHarness(configDirectory);
   await first.wiring.start();
-  const firstSession = new TestTraceSession('glissa-session-id');
+  const firstSession = new TestTraceSession('glimmervoid-session-id');
   first.wiring.attachSession(firstSession);
   firstSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   await first.wiring.whenIdle();
@@ -937,14 +937,14 @@ test('a restart resumes at the checkpoint instead of replaying retained history'
 
   const second = createHarness(configDirectory);
   await second.wiring.start();
-  const secondSession = new TestTraceSession('glissa-session-id');
+  const secondSession = new TestTraceSession('glimmervoid-session-id');
   second.wiring.attachSession(secondSession);
   secondSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   await second.wiring.whenIdle();
   await second.poll();
   await second.wiring.stop();
 
-  const records = readTrace(first.tracePath('glissa-session-id'));
+  const records = readTrace(first.tracePath('glimmervoid-session-id'));
   assert.deepEqual(records.map((record) => record.kind), ['session', 'prompt', 'session']);
 
   fs.rmSync(configDirectory, { recursive: true, force: true });
@@ -957,7 +957,7 @@ test('a skill expansion appended after restart retains the checkpointed call id'
   fs.writeFileSync(transcriptPath, skillToolCall(toolUseId), 'utf8');
   const first = createHarness(configDirectory);
   await first.wiring.start();
-  const firstSession = new TestTraceSession('glissa-session-id');
+  const firstSession = new TestTraceSession('glimmervoid-session-id');
   first.wiring.attachSession(firstSession);
   firstSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   await first.wiring.whenIdle();
@@ -966,13 +966,13 @@ test('a skill expansion appended after restart retains the checkpointed call id'
   fs.appendFileSync(transcriptPath, skillExpansion(toolUseId), 'utf8');
   const second = createHarness(configDirectory);
   await second.wiring.start();
-  const secondSession = new TestTraceSession('glissa-session-id');
+  const secondSession = new TestTraceSession('glimmervoid-session-id');
   second.wiring.attachSession(secondSession);
   secondSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   await second.wiring.whenIdle();
   await second.wiring.stop();
 
-  const expansion = readTrace(second.tracePath('glissa-session-id')).find((record) => record.kind === 'expansion');
+  const expansion = readTrace(second.tracePath('glimmervoid-session-id')).find((record) => record.kind === 'expansion');
   assert.equal(expansion?.kind, 'expansion');
   assert.equal(expansion?.kind === 'expansion' ? expansion.toolUseId : null, toolUseId);
 
@@ -985,7 +985,7 @@ test('a transcript shorter than the checkpoint restarts from zero and says so', 
   fs.writeFileSync(transcriptPath, mainPrompt('first prompt', 'prompt-one'), 'utf8');
   const first = createHarness(configDirectory);
   await first.wiring.start();
-  const firstSession = new TestTraceSession('glissa-session-id');
+  const firstSession = new TestTraceSession('glimmervoid-session-id');
   first.wiring.attachSession(firstSession);
   firstSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   await first.wiring.whenIdle();
@@ -994,13 +994,13 @@ test('a transcript shorter than the checkpoint restarts from zero and says so', 
   fs.writeFileSync(transcriptPath, mainPrompt('short', 'prompt-two'), 'utf8');
   const second = createHarness(configDirectory);
   await second.wiring.start();
-  const secondSession = new TestTraceSession('glissa-session-id');
+  const secondSession = new TestTraceSession('glimmervoid-session-id');
   second.wiring.attachSession(secondSession);
   secondSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   await second.wiring.whenIdle();
   await second.wiring.stop();
 
-  const records = readTrace(first.tracePath('glissa-session-id'));
+  const records = readTrace(first.tracePath('glimmervoid-session-id'));
   assert.deepEqual(records.map((record) => record.kind), ['session', 'prompt', 'session', 'prompt']);
   const reset = records[2];
   assert.equal(reset.kind === 'session' ? Boolean(reset.reason) : false, true);
@@ -1017,7 +1017,7 @@ test('a rebind drains the old transcript before it follows the new one', async (
   fs.writeFileSync(secondTranscript, mainPrompt('after the clear', 'prompt-two'), 'utf8');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath: firstTranscript });
@@ -1026,11 +1026,11 @@ test('a rebind drains the old transcript before it follows the new one', async (
   session.emit('claude-session-id', { id: 'cleared-session', vendor: 'claude', transcriptPath: secondTranscript });
   await harness.wiring.whenIdle();
 
-  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const records = readTrace(harness.tracePath('glimmervoid-session-id'));
   assert.deepEqual(records.map((record) => record.kind), ['session', 'prompt', 'session', 'prompt']);
   assert.equal(records[1].kind === 'prompt' ? records[1].text : null, 'before the clear');
   assert.equal(records[3].kind === 'prompt' ? records[3].text : null, 'after the clear');
-  const checkpoint = readCheckpoint(harness.checkpointPath('glissa-session-id'));
+  const checkpoint = readCheckpoint(harness.checkpointPath('glimmervoid-session-id'));
   assert.equal(checkpoint.transcriptPath, secondTranscript);
 
   await harness.wiring.stop();
@@ -1109,7 +1109,7 @@ test('stopping drains a session that never ended', async () => {
   fs.writeFileSync(transcriptPath, '', 'utf8');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
@@ -1118,13 +1118,13 @@ test('stopping drains a session that never ended', async () => {
   await harness.wiring.stop();
 
   assert.deepEqual(
-    readTrace(harness.tracePath('glissa-session-id')).map((record) => record.kind),
+    readTrace(harness.tracePath('glimmervoid-session-id')).map((record) => record.kind),
     ['session', 'prompt'],
   );
   fs.rmSync(configDirectory, { recursive: true, force: true });
 });
 
-test('an unsafe Glissa session id never becomes a trace path', async () => {
+test('an unsafe Glimmervoid session id never becomes a trace path', async () => {
   const { configDirectory, projectDirectory } = makeWorkspace('unsafe');
   const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
   fs.writeFileSync(transcriptPath, mainPrompt('prompt', 'prompt-id'), 'utf8');
@@ -1148,7 +1148,7 @@ test('the age prune runs on start, on its interval, and spares a bound session',
   const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
   fs.writeFileSync(transcriptPath, '', 'utf8');
   const harness = createHarness(configDirectory, Date.now());
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   await harness.wiring.whenIdle();
@@ -1158,15 +1158,15 @@ test('the age prune runs on start, on its interval, and spares a bound session',
   const staleTime = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   fs.writeFileSync(stalePath, '{}\n', 'utf8');
   fs.utimesSync(stalePath, staleTime, staleTime);
-  for (const filePath of [harness.tracePath('glissa-session-id'), harness.checkpointPath('glissa-session-id')]) {
+  for (const filePath of [harness.tracePath('glimmervoid-session-id'), harness.checkpointPath('glimmervoid-session-id')]) {
     fs.utimesSync(filePath, staleTime, staleTime);
   }
   await harness.wiring.start();
   await harness.wiring.whenIdle();
 
   assert.equal(fs.existsSync(stalePath), false);
-  assert.equal(fs.existsSync(harness.tracePath('glissa-session-id')), true);
-  assert.equal(fs.existsSync(harness.checkpointPath('glissa-session-id')), true);
+  assert.equal(fs.existsSync(harness.tracePath('glimmervoid-session-id')), true);
+  assert.equal(fs.existsSync(harness.checkpointPath('glimmervoid-session-id')), true);
   assert.deepEqual(harness.timers.map((timer) => timer.ms), [PRUNE_MS, POLL_MS]);
 
   fs.writeFileSync(staleCheckpointPath, '{}\n', 'utf8');
@@ -1179,7 +1179,7 @@ test('the age prune runs on start, on its interval, and spares a bound session',
 });
 
 test('the age prune keeps files inside the retention window', async () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-trace-retention-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-trace-retention-'));
   const oldPath = path.join(directory, 'old.jsonl');
   const currentPath = path.join(directory, 'current.jsonl');
   fs.writeFileSync(oldPath, '{}\n', 'utf8');
@@ -1203,27 +1203,27 @@ test('an append that fails keeps its records queued and leaves the checkpoint be
   fs.writeFileSync(transcriptPath, mainPrompt('first prompt', 'prompt-one'), 'utf8');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   await harness.wiring.whenIdle();
-  const offsetBeforeFailure = readCheckpoint(harness.checkpointPath('glissa-session-id')).offset;
+  const offsetBeforeFailure = readCheckpoint(harness.checkpointPath('glimmervoid-session-id')).offset;
 
-  fs.chmodSync(harness.tracePath('glissa-session-id'), 0o444);
+  fs.chmodSync(harness.tracePath('glimmervoid-session-id'), 0o444);
   fs.appendFileSync(transcriptPath, mainPrompt('written while unwritable', 'prompt-two'), 'utf8');
   await harness.poll();
 
-  assert.deepEqual(readTrace(harness.tracePath('glissa-session-id')).map((record) => record.kind), ['session', 'prompt']);
-  assert.equal(readCheckpoint(harness.checkpointPath('glissa-session-id')).offset, offsetBeforeFailure);
+  assert.deepEqual(readTrace(harness.tracePath('glimmervoid-session-id')).map((record) => record.kind), ['session', 'prompt']);
+  assert.equal(readCheckpoint(harness.checkpointPath('glimmervoid-session-id')).offset, offsetBeforeFailure);
 
-  fs.chmodSync(harness.tracePath('glissa-session-id'), 0o600);
+  fs.chmodSync(harness.tracePath('glimmervoid-session-id'), 0o600);
   await harness.poll();
 
-  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const records = readTrace(harness.tracePath('glimmervoid-session-id'));
   assert.deepEqual(records.map((record) => record.kind), ['session', 'prompt', 'prompt']);
   assert.equal(records[2].kind === 'prompt' ? records[2].text : null, 'written while unwritable');
-  assert.equal(readCheckpoint(harness.checkpointPath('glissa-session-id')).offset, fs.statSync(transcriptPath).size);
+  assert.equal(readCheckpoint(harness.checkpointPath('glimmervoid-session-id')).offset, fs.statSync(transcriptPath).size);
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });
@@ -1235,25 +1235,25 @@ test('a batch appended without its checkpoint is not replayed on the next start'
   fs.writeFileSync(transcriptPath, mainPrompt('appended before the crash', 'prompt-one'), 'utf8');
   const first = createHarness(configDirectory);
   await first.wiring.start();
-  const firstSession = new TestTraceSession('glissa-session-id');
+  const firstSession = new TestTraceSession('glimmervoid-session-id');
   first.wiring.attachSession(firstSession);
   firstSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   await first.wiring.whenIdle();
   await first.wiring.stop();
 
-  const stale = { ...readCheckpoint(first.checkpointPath('glissa-session-id')), offset: 0, offsetByTranscriptPath: {} };
-  fs.writeFileSync(first.checkpointPath('glissa-session-id'), JSON.stringify(stale), 'utf8');
+  const stale = { ...readCheckpoint(first.checkpointPath('glimmervoid-session-id')), offset: 0, offsetByTranscriptPath: {} };
+  fs.writeFileSync(first.checkpointPath('glimmervoid-session-id'), JSON.stringify(stale), 'utf8');
 
   const second = createHarness(configDirectory);
   await second.wiring.start();
-  const secondSession = new TestTraceSession('glissa-session-id');
+  const secondSession = new TestTraceSession('glimmervoid-session-id');
   second.wiring.attachSession(secondSession);
   secondSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   await second.wiring.whenIdle();
   await second.wiring.stop();
 
   assert.deepEqual(
-    readTrace(first.tracePath('glissa-session-id')).map((record) => record.kind),
+    readTrace(first.tracePath('glimmervoid-session-id')).map((record) => record.kind),
     ['session', 'prompt', 'session'],
   );
   fs.rmSync(configDirectory, { recursive: true, force: true });
@@ -1265,13 +1265,13 @@ test('a 130000-byte final trace record cannot hide the committed resume offset',
   fs.writeFileSync(transcriptPath, mainPrompt('before the large trace record', 'prompt-one'), 'utf8');
   const first = createHarness(configDirectory);
   await first.wiring.start();
-  const firstSession = new TestTraceSession('glissa-session-id');
+  const firstSession = new TestTraceSession('glimmervoid-session-id');
   first.wiring.attachSession(firstSession);
   firstSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   await first.wiring.whenIdle();
   await first.wiring.stop();
-  fs.rmSync(first.checkpointPath('glissa-session-id'));
-  fs.appendFileSync(first.tracePath('glissa-session-id'), transcriptLine({
+  fs.rmSync(first.checkpointPath('glimmervoid-session-id'));
+  fs.appendFileSync(first.tracePath('glimmervoid-session-id'), transcriptLine({
     ts: 10,
     uuid: 'large-call',
     parentUuid: null,
@@ -1285,15 +1285,15 @@ test('a 130000-byte final trace record cannot hide the committed resume offset',
 
   const second = createHarness(configDirectory);
   await second.wiring.start();
-  const secondSession = new TestTraceSession('glissa-session-id');
+  const secondSession = new TestTraceSession('glimmervoid-session-id');
   second.wiring.attachSession(secondSession);
   secondSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   await second.wiring.whenIdle();
 
-  const records = readTrace(first.tracePath('glissa-session-id'));
+  const records = readTrace(first.tracePath('glimmervoid-session-id'));
   assert.equal(records.filter((record) => record.kind === 'prompt').length, 2);
   assert.equal(records.filter((record) => record.kind === 'notice').length, 0);
-  assert.equal(readCheckpoint(second.checkpointPath('glissa-session-id')).offset, fs.statSync(transcriptPath).size);
+  assert.equal(readCheckpoint(second.checkpointPath('glimmervoid-session-id')).offset, fs.statSync(transcriptPath).size);
 
   await second.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });
@@ -1310,12 +1310,12 @@ test('a recovery without a checkpoint skips a transcript when its trace marker i
   );
   const first = createHarness(configDirectory);
   await first.wiring.start();
-  const firstSession = new TestTraceSession('glissa-session-id');
+  const firstSession = new TestTraceSession('glimmervoid-session-id');
   first.wiring.attachSession(firstSession);
   firstSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   await first.wiring.whenIdle();
   await first.wiring.stop();
-  fs.rmSync(first.checkpointPath('glissa-session-id'));
+  fs.rmSync(first.checkpointPath('glimmervoid-session-id'));
 
   const warnings: string[] = [];
   const second = createHarness(configDirectory, 10, {
@@ -1323,12 +1323,12 @@ test('a recovery without a checkpoint skips a transcript when its trace marker i
     warn: (message) => { warnings.push(String(message)); },
   });
   await second.wiring.start();
-  const secondSession = new TestTraceSession('glissa-session-id');
+  const secondSession = new TestTraceSession('glimmervoid-session-id');
   second.wiring.attachSession(secondSession);
   secondSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   await second.wiring.whenIdle();
 
-  const records = readTrace(first.tracePath('glissa-session-id'));
+  const records = readTrace(first.tracePath('glimmervoid-session-id'));
   assert.equal(records.filter((record) => record.kind === 'prompt').length, 300);
   assert.equal(
     records.filter((record) => record.kind === 'notice' && record.text === 'recovery could not establish the run, resuming at the transcript end').length,
@@ -1347,12 +1347,12 @@ test('a recovery on a transcript that appears after the bind notices the fallbac
   fs.writeFileSync(tracedTranscript, mainPrompt('traced before the checkpoint was lost', 'prompt-one'), 'utf8');
   const first = createHarness(configDirectory);
   await first.wiring.start();
-  const firstSession = new TestTraceSession('glissa-session-id');
+  const firstSession = new TestTraceSession('glimmervoid-session-id');
   first.wiring.attachSession(firstSession);
   firstSession.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath: tracedTranscript });
   await first.wiring.whenIdle();
   await first.wiring.stop();
-  fs.rmSync(first.checkpointPath('glissa-session-id'));
+  fs.rmSync(first.checkpointPath('glimmervoid-session-id'));
 
   const warnings: string[] = [];
   const second = createHarness(configDirectory, 10, {
@@ -1360,7 +1360,7 @@ test('a recovery on a transcript that appears after the bind notices the fallbac
     warn: (message) => { warnings.push(String(message)); },
   });
   await second.wiring.start();
-  const secondSession = new TestTraceSession('glissa-session-id');
+  const secondSession = new TestTraceSession('glimmervoid-session-id');
   second.wiring.attachSession(secondSession);
   secondSession.emit('claude-session-id', { id: 'later-session', vendor: 'claude', transcriptPath: laterTranscript });
   await second.wiring.whenIdle();
@@ -1368,7 +1368,7 @@ test('a recovery on a transcript that appears after the bind notices the fallbac
   fs.writeFileSync(laterTranscript, mainPrompt('retained before the first open', 'prompt-two'), 'utf8');
   await second.poll();
 
-  const records = readTrace(second.tracePath('glissa-session-id'));
+  const records = readTrace(second.tracePath('glimmervoid-session-id'));
   assert.equal(
     records.filter((record) => record.kind === 'notice' && record.text === 'recovery could not establish the run, resuming at the transcript end').length,
     1,
@@ -1385,16 +1385,16 @@ test('an empty trace file starts at the transcript beginning', async () => {
   const transcriptPath = path.join(projectDirectory, 'vendor-session.jsonl');
   fs.writeFileSync(transcriptPath, mainPrompt('first prompt', 'prompt-one'), 'utf8');
   const harness = createHarness(configDirectory);
-  fs.mkdirSync(path.dirname(harness.tracePath('glissa-session-id')), { recursive: true });
-  fs.writeFileSync(harness.tracePath('glissa-session-id'), '', 'utf8');
+  fs.mkdirSync(path.dirname(harness.tracePath('glimmervoid-session-id')), { recursive: true });
+  fs.writeFileSync(harness.tracePath('glimmervoid-session-id'), '', 'utf8');
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   await harness.wiring.whenIdle();
 
-  assert.deepEqual(readTrace(harness.tracePath('glissa-session-id')).map((record) => record.kind), ['session', 'prompt']);
-  assert.equal(readCheckpoint(harness.checkpointPath('glissa-session-id')).offset, fs.statSync(transcriptPath).size);
+  assert.deepEqual(readTrace(harness.tracePath('glimmervoid-session-id')).map((record) => record.kind), ['session', 'prompt']);
+  assert.equal(readCheckpoint(harness.checkpointPath('glimmervoid-session-id')).offset, fs.statSync(transcriptPath).size);
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });
@@ -1406,17 +1406,17 @@ test('a transcript line written between the teardown and the stop still lands', 
   fs.writeFileSync(transcriptPath, '', 'utf8');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   await harness.wiring.whenIdle();
-  session.emit('teardown', { id: 'glissa-session-id' });
+  session.emit('teardown', { id: 'glimmervoid-session-id' });
   await harness.wiring.whenIdle();
   fs.appendFileSync(transcriptPath, mainPrompt('written while the pty was reaped', 'prompt-one'), 'utf8');
   await harness.wiring.stop();
 
-  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const records = readTrace(harness.tracePath('glimmervoid-session-id'));
   assert.deepEqual(records.map((record) => record.kind), ['session', 'prompt']);
   assert.equal(records[1].kind === 'prompt' ? records[1].text : null, 'written while the pty was reaped');
   fs.rmSync(configDirectory, { recursive: true, force: true });
@@ -1428,7 +1428,7 @@ test('an exit in the tick of the first vendor id leaves no tailer behind', async
   fs.writeFileSync(transcriptPath, mainPrompt('written before the exit', 'prompt-one'), 'utf8');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
@@ -1438,7 +1438,7 @@ test('an exit in the tick of the first vendor id leaves no tailer behind', async
   await harness.poll();
 
   assert.deepEqual(
-    readTrace(harness.tracePath('glissa-session-id')).map((record) => record.kind),
+    readTrace(harness.tracePath('glimmervoid-session-id')).map((record) => record.kind),
     ['session', 'prompt'],
   );
 
@@ -1452,16 +1452,16 @@ test('a teardown in the tick of the first vendor id aborts the queued bind', asy
   fs.writeFileSync(transcriptPath, mainPrompt('never traced', 'prompt-one'), 'utf8');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
-  session.emit('teardown', { id: 'glissa-session-id' });
+  session.emit('teardown', { id: 'glimmervoid-session-id' });
   await harness.wiring.whenIdle();
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   await harness.wiring.whenIdle();
 
-  assert.equal(fs.existsSync(harness.tracePath('glissa-session-id')), false);
+  assert.equal(fs.existsSync(harness.tracePath('glimmervoid-session-id')), false);
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });
@@ -1473,7 +1473,7 @@ test('a rebind the validator refuses keeps the working binding', async () => {
   fs.writeFileSync(transcriptPath, mainPrompt('before the refused rebind', 'prompt-one'), 'utf8');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
@@ -1487,10 +1487,10 @@ test('a rebind the validator refuses keeps the working binding', async () => {
   fs.appendFileSync(transcriptPath, mainPrompt('after the refused rebind', 'prompt-two'), 'utf8');
   await harness.poll();
 
-  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const records = readTrace(harness.tracePath('glimmervoid-session-id'));
   assert.deepEqual(records.map((record) => record.kind), ['session', 'prompt', 'prompt']);
   assert.equal(records[2].kind === 'prompt' ? records[2].text : null, 'after the refused rebind');
-  assert.equal(readCheckpoint(harness.checkpointPath('glissa-session-id')).transcriptPath, transcriptPath);
+  assert.equal(readCheckpoint(harness.checkpointPath('glimmervoid-session-id')).transcriptPath, transcriptPath);
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });
@@ -1507,7 +1507,7 @@ test('a rebind to a path nested under an existing transcript keeps the working b
     warn: (message) => { warnings.push(String(message)); },
   });
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
@@ -1523,10 +1523,10 @@ test('a rebind to a path nested under an existing transcript keeps the working b
   fs.appendFileSync(transcriptPath, mainPrompt('after the nested rebind', 'prompt-two'), 'utf8');
   await harness.poll();
 
-  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const records = readTrace(harness.tracePath('glimmervoid-session-id'));
   assert.deepEqual(records.map((record) => record.kind), ['session', 'prompt', 'assistant', 'prompt']);
   assert.equal(records[3].kind === 'prompt' ? records[3].text : null, 'after the nested rebind');
-  assert.equal(readCheckpoint(harness.checkpointPath('glissa-session-id')).transcriptPath, transcriptPath);
+  assert.equal(readCheckpoint(harness.checkpointPath('glimmervoid-session-id')).transcriptPath, transcriptPath);
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /^\[trace\] transcript refused /);
   assert.match(warnings[0], /reason=missing/);
@@ -1548,7 +1548,7 @@ test('a subagent refused while the rebound transcript is still missing leaves th
   );
   const first = createHarness(configDirectory);
   await first.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   first.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath: firstTranscript });
@@ -1558,14 +1558,14 @@ test('a subagent refused while the rebound transcript is still missing leaves th
   session.emit('hook-event', subagentStop(unflushedSubagent));
   await first.wiring.whenIdle();
 
-  const checkpoint = readCheckpoint(first.checkpointPath('glissa-session-id'));
+  const checkpoint = readCheckpoint(first.checkpointPath('glimmervoid-session-id'));
   assert.equal(checkpoint.transcriptPath, firstTranscript);
   assert.equal(checkpoint.offsetByTranscriptPath[firstTranscript], fs.statSync(firstTranscript).size);
-  assert.ok(fs.statSync(first.tracePath('glissa-session-id')).size > 64 * 1024);
+  assert.ok(fs.statSync(first.tracePath('glimmervoid-session-id')).size > 64 * 1024);
 
   const second = createHarness(configDirectory);
   await second.wiring.start();
-  const resumedSession = new TestTraceSession('glissa-session-id');
+  const resumedSession = new TestTraceSession('glimmervoid-session-id');
   second.wiring.attachSession(resumedSession);
   resumedSession.emit('claude-session-id', {
     id: 'vendor-session',
@@ -1574,7 +1574,7 @@ test('a subagent refused while the rebound transcript is still missing leaves th
   });
   await second.wiring.whenIdle();
 
-  const records = readTrace(first.tracePath('glissa-session-id'));
+  const records = readTrace(first.tracePath('glimmervoid-session-id'));
   assert.equal(records.filter((record) => record.kind === 'prompt').length, 300);
   assert.equal(records.filter((record) => record.kind === 'notice').length, 0);
 
@@ -1590,7 +1590,7 @@ test('a rebind switches from the old transcript when the new transcript appears'
   fs.writeFileSync(firstTranscript, mainPrompt('first conversation', 'prompt-one'), 'utf8');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath: firstTranscript });
@@ -1601,14 +1601,14 @@ test('a rebind switches from the old transcript when the new transcript appears'
   fs.writeFileSync(secondTranscript, mainPrompt('after the switch', 'prompt-three'), 'utf8');
   await harness.poll();
 
-  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const records = readTrace(harness.tracePath('glimmervoid-session-id'));
   assert.deepEqual(
     records.map((record) => record.kind),
     ['session', 'prompt', 'prompt', 'session', 'prompt'],
   );
   assert.equal(records[2].kind === 'prompt' ? records[2].text : null, 'before the switch');
   assert.equal(records[4].kind === 'prompt' ? records[4].text : null, 'after the switch');
-  assert.equal(readCheckpoint(harness.checkpointPath('glissa-session-id')).transcriptPath, secondTranscript);
+  assert.equal(readCheckpoint(harness.checkpointPath('glimmervoid-session-id')).transcriptPath, secondTranscript);
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });
@@ -1622,7 +1622,7 @@ test('repeated rebinds to transcripts that do not exist keep one predecessor, no
   fs.writeFileSync(firstTranscript, mainPrompt('first prompt', 'prompt-one'), 'utf8');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath: firstTranscript });
@@ -1639,13 +1639,13 @@ test('repeated rebinds to transcripts that do not exist keep one predecessor, no
   fs.writeFileSync(lastTranscript, mainPrompt('from the last', 'prompt-three'), 'utf8');
   await harness.poll();
 
-  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const records = readTrace(harness.tracePath('glimmervoid-session-id'));
   assert.deepEqual(records.map((record) => record.kind), ['session', 'prompt', 'prompt', 'session', 'prompt']);
   assert.deepEqual(
     records.flatMap((record) => (record.kind === 'prompt' ? [record.text] : [])),
     ['first prompt', 'late on the first', 'from the last'],
   );
-  assert.equal(readCheckpoint(harness.checkpointPath('glissa-session-id')).transcriptPath, lastTranscript);
+  assert.equal(readCheckpoint(harness.checkpointPath('glimmervoid-session-id')).transcriptPath, lastTranscript);
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });
@@ -1659,7 +1659,7 @@ test('a rebind keeps a predecessor whose transcript appeared since the last poll
   fs.writeFileSync(firstTranscript, mainPrompt('first prompt', 'prompt-one'), 'utf8');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'first-session', vendor: 'claude', transcriptPath: firstTranscript });
@@ -1672,12 +1672,12 @@ test('a rebind keeps a predecessor whose transcript appeared since the last poll
   fs.writeFileSync(thirdTranscript, mainPrompt('third prompt', 'prompt-three'), 'utf8');
   await harness.poll();
 
-  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const records = readTrace(harness.tracePath('glimmervoid-session-id'));
   assert.deepEqual(
     records.flatMap((record) => (record.kind === 'prompt' ? [record.text] : [])),
     ['first prompt', 'second prompt', 'third prompt'],
   );
-  assert.equal(readCheckpoint(harness.checkpointPath('glissa-session-id')).transcriptPath, thirdTranscript);
+  assert.equal(readCheckpoint(harness.checkpointPath('glimmervoid-session-id')).transcriptPath, thirdTranscript);
 
   await harness.wiring.stop();
   fs.rmSync(configDirectory, { recursive: true, force: true });
@@ -1690,7 +1690,7 @@ test('a transcript drained during a deferred bind is not replayed when the sessi
   fs.writeFileSync(firstTranscript, mainPrompt('first prompt', 'prompt-one'), 'utf8');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath: firstTranscript });
@@ -1707,15 +1707,15 @@ test('a transcript drained during a deferred bind is not replayed when the sessi
   fs.writeFileSync(secondTranscript, paddingPrompts.join(''), 'utf8');
   await harness.poll();
 
-  const afterTheSwitch = readCheckpoint(harness.checkpointPath('glissa-session-id'));
+  const afterTheSwitch = readCheckpoint(harness.checkpointPath('glimmervoid-session-id'));
   assert.equal(afterTheSwitch.transcriptPath, secondTranscript);
   assert.equal(afterTheSwitch.offsetByTranscriptPath[firstTranscript], fs.statSync(firstTranscript).size);
-  assert.ok(fs.statSync(harness.tracePath('glissa-session-id')).size > 64 * 1024);
+  assert.ok(fs.statSync(harness.tracePath('glimmervoid-session-id')).size > 64 * 1024);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath: firstTranscript });
   await harness.wiring.whenIdle();
 
-  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const records = readTrace(harness.tracePath('glimmervoid-session-id'));
   const secondPrompts = records.filter((record) => record.kind === 'prompt' && record.text === 'second prompt');
   assert.equal(secondPrompts.length, 1);
   assert.equal(records[records.length - 1].kind, 'session');
@@ -1732,7 +1732,7 @@ test('returning to a conversation already traced resumes it instead of replaying
   fs.writeFileSync(secondTranscript, mainPrompt('second conversation', 'prompt-two'), 'utf8');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath: firstTranscript });
@@ -1743,13 +1743,13 @@ test('returning to a conversation already traced resumes it instead of replaying
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath: firstTranscript });
   await harness.wiring.whenIdle();
 
-  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const records = readTrace(harness.tracePath('glimmervoid-session-id'));
   assert.deepEqual(
     records.map((record) => record.kind),
     ['session', 'prompt', 'session', 'prompt', 'session', 'prompt'],
   );
   assert.equal(records[5].kind === 'prompt' ? records[5].text : null, 'back on the first');
-  const checkpoint = readCheckpoint(harness.checkpointPath('glissa-session-id'));
+  const checkpoint = readCheckpoint(harness.checkpointPath('glimmervoid-session-id'));
   assert.equal(checkpoint.offsetByTranscriptPath[secondTranscript], fs.statSync(secondTranscript).size);
   assert.equal(checkpoint.offsetByTranscriptPath[firstTranscript], fs.statSync(firstTranscript).size);
 
@@ -1773,7 +1773,7 @@ test('the subagent root follows the resolved transcript, not the path the hook h
   fs.writeFileSync(containedPath, subagentAnswer('answer beside the transcript'), 'utf8');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath: linkedTranscript });
@@ -1782,7 +1782,7 @@ test('the subagent root follows the resolved transcript, not the path the hook h
   session.emit('hook-event', subagentStop(containedPath));
   await harness.wiring.whenIdle();
 
-  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const records = readTrace(harness.tracePath('glimmervoid-session-id'));
   assert.deepEqual(records.map((record) => record.kind), ['session', 'notice', 'assistant']);
   assert.equal(records[0].kind === 'session' ? records[0].transcriptPath : null, realTranscript);
   assert.equal(records[1].kind === 'notice' ? records[1].text : null, 'refused agent-a1.jsonl: outside-root');
@@ -1793,21 +1793,21 @@ test('the subagent root follows the resolved transcript, not the path the hook h
 });
 
 test('a transcript sitting in the projects root itself never opens a sidechain beside it', async () => {
-  const configDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-trace-root-transcript-'));
+  const configDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-trace-root-transcript-'));
   const transcriptPath = path.join(projectsRoot, 'loose-session.jsonl');
   fs.writeFileSync(transcriptPath, '', 'utf8');
   const siblingPath = path.join(projectsRoot, 'loose-agent-a1.jsonl');
   fs.writeFileSync(siblingPath, subagentAnswer('sibling of the projects root'), 'utf8');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   session.emit('hook-event', subagentStop(siblingPath));
   await harness.wiring.whenIdle();
 
-  assert.deepEqual(readTrace(harness.tracePath('glissa-session-id')).map((record) => record.kind), ['session']);
+  assert.deepEqual(readTrace(harness.tracePath('glimmervoid-session-id')).map((record) => record.kind), ['session']);
 
   await harness.wiring.stop();
   fs.rmSync(transcriptPath, { force: true });
@@ -1823,14 +1823,14 @@ test('a subagent transcript past the read bound leaves a notice, not a raw line'
   fs.writeFileSync(subagentPath, 'x'.repeat(MAX_PARTIAL_LINE_BYTES + 1), 'utf8');
   const harness = createHarness(configDirectory);
   await harness.wiring.start();
-  const session = new TestTraceSession('glissa-session-id');
+  const session = new TestTraceSession('glimmervoid-session-id');
   harness.wiring.attachSession(session);
 
   session.emit('claude-session-id', { id: 'vendor-session', vendor: 'claude', transcriptPath });
   session.emit('hook-event', subagentStop(subagentPath));
   await harness.wiring.whenIdle();
 
-  const records = readTrace(harness.tracePath('glissa-session-id'));
+  const records = readTrace(harness.tracePath('glimmervoid-session-id'));
   assert.deepEqual(records.map((record) => record.kind), ['session', 'notice']);
   assert.equal(records[1].kind === 'notice' ? records[1].text : null, 'skipped 8388609 bytes of agent-a1.jsonl');
 
@@ -1856,13 +1856,13 @@ test('the lane serves a byte page of its own trace file and refuses an unsafe se
     text: 'answer',
   };
   const line = `${JSON.stringify(record)}\n`;
-  fs.writeFileSync(harness.tracePath('glissa-session-id'), line, 'utf8');
+  fs.writeFileSync(harness.tracePath('glimmervoid-session-id'), line, 'utf8');
 
-  const page = await harness.wiring.readTracePage('glissa-session-id', { after: 0 });
+  const page = await harness.wiring.readTracePage('glimmervoid-session-id', { after: 0 });
   assert.deepEqual(page.records, [TraceRecord.parse(record)]);
   assert.equal(page.next, Buffer.byteLength(line));
   assert.equal(page.reset, false);
-  assert.equal(page.path, harness.tracePath('glissa-session-id'));
+  assert.equal(page.path, harness.tracePath('glimmervoid-session-id'));
 
   const refused = await harness.wiring.readTracePage('../escape', { after: 0 });
   assert.deepEqual(refused, { records: [], start: 0, next: 0, reset: false, path: '' });

@@ -12,7 +12,7 @@ import { STATES } from '../shared/states.ts';
 import { claudeProjectsDir, listRepoConversations } from '../session/core/conversation-history.ts';
 import type { Session } from '../session/sessions.ts';
 import type { ControlSocket } from './backend-websockets.ts';
-import type { ConfigStore, GlissaConfig, ProjectEntry } from './config-store.ts';
+import type { ConfigStore, GlimmervoidConfig, ProjectEntry } from './config-store.ts';
 import type { ControlMessageRecord, ReplayLog } from './control-replay-core.ts';
 import { normalizeClientTrust } from './core/request-trust.ts';
 import {
@@ -103,14 +103,14 @@ interface MillControl {
 interface ControlHandlerDeps {
   sessions: Map<string, Session>;
 
-  makeSession?: (project: ProjectEntry, config: GlissaConfig) => Session;
+  makeSession?: (project: ProjectEntry, config: GlimmervoidConfig) => Session;
   wireSessionEvents?: (session: Session) => void;
-  config: GlissaConfig;
+  config: GlimmervoidConfig;
   configStore: ConfigStore;
   broadcastControl: (message: ControlMessageRecord) => void;
   generateProjectId: () => string;
-  applyConfigReload: (config: GlissaConfig) => void;
-  applySettingsReload: (config: GlissaConfig) => void;
+  applyConfigReload: (config: GlimmervoidConfig) => void;
+  applySettingsReload: (config: GlimmervoidConfig) => void;
   requestShutdown?: (() => unknown) | null;
   requestRestart?: (() => unknown) | null;
   handleClientFocus?: ((socket: ControlSocket, focused: boolean) => void) | null;
@@ -139,7 +139,7 @@ interface ControlHandlerDeps {
   conversationFs?: typeof fs;
   conversationGit?: (args: string[], cwd: string) => Promise<string>;
   conversationProjectsDir?: string;
-  readTracePage?: ((glissaSessionId: string, request: TracePageRequest) => Promise<TracePage>) | null;
+  readTracePage?: ((glimmervoidSessionId: string, request: TracePageRequest) => Promise<TracePage>) | null;
   readPlanRevision?: ((sessionId: string, request: PlanReadRequest) => Promise<PlanReadResult | null>) | null;
   decidePlanReview?: ((sessionId: string, decision: PlanDecision) => string | null) | null;
 }
@@ -796,7 +796,7 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     const project = posthogCore.resolveIssueProject(config.posthog, config.projects, ref.projectId)
       || autoCreatePosthogProject(ref.projectId, found.projectName);
     if (!project) {
-      reply({ error: 'No Glissa session is mapped to this PostHog project (set posthog.projectMap)' });
+      reply({ error: 'No Glimmervoid session is mapped to this PostHog project (set posthog.projectMap)' });
       return;
     }
     const sess = project.id ? sessions.get(project.id) : undefined;
@@ -1098,7 +1098,7 @@ function registerControlHandlers(controlWss: WebSocketServer, deps: ControlHandl
     const ws = socket as ControlSocket;
     ws.send(JSON.stringify(buildSnapshot()));
 
-    ws.send(JSON.stringify({ type: 'client-trust', trust: normalizeClientTrust(ws.glissaTrust) }));
+    ws.send(JSON.stringify({ type: 'client-trust', trust: normalizeClientTrust(ws.glimmervoidTrust) }));
     if (buildHealthSnapshot) {
       ws.send(JSON.stringify({ type: 'health-snapshot', stats: buildHealthSnapshot() }));
     }

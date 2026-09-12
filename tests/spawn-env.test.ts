@@ -16,8 +16,8 @@ const SCRUBBED = [
   'CLAUDE_CODE_SSE_PORT',
   'CLAUDE_CODE_ENTRYPOINT',
   'CLAUDE_CODE_CHILD_SESSION',
-  'GLISSA_PORT',
-  'GLISSA_CONFIG',
+  'GLIMMERVOID_PORT',
+  'GLIMMERVOID_CONFIG',
 ];
 
 function fullBase(): SpawnEnv {
@@ -28,8 +28,8 @@ function fullBase(): SpawnEnv {
     CLAUDE_CODE_SSE_PORT: '7777',
     CLAUDE_CODE_ENTRYPOINT: 'cli',
     CLAUDE_CODE_CHILD_SESSION: '1',
-    GLISSA_PORT: '3000',
-    GLISSA_CONFIG: 'C:\\x\\config.json',
+    GLIMMERVOID_PORT: '3000',
+    GLIMMERVOID_CONFIG: 'C:\\x\\config.json',
   };
 }
 
@@ -40,11 +40,11 @@ test('scrubs all 6 inherited vars', () => {
   }
 });
 
-test('negative: no CLAUDECODE-exact or GLISSA_* keys survive', () => {
+test('negative: no CLAUDECODE-exact or GLIMMERVOID_* keys survive', () => {
   const env = claudeSpawnEnv(fullBase());
   const keys = Object.keys(env);
   assert.equal(keys.includes('CLAUDECODE'), false);
-  assert.equal(keys.some((k) => k.startsWith('GLISSA_')), false);
+  assert.equal(keys.some((k) => k.startsWith('GLIMMERVOID_')), false);
   assert.equal(keys.includes('CLAUDE_CODE_SSE_PORT'), false);
   assert.equal(keys.includes('CLAUDE_CODE_ENTRYPOINT'), false);
 });
@@ -65,7 +65,7 @@ test('returns a COPY - baseEnv is never mutated', () => {
   const env = claudeSpawnEnv(base);
   assert.notEqual(env, base, 'output must be a distinct object');
   assert.equal(base.CLAUDECODE, '1');
-  assert.equal(base.GLISSA_PORT, '3000');
+  assert.equal(base.GLIMMERVOID_PORT, '3000');
   assert.equal(base.CLAUDE_CODE_SSE_PORT, '7777');
   assert.ok(!('CLAUDE_CODE_NO_FLICKER' in base), 'flag must not leak back onto the source');
   assert.equal(env.CLAUDE_CODE_NO_FLICKER, '1', 'flag must be present on the output');
@@ -95,36 +95,36 @@ test('the pack flag lands on the copy, never on the source env', () => {
 test('prependPathDir prepends to an existing Path key without adding PATH', () => {
   const base: SpawnEnv = { ...fullBase(), Path: `C:\\Windows${path.delimiter}C:\\Tools` };
   delete base.PATH;
-  const env = claudeSpawnEnv(base, null, { prependPathDir: 'C:\\Users\\johnw\\.glissa\\bin' });
-  assert.equal(env.Path, `C:\\Users\\johnw\\.glissa\\bin${path.delimiter}C:\\Windows${path.delimiter}C:\\Tools`);
+  const env = claudeSpawnEnv(base, null, { prependPathDir: 'C:\\Users\\johnw\\.glimmervoid\\bin' });
+  assert.equal(env.Path, `C:\\Users\\johnw\\.glimmervoid\\bin${path.delimiter}C:\\Windows${path.delimiter}C:\\Tools`);
   assert.equal('PATH' in env, false);
 });
 
 test('prependPathDir prepends to an existing PATH key', () => {
-  const env = claudeSpawnEnv(fullBase(), null, { prependPathDir: '/home/u/.glissa/bin' });
-  assert.equal(env.PATH, `/home/u/.glissa/bin${path.delimiter}/usr/bin`);
+  const env = claudeSpawnEnv(fullBase(), null, { prependPathDir: '/home/u/.glimmervoid/bin' });
+  assert.equal(env.PATH, `/home/u/.glimmervoid/bin${path.delimiter}/usr/bin`);
 });
 
 test('prependPathDir does not duplicate an existing path entry case-insensitively', () => {
-  const existingPath = `C:\\Users\\johnw\\.glissa\\bin${path.delimiter}C:\\Windows`;
+  const existingPath = `C:\\Users\\johnw\\.glimmervoid\\bin${path.delimiter}C:\\Windows`;
   const env = claudeSpawnEnv({ ...fullBase(), PATH: existingPath }, null, {
-    prependPathDir: 'c:\\users\\johnw\\.glissa\\bin',
+    prependPathDir: 'c:\\users\\johnw\\.glimmervoid\\bin',
   });
   assert.equal(env.PATH, existingPath);
 });
 
 test('prependPathDir does not duplicate an entry that differs only in slash direction', () => {
-  const existingPath = `C:/Users/johnw/.glissa/bin${path.delimiter}C:\\Windows`;
+  const existingPath = `C:/Users/johnw/.glimmervoid/bin${path.delimiter}C:\\Windows`;
   const env = claudeSpawnEnv({ ...fullBase(), PATH: existingPath }, null, {
-    prependPathDir: 'C:\\Users\\johnw\\.glissa\\bin',
+    prependPathDir: 'C:\\Users\\johnw\\.glimmervoid\\bin',
   });
   assert.equal(env.PATH, existingPath);
 });
 
 test('prependPathDir keeps a Windows drive-letter entry whole in a colon-delimited PATH', () => {
-  const existingPath = `/usr/bin${path.delimiter}C:\\Users\\johnw\\.glissa\\bin`;
+  const existingPath = `/usr/bin${path.delimiter}C:\\Users\\johnw\\.glimmervoid\\bin`;
   const env = claudeSpawnEnv({ ...fullBase(), PATH: existingPath }, null, {
-    prependPathDir: 'C:\\Users\\johnw\\.glissa\\bin',
+    prependPathDir: 'C:\\Users\\johnw\\.glimmervoid\\bin',
   });
   assert.equal(env.PATH, existingPath);
 });
@@ -132,16 +132,16 @@ test('prependPathDir keeps a Windows drive-letter entry whole in a colon-delimit
 test('prependPathDir prepends ahead of a Windows drive-letter entry without splitting it', () => {
   const existingPath = `/usr/bin${path.delimiter}C:\\Windows\\bin`;
   const env = claudeSpawnEnv({ ...fullBase(), PATH: existingPath }, null, {
-    prependPathDir: '/home/u/.glissa/bin',
+    prependPathDir: '/home/u/.glimmervoid/bin',
   });
-  assert.equal(env.PATH, `/home/u/.glissa/bin${path.delimiter}${existingPath}`);
+  assert.equal(env.PATH, `/home/u/.glimmervoid/bin${path.delimiter}${existingPath}`);
 });
 
 test('prependPathDir sets PATH when no path variable exists', () => {
   const base = fullBase();
   delete base.PATH;
-  const env = claudeSpawnEnv(base, null, { prependPathDir: '/home/u/.glissa/bin' });
-  assert.equal(env.PATH, '/home/u/.glissa/bin');
+  const env = claudeSpawnEnv(base, null, { prependPathDir: '/home/u/.glimmervoid/bin' });
+  assert.equal(env.PATH, '/home/u/.glimmervoid/bin');
 });
 
 test('omitted or null prependPathDir leaves the path variable byte-identical', () => {

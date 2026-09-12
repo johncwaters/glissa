@@ -31,7 +31,7 @@ function writeSpec(specsDir: string, name: string, body: string): void {
 }
 
 function writeFixture(): Fixture {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-mill-wiring-'));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-mill-wiring-'));
   const packsDir = path.join(tmpDir, 'packs');
   const specsDir = path.join(packsDir, 'specs');
   const sourcesDir = path.join(packsDir, 'sources', 'good');
@@ -241,14 +241,14 @@ test('the report lists every project as a consumer of every spec', async (t: Tes
   t.after(() => fs.rmSync(fixture.tmpDir, { recursive: true, force: true }));
 
   const { wiring } = makeWiring(fixture, {
-    config: { projects: [{ id: 'p1', name: 'glissa' }, { id: 'p2', name: 'other' }] },
+    config: { projects: [{ id: 'p1', name: 'glimmervoid' }, { id: 'p2', name: 'other' }] },
   });
   const { replies, done } = pull(wiring, 'r1');
   await done;
 
   const report = reportOf(replies[0]);
   assert.deepEqual(report.projects, [
-    { id: 'p1', name: 'glissa', packs: ['good'] },
+    { id: 'p1', name: 'glimmervoid', packs: ['good'] },
     { id: 'p2', name: 'other', packs: ['good'] },
   ]);
   assert.equal(report.packs[0].hasConsumers, true);
@@ -274,23 +274,23 @@ test('two cards on one checkout are offered once, and deliver as one project', a
   const { wiring } = makeWiring(fixture, {
     config: {
       projects: [
-        { id: 'p1', name: 'glissa', path: projectPath, packs: ['good'] },
-        { id: 'p2', name: 'glissa (2)', path: projectPath, packs: ['good'] },
+        { id: 'p1', name: 'glimmervoid', path: projectPath, packs: ['good'] },
+        { id: 'p2', name: 'glimmervoid (2)', path: projectPath, packs: ['good'] },
       ],
     },
     listSessions: () => [
-      { id: 's1', name: 'glissa', path: projectPath, state: 'RUNNING', packs: [{ name: 'good', version: VERSION }] },
-      { id: 's2', name: 'glissa (2)', path: projectPath, state: 'RUNNING', packs: [{ name: 'good', version: VERSION }] },
+      { id: 's1', name: 'glimmervoid', path: projectPath, state: 'RUNNING', packs: [{ name: 'good', version: VERSION }] },
+      { id: 's2', name: 'glimmervoid (2)', path: projectPath, state: 'RUNNING', packs: [{ name: 'good', version: VERSION }] },
     ],
   });
   const { replies, done } = pull(wiring, 'r1');
   await done;
 
   const report = reportOf(replies[0]);
-  assert.deepEqual(report.projects, [{ id: 'p1', name: 'glissa', packs: ['good'] }]);
+  assert.deepEqual(report.projects, [{ id: 'p1', name: 'glimmervoid', packs: ['good'] }]);
   const good = packRow(report, 'good');
   assert.equal(good.deliveredTo.length, 1);
-  assert.equal(good.deliveredTo[0].project, 'glissa');
+  assert.equal(good.deliveredTo[0].project, 'glimmervoid');
   assert.equal(good.deliveredTo[0].sessionCount, 2);
   assert.ok(!JSON.stringify(report).includes(fixture.tmpDir), 'no server path reaches the wire');
 });
@@ -301,9 +301,9 @@ test('a dormant card with an assigned pack reports a pending delivery, not silen
 
   const projectPath = path.join(fixture.tmpDir, 'checkout');
   const { wiring } = makeWiring(fixture, {
-    config: { projects: [{ id: 'p1', name: 'glissa', path: projectPath, packs: ['good'] }] },
+    config: { projects: [{ id: 'p1', name: 'glimmervoid', path: projectPath, packs: ['good'] }] },
     listSessions: () => [
-      { id: 's1', name: 'glissa', path: projectPath, state: 'DORMANT', packs: [] },
+      { id: 's1', name: 'glimmervoid', path: projectPath, state: 'DORMANT', packs: [] },
     ],
   });
   const { replies, done } = pull(wiring, 'r1');
@@ -312,7 +312,7 @@ test('a dormant card with an assigned pack reports a pending delivery, not silen
   const good = packRow(reportOf(replies[0]), 'good');
   assert.equal(good.deliveredTo.length, 1);
   assert.equal(good.deliveredTo[0]?.pending, true);
-  assert.equal(good.deliveredTo[0]?.project, 'glissa');
+  assert.equal(good.deliveredTo[0]?.project, 'glimmervoid');
   assert.equal(good.deliveredTo[0]?.state, 'DORMANT');
   assert.ok(!JSON.stringify(replies[0]).includes(fixture.tmpDir), 'no server path reaches the wire');
 });
@@ -325,10 +325,10 @@ test('with the mill switched off the report claims no consumer and no pending de
   const { wiring } = makeWiring(fixture, {
     config: {
       millEnabled: false,
-      projects: [{ id: 'p1', name: 'glissa', path: projectPath }],
+      projects: [{ id: 'p1', name: 'glimmervoid', path: projectPath }],
       prReview: { packs: ['good'] },
     },
-    listSessions: () => [{ id: 's1', name: 'glissa', path: projectPath, state: 'DORMANT', packs: [] }],
+    listSessions: () => [{ id: 's1', name: 'glimmervoid', path: projectPath, state: 'DORMANT', packs: [] }],
   });
   const { replies, done } = pull(wiring, 'r1');
   await done;
@@ -337,7 +337,7 @@ test('with the mill switched off the report claims no consumer and no pending de
   const good = packRow(report, 'good');
   assert.equal(good.hasConsumers, false, 'a disabled mill delivers to nobody, so it must promise nobody');
   assert.deepEqual(good.deliveredTo, []);
-  assert.deepEqual(report.projects, [{ id: 'p1', name: 'glissa', packs: [] }]);
+  assert.deepEqual(report.projects, [{ id: 'p1', name: 'glimmervoid', packs: [] }]);
 });
 
 test('with no project configured and no lane naming it, a spec is reported as having no consumers', async (t: TestContext) => {
@@ -370,12 +370,12 @@ function writeVariantFixture(): Fixture {
 }
 
 function variantConfig() {
-  return { projects: [{ id: 'p1', name: 'glissa', path: '/repos/a/glissa', packs: ['memory'] }] };
+  return { projects: [{ id: 'p1', name: 'glimmervoid', path: '/repos/a/glimmervoid', packs: ['memory'] }] };
 }
 
 test('a group spec reports its base row plus one row per consuming project', async () => {
   const fixture = writeVariantFixture();
-  const slug = projectVariantSlug('/repos/a/glissa');
+  const slug = projectVariantSlug('/repos/a/glimmervoid');
   try {
     const { wiring } = makeWiring(fixture, { config: variantConfig() });
     const { replies, done } = pull(wiring, 'r1');

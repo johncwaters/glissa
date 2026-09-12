@@ -154,7 +154,7 @@ async function writeOutputNoFollow(fullPath: string, content: string): Promise<v
 }
 
 function writeStandaloneLaneSettings(permissions: unknown): { args: string[]; cleanup(): void } {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-distill-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-distill-'));
   const settingsPath = path.join(dir, 'settings.json');
   fs.writeFileSync(settingsPath, JSON.stringify({ permissions }, null, 2), 'utf8');
   return {
@@ -197,7 +197,7 @@ function createDistillSpawn({
 }
 
 function makePackDistillResultFile(packName: string, index: number): Promise<JobResultFile> {
-  return createJobResultFile(`glissa-distill-${packName}-${index}`);
+  return createJobResultFile(`glimmervoid-distill-${packName}-${index}`);
 }
 
 function createPackDistiller(deps: PackDistillerDependencies = {}): PackDistiller {

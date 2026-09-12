@@ -50,9 +50,9 @@ test('parseStampLine only reads line 1, and rejects anything that is not a stamp
   assert.equal(parseStampLine(`# Brief\n${buildStampLine(SOURCES)}\n`), null, 'stamp on line 2 does not count');
   assert.equal(parseStampLine(''), null);
   assert.equal(parseStampLine(null), null);
-  assert.equal(parseStampLine('<!-- glissa-distill v1 not json -->\n'), null);
-  assert.equal(parseStampLine('<!-- glissa-distill v1 {"path":"a"} -->\n'), null, 'payload must be an array');
-  assert.equal(parseStampLine('<!-- glissa-distill v1 ["AGENTS.md"] -->\n'), null, 'entries must be records');
+  assert.equal(parseStampLine('<!-- glimmervoid-distill v1 not json -->\n'), null);
+  assert.equal(parseStampLine('<!-- glimmervoid-distill v1 {"path":"a"} -->\n'), null, 'payload must be an array');
+  assert.equal(parseStampLine('<!-- glimmervoid-distill v1 ["AGENTS.md"] -->\n'), null, 'entries must be records');
   assert.equal(parseStampLine('<!-- some other comment -->\n'), null);
 });
 
@@ -96,6 +96,6 @@ test('needsDistill: an edited, added, or removed source is stale', () => {
 });
 
 test('needsDistill: a full-length hash in the stamp still compares equal to a truncated one', () => {
-  const longStamp = `<!-- glissa-distill v1 ${JSON.stringify(SOURCES)} -->`;
+  const longStamp = `<!-- glimmervoid-distill v1 ${JSON.stringify(SOURCES)} -->`;
   assert.equal(needsDistill(SOURCES, fileWith(longStamp)).stale, false);
 });

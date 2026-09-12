@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import type { WriteStream } from "node:fs";
 
-import { glissaHomeDir } from "../server/core/config-path-core.ts";
+import { glimmervoidHomeDir } from "../server/core/config-path-core.ts";
 import { safePathSegment } from "../shared/paths.ts";
 import type { DecisionEntry } from "./core/decision-log.ts";
 import type { SessionState } from "../shared/states.ts";
@@ -13,7 +13,7 @@ import type { HookPayload } from "../shared/contracts/index.ts";
 import { projectHookPayload } from "./core/hook-payload-projection.ts";
 
 function defaultRecordingsDir(): string {
-  return path.join(glissaHomeDir(os.homedir(), process.env), "recordings");
+  return path.join(glimmervoidHomeDir(os.homedir(), process.env), "recordings");
 }
 
 const DEFAULT_MAX_FILE_SIZE = 50 * 1024 * 1024;

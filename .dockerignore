@@ -1,12 +1,12 @@
 # Build context for test/container/Dockerfile. node_modules MUST be excluded: it is a Windows tree
 # (and in a worktree, a junction into the main checkout), while the image runs `npm ci` for Linux
-# native builds of node-pty. config.json is excluded so the container resolves ~/.glissa/config.json,
-# the path a real install uses.
+# native builds of node-pty. The machine-local files below are excluded so no developer's state
+# leaks into the image.
 node_modules
 dist
 .git
-.glissa
-.glissa-worktrees
+.glimmervoid
+.glimmervoid-worktrees
 .omc
 .claude
 config.json

@@ -35,7 +35,7 @@ const SESSION_ID = "grok-probe-session";
 const PROMPT = "Run the shell command: touch ./grok-probe-approval.txt";
 const PACK_NAME = "live-probe-pack";
 const SENTINEL_WORD = "amberlattice";
-const PACK_PROMPT = "what sentinel word does the glissa context pack data file contain, answer with the word only";
+const PACK_PROMPT = "what sentinel word does the glimmervoid context pack data file contain, answer with the word only";
 const STEP_TIMEOUT_MS = 90000;
 const USAGE = "Usage: node test/probe-grok-session.ts [--keep]\n--keep retains a sanitized copy of the full authenticated PTY transcript.";
 
@@ -116,7 +116,7 @@ function makeProbePack(tempDirectory: string): string {
   fs.mkdirSync(dataDirectory, { recursive: true });
   fs.writeFileSync(
     path.join(currentDirectory, "CLAUDE.md"),
-    "# Glissa live probe pack\n\nFor sentinel questions, read `data/sentinel.txt`.\n",
+    "# Glimmervoid live probe pack\n\nFor sentinel questions, read `data/sentinel.txt`.\n",
     "utf8",
   );
   fs.writeFileSync(path.join(dataDirectory, "sentinel.txt"), `${SENTINEL_WORD}\n`, "utf8");
@@ -187,7 +187,7 @@ function copySanitizedRecording(tempDirectory: string): string | null {
   const recordings = fs.readdirSync(recordingsDirectory);
   if (recordings.length === 0) return null;
   const source = path.join(recordingsDirectory, recordings[0]);
-  const outputDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "glissa-grok-probe-out-"));
+  const outputDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "glimmervoid-grok-probe-out-"));
   const output = path.join(outputDirectory, recordings[0]);
   const sanitized = fs.readFileSync(source, "utf8")
     .split(tempDirectory).join("<grok-probe>")
@@ -216,14 +216,14 @@ async function main(args: string[] = process.argv.slice(2)): Promise<void> {
   }
   const resolvedBeforeIsolation = grok.resolveCommand();
   if (!resolvedBeforeIsolation.path) throw new Error("The native Grok binary is not installed.");
-  const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "glissa-grok-probe-"));
+  const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "glimmervoid-grok-probe-"));
   const projectDirectory = path.join(tempDirectory, "project");
   fs.mkdirSync(projectDirectory);
   const configPath = path.join(tempDirectory, "config.json");
   writeProbeConfig(configPath, projectDirectory);
   const builtRoot = makeProbePack(tempDirectory);
   const claudeHookProbe = writeClaudeHookProbe(tempDirectory);
-  process.env.GLISSA_CONFIG = configPath;
+  process.env.GLIMMERVOID_CONFIG = configPath;
   process.env.GROK_HOME = makeProbeGrokHome(tempDirectory, resolvedBeforeIsolation.path);
   process.env.GROK_DEFAULT_SELECTED_PERMISSION = "allow_once";
   const setupCode = runAgentSetupCli(["setup", "grok"]);
@@ -285,7 +285,7 @@ async function main(args: string[] = process.argv.slice(2)): Promise<void> {
     session.write("\r");
     await waitForState(session, ["COMPLETE"], "turn completion");
     check("a turn-end hook completed the card", session.state === "COMPLETE");
-    check("the hook child inherited GLISSA_HOOK_URL", hookEvents.includes("notification") && hookEvents.includes("stop"));
+    check("the hook child inherited GLIMMERVOID_HOOK_URL", hookEvents.includes("notification") && hookEvents.includes("stop"));
     const capturedId = session._resumeSessionId;
     const stopPayload = hookPayloads.findLast((entry) => entry.event === "stop" && entry.payload.reason === "end_turn");
     check("Stop carried reason end_turn", stopPayload?.payload.reason === "end_turn");

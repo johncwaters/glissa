@@ -8,7 +8,7 @@ in this repo; they are named for the historical record only.
 
 ## Why the old approach failed
 
-Glissa originally inferred session status by **scraping the rendered TUI** out of the raw PTY
+Glimmervoid originally inferred session status by **scraping the rendered TUI** out of the raw PTY
 byte stream. That stack was:
 
 - `patterns.js`: 3-layer prompt heuristics (exact strings, regex, silence timer + arm/confirm).
@@ -32,7 +32,7 @@ Root causes of unreliability:
 Delete the content-scraping stack and derive status from **structural, machine-emitted signals**:
 
 - **Primary: Claude Code hooks** (`Stop`, `Notification`, `UserPromptSubmit`, `SessionStart/End`)
-  injected at spawn via `claude --settings <file>` (HTTP-type hooks POSTing to Glissa's localhost
+  injected at spawn via `claude --settings <file>` (HTTP-type hooks POSTing to Glimmervoid's localhost
   server). Hooks fire at turn boundaries, carry `session_id`/`cwd`, and require no repo mutation.
 - **Fallback: OSC-0 title source** (`detection/osc-title-source.js`), the proven braille-spinner /
   idle-glyph signal, but with an *honest* contract: it emits only `working`/`ready`/`unknown`,
@@ -64,10 +64,10 @@ Confirmed:
   reproduce on this version.
 
 **ConPTY limitation reconfirmed.** An interactive node-pty probe (`.omc/step0-hook-probe.js`)
-**wedged at `pty.spawn`** while the user's Glissa had ~5 live ConPTY `claude` sessions, matching
+**wedged at `pty.spawn`** while the user's Glimmervoid had ~5 live ConPTY `claude` sessions, matching
 `.omc/probes/common-patterns.md`: ConPTY does not allow concurrent node-pty spawns. Implication:
 interactive live verification (SessionStart, `Notification(idle_prompt)`, the #3118
-tool-call-end-Stop gap) must be run with Glissa stopped; deferred to US-009.
+tool-call-end-Stop gap) must be run with Glimmervoid stopped; deferred to US-009.
 
 **Decision: proceed with Option C (hooks-primary, OSC-title fallback).** The authoritative path is
 empirically validated for the YOLO config.
@@ -83,7 +83,7 @@ empirically validated for the YOLO config.
   and could silently block injected hooks (realistic in the ELM corporate env). Mitigation: startup
   guard: if no hook callback arrives for a known-working session, fall back to OSC-title + a visible
   "detection degraded" badge.
-- Bun HTTP client fails to *external* URLs (#30613); **localhost works**, Glissa binds `127.0.0.1`.
+- Bun HTTP client fails to *external* URLs (#30613); **localhost works**, Glimmervoid binds `127.0.0.1`.
 
 ## Lessons
 

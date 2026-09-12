@@ -12,12 +12,12 @@ import {
   NO_CHAIN,
 } from '../detection/settings-injector.ts';
 
-const BASE = { port: 4321, glissaId: 'sess-1', token: 'tok-abc' };
+const BASE = { port: 4321, glimmervoidId: 'sess-1', token: 'tok-abc' };
 
 let tmpDir = '';
 
 test.before(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-statusline-'));
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-statusline-'));
 });
 
 test.after(() => {
@@ -57,13 +57,13 @@ test('enabled: every path in the command is forward-slashed for git-bash', () =>
   const settings = buildHookSettings({
     ...BASE,
     planLimits: true,
-    relayPath: 'C:\\Users\\johnw\\glissa\\session\\statusline-relay.ts',
+    relayPath: 'C:\\Users\\johnw\\glimmervoid\\session\\statusline-relay.ts',
     userSettingsPath: path.join(tmpDir, 'nope.json'),
   });
   assert.ok(settings.statusLine);
   const command = settings.statusLine.command;
   assert.equal(command.includes('\\'), false, `no backslash survives: ${command}`);
-  assert.ok(command.includes('C:/Users/johnw/glissa/session/statusline-relay.ts'));
+  assert.ok(command.includes('C:/Users/johnw/glimmervoid/session/statusline-relay.ts'));
 });
 
 test('the real relay path resolves to a file that exists', () => {

@@ -51,7 +51,7 @@ async function runStatus(): Promise<number> {
   const extensionId = extensionIdOf(manifest);
   const editors = Object.entries(resolvedEditorPaths());
 
-  console.log('glissa visions\n');
+  console.log('glimmervoid visions\n');
   console.log(`  ${'relay'.padEnd(18)} ${fs.existsSync(RELAY_PATH) ? commandLine(resolveRelayInvocation()) : `MISSING: ${RELAY_PATH}`}`);
   console.log(`  ${'extension'.padEnd(18)} ${extensionId} ${manifest.version}`);
   if (editors.length === 0) console.log(`  ${'VS Code family'.padEnd(18)} none found on PATH`);
@@ -89,7 +89,7 @@ function runSetup(args: string[]): number {
     console.log(`${section.snippet}\n`);
   }
   console.log('Findings reach the dashboard Visions tab whichever client mirrors the buffer.');
-  console.log('The relay tries port 5173 then 3000; GLISSA_PORT or --port names another one.');
+  console.log('The relay tries port 5173 then 3000; GLIMMERVOID_PORT or --port names another one.');
   return 0;
 }
 
@@ -100,7 +100,7 @@ async function runVisionsCli(args: string[] = []): Promise<number | never> {
   if (command === 'uninstall') return runUninstall();
   if (command === 'setup') return runSetup(args.slice(1));
   if (command === 'status') return runStatus();
-  console.error('Usage: glissa visions relay\n       glissa visions install [--editor <command>]\n       glissa visions uninstall\n       glissa visions setup [--editor <id>]\n       glissa visions status');
+  console.error('Usage: glimmervoid visions relay\n       glimmervoid visions install [--editor <command>]\n       glimmervoid visions uninstall\n       glimmervoid visions setup [--editor <id>]\n       glimmervoid visions status');
   return 1;
 }
 

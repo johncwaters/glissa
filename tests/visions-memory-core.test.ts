@@ -21,11 +21,11 @@ import {
 import { sanitizeOneLine } from '../server/core/text-core.ts';
 
 const SCOPE = [
-  { id: 'p1', path: 'c:/repos/glissa' },
+  { id: 'p1', path: 'c:/repos/glimmervoid' },
   { id: 'p2', path: 'c:/repos/other' },
 ];
 
-test('the project tag is the folded repo path, never the Glissa project id', () => {
+test('the project tag is the folded repo path, never the Glimmervoid project id', () => {
   assert.equal(projectTagFor('p2', SCOPE), 'c:/repos/other');
   assert.equal(projectTagFor('unknown', SCOPE), null);
   assert.equal(projectTagFor(null, SCOPE), null);
@@ -33,9 +33,9 @@ test('the project tag is the folded repo path, never the Glissa project id', () 
 });
 
 test('a basename survives percent encoding, a fragment and both slash kinds', () => {
-  assert.equal(basenameOfUri('file:///c:/repos/glissa/docs/plan%20one.md'), 'plan one.md');
-  assert.equal(basenameOfUri('file:///c:/repos/glissa/notes.md#heading'), 'notes.md');
-  assert.equal(basenameOfUri('c:\\repos\\glissa\\notes.md'), 'notes.md');
+  assert.equal(basenameOfUri('file:///c:/repos/glimmervoid/docs/plan%20one.md'), 'plan one.md');
+  assert.equal(basenameOfUri('file:///c:/repos/glimmervoid/notes.md#heading'), 'notes.md');
+  assert.equal(basenameOfUri('c:\\repos\\glimmervoid\\notes.md'), 'notes.md');
   assert.equal(basenameOfUri(''), 'document');
 });
 
@@ -46,12 +46,12 @@ test('a one-line sanitize folds newlines and control characters into single spac
 });
 
 test('an intent record is a model-stamped semantic claim carrying its supersession', () => {
-  const input = intentMemoryInput({ text: ' shipping M13 ', project: 'c:/repos/glissa', supersedes: 'm-abc' });
+  const input = intentMemoryInput({ text: ' shipping M13 ', project: 'c:/repos/glimmervoid', supersedes: 'm-abc' });
   assert.deepEqual(input, {
     kind: 'intent',
     layer: 'semantic',
-    project: 'c:/repos/glissa',
-    source: { kind: 'model', vendor: 'glissa', sessionId: null },
+    project: 'c:/repos/glimmervoid',
+    source: { kind: 'model', vendor: 'glimmervoid', sessionId: null },
     text: 'shipping M13',
     supersedes: 'm-abc',
   });
@@ -66,31 +66,31 @@ test('the intent head per slot is the newest record for that slot', () => {
   const heads = latestIntentHeads([
     { kind: 'intent', project: null, id: 'g1', ts: 10 },
     { kind: 'intent', project: null, id: 'g2', ts: 20 },
-    { kind: 'intent', project: 'c:/repos/glissa', id: 'p1', ts: 30 },
+    { kind: 'intent', project: 'c:/repos/glimmervoid', id: 'p1', ts: 30 },
     { kind: 'knowledge', project: null, id: 'k1', ts: 99 },
   ]);
   assert.equal(heads.get('|'), 'g2');
-  assert.equal(heads.get('c:/repos/glissa|'), 'p1');
+  assert.equal(heads.get('c:/repos/glimmervoid|'), 'p1');
   assert.equal(heads.has('k1'), false);
 });
 
 test('the intent head is keyed by project AND thread, read from the record text prefix', () => {
   const heads = latestIntentHeads([
-    { kind: 'intent', project: 'c:/repos/glissa', id: 'a1', ts: 10, text: 'thread t-716d49b4: story A' },
-    { kind: 'intent', project: 'c:/repos/glissa', id: 'a2', ts: 20, text: 'thread t-716d49b4: story A, refined' },
-    { kind: 'intent', project: 'c:/repos/glissa', id: 'b1', ts: 30, text: 'thread t-0badf00d: story B' },
-    { kind: 'intent', project: 'c:/repos/glissa', id: 'legacy', ts: 40, text: 'thread pool sizing: not a thread id' },
+    { kind: 'intent', project: 'c:/repos/glimmervoid', id: 'a1', ts: 10, text: 'thread t-716d49b4: story A' },
+    { kind: 'intent', project: 'c:/repos/glimmervoid', id: 'a2', ts: 20, text: 'thread t-716d49b4: story A, refined' },
+    { kind: 'intent', project: 'c:/repos/glimmervoid', id: 'b1', ts: 30, text: 'thread t-0badf00d: story B' },
+    { kind: 'intent', project: 'c:/repos/glimmervoid', id: 'legacy', ts: 40, text: 'thread pool sizing: not a thread id' },
   ]);
-  assert.equal(heads.get(intentHeadKey('c:/repos/glissa', 't-716d49b4')), 'a2');
-  assert.equal(heads.get(intentHeadKey('c:/repos/glissa', 't-0badf00d')), 'b1');
-  assert.equal(heads.get(intentHeadKey('c:/repos/glissa', null)), 'legacy', 'an unanchored prefix is unthreaded');
+  assert.equal(heads.get(intentHeadKey('c:/repos/glimmervoid', 't-716d49b4')), 'a2');
+  assert.equal(heads.get(intentHeadKey('c:/repos/glimmervoid', 't-0badf00d')), 'b1');
+  assert.equal(heads.get(intentHeadKey('c:/repos/glimmervoid', null)), 'legacy', 'an unanchored prefix is unthreaded');
   assert.equal(threadIdOfIntentText('thread t-716d49b4: story A'), 't-716d49b4');
   assert.equal(threadIdOfIntentText('thread T-716D49B4: story A'), null);
   assert.equal(threadIdOfIntentText('thread t-716d49b4 story A'), null);
 });
 
 test('an intent record carries its thread as a text prefix with no square brackets', () => {
-  const input = intentMemoryInput({ text: '  story A  ', project: 'c:/repos/glissa', threadId: 't-716d49b4' });
+  const input = intentMemoryInput({ text: '  story A  ', project: 'c:/repos/glimmervoid', threadId: 't-716d49b4' });
   assert.equal(input?.text, 'thread t-716d49b4: story A');
   assert.equal(intentMemoryInput({ text: 'story A', threadId: 'nope' })?.text, 'story A', 'a malformed id is no prefix');
   assert.equal(/[[\]]/.test(input?.text), false);
@@ -98,8 +98,8 @@ test('an intent record carries its thread as a text prefix with no square bracke
 
 test('dispatch comments and the tier 4 hand become episodic model knowledge', () => {
   const inputs = dispatchMemoryInputs({
-    uri: 'file:///c:/repos/glissa/docs/notes.md',
-    project: 'c:/repos/glissa',
+    uri: 'file:///c:/repos/glimmervoid/docs/notes.md',
+    project: 'c:/repos/glimmervoid',
     comments: [{ line: 12, message: 'one suggestion' }, { line: 0, message: 'bad line' }, { line: 3, message: '  ' }],
     hand: 'the structure drifts',
   });
@@ -107,8 +107,8 @@ test('dispatch comments and the tier 4 hand become episodic model knowledge', ()
   assert.deepEqual(inputs[0], {
     kind: 'knowledge',
     layer: 'episodic',
-    project: 'c:/repos/glissa',
-    source: { kind: 'model', vendor: 'glissa', sessionId: null },
+    project: 'c:/repos/glimmervoid',
+    source: { kind: 'model', vendor: 'glimmervoid', sessionId: null },
     text: 'notes.md:12: one suggestion',
     supersedes: null,
   });
@@ -121,10 +121,10 @@ test('a dispatch with nothing to say writes nothing', () => {
 
 test('an applied fix is action-ranked feedback naming the rule and its 1-based line', () => {
   const fix = { code: 'repeated-word', range: { start: { line: 4, character: 2 } } };
-  const input = fixFeedbackInput({ uri: 'file:///c:/repos/glissa/a.md', project: 'c:/repos/glissa', fix });
+  const input = fixFeedbackInput({ uri: 'file:///c:/repos/glimmervoid/a.md', project: 'c:/repos/glimmervoid', fix });
   assert.equal(input?.kind, 'feedback');
   assert.equal(input?.layer, 'episodic');
-  assert.deepEqual(input?.source, { kind: 'action', vendor: 'glissa', sessionId: null });
+  assert.deepEqual(input?.source, { kind: 'action', vendor: 'glimmervoid', sessionId: null });
   assert.equal(input?.text, 'applied repeated-word at a.md:5');
   assert.equal(fixFeedbackInput({ uri: 'file:///a.md', fix: {} }), null);
 });
@@ -142,18 +142,18 @@ test('a served finding id is the rule plus its position, and its key spans uri a
 
 test('a served record is action-ranked and names where the finding sat', () => {
   const input = servedFeedbackInput({
-    uri: 'file:///c:/repos/glissa/a.md', project: 'c:/repos/glissa', id: 'heading-skip@7:0', line: 7,
+    uri: 'file:///c:/repos/glimmervoid/a.md', project: 'c:/repos/glimmervoid', id: 'heading-skip@7:0', line: 7,
   });
   assert.equal(input?.text, 'served heading-skip@7:0 at a.md:7');
-  assert.deepEqual(input?.source, { kind: 'action', vendor: 'glissa', sessionId: null });
+  assert.deepEqual(input?.source, { kind: 'action', vendor: 'glimmervoid', sessionId: null });
   assert.equal(servedFeedbackInput({ uri: 'file:///a.md', id: '  ' }), null);
 });
 
 test('a dismissal is action-ranked and carries only the finding id', () => {
-  const input = dismissFeedbackInput({ uri: 'file:///c:/repos/glissa/a.md', project: null, id: 'heading-skip@7:0' });
+  const input = dismissFeedbackInput({ uri: 'file:///c:/repos/glimmervoid/a.md', project: null, id: 'heading-skip@7:0' });
   assert.equal(input?.text, 'dismissed heading-skip@7:0 at a.md');
   assert.equal(input?.project, null);
-  assert.deepEqual(input?.source, { kind: 'action', vendor: 'glissa', sessionId: null });
+  assert.deepEqual(input?.source, { kind: 'action', vendor: 'glimmervoid', sessionId: null });
 });
 
 test('a dismissal payload is read from either uri spelling and refused when unusable', () => {
@@ -188,8 +188,8 @@ test('the served key set dedupes and evicts oldest first', () => {
 
 test('a basename with spaces still dedupes against what was delivered', () => {
   const inputs = dispatchMemoryInputs({
-    uri: 'file:///c:/repos/glissa/docs/Copy%20of%20Context%20Engineer%20SuperDay%20.md',
-    project: 'c:/repos/glissa',
+    uri: 'file:///c:/repos/glimmervoid/docs/Copy%20of%20Context%20Engineer%20SuperDay%20.md',
+    project: 'c:/repos/glimmervoid',
     comments: [{ line: 12, message: 'the same thought, reworded' }, { line: 13, message: 'a new thought' }],
     hand: 'a reworded hand',
     delivered: [
@@ -202,8 +202,8 @@ test('a basename with spaces still dedupes against what was delivered', () => {
 
 test('a comment or hand whose text was delivered this round is not written again', () => {
   const inputs = dispatchMemoryInputs({
-    uri: 'file:///c:/repos/glissa/docs/notes.md',
-    project: 'c:/repos/glissa',
+    uri: 'file:///c:/repos/glimmervoid/docs/notes.md',
+    project: 'c:/repos/glimmervoid',
     comments: [{ line: 12, message: 'the same thought, reworded' }, { line: 13, message: 'a new thought' }],
     hand: 'a reworded hand',
     delivered: ['notes.md:12: one suggestion', 'notes.md: an old hand'],

@@ -48,8 +48,8 @@ function baselineState(overrides = {}) {
 }
 
 test('rev-parse resolves a main checkout, and a relative common dir against the cwd it ran in', () => {
-  const cwd = path.resolve('/projects/glissa');
-  const layoutOrNull = parseRevParse(['/projects/glissa', '/projects/glissa/.git', '.git', ''].join('\n'), cwd);
+  const cwd = path.resolve('/projects/glimmervoid');
+  const layoutOrNull = parseRevParse(['/projects/glimmervoid', '/projects/glimmervoid/.git', '.git', ''].join('\n'), cwd);
   assert.equal(layoutOrNull?.toplevel, cwd);
   assert.equal(layoutOrNull?.gitDir, path.join(cwd, '.git'));
   assert.equal(layoutOrNull?.commonDir, path.join(cwd, '.git'));
@@ -59,21 +59,21 @@ test('rev-parse keeps a linked worktree gitdir separate from the common dir', ()
   const worktree = path.resolve('/worktrees/feature');
   const layoutOrNull = parseRevParse([
     '/worktrees/feature',
-    '/projects/glissa/.git/worktrees/feature',
-    '/projects/glissa/.git',
+    '/projects/glimmervoid/.git/worktrees/feature',
+    '/projects/glimmervoid/.git',
   ].join('\n'), worktree);
   assert.equal(layoutOrNull?.toplevel, worktree);
-  assert.equal(layoutOrNull?.gitDir, path.resolve('/projects/glissa/.git/worktrees/feature'));
-  assert.equal(layoutOrNull?.commonDir, path.resolve('/projects/glissa/.git'));
+  assert.equal(layoutOrNull?.gitDir, path.resolve('/projects/glimmervoid/.git/worktrees/feature'));
+  assert.equal(layoutOrNull?.commonDir, path.resolve('/projects/glimmervoid/.git'));
 });
 
 test('rev-parse output that is short of its three lines resolves to nothing at all', () => {
-  assert.equal(parseRevParse('/projects/glissa\n', '/projects/glissa'), null);
-  assert.equal(parseRevParse('', '/projects/glissa'), null);
+  assert.equal(parseRevParse('/projects/glimmervoid\n', '/projects/glimmervoid'), null);
+  assert.equal(parseRevParse('', '/projects/glimmervoid'), null);
 });
 
 test('the watch set is directories, deduped, with the linked worktree gitdir beside the common one', () => {
-  const commonDir = path.resolve('/projects/glissa/.git');
+  const commonDir = path.resolve('/projects/glimmervoid/.git');
   const main = deriveWatchDirs({ gitDir: commonDir, commonDir });
   assert.deepEqual(main, [commonDir, path.join(commonDir, 'refs', 'heads')]);
 
@@ -154,10 +154,10 @@ test('the signature is bounded no matter how many paths a tree holds', () => {
 });
 
 test('a log line parses into sha, author, time and subject, and anything else is no commit at all', () => {
-  const line = [SHA, 'Glissa Test', '1699999999', 'fix the gate: keep it simple'].join(LOG_FIELD_SEPARATOR);
+  const line = [SHA, 'Glimmervoid Test', '1699999999', 'fix the gate: keep it simple'].join(LOG_FIELD_SEPARATOR);
   const commitOrNull = parseCommitLine(`${line}\n`);
   assert.equal(commitOrNull?.sha, SHA);
-  assert.equal(commitOrNull?.author, 'Glissa Test');
+  assert.equal(commitOrNull?.author, 'Glimmervoid Test');
   assert.equal(commitOrNull?.committedAt, 1699999999000);
   assert.equal(commitOrNull?.subject, 'fix the gate: keep it simple');
 
@@ -182,7 +182,7 @@ test('a settle that changed nothing publishes nothing', () => {
 test('a moved HEAD on the same branch publishes one commit carrying its branch and subject', () => {
   const status = statusOf({ oid: OTHER_SHA });
   const commit = {
-    sha: OTHER_SHA, author: 'Glissa Test', committedAt: NOW - 5000, subject: 'add the feature flag',
+    sha: OTHER_SHA, author: 'Glimmervoid Test', committedAt: NOW - 5000, subject: 'add the feature flag',
   };
   const { events } = decideGitEvents({
     previous: baselineState(), status, commit, root: '/repo', now: NOW,

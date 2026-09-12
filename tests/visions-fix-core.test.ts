@@ -116,7 +116,7 @@ test('a code action is a quickfix carrying its diagnostic and one versioned docu
   assert.equal(action.title, 'Delete the repeated word');
   assert.equal(action.kind, 'quickfix');
   assert.deepEqual(action.diagnostics, [{
-    range: fix.range, severity: 2, source: 'glissa-visions', code: 'repeated-word', message: 'Repeated word "with"',
+    range: fix.range, severity: 2, source: 'glimmervoid-visions', code: 'repeated-word', message: 'Repeated word "with"',
   }]);
   assert.deepEqual(action.edit, {
     documentChanges: [{

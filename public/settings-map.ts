@@ -118,7 +118,7 @@ export const SETTINGS_MAP = Object.freeze([
     settings: [
       {
         id: 'auto-resume', path: 'autoResume', title: 'Auto-resume sessions on startup',
-        description: 'Resume conversations that were live when Glissa last shut down or crashed.',
+        description: 'Resume conversations that were live when Glimmervoid last shut down or crashed.',
         control: 'toggle', keywords: ['startup', 'conversation'], defaultValue: true,
       },
       {
@@ -133,7 +133,7 @@ export const SETTINGS_MAP = Object.freeze([
     id: 'machine-updates',
     level: 'machine',
     title: 'Updates',
-    description: 'Inspect, stage and hand off Glissa updates without opening a terminal.',
+    description: 'Inspect, stage and hand off Glimmervoid updates without opening a terminal.',
     settings: [
       {
         id: 'update-installed', path: 'checkForUpdates', title: 'Installed',
@@ -158,7 +158,7 @@ export const SETTINGS_MAP = Object.freeze([
       },
       {
         id: 'check-updates', path: 'checkForUpdates', title: 'Check for updates on startup',
-        description: 'Check for a newer Glissa at launch and while a dashboard is connected.',
+        description: 'Check for a newer Glimmervoid at launch and while a dashboard is connected.',
         control: 'toggle', keywords: ['release', 'github'], defaultValue: true,
       },
       {
@@ -637,7 +637,7 @@ export const SETTINGS_MAP = Object.freeze([
         id: 'rtk-compression', path: 'rtk', title: 'rtk output compression',
         description: 'Compress Bash output for newly spawned or restarted sessions.',
         control: 'toggle', keywords: ['bash', 'tokens'], danger: true, dangerConfirmation: 'rtk', status: 'rtk-install',
-        warning: 'Enabling this control permits Glissa to install the pinned rtk executable automatically.', defaultValue: false,
+        warning: 'Enabling this control permits Glimmervoid to install the pinned rtk executable automatically.', defaultValue: false,
       },
     ],
   },

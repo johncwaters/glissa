@@ -57,7 +57,7 @@ function buildPackNotice(
 
   const label = stale.length === 1 ? "Context pack updated" : "Context packs updated";
   const notice =
-    `[glissa] ${label} since this session started: ${listed.join("; ")}. `
+    `[glimmervoid] ${label} since this session started: ${listed.join("; ")}. `
     + "The pack CLAUDE.md and rules text loaded at spawn may be out of date. "
     + "Re-read the files under the pack directory added to this session if they matter for this turn.";
   if (notice.length <= MAX_NOTICE_CHARS) return notice;

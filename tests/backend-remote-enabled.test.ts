@@ -91,14 +91,14 @@ async function pairDevice(): Promise<string> {
 
 test.before(async () => {
   const remotePort = await reserveFreePort();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-remote-on-'));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-remote-on-'));
   const cfgPath = path.join(tmpDir, 'config.json');
   fs.writeFileSync(cfgPath, JSON.stringify({
     projects: [], teams: [], repoRoots: [],
-    remote: { enabled: true, port: remotePort, publicHost: 'glissa.test', allowedOrigins: ['https://glissa.test'] },
+    remote: { enabled: true, port: remotePort, publicHost: 'glimmervoid.test', allowedOrigins: ['https://glimmervoid.test'] },
   }, null, 2), 'utf8');
-  const prevEnv = process.env.GLISSA_CONFIG;
-  process.env.GLISSA_CONFIG = cfgPath;
+  const prevEnv = process.env.GLIMMERVOID_CONFIG;
+  process.env.GLIMMERVOID_CONFIG = cfgPath;
 
   const localServer = http.createServer();
   const backend = createBackend(localServer, { staticDir: path.join(import.meta.dirname, '..', 'public') });
@@ -120,8 +120,8 @@ test.after(async () => {
     server.closeAllConnections();
     await closeServer(server);
   }
-  if (prevEnv == null) delete process.env.GLISSA_CONFIG;
-  if (prevEnv != null) process.env.GLISSA_CONFIG = prevEnv;
+  if (prevEnv == null) delete process.env.GLIMMERVOID_CONFIG;
+  if (prevEnv != null) process.env.GLIMMERVOID_CONFIG = prevEnv;
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -130,7 +130,7 @@ test('the backend reports the configured remote listener', () => {
   assert.equal(backend.remote.enabled, true);
   assert.equal(backend.remote.port, remotePort);
   assert.equal(boundPort(remoteServer), remotePort, 'the second listener really took the configured port');
-  assert.equal(backend.remote.publicHost, 'glissa.test');
+  assert.equal(backend.remote.publicHost, 'glimmervoid.test');
 });
 
 test('the local listener is untouched by remote mode', async () => {
@@ -166,7 +166,7 @@ test('a control upgrade without a cookie is refused with a 401 status line', asy
   assert.match(body, /^HTTP\/1\.1 401/, 'remote mode explains the refusal instead of a naked reset');
 });
 
-test('an upgrade for a path Glissa does not own is CLOSED on the remote listener', async () => {
+test('an upgrade for a path Glimmervoid does not own is CLOSED on the remote listener', async () => {
   const { remoteServer, remotePort } = ctx();
   const destroyed = await backendDestroyedUpgrade(remoteServer, remotePort, '/some-other-app');
   assert.equal(destroyed, true, 'nothing else listens there; leaving it open strands a pre-auth socket');
@@ -188,7 +188,7 @@ test('a paired device may reconnect with a replay cursor on the remote listener'
   const cookie = await pairDevice();
   const ws = new WebSocket(`ws://127.0.0.1:${ctx().remotePort}/control?since=7`, {
     headers: { Cookie: cookie },
-    origin: 'https://glissa.test',
+    origin: 'https://glimmervoid.test',
   });
   const first = await new Promise<{ type: string }>((resolve, reject) => {
     ws.once('message', (raw: Buffer) => resolve(JSON.parse(raw.toString())));

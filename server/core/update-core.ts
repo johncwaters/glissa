@@ -1,6 +1,6 @@
 import type { UpdateChannel } from '../../shared/contracts/update-journal.ts';
+import { REPO_SLUG } from '../../shared/repo.ts';
 
-const REPO_SLUG = 'johncwaters/glissa';
 const SHA_RE = /^[0-9a-f]{40}$/;
 const NPM_GLOBAL_COMMAND = `npm install -g github:${REPO_SLUG} --allow-git=root`;
 const CLONE_COMMAND = 'git pull --ff-only && npm ci && npm run build';

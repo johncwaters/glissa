@@ -50,7 +50,7 @@ interface FakeStore extends MemoryIngestStore {
 }
 
 function makeHomes(): Homes {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memingest-'));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-memingest-'));
   const claudeHome = path.join(tmpDir, 'claude');
   const projects = path.join(claudeHome, 'projects');
   fs.mkdirSync(projects, { recursive: true });
@@ -113,7 +113,7 @@ function fakeStore(dir: string): FakeStore {
   const store: FakeStore = {
     appended,
     delivered,
-    dbPath: path.join(dir, 'glissa.db'),
+    dbPath: path.join(dir, 'glimmervoid.db'),
     tails,
     refuseTailWrites: false,
     refuseAppends: false,
@@ -199,7 +199,7 @@ function withHomes(fn: (context: HomesContext) => Promise<void>): () => Promise<
 function realStore(memoryDir: string, extra: Partial<MemoryStoreOptions> = {}): MemoryStore {
   const store = createMemoryStore({
     dir: memoryDir,
-    dbPath: path.join(memoryDir, 'glissa.db'),
+    dbPath: path.join(memoryDir, 'glimmervoid.db'),
     config: { ...resolveMemoryConfig(null), enabled: true },
     logger: { log: () => {}, warn: () => {} },
     ...extra,
@@ -326,8 +326,8 @@ test('the backfill reads a transcript written while nothing was tailing', withHo
 }));
 
 test('the ingest write path tags a worktree transcript with its configured project', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
-  const projectPath = '/home/carbon/projects/glissa';
-  const worktreePath = '/home/carbon/projects/.glissa-worktrees/glissa-abc123';
+  const projectPath = '/home/carbon/projects/glimmervoid';
+  const worktreePath = '/home/carbon/projects/.glimmervoid-worktrees/glimmervoid-abc123';
   seedTranscript(projects, {
     lines: [claudeAssistant({ text: 'worktree fact', cwd: worktreePath, ts: '2026-08-20T10:00:00.000Z' })],
   });
@@ -343,8 +343,8 @@ test('the ingest write path tags a worktree transcript with its configured proje
 
 test('a project added after ingest wiring tags the next worktree event', withHomes(async ({ memoryDir, env, cleanups }) => {
   const configuredProjects: { path: string }[] = [];
-  const projectPath = '/home/carbon/projects/glissa';
-  const worktreePath = '/home/carbon/projects/.glissa-worktrees/glissa-abc123';
+  const projectPath = '/home/carbon/projects/glimmervoid';
+  const worktreePath = '/home/carbon/projects/.glimmervoid-worktrees/glimmervoid-abc123';
   const knownProjects = () => configuredProjects;
   const store = realStore(memoryDir, { knownProjects });
   cleanups.push(() => store.stop());
@@ -526,12 +526,12 @@ test('with no ledger to speak of, the floor skips nothing', withHomes(async ({ p
 }));
 
 test('a lane worktree caught by shape is excluded from the backfill too', withHomes(async ({ projects, memoryDir, env, cleanups }) => {
-  const dir = path.join(projects, '-tmp-glissa-wt-pr-review-ab12cd');
+  const dir = path.join(projects, '-tmp-glimmervoid-wt-pr-review-ab12cd');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(
     path.join(dir, 'sess-pr.jsonl'),
     claudeAssistant({
-      text: 'a pr-review verdict', sessionId: 'sess-pr', cwd: '/tmp/glissa-wt-pr-review-ab12cd', ts: '2026-08-20T10:00:00.000Z',
+      text: 'a pr-review verdict', sessionId: 'sess-pr', cwd: '/tmp/glimmervoid-wt-pr-review-ab12cd', ts: '2026-08-20T10:00:00.000Z',
     }),
     'utf8',
   );

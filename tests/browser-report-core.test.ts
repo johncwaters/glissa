@@ -33,8 +33,8 @@ function failedStep(index: number, source: string, diffPath: string | null): Ste
       predicate: 'gridMatchesSnapshot',
       detail: 'the attached terminal never repainted row 12',
       firstDifferingRow: 12,
-      expectedRow: 'glissa> npm test',
-      actualRow: 'glissa>',
+      expectedRow: 'glimmervoid> npm test',
+      actualRow: 'glimmervoid>',
       diffPath,
     },
     shot: null,
@@ -140,7 +140,7 @@ test('caseKey joins viewport and scenario with a double hyphen', () => {
 test('the markdown opens with the run heading and the failure verdict', () => {
   const markdown = renderMarkdown(fixtureReport);
   const lines = markdown.split('\n');
-  assert.equal(lines[0], '# Glissa browser harness run-2026-09-10-01');
+  assert.equal(lines[0], '# Glimmervoid browser harness run-2026-09-10-01');
   assert.equal(lines[2], 'FAIL 1 of 3 (1 skipped)');
   assert.equal(lines[3], 'repoHead 374d27b node v24.4.0 playwright-core 1.55.0');
 });
@@ -159,8 +159,8 @@ test('failures are rendered before the matrix with the row diff and artifact pat
   assert.ok(failures.includes('step 1 expectGridSettled'));
   assert.ok(failures.includes('gridMatchesSnapshot: the attached terminal never repainted row 12'));
   assert.ok(failures.includes('row 12'));
-  assert.ok(failures.includes('```expected\nglissa> npm test\n```'));
-  assert.ok(failures.includes('```actual\nglissa>\n```'));
+  assert.ok(failures.includes('```expected\nglimmervoid> npm test\n```'));
+  assert.ok(failures.includes('```actual\nglimmervoid>\n```'));
   assert.ok(failures.includes('shot: shots/desktop--attach-0.png'));
   assert.ok(failures.includes('diff: diffs/desktop--attach.png'));
 });

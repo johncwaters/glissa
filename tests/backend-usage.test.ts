@@ -132,7 +132,7 @@ interface UsageHarness {
 
 function withBackend({ usage }: { usage?: Record<string, unknown> }, fn: (harness: UsageHarness) => Promise<void>) {
   return async () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-usage-'));
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-usage-'));
     const projectDir = path.join(tmpDir, 'project');
     const claudeHome = path.join(tmpDir, 'claude');
     fs.mkdirSync(projectDir);
@@ -147,8 +147,8 @@ function withBackend({ usage }: { usage?: Record<string, unknown> }, fn: (harnes
     };
     if (usage) cfg.usage = usage;
     fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), 'utf8');
-    const prevEnv = process.env.GLISSA_CONFIG;
-    process.env.GLISSA_CONFIG = cfgPath;
+    const prevEnv = process.env.GLIMMERVOID_CONFIG;
+    process.env.GLIMMERVOID_CONFIG = cfgPath;
 
     const probe = makeUsageProbe(claudeHome);
     const server = http.createServer();
@@ -163,8 +163,8 @@ function withBackend({ usage }: { usage?: Record<string, unknown> }, fn: (harnes
       backend.shutdown();
       server.closeAllConnections();
       await closeServer(server);
-      if (prevEnv == null) delete process.env.GLISSA_CONFIG;
-      if (prevEnv != null) process.env.GLISSA_CONFIG = prevEnv;
+      if (prevEnv == null) delete process.env.GLIMMERVOID_CONFIG;
+      if (prevEnv != null) process.env.GLIMMERVOID_CONFIG = prevEnv;
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   };
@@ -312,7 +312,7 @@ type PassResult = Awaited<ReturnType<ReturnType<typeof createUsageScanner>['runP
 type PassArgs = Parameters<ReturnType<typeof createUsageScanner>['runPass']>[0];
 
 function scriptedScanner(passes: PassArgs[], passResults: PassResult[]) {
-  const scanner = createUsageScanner({ env: {}, homeDir: path.join(os.tmpdir(), 'glissa-usage-nowhere') });
+  const scanner = createUsageScanner({ env: {}, homeDir: path.join(os.tmpdir(), 'glimmervoid-usage-nowhere') });
   scanner.runPass = async (args?: PassArgs) => {
     passes.push(args);
     return passResults[Math.min(passes.length - 1, passResults.length - 1)];
@@ -554,7 +554,7 @@ test('a settings restart during an in-flight start arms the NEW interval cadence
   const armed: { ms: number; handle: NodeJS.Timeout }[] = [];
   const cleared: NodeJS.Timeout[] = [];
   const counted = { passes: 0 };
-  const scanner = createUsageScanner({ env: {}, homeDir: path.join(os.tmpdir(), 'glissa-usage-nowhere') });
+  const scanner = createUsageScanner({ env: {}, homeDir: path.join(os.tmpdir(), 'glimmervoid-usage-nowhere') });
   scanner.runPass = async () => {
     counted.passes += 1;
     if (counted.passes === 1) await firstPassGate;

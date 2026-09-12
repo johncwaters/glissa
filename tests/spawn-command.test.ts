@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import claudeCode from '../session/adapters/claude-code.ts';
 import { classifyCommandKind, dedupePathMatches, resolveAgentCommand } from '../session/core/spawn-command.ts';
-const SETTINGS = ['--settings', 'C:\\tmp\\glissa\\settings.json'];
+const SETTINGS = ['--settings', 'C:\\tmp\\glimmervoid\\settings.json'];
 const DANGER = ['--dangerously-skip-permissions'];
 
 test('posix -> bare claude, args preserved in order', () => {
@@ -189,7 +189,7 @@ test('classifyCommandKind maps extensions correctly', () => {
 });
 
 test('packArgs land between the settings block and agentArgs, on both spawn forms', () => {
-  const PACKS = ['--add-dir', 'C:/Users/johnw/.glissa/packs/built/house-rules/current'];
+  const PACKS = ['--add-dir', 'C:/Users/johnw/.glimmervoid/packs/built/house-rules/current'];
   const direct = claudeCode.buildSpawnCommand({
     platform: 'win32',
     resolved: { path: 'C:/a/claude.exe', kind: 'exe' },

@@ -33,7 +33,7 @@ function initRepoOnMain(prefix: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   try { git(['init', '-b', 'main'], dir); } catch { git(['init'], dir); }
   git(['config', 'user.email', 'test@example.com'], dir);
-  git(['config', 'user.name', 'Glissa Test'], dir);
+  git(['config', 'user.name', 'Glimmervoid Test'], dir);
   git(['config', 'commit.gpgsign', 'false'], dir);
   fs.writeFileSync(path.join(dir, 'README.md'), '# repo\n', 'utf8');
   fs.writeFileSync(path.join(dir, '.gitignore'), 'node_modules/\n', 'utf8');
@@ -43,18 +43,18 @@ function initRepoOnMain(prefix: string): string {
 }
 
 function initRepoOnDevelop(): string {
-  const dir = initRepoOnMain('glissa-sess-');
+  const dir = initRepoOnMain('glimmervoid-sess-');
   git(['branch', 'develop'], dir);
   git(['checkout', 'develop'], dir);
   return dir;
 }
 
 function initRepoMainOnly(): string {
-  return initRepoOnMain('glissa-mainonly-');
+  return initRepoOnMain('glimmervoid-mainonly-');
 }
 
 function initRepoMainWithDevelop(): { dir: string; developSha: string } {
-  const dir = initRepoOnMain('glissa-base-');
+  const dir = initRepoOnMain('glimmervoid-base-');
   git(['branch', 'develop'], dir);
   git(['checkout', 'develop'], dir);
   fs.writeFileSync(path.join(dir, 'on-develop.txt'), 'dev\n', 'utf8');
@@ -186,9 +186,9 @@ test('stageDetachedWorktree adds the fixed sha as a detached worktree', async ()
     },
   });
   const sha = 'a'.repeat(40);
-  const staged = await gitWorkspace.stageDetachedWorktree({ projectPath: '/repo', worktreePath: '/repo/.glissa/update/next', sha });
+  const staged = await gitWorkspace.stageDetachedWorktree({ projectPath: '/repo', worktreePath: '/repo/.glimmervoid/update/next', sha });
   assert.equal(staged.ok, true);
-  assert.deepEqual(calls, [{ args: ['worktree', 'add', '--detach', '/repo/.glissa/update/next', sha], cwd: '/repo' }]);
+  assert.deepEqual(calls, [{ args: ['worktree', 'add', '--detach', '/repo/.glimmervoid/update/next', sha], cwd: '/repo' }]);
 });
 
 test('stageDetachedWorktree refuses a non-lowercase full sha without running git', async () => {
@@ -361,20 +361,20 @@ test('resetKeepTo refuses an invalid target sha without running git', async () =
 test('mergeBack (injected): committed-only rebase + ff-only merge when target is checked out, then junction-safe teardown', async () => {
   const cmds: string[] = [];
   const gw = createGitWorkspace({ git: fakeSessionGit(cmds, { ahead: '1', dirty: '', head: 'develop' }) });
-  const ws = { cwd: '/wt', isGit: true, branch: 'glissa/session/abc', base: 'develop' };
+  const ws = { cwd: '/wt', isGit: true, branch: 'glimmervoid/session/abc', base: 'develop' };
   const r = await gw.mergeBack({ projectPath: '/repo', workspace: ws, targetBranch: 'develop' });
 
   assert.equal(r.merged, true);
   assert.equal(r.committed, true);
   assert.equal(r.branch, null);
-  assert.ok(cmds.includes('rev-list --count develop..glissa/session/abc'), 'checks for commits to merge');
+  assert.ok(cmds.includes('rev-list --count develop..glimmervoid/session/abc'), 'checks for commits to merge');
   assert.ok(!cmds.includes('add -A'), 'committed-only: never stages the whole working tree');
   assert.ok(!cmds.some((c) => c.startsWith('commit')), 'committed-only: never creates a commit');
   assert.ok(!cmds.some((c) => c.startsWith('stash')), 'a clean tree needs no stash');
   assert.ok(ranRebaseOnto(cmds, 'develop'), 'rebases onto the integration branch');
-  assert.ok(cmds.includes('merge --ff-only glissa/session/abc'), 'ff-only merge into the checked-out target');
+  assert.ok(cmds.includes('merge --ff-only glimmervoid/session/abc'), 'ff-only merge into the checked-out target');
   assert.ok(cmds.includes('worktree remove --force /wt'));
-  assert.ok(cmds.includes('branch -D glissa/session/abc'));
+  assert.ok(cmds.includes('branch -D glimmervoid/session/abc'));
   assert.ok(
     cmds.includes('fetch --quiet --prune origin refs/heads/*:refs/remotes/origin/*'),
     'fetches the remote base before merging',
@@ -386,31 +386,31 @@ test('resolveProjectPath matches a custom linked worktree through the shared git
   const git = async (args: string[], cwd: string) => {
     calls.push({ args, cwd });
     assert.deepEqual(args, ['rev-parse', '--git-common-dir']);
-    if (cwd === '/custom/worktrees/glissa-feature') return '/repos/glissa/.git';
-    if (cwd === '/repos/glissa') return '.git';
+    if (cwd === '/custom/worktrees/glimmervoid-feature') return '/repos/glimmervoid/.git';
+    if (cwd === '/repos/glimmervoid') return '.git';
     throw new Error('not a git checkout');
   };
   const workspace = createGitWorkspace({ git });
-  const knownProjects = [{ path: '/repos/glissa' }, { path: '/repos/other' }];
+  const knownProjects = [{ path: '/repos/glimmervoid' }, { path: '/repos/other' }];
 
   assert.equal(await workspace.resolveProjectPath({
-    cwd: '/custom/worktrees/glissa-feature', knownProjects,
-  }), '/repos/glissa');
+    cwd: '/custom/worktrees/glimmervoid-feature', knownProjects,
+  }), '/repos/glimmervoid');
   assert.equal(await workspace.resolveProjectPath({
-    cwd: '/custom/worktrees/glissa-feature', knownProjects,
-  }), '/repos/glissa');
-  assert.equal(calls.filter((call) => call.cwd === '/repos/glissa').length, 1);
+    cwd: '/custom/worktrees/glimmervoid-feature', knownProjects,
+  }), '/repos/glimmervoid');
+  assert.equal(calls.filter((call) => call.cwd === '/repos/glimmervoid').length, 1);
 });
 
 test('mergeBack (injected): updates the target ref via ff-only fetch when the target is NOT checked out', async () => {
   const cmds: string[] = [];
   const gw = createGitWorkspace({ git: fakeSessionGit(cmds, { ahead: '1', head: 'main' }) });
-  const ws = { cwd: '/wt', isGit: true, branch: 'glissa/session/abc', base: 'develop' };
+  const ws = { cwd: '/wt', isGit: true, branch: 'glimmervoid/session/abc', base: 'develop' };
   const r = await gw.mergeBack({ projectPath: '/repo', workspace: ws, targetBranch: 'develop' });
 
   assert.equal(r.merged, true);
   assert.ok(ranRebaseOnto(cmds, 'develop'));
-  assert.ok(cmds.includes('fetch . refs/heads/glissa/session/abc:refs/heads/develop'), 'ff-only ref update, no checkout needed');
+  assert.ok(cmds.includes('fetch . refs/heads/glimmervoid/session/abc:refs/heads/develop'), 'ff-only ref update, no checkout needed');
   assert.ok(!cmds.some((c) => c.startsWith('merge --ff-only')), 'no working-tree merge when target not checked out');
   assert.ok(cmds.includes('worktree remove --force /wt'));
 });
@@ -418,13 +418,13 @@ test('mergeBack (injected): updates the target ref via ff-only fetch when the ta
 test('mergeBack (injected): a rebase conflict aborts and PARKS the branch (worktree + branch preserved)', async () => {
   const cmds: string[] = [];
   const gw = createGitWorkspace({ git: fakeSessionGit(cmds, { rebaseFails: true }) });
-  const ws = { cwd: '/wt', isGit: true, branch: 'glissa/session/abc', base: 'develop' };
+  const ws = { cwd: '/wt', isGit: true, branch: 'glimmervoid/session/abc', base: 'develop' };
   const r = await gw.mergeBack({ projectPath: '/repo', workspace: ws, targetBranch: 'develop' });
 
   assert.equal(r.merged, false);
   assert.equal(r.parked, true);
   assert.equal(r.reason, 'rebase-conflict');
-  assert.equal(r.branch, 'glissa/session/abc');
+  assert.equal(r.branch, 'glimmervoid/session/abc');
   assert.ok(cmds.includes('rebase --abort'), 'the conflicted rebase is aborted');
   assert.ok(!cmds.some((c) => c.startsWith('worktree remove')), 'parked: worktree NOT removed');
   assert.ok(!cmds.some((c) => c.startsWith('branch -D')), 'parked: branch NOT deleted');
@@ -433,7 +433,7 @@ test('mergeBack (injected): a rebase conflict aborts and PARKS the branch (workt
 test('mergeBack (injected): a rebase conflict captures the conflicting files BEFORE aborting (for the handoff prompt)', async () => {
   const cmds: string[] = [];
   const gw = createGitWorkspace({ git: fakeSessionGit(cmds, { rebaseFails: true, conflicts: ['src/a.js', 'src/b.js'] }) });
-  const ws = { cwd: '/wt', isGit: true, branch: 'glissa/session/abc', base: 'develop' };
+  const ws = { cwd: '/wt', isGit: true, branch: 'glimmervoid/session/abc', base: 'develop' };
   const r = await gw.mergeBack({ projectPath: '/repo', workspace: ws, targetBranch: 'develop' });
 
   assert.equal(r.parked, true);
@@ -448,7 +448,7 @@ test('mergeBack (injected): a rebase conflict captures the conflicting files BEF
 test('mergeBack (injected): nothing committed + a clean tree -> discards the empty worktree + branch', async () => {
   const cmds: string[] = [];
   const gw = createGitWorkspace({ git: fakeSessionGit(cmds, { ahead: '0', dirty: '' }) });
-  const ws = { cwd: '/wt', isGit: true, branch: 'glissa/session/abc', base: 'develop' };
+  const ws = { cwd: '/wt', isGit: true, branch: 'glimmervoid/session/abc', base: 'develop' };
   const r = await gw.mergeBack({ projectPath: '/repo', workspace: ws, targetBranch: 'develop' });
 
   assert.equal(r.merged, false);
@@ -457,31 +457,31 @@ test('mergeBack (injected): nothing committed + a clean tree -> discards the emp
   assert.equal(r.branch, null);
   assert.ok(ranNoRebase(cmds), 'no rebase when there is nothing to merge');
   assert.ok(cmds.includes('worktree remove --force /wt'));
-  assert.ok(cmds.includes('branch -D glissa/session/abc'));
+  assert.ok(cmds.includes('branch -D glimmervoid/session/abc'));
 });
 
 test('mergeBack (injected): a DIRTY worktree is refused and PARKED, never torn down (no data loss on finish)', async () => {
 
   const cmds: string[] = [];
   const gw = createGitWorkspace({ git: fakeSessionGit(cmds, { ahead: '1', dirty: ' M wip.js' }) });
-  const ws = { cwd: '/wt', isGit: true, branch: 'glissa/session/abc', base: 'develop' };
+  const ws = { cwd: '/wt', isGit: true, branch: 'glimmervoid/session/abc', base: 'develop' };
   const r = await gw.mergeBack({ projectPath: '/repo', workspace: ws, targetBranch: 'develop' });
 
   assert.equal(r.merged, false);
   assert.equal(r.committed, false);
   assert.equal(r.parked, true);
   assert.equal(r.reason, 'uncommitted-changes');
-  assert.equal(r.branch, 'glissa/session/abc', 'branch retained so the uncommitted work is not lost');
+  assert.equal(r.branch, 'glimmervoid/session/abc', 'branch retained so the uncommitted work is not lost');
   assert.ok(ranNoRebase(cmds), 'dirty: nothing is merged');
   assert.ok(!cmds.some((c) => c.startsWith('stash')), 'dirty: nothing is stashed/dropped');
   assert.ok(!cmds.some((c) => c.startsWith('worktree remove')), 'uncommitted work is never destroyed');
   assert.ok(!cmds.some((c) => c.startsWith('branch -D')), 'branch kept');
 });
 
-test('mergeBack (injected): a missing target branch PARKS (Glissa never creates the integration branch)', async () => {
+test('mergeBack (injected): a missing target branch PARKS (Glimmervoid never creates the integration branch)', async () => {
   const cmds: string[] = [];
   const gw = createGitWorkspace({ git: fakeSessionGit(cmds, { targetExists: false }) });
-  const ws = { cwd: '/wt', isGit: true, branch: 'glissa/session/abc', base: 'develop' };
+  const ws = { cwd: '/wt', isGit: true, branch: 'glimmervoid/session/abc', base: 'develop' };
   const r = await gw.mergeBack({ projectPath: '/repo', workspace: ws, targetBranch: 'develop' });
 
   assert.equal(r.merged, false);
@@ -493,17 +493,17 @@ test('mergeBack (injected): a missing target branch PARKS (Glissa never creates 
 test('mergeKeep (injected): committed-only rebase + ff, then KEEPS the worktree and branch', async () => {
   const cmds: string[] = [];
   const gw = createGitWorkspace({ git: fakeSessionGit(cmds, { ahead: '1', dirty: '', head: 'develop' }) });
-  const ws = { cwd: '/wt', isGit: true, branch: 'glissa/session/abc', base: 'develop' };
+  const ws = { cwd: '/wt', isGit: true, branch: 'glimmervoid/session/abc', base: 'develop' };
   const r = await gw.mergeKeep({ projectPath: '/repo', workspace: ws, targetBranch: 'develop' });
 
   assert.equal(r.merged, true);
   assert.equal(r.kept, true);
-  assert.equal(r.branch, 'glissa/session/abc', 'session branch retained so the session keeps running');
+  assert.equal(r.branch, 'glimmervoid/session/abc', 'session branch retained so the session keeps running');
   assert.equal(r.baseSha, 'newbase', 'reports the new integration tip the worktree sits on');
   assert.ok(!cmds.includes('add -A'), 'committed-only: never stages the whole working tree');
   assert.ok(!cmds.some((c) => c.startsWith('commit')), 'committed-only: never creates a commit');
   assert.ok(ranRebaseOnto(cmds, 'develop'), 'rebases the worktree onto develop');
-  assert.ok(cmds.includes('merge --ff-only glissa/session/abc'), 'ff-only merge into develop');
+  assert.ok(cmds.includes('merge --ff-only glimmervoid/session/abc'), 'ff-only merge into develop');
   assert.ok(!cmds.some((c) => c.startsWith('worktree remove')), 'worktree is NOT torn down');
   assert.ok(!cmds.some((c) => c.startsWith('branch -D')), 'branch is NOT deleted');
 });
@@ -511,7 +511,7 @@ test('mergeKeep (injected): committed-only rebase + ff, then KEEPS the worktree 
 test('mergeKeep (injected): a rebase conflict PARKS (worktree + branch preserved)', async () => {
   const cmds: string[] = [];
   const gw = createGitWorkspace({ git: fakeSessionGit(cmds, { rebaseFails: true }) });
-  const ws = { cwd: '/wt', isGit: true, branch: 'glissa/session/abc', base: 'develop' };
+  const ws = { cwd: '/wt', isGit: true, branch: 'glimmervoid/session/abc', base: 'develop' };
   const r = await gw.mergeKeep({ projectPath: '/repo', workspace: ws, targetBranch: 'develop' });
 
   assert.equal(r.merged, false);
@@ -524,14 +524,14 @@ test('mergeKeep (injected): a rebase conflict PARKS (worktree + branch preserved
 test('mergeKeep (injected): nothing committed is a no-op that KEEPS the worktree (no teardown, no rebase)', async () => {
   const cmds: string[] = [];
   const gw = createGitWorkspace({ git: fakeSessionGit(cmds, { ahead: '0' }) });
-  const ws = { cwd: '/wt', isGit: true, branch: 'glissa/session/abc', base: 'develop' };
+  const ws = { cwd: '/wt', isGit: true, branch: 'glimmervoid/session/abc', base: 'develop' };
   const r = await gw.mergeKeep({ projectPath: '/repo', workspace: ws, targetBranch: 'develop' });
 
   assert.equal(r.merged, false);
   assert.equal(r.committed, false);
   assert.equal(r.reason, 'nothing-to-commit');
   assert.equal(r.kept, true);
-  assert.equal(r.branch, 'glissa/session/abc', 'branch retained (the live session continues)');
+  assert.equal(r.branch, 'glimmervoid/session/abc', 'branch retained (the live session continues)');
   assert.ok(ranNoRebase(cmds), 'no rebase when there is nothing to merge');
   assert.ok(!cmds.some((c) => c.startsWith('worktree remove')), 'worktree kept on nothing-to-commit');
 });
@@ -539,12 +539,12 @@ test('mergeKeep (injected): nothing committed is a no-op that KEEPS the worktree
 test('mergeKeep (injected): uncommitted work is STASHED around the rebase, then restored (pop)', async () => {
   const cmds: string[] = [];
   const gw = createGitWorkspace({ git: fakeSessionGit(cmds, { ahead: '1', dirty: ' M f.js', head: 'develop' }) });
-  const ws = { cwd: '/wt', isGit: true, branch: 'glissa/session/abc', base: 'develop' };
+  const ws = { cwd: '/wt', isGit: true, branch: 'glimmervoid/session/abc', base: 'develop' };
   const r = await gw.mergeKeep({ projectPath: '/repo', workspace: ws, targetBranch: 'develop' });
 
   assert.equal(r.merged, true);
   assert.equal(r.restoreConflict, false);
-  assert.ok(cmds.includes('stash push --include-untracked -m glissa-merge'), 'stashes the uncommitted work');
+  assert.ok(cmds.includes('stash push --include-untracked -m glimmervoid-merge'), 'stashes the uncommitted work');
   assert.ok(ranRebaseOnto(cmds, 'develop'), 'rebases on the now-clean tree');
   assert.ok(cmds.includes('stash pop'), 'restores the uncommitted work onto the rebased worktree');
   assert.ok(!cmds.includes('stash drop'), 'mergeKeep restores rather than drops');
@@ -773,7 +773,7 @@ test('hasUnmergedWork (real git): an unresolvable integration branch reports wor
     const gw = createGitWorkspace();
     const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'safe', baseBranch: 'develop' });
 
-    git(['config', `branch.${ws.branch}.glissa-integration`, 'no-such-branch'], repo);
+    git(['config', `branch.${ws.branch}.glimmervoid-integration`, 'no-such-branch'], repo);
     assert.equal(await gw.hasUnmergedWork({ projectPath: repo, workspace: ws, integrationBranch: 'develop', configuredIntegrationBranch: 'develop' }), true,
       'a failed rev-list keeps the worktree');
   } finally {
@@ -903,10 +903,10 @@ test('create (real git): stamps the fork-base marker on the branch; branch delet
     const gw = createGitWorkspace();
     const ws = await gw.create({ projectPath: repo, teamId: 'session', label: 'mark1', baseBranch: 'develop' });
     assert.equal(ws.isGit, true);
-    assert.equal(git(['config', '--get', `branch.${ws.branch}.glissa-integration`], repo).trim(), 'develop');
+    assert.equal(git(['config', '--get', `branch.${ws.branch}.glimmervoid-integration`], repo).trim(), 'develop');
 
     await gw.discard({ projectPath: repo, workspace: ws });
-    assert.throws(() => git(['config', '--get', `branch.${ws.branch}.glissa-integration`], repo), 'git drops branch.<name>.* config on branch delete');
+    assert.throws(() => git(['config', '--get', `branch.${ws.branch}.glimmervoid-integration`], repo), 'git drops branch.<name>.* config on branch delete');
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
   }
@@ -937,7 +937,7 @@ test('create (injected git): a branch already checked out in another worktree re
     if (args[0] === 'rev-parse' && args.includes('--abbrev-ref')) return 'main';
     if (args[0] === 'rev-parse') return 'headsha';
     if (args[0] === 'worktree' && args[1] === 'list') {
-      return 'worktree /repo\nbranch refs/heads/main\n\nworktree /other/wt\nbranch refs/heads/glissa/session/dup1\n\n';
+      return 'worktree /repo\nbranch refs/heads/main\n\nworktree /other/wt\nbranch refs/heads/glimmervoid/session/dup1\n\n';
     }
     return '';
   };
@@ -946,7 +946,7 @@ test('create (injected git): a branch already checked out in another worktree re
   assert.equal(ws.isGit, false);
   assert.equal(ws.reason, 'branch-in-use');
   assert.equal(ws.conflictPath, '/other/wt');
-  assert.equal(ws.branch, 'glissa/session/dup1', 'result names the conflicting branch so the caller can self-adopt');
+  assert.equal(ws.branch, 'glimmervoid/session/dup1', 'result names the conflicting branch so the caller can self-adopt');
   assert.ok(!cmds.some((c) => c.startsWith('worktree add')), 'never adds a new worktree over an in-use branch');
   assert.ok(!cmds.some((c) => c.startsWith('branch -D')), 'never attempts to drop the conflicting branch');
 });
@@ -973,7 +973,7 @@ test('create (real git): creating the same session branch twice returns branch-i
 
 test('create (worktreeBase + shareList): worktree lives under the base and gets the gitignored context', { skip: !GIT || !WIN }, async () => {
   const repo = initRepoOnDevelop();
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-wtroot-'));
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-wtroot-'));
 
   fs.writeFileSync(path.join(repo, '.gitignore'), 'node_modules/\n.omc/\n.env\n', 'utf8');
   git(['add', '.gitignore'], repo); git(['commit', '-m', 'ignore local context'], repo);
@@ -1009,7 +1009,7 @@ test('create (worktreeBase + shareList): worktree lives under the base and gets 
 
 test('populate re-shares stripped junctions into a surviving worktree (adopt-after-failed-removal)', { skip: !GIT || !WIN }, async () => {
   const repo = initRepoOnDevelop();
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-wtroot-'));
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-wtroot-'));
   fs.writeFileSync(path.join(repo, '.gitignore'), 'node_modules/\n.env\n', 'utf8');
   git(['add', '.gitignore'], repo); git(['commit', '-m', 'ignore local context'], repo);
   fs.mkdirSync(path.join(repo, 'node_modules'), { recursive: true });
@@ -1057,7 +1057,7 @@ function initRepoWithLocalContext(ignoreText = 'node_modules\n.omc\n.env\n') {
 
 test('create (worktreeBase + shareList, POSIX): dirs are SYMLINKED in, files copied, and teardown never follows the link', { skip: !GIT || WIN }, async () => {
   const repo = initRepoWithLocalContext();
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-wtroot-'));
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-wtroot-'));
   try {
     const gw = createGitWorkspace();
     const ws = await gw.create({
@@ -1089,7 +1089,7 @@ test('create (worktreeBase + shareList, POSIX): dirs are SYMLINKED in, files cop
 
 test('mergeBack (POSIX): the shared symlink is never staged by `git add -A`, and the real dir survives the merge', { skip: !GIT || WIN }, async () => {
   const repo = initRepoWithLocalContext();
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-wtroot-'));
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-wtroot-'));
   try {
     const gw = createGitWorkspace();
     const ws = await gw.create({
@@ -1117,7 +1117,7 @@ test('mergeBack (POSIX): the shared symlink is never staged by `git add -A`, and
 
 test('create (shareList, POSIX): a trailing-slash ignore pattern cannot cover a symlink, so the share is refused', { skip: !GIT || WIN }, async () => {
   const repo = initRepoWithLocalContext('node_modules/\n.omc/\n.env\n');
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-wtroot-'));
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-wtroot-'));
   const warnings: string[] = [];
   const originalWarn = console.warn;
   console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(' ')); };
@@ -1192,7 +1192,7 @@ test('listWorktrees reports Claude agent worktree locks, dirtiness, tips, and pr
       { branch: 'worktree-agent-two', locked: false, dirty: true },
     ]);
     assert.equal(listed[0]?.tipSha, git(['rev-parse', 'worktree-agent-one'], repo).trim());
-    assert.deepEqual(await gitWorkspace.listWorktrees({ projectPath: repo, prefixes: ['glissa/session/'], integrationBranch: 'develop', configuredIntegrationBranch: 'develop' }), []);
+    assert.deepEqual(await gitWorkspace.listWorktrees({ projectPath: repo, prefixes: ['glimmervoid/session/'], integrationBranch: 'develop', configuredIntegrationBranch: 'develop' }), []);
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
   }
@@ -1315,7 +1315,7 @@ test('listSessionWorktrees flags a parked (committed-ahead) worktree as work eve
 });
 
 function initRepoWithAbsorbedDevelop(): string {
-  const dir = initRepoOnMain('glissa-stale-marker-');
+  const dir = initRepoOnMain('glimmervoid-stale-marker-');
   git(['branch', 'develop'], dir);
   fs.writeFileSync(path.join(dir, 'landed.txt'), 'landed\n', 'utf8');
   git(['add', '-A'], dir);
@@ -1328,12 +1328,12 @@ test('listSessionWorktrees (real git): an unconfigured base migrates a marker wh
   try {
     const gw = createGitWorkspace();
     const ws = await gw.create({ projectPath: dir, teamId: 'session', label: 'stale', baseBranch: 'develop' });
-    assert.equal(git(['config', '--get', `branch.${ws.branch}.glissa-integration`], dir).trim(), 'develop');
+    assert.equal(git(['config', '--get', `branch.${ws.branch}.glimmervoid-integration`], dir).trim(), 'develop');
 
     const [entry] = await gw.listSessionWorktrees({ projectPath: dir, integrationBranch: null });
     assert.equal(entry.integrationBranch, 'main', 'develop is an ancestor of main, so the base follows the default');
     assert.equal(entry.hasWork, false, 'hasWork computed against main, not the abandoned develop');
-    assert.equal(git(['config', '--get', `branch.${ws.branch}.glissa-integration`], dir).trim(), 'main', 'marker rewritten');
+    assert.equal(git(['config', '--get', `branch.${ws.branch}.glimmervoid-integration`], dir).trim(), 'main', 'marker rewritten');
     await gw.discard({ projectPath: dir, workspace: ws });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -1347,7 +1347,7 @@ test('listSessionWorktrees (real git, sync): the startup reconcile path migrates
     const ws = await gw.create({ projectPath: dir, teamId: 'session', label: 'stalesync', baseBranch: 'develop' });
     const [entry] = createGitWorkspaceSync().listSessionWorktrees({ projectPath: dir, integrationBranch: null });
     assert.equal(entry.integrationBranch, 'main');
-    assert.equal(git(['config', '--get', `branch.${ws.branch}.glissa-integration`], dir).trim(), 'main');
+    assert.equal(git(['config', '--get', `branch.${ws.branch}.glimmervoid-integration`], dir).trim(), 'main');
     await gw.discard({ projectPath: dir, workspace: ws });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -1361,7 +1361,7 @@ test('listSessionWorktrees (real git): a marker whose branch holds commits main 
     const ws = await gw.create({ projectPath: dir, teamId: 'session', label: 'keepmarker', baseBranch: 'develop' });
     const [entry] = await gw.listSessionWorktrees({ projectPath: dir, integrationBranch: null });
     assert.equal(entry.integrationBranch, 'develop', 'develop is not an ancestor of main, so retargeting would show its commits as session work');
-    assert.equal(git(['config', '--get', `branch.${ws.branch}.glissa-integration`], dir).trim(), 'develop');
+    assert.equal(git(['config', '--get', `branch.${ws.branch}.glimmervoid-integration`], dir).trim(), 'develop');
     await gw.discard({ projectPath: dir, workspace: ws });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -1393,7 +1393,7 @@ test('hasUnmergedWork (real git): an already-resolved base argument does not blo
       'the worktree holds nothing main lacks',
     );
     assert.equal(
-      git(['config', '--get', `branch.${ws.branch}.glissa-integration`], dir).trim(),
+      git(['config', '--get', `branch.${ws.branch}.glimmervoid-integration`], dir).trim(),
       'main',
       'the resolved base argument is a fallback, never a configured branch that pins the marker',
     );
@@ -1416,7 +1416,7 @@ test('listSessionWorktrees (real git): a marker whose branch was deleted migrate
     const [entry] = await gw.listSessionWorktrees({ projectPath: dir, integrationBranch: null });
     assert.equal(entry.integrationBranch, 'main', 'a marker that no longer resolves cannot measure anything');
     assert.equal(entry.hasWork, true, 'the commit counts against the default branch');
-    assert.equal(git(['config', '--get', `branch.${ws.branch}.glissa-integration`], dir).trim(), 'main');
+    assert.equal(git(['config', '--get', `branch.${ws.branch}.glimmervoid-integration`], dir).trim(), 'main');
     await gw.discard({ projectPath: dir, workspace: ws });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -1424,7 +1424,7 @@ test('listSessionWorktrees (real git): a marker whose branch was deleted migrate
 });
 
 function initCloneWithOriginOnlyDevelop(): { rootDir: string; repoDir: string } {
-  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-origin-marker-'));
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-origin-marker-'));
   const seedDir = initRepoMainWithDevelop().dir;
   const remoteDir = path.join(rootDir, 'origin.git');
   const repoDir = path.join(rootDir, 'repository');
@@ -1432,7 +1432,7 @@ function initCloneWithOriginOnlyDevelop(): { rootDir: string; repoDir: string } 
   git(['symbolic-ref', 'HEAD', 'refs/heads/main'], remoteDir);
   git(['clone', remoteDir, repoDir], rootDir);
   git(['config', 'user.email', 'test@example.com'], repoDir);
-  git(['config', 'user.name', 'Glissa Test'], repoDir);
+  git(['config', 'user.name', 'Glimmervoid Test'], repoDir);
   git(['config', 'commit.gpgsign', 'false'], repoDir);
   git(['branch', 'develop', 'origin/develop'], repoDir);
   fs.rmSync(seedDir, { recursive: true, force: true });
@@ -1452,7 +1452,7 @@ test('listSessionWorktrees (real git): a marker branch alive only on origin keep
     const [entry] = await gw.listSessionWorktrees({ projectPath: repoDir, integrationBranch: null });
     assert.equal(entry.integrationBranch, 'develop', 'the base stays a plain branch name that a later create can fork from');
     assert.equal(entry.hasWork, true, 'the session commit is measured against the remote-tracking ref that resolved');
-    assert.equal(git(['config', '--get', `branch.${ws.branch}.glissa-integration`], repoDir).trim(), 'develop', 'marker left alone');
+    assert.equal(git(['config', '--get', `branch.${ws.branch}.glimmervoid-integration`], repoDir).trim(), 'develop', 'marker left alone');
     assert.throws(
       () => git(['rev-parse', '--verify', '--quiet', 'refs/heads/origin/develop'], repoDir),
       Error,
@@ -1465,16 +1465,16 @@ test('listSessionWorktrees (real git): a marker branch alive only on origin keep
 });
 
 function initCloneWithPrefixedRemoteBranches(): { rootDir: string; repoDir: string; remoteDir: string } {
-  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-branch-gc-'));
-  const seedDir = initRepoOnMain('glissa-branch-gc-seed-');
-  for (const branchName of ['worktree-agent-123', 'glissa/session/abc', 'release/x']) git(['branch', branchName], seedDir);
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-branch-gc-'));
+  const seedDir = initRepoOnMain('glimmervoid-branch-gc-seed-');
+  for (const branchName of ['worktree-agent-123', 'glimmervoid/session/abc', 'release/x']) git(['branch', branchName], seedDir);
   const remoteDir = path.join(rootDir, 'origin.git');
   const repoDir = path.join(rootDir, 'repository');
   git(['clone', '--bare', seedDir, remoteDir], rootDir);
   git(['symbolic-ref', 'HEAD', 'refs/heads/main'], remoteDir);
   git(['clone', remoteDir, repoDir], rootDir);
   git(['config', 'user.email', 'test@example.com'], repoDir);
-  git(['config', 'user.name', 'Glissa Test'], repoDir);
+  git(['config', 'user.name', 'Glimmervoid Test'], repoDir);
   git(['config', 'commit.gpgsign', 'false'], repoDir);
   fs.rmSync(seedDir, { recursive: true, force: true });
   return { rootDir, repoDir, remoteDir };
@@ -1485,10 +1485,10 @@ test('listRemoteBranches (real git): lists every prefixed remote branch and noth
   try {
     const listed = await createGitWorkspace().listRemoteBranches({
       projectPath: repoDir,
-      prefixes: ['glissa/session/', 'worktree-agent-'],
+      prefixes: ['glimmervoid/session/', 'worktree-agent-'],
     });
     if (!('branches' in listed)) throw new Error('listing a cloned repository returns branches');
-    assert.deepEqual(listed.branches.map((remoteBranch) => remoteBranch.name).sort(), ['glissa/session/abc', 'worktree-agent-123']);
+    assert.deepEqual(listed.branches.map((remoteBranch) => remoteBranch.name).sort(), ['glimmervoid/session/abc', 'worktree-agent-123']);
     for (const remoteBranch of listed.branches) assert.match(remoteBranch.tipSha, /^[0-9a-f]{7,}$/);
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
@@ -1499,22 +1499,22 @@ test('deleteRemoteBranch (real git): a remote tip that moved after the listing i
   const { rootDir, repoDir, remoteDir } = initCloneWithPrefixedRemoteBranches();
   try {
     const gitWorkspace = createGitWorkspace();
-    const listedTipSha = git(['rev-parse', 'refs/remotes/origin/glissa/session/abc'], repoDir).trim();
+    const listedTipSha = git(['rev-parse', 'refs/remotes/origin/glimmervoid/session/abc'], repoDir).trim();
     fs.writeFileSync(path.join(repoDir, 'later.txt'), 'later\n', 'utf8');
     git(['add', '-A'], repoDir);
     git(['commit', '-m', 'work pushed after the listing'], repoDir);
-    git(['push', 'origin', 'HEAD:refs/heads/glissa/session/abc'], repoDir);
+    git(['push', 'origin', 'HEAD:refs/heads/glimmervoid/session/abc'], repoDir);
     const movedTipSha = git(['rev-parse', 'HEAD'], repoDir).trim();
 
-    const refused = await gitWorkspace.deleteRemoteBranch({ projectPath: repoDir, name: 'glissa/session/abc', tipSha: listedTipSha });
+    const refused = await gitWorkspace.deleteRemoteBranch({ projectPath: repoDir, name: 'glimmervoid/session/abc', tipSha: listedTipSha });
 
     assert.equal(refused.ok, false);
-    assert.equal(git(['rev-parse', 'refs/heads/glissa/session/abc'], remoteDir).trim(), movedTipSha);
+    assert.equal(git(['rev-parse', 'refs/heads/glimmervoid/session/abc'], remoteDir).trim(), movedTipSha);
 
-    const deleted = await gitWorkspace.deleteRemoteBranch({ projectPath: repoDir, name: 'glissa/session/abc', tipSha: movedTipSha });
+    const deleted = await gitWorkspace.deleteRemoteBranch({ projectPath: repoDir, name: 'glimmervoid/session/abc', tipSha: movedTipSha });
 
     assert.equal(deleted.ok, true);
-    assert.throws(() => git(['rev-parse', '--verify', '--quiet', 'refs/heads/glissa/session/abc'], remoteDir), Error);
+    assert.throws(() => git(['rev-parse', '--verify', '--quiet', 'refs/heads/glimmervoid/session/abc'], remoteDir), Error);
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
@@ -1524,7 +1524,7 @@ test('listSessionWorktrees (injected git): a failing status keeps the worktree e
   const failingStatusGit = (args: string[]): string => {
     if (args[0] === 'rev-parse' && args.includes('--is-inside-work-tree')) return 'true';
     if (args[0] === 'worktree' && args[1] === 'list') {
-      return 'worktree /repo\nbranch refs/heads/main\n\nworktree /wt/corrupt\nbranch refs/heads/glissa/session/corrupt\n\n';
+      return 'worktree /repo\nbranch refs/heads/main\n\nworktree /wt/corrupt\nbranch refs/heads/glimmervoid/session/corrupt\n\n';
     }
     if (args[0] === 'config') return 'main';
     if (args[0] === 'status') {

@@ -35,7 +35,7 @@ function fixtureVersionDir(builtRoot: string, name: string, label: string) {
 }
 
 async function makeBuiltRoot(packs: Record<string, string | Record<string, unknown>>) {
-  const builtRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'glissa-packs-'));
+  const builtRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'glimmervoid-packs-'));
   for (const [name, value] of Object.entries(packs)) {
     const { version: versionLabel, ...extra } = typeof value === 'string' ? { version: value } : value;
     const version = fixtureVersion(String(versionLabel));
@@ -108,7 +108,7 @@ test('the runtime built-pack root override is resolved when the session starts',
 
 test('a packed session leaves the PostToolUse matchers alone, since nothing consumes pack reads', async () => {
   const builtRoot = await makeBuiltRoot({ 'house-rules': 'v-abc' });
-  const hooksBaseDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glissa-pack-hooks-'));
+  const hooksBaseDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glimmervoid-pack-hooks-'));
   const payloads: PacksDeliveredPayload[] = [];
   const session = new Session({
     id: 'measured-pack',
@@ -186,7 +186,7 @@ test('a spawn that never starts delivers no pack', async () => {
 });
 
 test('a session without delivered packs keeps the wakeup matcher alone', async () => {
-  const hooksBaseDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glissa-pack-hooks-'));
+  const hooksBaseDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glimmervoid-pack-hooks-'));
   const session = new Session({
     id: 'measured-empty',
     name: 'measured-empty',
@@ -378,7 +378,7 @@ test('packs: "house-rules" (not an array) is ignored entirely', async () => {
   }
 });
 
-const SLUG = 'glissa-12345678';
+const SLUG = 'glimmervoid-12345678';
 
 async function startWithPacks(builtRoot: string, options: Partial<SessionOptions> = {}) {
   const calls: SpawnCall[] = [];
@@ -584,7 +584,7 @@ test('a pack built out of the project\'s own files is skipped as self-referentia
 test('the same pack still reaches a project it was not built out of', async () => {
   const builtRoot = await makeBuiltRoot({ mirror: { version: 'v1', sourceRoots: [`${toPosix(process.cwd())}/docs`], sources: [{ pattern: 'docs/*.md', files: [{ relPath: 'a.md' }] }] } });
   const calls: SpawnCall[] = [];
-  const elsewhereDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glissa-elsewhere-'));
+  const elsewhereDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glimmervoid-elsewhere-'));
   const s = new Session({
     id: 'elsewhere', name: 'elsewhere', path: elsewhereDir,
     packs: ['mirror'], packsBuiltRoot: builtRoot,

@@ -1,17 +1,17 @@
 # Plan: configurable base branch, no hardcoded `develop`
 
-Status: design for review, drafted 2026-08-30, revised the same day twice (glissa-wide config,
+Status: design for review, drafted 2026-08-30, revised the same day twice (glimmervoid-wide config,
 commit skill trunk-only; then remote-as-truth and develop left alone). Nothing implemented. Two
 repos are touched: this one (Part A) and `claude-setup` `skills/commit` + profiles (Part B).
 `AGENTS.md` and the code win over this doc once work lands.
 
 ## Problem
 
-Glissa and the `/commit` skill both assume a gitflow shape: feature -> `develop` -> `main`. The
+Glimmervoid and the `/commit` skill both assume a gitflow shape: feature -> `develop` -> `main`. The
 target is the PostHog shape: branch off the repo's default branch, land on it, nothing in between,
 unfinished work behind flags rather than on a long-lived branch.
 
-- Glissa's `integrationBranch` (`server/config-store.js:80`) defaults to `'develop'`, and five call
+- Glimmervoid's `integrationBranch` (`server/config-store.js:80`) defaults to `'develop'`, and five call
   sites bypass the config with a literal `'develop'` fallback. The review sidebar's copy says
   "Merge into develop" whatever the real target is.
 - `/commit` promotion hardcodes `develop` as the intermediate hop (`land.ts` `promotionHops`), and
@@ -20,10 +20,10 @@ unfinished work behind flags rather than on a long-lived branch.
 
 ## Decisions taken in review
 
-1. Glissa config stays **machine-wide**: one `integrationBranch` for every project, no per-project
+1. Glimmervoid config stays **machine-wide**: one `integrationBranch` for every project, no per-project
    override.
 2. `/commit` is a personal tool and adopts the trunk flow outright. No gitflow mode is preserved.
-3. **Worktrees stay.** Every Glissa session still runs in its own worktree forked off the base
+3. **Worktrees stay.** Every Glimmervoid session still runs in its own worktree forked off the base
    branch and merged back by rebase-then-fast-forward. Trunk-based changes only *which* branch that
    is, never the isolation. (`AGENTS.md` "Development Workflow" already states this as a convention
    for fanning out over this repo; unchanged.)
@@ -39,7 +39,7 @@ Out of scope: PR-shaped session close-out, spawn-from-issue, prompt levers for f
 
 ---
 
-## Part A: Glissa
+## Part A: Glimmervoid
 
 ### A1. Config semantics
 
@@ -83,7 +83,7 @@ detectDefaultBranch(projectPath) -> string | null   // origin/HEAD -> main -> ma
 ```
 
 `createBody` already takes `baseBranch`; when it is `null` it calls `detectDefaultBranch` and writes
-the result into the existing per-branch marker (`branch.<name>.glissa-integration`,
+the result into the existing per-branch marker (`branch.<name>.glimmervoid-integration`,
 `git-workspace.js:242`). The marker stays the authority for a live worktree, so changing the config
 never retargets a running session (unchanged invariant, `git-workspace.js:553`).
 
@@ -196,7 +196,7 @@ If `mainline` cannot be resolved preflight still returns `READY` with a warning;
 commits and pushes the feature branch and reports `promotion skipped: no mainline`.
 
 Consistency warning, not a gate: if the repo's `.claude/release-profile.yml` names a
-`git.integration` other than the resolved mainline, preflight warns. Glissa's own profile is the
+`git.integration` other than the resolved mainline, preflight warns. Glimmervoid's own profile is the
 first repo this fires on (see step 4).
 
 ### B3. `land.ts`
@@ -210,7 +210,7 @@ Delete, not generalize:
   have prevented this); otherwise one `promoteHop(current, mainline)`, then push mainline. The
   feature branch is not pushed after a successful mainline promotion (existing rule,
   `land.ts:353-360`).
-- `deletedRemoteBranches` (merged `glissa/` branch pruning) tests merged-ness against mainline.
+- `deletedRemoteBranches` (merged `glimmervoid/` branch pruning) tests merged-ness against mainline.
 
 Remote as source of truth (decision 4) in the one hop, which is mostly what `promoteHop` /
 `syncDestinationWithOrigin` (`land.ts:505-560`) already do; the change is the diverged case:
@@ -255,9 +255,9 @@ Document `MAINLINE_AHEAD` in the outcome table with its remedy.
    fetch/ff/push steps.
 3. B1 to B5 in `claude-setup`; profiles updated in the same change; `setup/apply` re-run on each
    machine.
-4. Glissa repo housekeeping now that commits land on `main`: `.claude/release-profile.yml`
+4. Glimmervoid repo housekeeping now that commits land on `main`: `.claude/release-profile.yml`
    `release_from`/`integration` -> `main`, drop the post-release "sync main" step; this machine's
-   `~/.glissa/config.json` `integrationBranch` -> `null`. Session worktrees still parked on
+   `~/.glimmervoid/config.json` `integrationBranch` -> `null`. Session worktrees still parked on
    `develop` finish through their marker (it names their base), so no session needs restarting.
    `develop` itself stays (decision 5).
 
@@ -292,4 +292,4 @@ the text above, all deliberate:
   `--no-push` suppresses every push. Preflight reads `.claude/release-profile.json` first, `.yml` as
   the retired fallback.
 - Step 4's `release-profile.yml` edit rides on the feature branch. The machine config
-  (`~/.glissa/config.json` `integrationBranch` -> `null`) is left for the operator.
+  (`~/.glimmervoid/config.json` `integrationBranch` -> `null`) is left for the operator.

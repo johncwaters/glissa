@@ -13,10 +13,10 @@ import type {
 import type { UpdateStatus } from '../server/backend-update.ts';
 import type { UpdateJournal } from '../shared/contracts/update-journal.ts';
 
-const ROOT = '/repo/glissa';
-const UPDATE_PATH = `${ROOT}/.glissa/update`;
+const ROOT = '/repo/glimmervoid';
+const UPDATE_PATH = `${ROOT}/.glimmervoid/update`;
 const STAGING_PATH = `${UPDATE_PATH}/next`;
-const JOURNAL_PATH = '/home/test/.glissa/update-journal.json';
+const JOURNAL_PATH = '/home/test/.glimmervoid/update-journal.json';
 const HEAD_SHA = '1'.repeat(40);
 const TARGET_SHA = '2'.repeat(40);
 

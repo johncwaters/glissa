@@ -18,7 +18,7 @@ function shortPathOf(target: string): string | null {
 }
 
 function withTempDir<T>(fn: (dir: string) => T): T {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-shortpath-longname-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-shortpath-longname-'));
   try {
     return fn(dir);
   } finally {

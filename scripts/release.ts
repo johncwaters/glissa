@@ -3,6 +3,7 @@ import type { ExecSyncOptions } from 'node:child_process';
 import fs from 'node:fs';
 
 import pkg from '../package.json' with { type: 'json' };
+import { REPO_SLUG } from '../shared/repo.ts';
 
 function run(cmd: string, opts: ExecSyncOptions = {}): void {
   console.log(`  $ ${cmd}`);
@@ -26,7 +27,7 @@ function hasCommand(cmd: string): boolean {
 const VERSION = pkg.version;
 const TAG = `v${VERSION}`;
 
-console.log(`==> Releasing glissa ${TAG}\n`);
+console.log(`==> Releasing glimmervoid ${TAG}\n`);
 
 const status = runCapture('git status --porcelain');
 if (status) {
@@ -52,8 +53,8 @@ const packedFiles = runCapture('npm pack --dry-run 2>&1')
   .filter((match): match is RegExpMatchArray => match !== null)
   .map((match) => match[1].trim());
 
-if (!packedFiles.includes('dist/bin/glissa.js')) {
-  console.error('ERROR: the tarball has no dist/bin/glissa.js, so the installed CLI would have nothing to run.');
+if (!packedFiles.includes('dist/bin/glimmervoid.js')) {
+  console.error('ERROR: the tarball has no dist/bin/glimmervoid.js, so the installed CLI would have nothing to run.');
   process.exit(1);
 }
 const rawSources = packedFiles.filter((file) => /\.[cm]?ts$/.test(file));
@@ -67,7 +68,7 @@ console.log('\n==> Pushing to GitHub...');
 run('git push');
 
 console.log(`\n==> Tagging ${TAG}...`);
-run(`git tag -a ${TAG} -m "Glissa ${TAG}"`);
+run(`git tag -a ${TAG} -m "Glimmervoid ${TAG}"`);
 run(`git push origin ${TAG}`);
 
 const hasGhCli = hasCommand('gh');
@@ -82,14 +83,14 @@ if (hasGhCli) {
   const tmpFile = 'release-notes.tmp.md';
   fs.writeFileSync(tmpFile, notes);
   try {
-    run(`gh release create ${TAG} --title "Glissa ${TAG}" --notes-file ${tmpFile}`);
+    run(`gh release create ${TAG} --title "Glimmervoid ${TAG}" --notes-file ${tmpFile}`);
   } finally {
     try { fs.unlinkSync(tmpFile); } catch {  }
   }
 }
 if (!hasGhCli) {
   console.log('\n==> Skipping GitHub release (gh CLI not installed).');
-  console.log(`   Create manually at: https://github.com/johncwaters/glissa/releases/new?tag=${TAG}`);
+  console.log(`   Create manually at: https://github.com/${REPO_SLUG}/releases/new?tag=${TAG}`);
 }
 
-console.log(`\n==> Done! Tagged and pushed glissa ${TAG}.`);
+console.log(`\n==> Done! Tagged and pushed glimmervoid ${TAG}.`);

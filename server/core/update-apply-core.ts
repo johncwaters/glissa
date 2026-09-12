@@ -218,7 +218,7 @@ function planHandOffRenames({
   stagingPath: string;
   lockfileChanged: boolean;
 }): HandOffRenamePlan {
-  const updatePath = `${root}/.glissa/update`;
+  const updatePath = `${root}/.glimmervoid/update`;
   const renames: RenameOperation[] = [
     { from: `${root}/dist`, to: `${updatePath}/${PREVIOUS_DIST_BACKUP_NAME}`, artifact: 'dist' },
     { from: `${stagingPath}/dist`, to: `${root}/dist`, artifact: 'dist' },

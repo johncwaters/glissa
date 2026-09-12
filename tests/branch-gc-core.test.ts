@@ -110,8 +110,8 @@ test('the worktree tip union keeps project tips first, dedupes by sha, and drops
 test('deletes merged and stale orphaned session branches while preserving input order', () => {
   const planned = planBranchGc({
     remoteBranches: [
-      branch('glissa/session/merged', { mergedIntoIntegration: true }),
-      branch('glissa/session/stale', { tipCommitTimeMs: NOW_MS - 15 * DAY_MS }),
+      branch('glimmervoid/session/merged', { mergedIntoIntegration: true }),
+      branch('glimmervoid/session/stale', { tipCommitTimeMs: NOW_MS - 15 * DAY_MS }),
     ],
     integrationTips: [{ branch: 'develop', sha: 'develop-sha' }],
     liveSessionIds: new Set(),
@@ -120,8 +120,8 @@ test('deletes merged and stale orphaned session branches while preserving input 
 
   assert.deepEqual(planned, {
     deletions: [
-      { name: 'glissa/session/merged', reason: 'merged-into-integration', tipSha: 'glissa/session/merged-sha' },
-      { name: 'glissa/session/stale', reason: 'stale-orphan', tipSha: 'glissa/session/stale-sha' },
+      { name: 'glimmervoid/session/merged', reason: 'merged-into-integration', tipSha: 'glimmervoid/session/merged-sha' },
+      { name: 'glimmervoid/session/stale', reason: 'stale-orphan', tipSha: 'glimmervoid/session/stale-sha' },
     ],
     kept: [],
   });
@@ -130,9 +130,9 @@ test('deletes merged and stale orphaned session branches while preserving input 
 test('a merged branch is deleted under the merge proof reason that decided it', () => {
   const planned = planBranchGc({
     remoteBranches: [
-      branch('glissa/session/rebased', { mergedIntoIntegration: true, mergedReason: 'tree-contained' }),
-      branch('glissa/session/landed', { mergedIntoIntegration: true, mergedReason: 'ancestor' }),
-      branch('glissa/session/aged', {
+      branch('glimmervoid/session/rebased', { mergedIntoIntegration: true, mergedReason: 'tree-contained' }),
+      branch('glimmervoid/session/landed', { mergedIntoIntegration: true, mergedReason: 'ancestor' }),
+      branch('glimmervoid/session/aged', {
         mergedIntoIntegration: false,
         mergedReason: 'unmerged-content',
         tipCommitTimeMs: NOW_MS - 15 * DAY_MS,
@@ -144,15 +144,15 @@ test('a merged branch is deleted under the merge proof reason that decided it', 
   });
 
   assert.deepEqual(planned.deletions, [
-    { name: 'glissa/session/rebased', reason: 'tree-contained', tipSha: 'glissa/session/rebased-sha' },
-    { name: 'glissa/session/landed', reason: 'ancestor', tipSha: 'glissa/session/landed-sha' },
-    { name: 'glissa/session/aged', reason: 'stale-orphan', tipSha: 'glissa/session/aged-sha' },
+    { name: 'glimmervoid/session/rebased', reason: 'tree-contained', tipSha: 'glimmervoid/session/rebased-sha' },
+    { name: 'glimmervoid/session/landed', reason: 'ancestor', tipSha: 'glimmervoid/session/landed-sha' },
+    { name: 'glimmervoid/session/aged', reason: 'stale-orphan', tipSha: 'glimmervoid/session/aged-sha' },
   ]);
 });
 
 test('a configured session branch is never deleted even when merged and stale', () => {
   const planned = planBranchGc({
-    remoteBranches: [branch('glissa/session/live', {
+    remoteBranches: [branch('glimmervoid/session/live', {
       mergedIntoIntegration: true,
       tipCommitTimeMs: NOW_MS - 30 * DAY_MS,
     })],
@@ -163,14 +163,14 @@ test('a configured session branch is never deleted even when merged and stale', 
 
   assert.deepEqual(planned, {
     deletions: [],
-    kept: [{ name: 'glissa/session/live', reason: 'live-session' }],
+    kept: [{ name: 'glimmervoid/session/live', reason: 'live-session' }],
   });
 });
 
 test('a live session branch survives every configured prefix that lists it', () => {
-  for (const prefixes of [['glissa/'], ['glissa/session'], ['glissa/session/'], ['glissa/', 'worktree-agent-']]) {
+  for (const prefixes of [['glimmervoid/'], ['glimmervoid/session'], ['glimmervoid/session/'], ['glimmervoid/', 'worktree-agent-']]) {
     const planned = planBranchGc({
-      remoteBranches: [branch('glissa/session/live', {
+      remoteBranches: [branch('glimmervoid/session/live', {
         mergedIntoIntegration: true,
         tipCommitTimeMs: NOW_MS - 30 * DAY_MS,
       })],
@@ -182,7 +182,7 @@ test('a live session branch survives every configured prefix that lists it', () 
 
     assert.deepEqual(planned, {
       deletions: [],
-      kept: [{ name: 'glissa/session/live', reason: 'live-session' }],
+      kept: [{ name: 'glimmervoid/session/live', reason: 'live-session' }],
     }, prefixes.join(','));
   }
 });
@@ -190,8 +190,8 @@ test('a live session branch survives every configured prefix that lists it', () 
 test('keeps fresh unmerged session branches and uses 14 stale days by default', () => {
   const planned = planBranchGc({
     remoteBranches: [
-      branch('glissa/session/fresh'),
-      branch('glissa/session/boundary', { tipCommitTimeMs: NOW_MS - 14 * DAY_MS }),
+      branch('glimmervoid/session/fresh'),
+      branch('glimmervoid/session/boundary', { tipCommitTimeMs: NOW_MS - 14 * DAY_MS }),
     ],
     integrationTips: [],
     liveSessionIds: new Set(),
@@ -201,8 +201,8 @@ test('keeps fresh unmerged session branches and uses 14 stale days by default', 
   assert.deepEqual(planned, {
     deletions: [],
     kept: [
-      { name: 'glissa/session/fresh', reason: 'not-merged-and-fresh' },
-      { name: 'glissa/session/boundary', reason: 'not-merged-and-fresh' },
+      { name: 'glimmervoid/session/fresh', reason: 'not-merged-and-fresh' },
+      { name: 'glimmervoid/session/boundary', reason: 'not-merged-and-fresh' },
     ],
   });
 });
@@ -213,9 +213,9 @@ test('foreign, mainline, and configured integration branch names are never delet
       branch('feature/old', { mergedIntoIntegration: true, tipCommitTimeMs: 0 }),
       branch('main', { mergedIntoIntegration: true, tipCommitTimeMs: 0 }),
       branch('master', { mergedIntoIntegration: true, tipCommitTimeMs: 0 }),
-      branch('glissa/session/integration', { mergedIntoIntegration: true, tipCommitTimeMs: 0 }),
+      branch('glimmervoid/session/integration', { mergedIntoIntegration: true, tipCommitTimeMs: 0 }),
     ],
-    integrationTips: [{ branch: 'glissa/session/integration', sha: null }],
+    integrationTips: [{ branch: 'glimmervoid/session/integration', sha: null }],
     liveSessionIds: new Set(),
     nowMs: NOW_MS,
   });
@@ -226,7 +226,7 @@ test('foreign, mainline, and configured integration branch names are never delet
       { name: 'feature/old', reason: 'foreign-prefix' },
       { name: 'main', reason: 'foreign-prefix' },
       { name: 'master', reason: 'foreign-prefix' },
-      { name: 'glissa/session/integration', reason: 'not-merged-and-fresh' },
+      { name: 'glimmervoid/session/integration', reason: 'not-merged-and-fresh' },
     ],
   });
 });
@@ -238,7 +238,7 @@ test('the default prefixes include worktree-agent branches and custom prefixes f
   });
   const underSessionPrefixOnly = planBranchGc({
     remoteBranches: [branch('worktree-agent-x', { mergedIntoIntegration: true, tipCommitTimeMs: 0 })],
-    prefixes: ['glissa/session/'],
+    prefixes: ['glimmervoid/session/'],
     nowMs: NOW_MS,
   });
 
@@ -248,21 +248,21 @@ test('the default prefixes include worktree-agent branches and custom prefixes f
 
 test('prefix rejection precedes protected and live-session guards', () => {
   const planned = planBranchGc({
-    remoteBranches: [branch('glissa/session/guarded', { mergedIntoIntegration: true, tipCommitTimeMs: 0 })],
-    integrationTips: [{ branch: 'glissa/session/guarded', sha: 'guarded-sha' }],
+    remoteBranches: [branch('glimmervoid/session/guarded', { mergedIntoIntegration: true, tipCommitTimeMs: 0 })],
+    integrationTips: [{ branch: 'glimmervoid/session/guarded', sha: 'guarded-sha' }],
     liveSessionIds: new Set(['guarded']),
     prefixes: ['worktree-agent-'],
     nowMs: NOW_MS,
   });
 
-  assert.deepEqual(planned.kept, [{ name: 'glissa/session/guarded', reason: 'foreign-prefix' }]);
+  assert.deepEqual(planned.kept, [{ name: 'glimmervoid/session/guarded', reason: 'foreign-prefix' }]);
 });
 
 test('every deletion carries the listed tip sha that leases its removal', () => {
   const planned = planBranchGc({
     remoteBranches: [
-      { name: 'glissa/session/merged', tipSha: 'merged-tip', tipCommitTimeMs: NOW_MS, mergedIntoIntegration: true },
-      { name: 'glissa/session/stale', tipSha: 'stale-tip', tipCommitTimeMs: NOW_MS - 30 * DAY_MS },
+      { name: 'glimmervoid/session/merged', tipSha: 'merged-tip', tipCommitTimeMs: NOW_MS, mergedIntoIntegration: true },
+      { name: 'glimmervoid/session/stale', tipSha: 'stale-tip', tipCommitTimeMs: NOW_MS - 30 * DAY_MS },
     ],
     nowMs: NOW_MS,
   });
@@ -285,7 +285,7 @@ test('an empty prefix never makes every remote branch eligible', () => {
 
 test('a non-finite commit time fails closed as fresh', () => {
   const planned = planBranchGc({
-    remoteBranches: [branch('glissa/session/unknown-time', { tipCommitTimeMs: Number.NaN })],
+    remoteBranches: [branch('glimmervoid/session/unknown-time', { tipCommitTimeMs: Number.NaN })],
     integrationTips: [],
     liveSessionIds: new Set(),
     nowMs: NOW_MS,
@@ -293,6 +293,6 @@ test('a non-finite commit time fails closed as fresh', () => {
   });
 
   assert.deepEqual(planned.kept, [
-    { name: 'glissa/session/unknown-time', reason: 'not-merged-and-fresh' },
+    { name: 'glimmervoid/session/unknown-time', reason: 'not-merged-and-fresh' },
   ]);
 });

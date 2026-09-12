@@ -105,7 +105,7 @@ test('an unreadable transcript directory yields io-failed and leaves an unchange
   const projectsDir = await makeProjectsDir(root);
   const transcriptDir = path.join(projectsDir, 'C--repo');
   const transcript = path.join(transcriptDir, 'session-a.jsonl');
-  const warehousePath = path.join(root, '.glissa', 'usage-warehouse.json');
+  const warehousePath = path.join(root, '.glimmervoid', 'usage-warehouse.json');
   await writeLines(transcript, [usageLine({ messageId: 'message-a', requestId: 'request-a', input: 10 })]);
   let isTranscriptDirUnreadable = false;
   let now = Date.parse('2026-08-19T12:00:00.000Z');
@@ -136,7 +136,7 @@ test('an incremental io-failed pass still persists what the readable files added
   const projectsDir = await makeProjectsDir(root);
   const readableDir = path.join(projectsDir, 'C--repo');
   const deniedDir = path.join(projectsDir, 'C--other');
-  const warehousePath = path.join(root, '.glissa', 'usage-warehouse.json');
+  const warehousePath = path.join(root, '.glimmervoid', 'usage-warehouse.json');
   await writeLines(path.join(readableDir, 'session-a.jsonl'), [usageLine({ messageId: 'message-a', requestId: 'request-a', input: 10 })]);
   await writeLines(path.join(deniedDir, 'session-b.jsonl'), [usageLine({ messageId: 'message-b', requestId: 'request-b', input: 20 })]);
   let isDeniedDirUnreadable = false;
@@ -170,7 +170,7 @@ test('a forced io-failed pass leaves the warehouse untouched rather than persist
   const projectsDir = await makeProjectsDir(root);
   const readableDir = path.join(projectsDir, 'C--repo');
   const deniedDir = path.join(projectsDir, 'C--other');
-  const warehousePath = path.join(root, '.glissa', 'usage-warehouse.json');
+  const warehousePath = path.join(root, '.glimmervoid', 'usage-warehouse.json');
   await writeLines(path.join(readableDir, 'session-a.jsonl'), [usageLine({ messageId: 'message-a', requestId: 'request-a', input: 10 })]);
   await writeLines(path.join(deniedDir, 'session-b.jsonl'), [usageLine({ messageId: 'message-b', requestId: 'request-b', input: 20 })]);
   let isDeniedDirUnreadable = false;
@@ -753,7 +753,7 @@ async function warehouseTokens(warehousePath: string): Promise<number> {
 }
 
 async function makeTempRoot(): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), 'glissa-usage-scanner-'));
+  return fs.mkdtemp(path.join(os.tmpdir(), 'glimmervoid-usage-scanner-'));
 }
 
 async function makeProjectsDir(root: string): Promise<string> {

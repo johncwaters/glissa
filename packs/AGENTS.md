@@ -4,7 +4,7 @@
 # packs
 
 ## Purpose
-Version-controlled input to the context mill: pack specs and the shared source material they assemble. Built output never lands here; it goes to `~/.glissa/packs/built/<name>/current/` (runtime artifact, writable even when the install dir is not).
+Version-controlled input to the context mill: pack specs and the shared source material they assemble. Built output never lands here; it goes to `~/.glimmervoid/packs/built/<name>/current/` (runtime artifact, writable even when the install dir is not).
 
 ## Subdirectories
 
@@ -33,13 +33,13 @@ Version-controlled input to the context mill: pack specs and the shared source m
 
 Every key is validated by `validatePackSpec` in `../server/core/pack-core.ts`; unknown keys are a build error, not a silent no-op. A source sets exactly one of `path` (a file or a directory taken whole) or `glob` (`**`, `*`, `?`). Relative patterns resolve against this directory, so a spec reads the same from a repo checkout or a global install; absolute patterns are allowed. `optional: true` is allowed only on a source and means a missing match is skipped instead of failing the build, for derived files the distiller has not written yet. `budgetTokens` is a hard gate: over budget means no output at all.
 
-### Data sources and `{{glissaHome}}`
+### Data sources and `{{glimmervoidHome}}`
 
-A source may set `data: true`. Its files are published under `data/<slug>/` as plain files instead of being folded into `.claude/rules/`, and the index gets only a fixed pointer line naming them as recorded observation, never their content. That is the carrier for long-term memory (`docs/plan-visions-3.md`, M16), and two rules make it structural rather than a convention: a source pattern may name `{{glissaHome}}` (the directory `config.json` lives in, the one runtime path a version-controlled spec may name) only when it anchors the whole pattern, carries no `..` segment, and sets `data: true`; and a build FAILS, publishing nothing, when any line of a data file turns up in `CLAUDE.md` or under `.claude/rules/`.
+A source may set `data: true`. Its files are published under `data/<slug>/` as plain files instead of being folded into `.claude/rules/`, and the index gets only a fixed pointer line naming them as recorded observation, never their content. That is the carrier for long-term memory (`docs/plan-visions-3.md`, M16), and two rules make it structural rather than a convention: a source pattern may name `{{glimmervoidHome}}` (the directory `config.json` lives in, the one runtime path a version-controlled spec may name) only when it anchors the whole pattern, carries no `..` segment, and sets `data: true`; and a build FAILS, publishing nothing, when any line of a data file turns up in `CLAUDE.md` or under `.claude/rules/`.
 
 `specs/memory.pack.json` is the shipped example. It carries the GLOBAL projection file (`memory/dist/current/MEMORY.md`) and nothing under `projects/`: a pack is built once per name and delivered to every configured project, so a per-project topic file in it would ride into an unrelated repo's session. Per-project memory reaches a session through the Visions dispatch prompt and the operator's own pointer line instead.
 
-`distill` is optional. Each entry declares one derived output path under `packs/`, the local source files to summarize, and carbon-unit written `instructions`. The distiller writes only the output file, stamps line 1 with the source hashes, and reports `DISTILLED`, `NO_CHANGE`, or `ERROR` through its result file. The scheduled lane is gated by `config.packDistiller`; manual `glissa pack distill [name] [--dry-run]` is always allowed.
+`distill` is optional. Each entry declares one derived output path under `packs/`, the local source files to summarize, and carbon-unit written `instructions`. The distiller writes only the output file, stamps line 1 with the source hashes, and reports `DISTILLED`, `NO_CHANGE`, or `ERROR` through its result file. The scheduled lane is gated by `config.packDistiller`; manual `glimmervoid pack distill [name] [--dry-run]` is always allowed.
 
 ## For AI Agents
 
@@ -51,7 +51,7 @@ A source may set `data: true`. Its files are published under `data/<slug>/` as p
 - A spec whose sources reach OUTSIDE `packs/` is repo-development context and must be excluded from the tarball, or a global install fails its build on every watch fire and every sweep. The packaged-install job in `.github/workflows/test.yml` is what catches it: a shipped spec whose non-optional sources are not in the whitelist fails that install.
 
 ### Testing Requirements
-- `node --test tests/pack-core.test.ts tests/pack-builder.test.ts` covers the format and the builder; `glissa pack build` is the end-to-end check.
+- `node --test tests/pack-core.test.ts tests/pack-builder.test.ts` covers the format and the builder; `glimmervoid pack build` is the end-to-end check.
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->
 
@@ -63,8 +63,8 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 - Deterministic by contract, so the version is a hash and a rebuild diffable. It hashes every DELIVERED file, not just sources, or an edited rule rides out under an unchanged version.
 - Budgets are hard gates and a failed build writes NOTHING, leaving the last good `current/` untouched. The always-loaded index has a tighter cap: context rot bites the discovery tier first.
-- One switch, `millEnabled`, gates the whole mill: on means every spec builds, is watched, and is handed to every configured project at spawn, alphabetically up to the four pack per session cap, whose over-cap warning is the trigger to revisit that number; off means no pack builds and no delivery to any session, project or lane. There is no per-project pack list, so the only per-project gate is the spawn-time self-referential refusal (`server/core/pack-core.ts` decidePackDelivery, `tests/session-factory-packs.test.ts`, `tests/backend-mill.test.ts`). `glissa pack build` stays always allowed.
-- The staleness notice is Glissa-AUTHORED only, never pack content, or the hook response becomes an injection relay; only an ACCEPTED callback may consume one.
+- One switch, `millEnabled`, gates the whole mill: on means every spec builds, is watched, and is handed to every configured project at spawn, alphabetically up to the four pack per session cap, whose over-cap warning is the trigger to revisit that number; off means no pack builds and no delivery to any session, project or lane. There is no per-project pack list, so the only per-project gate is the spawn-time self-referential refusal (`server/core/pack-core.ts` decidePackDelivery, `tests/session-factory-packs.test.ts`, `tests/backend-mill.test.ts`). `glimmervoid pack build` stays always allowed.
+- The staleness notice is Glimmervoid-AUTHORED only, never pack content, or the hook response becomes an injection relay; only an ACCEPTED callback may consume one.
 - An unbuilt, unreadable, `self-referential` or `empty` pack is SKIPPED with a decision-trace entry (`decidePackDelivery`): additive context must never block a spawn, and a pack sourced from inside the consumer's own checkout is a drifting copy of what that session already loads.
 - A `data: true` source publishes outside the instruction tier, and the build FAILS if a data line appears in the index or under `.claude/rules/`: a build gate beats a convention.
 - Per-project variants flatten into independent pack NAMES, so one version per pack still holds. A foreign project's slug in a delivered path fails the build.

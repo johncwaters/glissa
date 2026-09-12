@@ -54,14 +54,14 @@ test('a published diagnostic keeps its range, code and source', () => {
     message: 'Fence is not closed',
     severity: 2,
     code: 'unclosed-fence',
-    source: 'glissa-visions',
+    source: 'glimmervoid-visions',
   }]), 'diagnostic');
   assert.equal(diagnostic.message, 'Fence is not closed');
   assert.equal(diagnostic.severity, vscode.DiagnosticSeverity.Warning);
   assert.equal(diagnostic.range.start.line, 2);
   assert.equal(diagnostic.range.start.character, 4);
   assert.equal(diagnostic.code, 'unclosed-fence');
-  assert.equal(diagnostic.source, 'glissa-visions');
+  assert.equal(diagnostic.source, 'glimmervoid-visions');
 });
 
 test('a malformed diagnostic degrades instead of throwing', () => {

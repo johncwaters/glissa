@@ -27,13 +27,13 @@ test('port accepts an integer or a numeric string, else null', () => {
 });
 
 test('allowedOrigins defaults to https://<publicHost> when a host is set and the list is empty', () => {
-  const remote = normalizeRemoteConfig({ enabled: true, port: 3001, publicHost: 'glissa.test' });
-  assert.deepEqual(remote.allowedOrigins, ['https://glissa.test']);
-  assert.deepEqual(normalizeRemoteConfig({ publicHost: '  glissa.test  ' }).publicHost, 'glissa.test');
+  const remote = normalizeRemoteConfig({ enabled: true, port: 3001, publicHost: 'glimmervoid.test' });
+  assert.deepEqual(remote.allowedOrigins, ['https://glimmervoid.test']);
+  assert.deepEqual(normalizeRemoteConfig({ publicHost: '  glimmervoid.test  ' }).publicHost, 'glimmervoid.test');
 });
 
 test('an explicit allowedOrigins list wins over the publicHost default', () => {
-  const remote = normalizeRemoteConfig({ enabled: true, port: 3001, publicHost: 'glissa.test', allowedOrigins: ['https://other.test'] });
+  const remote = normalizeRemoteConfig({ enabled: true, port: 3001, publicHost: 'glimmervoid.test', allowedOrigins: ['https://other.test'] });
   assert.deepEqual(remote.allowedOrigins, ['https://other.test']);
 });
 
@@ -43,12 +43,12 @@ test('allowedOrigins drops non-string and blank entries', () => {
 });
 
 test('a disabled remote block contributes no allowed origins at all', () => {
-  assert.deepEqual(normalizeRemoteConfig({ enabled: false, publicHost: 'glissa.test' }).allowedOrigins, []);
+  assert.deepEqual(normalizeRemoteConfig({ enabled: false, publicHost: 'glimmervoid.test' }).allowedOrigins, []);
   assert.deepEqual(
-    normalizeRemoteConfig({ enabled: false, publicHost: 'glissa.test', allowedOrigins: ['https://other.test'] }).allowedOrigins,
+    normalizeRemoteConfig({ enabled: false, publicHost: 'glimmervoid.test', allowedOrigins: ['https://other.test'] }).allowedOrigins,
     []
   );
-  assert.equal(normalizeRemoteConfig({ enabled: false, publicHost: 'glissa.test' }).publicHost, 'glissa.test',
+  assert.equal(normalizeRemoteConfig({ enabled: false, publicHost: 'glimmervoid.test' }).publicHost, 'glimmervoid.test',
     'the host itself is still reported, it just grants nothing');
 });
 
@@ -85,21 +85,21 @@ test('isLoopbackHost recognizes the loopback spellings and nothing else', () => 
   for (const host of ['127.0.0.1', '127.1.2.3', 'localhost', 'LOCALHOST', '::1', '[::1]', '0:0:0:0:0:0:0:1']) {
     assert.equal(isLoopbackHost(host), true, host);
   }
-  for (const host of ['0.0.0.0', '192.168.1.5', 'glissa.test', '', null, undefined, '128.0.0.1']) {
+  for (const host of ['0.0.0.0', '192.168.1.5', 'glimmervoid.test', '', null, undefined, '128.0.0.1']) {
     assert.equal(isLoopbackHost(host), false, String(host));
   }
 });
 
-test('no GLISSA_HOST binds loopback', () => {
+test('no GLIMMERVOID_HOST binds loopback', () => {
   assert.deepEqual(decideBindHost({}), { host: '127.0.0.1', allowed: true, reason: null });
   assert.deepEqual(decideBindHost({ envHost: '   ' }), { host: '127.0.0.1', allowed: true, reason: null });
 });
 
-test('a loopback GLISSA_HOST is honored as-is', () => {
+test('a loopback GLIMMERVOID_HOST is honored as-is', () => {
   assert.deepEqual(decideBindHost({ envHost: '::1' }), { host: '::1', allowed: true, reason: null });
 });
 
-test('a non-loopback GLISSA_HOST is refused unless insecure bind is explicit', () => {
+test('a non-loopback GLIMMERVOID_HOST is refused unless insecure bind is explicit', () => {
   const refused = decideBindHost({ envHost: '0.0.0.0' });
   assert.equal(refused.allowed, false);
   assert.equal(refused.reason, 'non-loopback');

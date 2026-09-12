@@ -35,11 +35,11 @@ test('an assistant turn becomes an episodic knowledge record stamped reported', 
 });
 
 test('the ingest mapper stamps a known project before the record reaches storage', () => {
-  const projectPath = 'C:\\Work\\Glissa';
+  const projectPath = 'C:\\Work\\Glimmervoid';
   const input = memoryInputFromEvent(event({
-    scope: { root: 'C:\\Work\\.glissa-worktrees\\Glissa-abc123', sessionId: 'sess-1' },
+    scope: { root: 'C:\\Work\\.glimmervoid-worktrees\\Glimmervoid-abc123', sessionId: 'sess-1' },
   }), { knownProjects: [{ path: projectPath }] });
-  assert.equal(input?.project, 'c:/work/glissa');
+  assert.equal(input?.project, 'c:/work/glimmervoid');
 });
 
 test('a tool call never becomes a record, however well formed the event is', () => {

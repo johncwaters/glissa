@@ -60,9 +60,9 @@ function endpointFromUrl(rawUrl: string): HookEndpoint | null {
   const segments = parsed.pathname.split('/').filter((segment) => segment.length > 0);
   const hookIndex = segments.indexOf('hook');
   if (hookIndex < 0) return null;
-  const glissaId = segments[hookIndex + 1];
-  if (!glissaId) return null;
-  return { base: `${parsed.origin}/hook/${glissaId}`, query: parsed.search };
+  const glimmervoidId = segments[hookIndex + 1];
+  if (!glimmervoidId) return null;
+  return { base: `${parsed.origin}/hook/${glimmervoidId}`, query: parsed.search };
 }
 
 function readEndpoint(settingsPath: string | null): HookEndpoint | null {

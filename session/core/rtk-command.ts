@@ -8,7 +8,7 @@ interface StatApi {
 }
 
 interface RtkPathInputs {
-  glissaHome: string;
+  glimmervoidHome: string;
   platform: NodeJS.Platform;
   exec: PathLookupExec;
   fsApi: StatApi;
@@ -29,10 +29,10 @@ function firstExistingFile(candidates: readonly string[], fsApi: StatApi): strin
   return null;
 }
 
-function resolveRtkPath({ glissaHome, platform, exec, fsApi }: RtkPathInputs): string | null {
+function resolveRtkPath({ glimmervoidHome, platform, exec, fsApi }: RtkPathInputs): string | null {
   const bundledCandidates = [
-    path.join(glissaHome, 'bin', 'rtk.exe'),
-    path.join(glissaHome, 'bin', 'rtk'),
+    path.join(glimmervoidHome, 'bin', 'rtk.exe'),
+    path.join(glimmervoidHome, 'bin', 'rtk'),
   ];
   const bundled = firstExistingFile(bundledCandidates, fsApi);
   if (bundled) return bundled;

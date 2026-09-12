@@ -5,13 +5,13 @@
 **Status:** pending approval
 **Mode:** direct plan (decisions locked with the user)
 **Source:** the finalized build plan (artifact `ab3a965c`) + three Explore passes over `server/`, `session/`, `teamlib/`, `notifications/`
-**Feature:** an opt-in poller that reviews the user's own open PRs, resolves conflicts, and merges the clean ones on green checks, pinging Telegram on anything actionable. Default off; all config keys absent = current Glissa, unchanged.
+**Feature:** an opt-in poller that reviews the user's own open PRs, resolves conflicts, and merges the clean ones on green checks, pinging Telegram on anything actionable. Default off; all config keys absent = current Glimmervoid, unchanged.
 
 ---
 
 ## 1. Requirements Summary
 
-Add an optional background lane to Glissa's existing Windows backend that, every 15 minutes:
+Add an optional background lane to Glimmervoid's existing Windows backend that, every 15 minutes:
 
 1. Lists open PRs on repos the user explicitly opted in (`config.prReview.projects`).
 2. Filters to the user's own non-draft branches (skip forks, drafts, bots).
@@ -37,7 +37,7 @@ The Telegram piece is PR-only: a direct push helper the poller calls, **not** a 
 
 | Decision | Choice |
 | --- | --- |
-| Watch scope | Explicit opt-in list of Glissa project ids (`config.prReview.projects`) |
+| Watch scope | Explicit opt-in list of Glimmervoid project ids (`config.prReview.projects`) |
 | Auto-merge gate | Clean review **and** green checks **and** no `.github/workflows/` edits |
 | After conflict resolution | Merge once checks pass (treated like any clean PR) |
 | Which PRs | User's own branches, non-draft; skip forks and bots |
@@ -57,7 +57,7 @@ The Telegram piece is PR-only: a direct push helper the poller calls, **not** a 
 ### 3.2 Two lanes
 
 - **Clean lane** — session cwd is the project path (`getProjectPathById(projectId)`, used at `server/backend.js:546,621`). The agent only runs `gh pr diff`/`gh pr view`/`gh pr comment` (remote) and reads files at HEAD. `effectiveCwd()` returns `this.path` when no worktree is injected (`session/sessions.js:900-902`), so nothing dirties the tree. It coexists with a live interactive session in the same repo (two PTY processes, each its own injected settings file).
-- **Conflict lane** — the poller calls `gitWorkspace.create({ projectPath, teamId: 'pr-review', label: 'pr-<N>', worktreeBase })` (`teamlib/team-git.js:115-193`) to fork an isolated worktree (branch `glissa/pr-review/pr-<N>`, namespaced away from the `glissa/session/*` boot sweep at `team-git.js:454`). The session runs in that worktree; the agent runs `gh pr checkout <N>`, `git rebase origin/<base>`, resolves, commits, `git push`. On session exit the poller calls `gitWorkspace.discard({ projectPath, workspace })` (`team-git.js:383-394`) to tear the worktree down. team-git's internal `serialize()` queue (`team-git.js:76`) means these ops never race a concurrent team run.
+- **Conflict lane** — the poller calls `gitWorkspace.create({ projectPath, teamId: 'pr-review', label: 'pr-<N>', worktreeBase })` (`teamlib/team-git.js:115-193`) to fork an isolated worktree (branch `glimmervoid/pr-review/pr-<N>`, namespaced away from the `glimmervoid/session/*` boot sweep at `team-git.js:454`). The session runs in that worktree; the agent runs `gh pr checkout <N>`, `git rebase origin/<base>`, resolves, commits, `git push`. On session exit the poller calls `gitWorkspace.discard({ projectPath, workspace })` (`team-git.js:383-394`) to tear the worktree down. team-git's internal `serialize()` queue (`team-git.js:76`) means these ops never race a concurrent team run.
 
 ### 3.3 Verdict contract (result file, not reviewDecision)
 
@@ -127,7 +127,7 @@ Config shapes (documented, user adds by hand to enable):
   "mergeMethod": "rebase",
   "maxConcurrentReviews": 3,
   "reviewTimeoutSeconds": 900,
-  "projects": ["<glissa-project-id>"]
+  "projects": ["<glimmervoid-project-id>"]
 }
 ```
 
@@ -155,7 +155,7 @@ Config shapes (documented, user adds by hand to enable):
 2. `PR_REVIEW_DENY` — a `{ deny: [...] }` fragment (`settings-injector.js:66` accepts `{ deny: [<rule strings>] }`, merged only when non-empty; verified). Each entry must be valid Claude Code permission-rule syntax, **not** a free-form glob — e.g. `Bash(gh pr merge:*)`, `Bash(gh pr close:*)`, `Bash(gh repo delete:*)`, `Bash(git push --force:*)`, `Bash(git push -f:*)`, `Edit(.github/workflows/**)`, `Write(.github/workflows/**)`. Pin the exact strings during build against the installed Claude Code. Best-effort only (it runs under `--dangerously-skip-permissions`, per R3) — a belt, not the belt.
 3. **[timeout — critic finding #1]** `spawnReview` builds the review prompt (§4.3) with the PR number, base branch, and `resultPath` (a temp file under `os.tmpdir()`, **not** the repo, to keep the clean lane collision-free). `spawnGate.run(() => sess.start())`. Arm a hard timeout mirroring `runStage` (`teamlib/team-orchestrator.js:184`: `setTimeout(() => { session.destroy(); resolve('timeout') }, reviewTimeoutSeconds*1000)`, timer `.unref()`'d, cleared on `exit`). On `exit`, read+parse `resultPath`, delete it, resolve the verdict (`ERROR` if missing/unparseable). On timeout: `session.destroy()`, resolve `ERROR`, clear the in-flight lock, ping error. Without this a hung `-p` session pins the PR in-flight forever and, once `maxConcurrentReviews` such sessions accumulate, silently disables the whole feature.
 4. Poller applies the verdict: `CHANGES` → `pingFor` → `sendPrPing`, state `done`; `CLEAN` → state `awaiting-checks` (silent). **[re-review termination — critic finding #5]** Record `reviewedHead` by a **mandatory** poller-side re-query `gh pr view <N> --json headRefOid` after exit — never trust the agent's self-reported `head` (it may capture the pre-push SHA and cause an endless re-review + duplicate comment/ping loop). Add a short settle+retry (e.g. 2–3 reads over a few seconds) so GitHub's eventual-consistency window right after a resolve-push can't record a stale head. The in-flight lock stays set until `reviewedHead` is recorded.
-5. **[atomic state — critic gap]** Every write of the state file uses tmp-file + rename (the codebase convention at `server/config-store.js:161-163`) so a crash mid-write can't leave a torn `.glissa/pr-review-state.json`.
+5. **[atomic state — critic gap]** Every write of the state file uses tmp-file + rename (the codebase convention at `server/config-store.js:161-163`) so a crash mid-write can't leave a torn `.glimmervoid/pr-review-state.json`.
 
 **AC-2:** With a fake `spawnReview` returning each verdict, the poller: records the correct `reviewedHead` (from the re-query, not the agent), sets the right phase, and pings exactly on `CHANGES` (not `CLEAN`). A `spawnReview` that never resolves is force-resolved to `ERROR` by the timeout and frees its in-flight slot (no permanent cap starvation). Integration smoke (manual, one real repo): a clean PR gets `verdict CLEAN`, no comment, no merge, moves to `awaiting-checks`; repo working tree stays clean (`git status` unchanged) throughout.
 
@@ -166,8 +166,8 @@ Config shapes (documented, user adds by hand to enable):
 1. **[branch-in-use precheck — critic finding #3]** When `pr.mergeable === 'CONFLICTING'`, first check whether the PR's head branch is already checked out in any worktree (`git worktree list --porcelain` → compare head ref names). These are the user's OWN branches, so it is normal for the operator to be working on the very branch the PR is from; git forbids the same branch in two worktrees, so `gh pr checkout <N>` would fail with "already checked out". If it is checked out anywhere, degrade to `ERROR` + ping ("branch checked out locally, resolve manually") — do **not** spawn a doomed session.
 2. Otherwise `gitWorkspace.create({ projectPath, teamId: 'pr-review', label: 'pr-'+n, worktreeBase: getWorktreeBase(projectPath) })`. If `isGit === false` (non-git / `reason`), fall back to `ERROR` + ping (cannot isolate). Otherwise spawn the review session with cwd = `workspace.cwd`.
 3. The prompt's conflict branch (§4.3) instructs `gh pr checkout <N>`, `git rebase origin/<base>`, resolve, commit, `git push`; if not confidently resolvable, write `ERROR` and do not push. (Confirm whether `gh pr checkout --detach` is available on the installed `gh` — a detached checkout avoids creating the persistent local branch that finding #6 must otherwise clean up.)
-4. On `exit`, `gitWorkspace.discard({ projectPath, workspace })` regardless of verdict (teardown is junction-safe, `team-git.js:386-393`). **[branch leak — critic finding #6]** `discard` deletes only `workspace.branch` (`glissa/pr-review/pr-N`); `gh pr checkout <N>` created a *separate* local branch (the PR head ref) that `discard` does not remove. After `discard`, best-effort `git branch -D <prHeadRef>` in `projectPath` (or use `--detach` per step 3) so no persistent branch accumulates per review. `RESOLVED` → ping "resolved", state `awaiting-checks`; `ERROR` → ping error.
-5. Boot orphan cleanup: on `start()`, best-effort prune stale `glissa/pr-review/*` worktrees **and** any leaked PR-head local branches (list via `git worktree list --porcelain` / `git branch`, `discard`/`removeWorktreeByPath` any with no matching in-flight PR). The `glissa/session/*` boot sweep (`team-git.js:484-492`) does **not** cover this namespace, so the poller owns it.
+4. On `exit`, `gitWorkspace.discard({ projectPath, workspace })` regardless of verdict (teardown is junction-safe, `team-git.js:386-393`). **[branch leak — critic finding #6]** `discard` deletes only `workspace.branch` (`glimmervoid/pr-review/pr-N`); `gh pr checkout <N>` created a *separate* local branch (the PR head ref) that `discard` does not remove. After `discard`, best-effort `git branch -D <prHeadRef>` in `projectPath` (or use `--detach` per step 3) so no persistent branch accumulates per review. `RESOLVED` → ping "resolved", state `awaiting-checks`; `ERROR` → ping error.
+5. Boot orphan cleanup: on `start()`, best-effort prune stale `glimmervoid/pr-review/*` worktrees **and** any leaked PR-head local branches (list via `git worktree list --porcelain` / `git branch`, `discard`/`removeWorktreeByPath` any with no matching in-flight PR). The `glimmervoid/session/*` boot sweep (`team-git.js:484-492`) does **not** cover this namespace, so the poller owns it.
 
 **AC-3:** Fake `gitWorkspace` (inject `git` runner) verifies: `create` is called for a CONFLICTING PR only after the branch-in-use precheck passes; a PR whose head branch is checked out elsewhere yields `ERROR` + ping and never calls `create`; `discard` is called on every exit path; the leaked PR-head branch is deleted after `discard`; a non-git project yields `ERROR` not a crash. Manual: a deliberately-conflicted PR on a scratch repo is resolved, pushed (new head SHA), pinged "resolved", the worktree is gone (`git worktree list` clean), and **no persistent branch or worktree remains** in the main repo.
 
@@ -177,7 +177,7 @@ Config shapes (documented, user adds by hand to enable):
 
 1. **[no-checks edge — critic finding #4]** `readChecks(projectPath, n)` must return a four-way status `{ green, failing, pending, none }`, not a boolean. `gh pr checks <N>` exits non-zero (code 8) on a PR with **no** checks — that is `none`, NOT green. Merging on `none` would push a resolved conflict to the default branch with **zero CI verification**, nullifying the entire R1/R2 safety argument (which rests on "the fresh CI run catches a wrong-side pick"). So: `none` is **non-mergeable** — ping once and leave it for the human. Merge only on `green`.
 2. Each tick, for PRs in phase `awaiting-checks`, over the **filtered** PR list (a PR that flipped to draft mid-flight must not merge — critic non-blocking): `readChecks`. `green` → re-verify the PR touches no `.github/workflows/` (defense in depth) → `mergePr(projectPath, n, 'rebase')` → ping "merged", state `merged`. `failing` or `none` → ping "error" once (dedupe via a `pingedError` flag in state), leave for the human. `pending` → wait for the next tick.
-3. **[external merge/close — critic non-blocking]** `gh pr list` returns only OPEN PRs. A PR merged/closed outside Glissa between ticks simply drops out of the list: treat its disappearance as a silent terminal transition and **prune its state entry** (prevents unbounded state-file growth). A `mergePr` call that fails because the PR was already merged/closed is a silent no-op, not an "error" ping.
+3. **[external merge/close — critic non-blocking]** `gh pr list` returns only OPEN PRs. A PR merged/closed outside Glimmervoid between ticks simply drops out of the list: treat its disappearance as a silent terminal transition and **prune its state entry** (prevents unbounded state-file growth). A `mergePr` call that fails because the PR was already merged/closed is a silent no-op, not an "error" ping.
 4. A new head SHA on a `done`/`merged`/`error` PR (re-push, new commit) → `planReviews` reopens it as `new` (re-review). `planMerges` consumes the `filterActionablePrs` output so draft/fork/bot flips are excluded from merging.
 
 **AC-4:** Fake `readChecks`/`mergePr`: `green` → merge called once + ping "merged"; `failing` → ping "error" once (not repeated across ticks); `none` → no merge, ping "error" once (the safety-critical case); `pending` → no merge. A PR that touches `.github/workflows/` never reaches merge. A PR that vanishes from the list is pruned from state with no spurious ping; a `mergePr` failing on an already-merged PR does not ping "error".
@@ -207,7 +207,7 @@ Config shapes (documented, user adds by hand to enable):
 ## 4.x Supporting Details
 
 ### 4.2 Telegram helper contract
-`sendPrPing(botToken, chatId, text)` → single HTTPS POST, resolves void, never throws. Message text examples: `"Glissa PR: changes requested on owner/repo#12 — <summary>"`, `"merged owner/repo#12 (rebase)"`, `"conflicts resolved on owner/repo#12, awaiting checks"`, `"error on owner/repo#12 — <reason>"`.
+`sendPrPing(botToken, chatId, text)` → single HTTPS POST, resolves void, never throws. Message text examples: `"Glimmervoid PR: changes requested on owner/repo#12 — <summary>"`, `"merged owner/repo#12 (rebase)"`, `"conflicts resolved on owner/repo#12, awaiting checks"`, `"error on owner/repo#12 — <reason>"`.
 
 ### 4.3 Review prompt (the `initialPrompt`)
 Passed per PR. Key instructions (exact wording refined during build):
@@ -224,7 +224,7 @@ Passed per PR. Key instructions (exact wording refined during build):
 `makeStageSession` registers into `teamSessions`, which team shutdown/config-reload logic iterates. Mixing PR sessions there risks surprising that logic. A parallel `reviewSessions` Map with the identical auto-remove pattern keeps the lanes independent for ~30 lines. (Reuse the *pattern*, not the map.)
 
 ### 4.5 State file
-`.glissa/pr-review-state.json` (per project root, or one global under `~/.glissa/`; pick per-project to match the `.glissa/` convention). Shape: `{ "owner/repo#N": { reviewedHead, phase, wasConflicting, pingedError } }`. Written after each transition via **tmp-file + rename** (the `config-store.js:161-163` convention) so a crash mid-write cannot leave a torn file. Out of `config.json` so it never churns settings. Load on `start()`; tolerate a missing/corrupt file (start empty). Entries for PRs no longer in `gh pr list` are pruned each tick (§Phase-4.3) to bound growth.
+`.glimmervoid/pr-review-state.json` (per project root, or one global under `~/.glimmervoid/`; pick per-project to match the `.glimmervoid/` convention). Shape: `{ "owner/repo#N": { reviewedHead, phase, wasConflicting, pingedError } }`. Written after each transition via **tmp-file + rename** (the `config-store.js:161-163` convention) so a crash mid-write cannot leave a torn file. Out of `config.json` so it never churns settings. Load on `start()`; tolerate a missing/corrupt file (start empty). Entries for PRs no longer in `gh pr list` are pruned each tick (§Phase-4.3) to bound growth.
 
 ---
 
@@ -237,7 +237,7 @@ Passed per PR. Key instructions (exact wording refined during build):
 | R3 | `-p` session with skip-permissions runs arbitrary `gh`/`git` | Deny-list fragment (§Phase-2.2) blocks force-push/delete/merge/workflow edits; own repos on localhost; document as best-effort. |
 | R4 | Slow tick (long conflict resolution) stacks with the next tick | `tickRunning` re-entrancy guard + `maxConcurrentReviews` cap; `spawnGate` serializes spawn starts (ConPTY wedge, `spawn-gate.js`). |
 | R5 | Resolve-push changes head → PR re-reviewed forever | Record `reviewedHead` = post-exit head; in-flight lock stops overlapping ticks double-grabbing; phase `awaiting-checks` is not re-reviewed unless head changes again by an external push. |
-| R6 | Orphaned `glissa/pr-review/*` worktree after a crash | Boot prune of that namespace in `start()` (the `glissa/session/*` sweep does not cover it). |
+| R6 | Orphaned `glimmervoid/pr-review/*` worktree after a crash | Boot prune of that namespace in `start()` (the `glimmervoid/session/*` sweep does not cover it). |
 | R7 | `gh` not authenticated / not on PATH on the host | Prereq documented; a failing `gh pr list` logs and the tick no-ops (no crash); consider a one-time `gh auth status` check at `start()`. |
 | R8 | GitHub `gh` JSON field names differ across `gh` versions | Confirm `headRefOid`, `mergeable`, `isDraft`, `headRepositoryOwner`, `author`, `statusCheckRollup` against the installed `gh` before finalizing the field list. |
 | R9 | Live config reload won't refresh `prReview`/`telegram` (unlisted keys, `applySettings` `config-store.js:195-214`) | Documented "read once at boot, restart to change" (same as `osToast`). Acceptable; note in the Settings docs. |
@@ -269,7 +269,7 @@ Passed per PR. Key instructions (exact wording refined during build):
 
 1. `gh` JSON field names + `statusCheckRollup` shape on the installed `gh` (R8).
 2. Whether an existing HTTP client helper should back `sendPrPing` vs raw `node:https`.
-3. State file location: per-project `.glissa/pr-review-state.json` vs one global `~/.glissa/`.
+3. State file location: per-project `.glimmervoid/pr-review-state.json` vs one global `~/.glimmervoid/`.
 4. Exact `PR_REVIEW_DENY` glob list that `settingsPermissions` accepts (confirm the deny-fragment schema the settings injector honors).
 5. `getWorktreeBase` reuse for the conflict lane vs team-git's `os.tmpdir()` default (recognizable path vs pure throwaway).
 

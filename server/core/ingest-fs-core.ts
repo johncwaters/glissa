@@ -43,7 +43,7 @@ export type FsIngestEvent = {
 const IGNORED_DIR_NAMES: readonly string[] = Object.freeze([
   '.git',
   'node_modules',
-  '.glissa',
+  '.glimmervoid',
   '.cache',
   '.parcel-cache',
   '.turbo',

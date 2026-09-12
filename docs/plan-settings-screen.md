@@ -26,7 +26,7 @@ Fetched from `frontend/src/scenes/settings/` at `master` (SettingsMap.tsx, types
 8. Each setting renders inside its own error boundary; one broken control cannot blank the page.
 9. An alias map redirects renamed sections and never-valid-but-intuitive ids with `replace`, so old links never die.
 
-Also noted: Vercel splits scope owner (team vs project) into separate URL trees and treats a version-controlled file as co-author of the dashboard, which is the closest analogue to Glissa's `config.json`. Grafana mirrors `grafana.ini` only partially and says so.
+Also noted: Vercel splits scope owner (team vs project) into separate URL trees and treats a version-controlled file as co-author of the dashboard, which is the closest analogue to Glimmervoid's `config.json`. Grafana mirrors `grafana.ini` only partially and says so.
 
 ## Proposal
 
@@ -40,7 +40,7 @@ Phone: the view is re-parented whole via `adoptElement`, like every other panel;
 
 ### 2. One declarative settings map
 
-`public/settings-map.mjs` is the single source. Shape, kept to what Glissa needs:
+`public/settings-map.mjs` is the single source. Shape, kept to what Glimmervoid needs:
 
 ```js
 {
@@ -101,7 +101,7 @@ Search box at the top of the sidebar. Typing replaces the nav with a flat result
 - The Mill view delivery rows (link to `lanes-mill#packs-auto-rebuild`).
 - The usage budget alert (link to `machine-usage#daily-budget`).
 - A lane's disabled banner ("PR review is off", link to its enable toggle).
-- `glissa doctor` output can print the same ids.
+- `glimmervoid doctor` output can print the same ids.
 
 A small alias table maps the old tab names (`telegram`, `posthog`, `mill`) to section ids so any bookmark or doc written against the tabs keeps resolving.
 

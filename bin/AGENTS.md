@@ -4,14 +4,14 @@
 # bin
 
 ## Purpose
-The globally-installed CLI entry point for Glissa (`npm i -g github:johncwaters/glissa`; there is no registry package, see `../docs/distribution.md`). Parses CLI flags and boots the production server.
+The globally-installed CLI entry point for Glimmervoid (`npm i -g github:johncwaters/glimmervoid`; there is no registry package, see `../docs/distribution.md`). Parses CLI flags and boots the production server.
 
 ## Key Files
 
 | File | Description |
 |------|-------------|
-| `glissa.ts` | `#!/usr/bin/env node` launcher: `doctor`, `pair` (`--list`, `--revoke <id>`, `--name <label>`), `pack` (`build [name]`, `list`), `--port`, `--config`, `--version`, `--help`; sets env vars, dispatches CLI-only commands, then imports `../server/main.ts` |
-| `path-doctor.ts` | Pure PATH helpers shared by `glissa doctor` and the post-install PATH notice |
+| `glimmervoid.ts` | `#!/usr/bin/env node` launcher: `doctor`, `pair` (`--list`, `--revoke <id>`, `--name <label>`), `pack` (`build [name]`, `list`), `--port`, `--config`, `--version`, `--help`; sets env vars, dispatches CLI-only commands, then imports `../server/main.ts` |
+| `path-doctor.ts` | Pure PATH helpers shared by `glimmervoid doctor` and the post-install PATH notice |
 
 ## For AI Agents
 

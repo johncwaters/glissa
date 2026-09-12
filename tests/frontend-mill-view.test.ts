@@ -122,8 +122,8 @@ test('a pack nothing names is said out loud rather than left blank', async () =>
   const { consumerLine } = await importCore();
   assert.equal(consumerLine(pack()), 'consumers: none');
   assert.equal(
-    consumerLine(pack({ consumers: { projects: ['glissa', 'other'], lanes: [{ kind: 'prReview', label: 'prReview.packs' }] } })),
-    'consumers: projects glissa, other, the PR review lane',
+    consumerLine(pack({ consumers: { projects: ['glimmervoid', 'other'], lanes: [{ kind: 'prReview', label: 'prReview.packs' }] } })),
+    'consumers: projects glimmervoid, other, the PR review lane',
   );
 });
 
@@ -201,23 +201,23 @@ test('a zero-consumer pack is never an attention part', async () => {
 
 test('a delivery row names one project and its cards', async () => {
   const { deliveryDetail, deliveryLabel, deliveryStaleText, deliveryTone } = await importCore();
-  const single = { project: 'glissa', sessionCount: 1, state: 'RUNNING', version: VERSION, stale: false, staleSessions: 0 };
-  assert.equal(deliveryLabel(single), 'glissa (running)');
+  const single = { project: 'glimmervoid', sessionCount: 1, state: 'RUNNING', version: VERSION, stale: false, staleSessions: 0 };
+  assert.equal(deliveryLabel(single), 'glimmervoid (running)');
   assert.equal(deliveryStaleText(single), '');
   assert.equal(deliveryTone(single), 'ok');
 
-  const grouped = { project: 'glissa', sessionCount: 2, state: 'RUNNING', version: VERSION, stale: true, staleSessions: 1 };
-  assert.equal(deliveryLabel(grouped), 'glissa (2 sessions, running)');
+  const grouped = { project: 'glimmervoid', sessionCount: 2, state: 'RUNNING', version: VERSION, stale: true, staleSessions: 1 };
+  assert.equal(deliveryLabel(grouped), 'glimmervoid (2 sessions, running)');
   assert.equal(deliveryDetail(grouped), 'version abcdef012345');
   assert.equal(deliveryStaleText(grouped), '1 of 2 stale');
   assert.equal(deliveryTone(grouped), 'warn');
 
-  const mixed = { project: 'glissa', sessionCount: 2, state: null, version: null, stale: true, staleSessions: 2 };
-  assert.equal(deliveryLabel(mixed), 'glissa (2 sessions)', 'no state is claimed while the sessions disagree');
+  const mixed = { project: 'glimmervoid', sessionCount: 2, state: null, version: null, stale: true, staleSessions: 2 };
+  assert.equal(deliveryLabel(mixed), 'glimmervoid (2 sessions)', 'no state is claimed while the sessions disagree');
   assert.equal(deliveryStaleText(mixed), 'stale', 'every session behind is plainly stale');
 
-  const pending = { project: 'glissa', sessionCount: 1, state: 'DORMANT', version: null, stale: null, staleSessions: 0, pending: true };
-  assert.equal(deliveryLabel(pending), 'glissa (dormant)');
+  const pending = { project: 'glimmervoid', sessionCount: 1, state: 'DORMANT', version: null, stale: null, staleSessions: 0, pending: true };
+  assert.equal(deliveryLabel(pending), 'glimmervoid (dormant)');
   assert.equal(deliveryDetail(pending), 'delivers on next spawn');
   assert.equal(deliveryStaleText(pending), '');
   assert.equal(deliveryTone(pending), 'ok');
@@ -247,18 +247,18 @@ test('a pack keeps its variants beside it, and the family is ranked by its worst
     pack({ name: 'memory-other-87654321', group: 'memory' }),
     pack({ name: 'alpha' }),
     pack({ name: 'memory' }),
-    pack({ name: 'memory-glissa-12345678', group: 'memory', staleDeliveries: 1 }),
+    pack({ name: 'memory-glimmervoid-12345678', group: 'memory', staleDeliveries: 1 }),
   ];
   assert.deepEqual(sortPackRows(rows).map((row) => row.name), [
-    'memory', 'memory-glissa-12345678', 'memory-other-87654321', 'alpha', 'zulu',
+    'memory', 'memory-glimmervoid-12345678', 'memory-other-87654321', 'alpha', 'zulu',
   ]);
 });
 
 test('a variant row says what it is; an ordinary pack says nothing extra', async () => {
   const { variantNote } = await importCore();
-  const note = variantNote(pack({ name: 'memory-glissa-12345678', group: 'memory', consumers: { projects: ['glissa'], lanes: [] } }));
+  const note = variantNote(pack({ name: 'memory-glimmervoid-12345678', group: 'memory', consumers: { projects: ['glimmervoid'], lanes: [] } }));
   assert.match(note, /variant of "memory"/);
-  assert.match(note, /project glissa/);
+  assert.match(note, /project glimmervoid/);
   assert.equal(variantNote(pack()), '');
 });
 

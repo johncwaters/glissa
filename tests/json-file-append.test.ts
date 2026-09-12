@@ -10,7 +10,7 @@ import type { AsyncWriteOptions } from '../server/json-file.ts';
 type AsyncFileSystem = NonNullable<AsyncWriteOptions['fsPromises']>;
 
 function tempFile(name: string): { dir: string; filePath: string } {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-append-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-append-'));
   return { dir, filePath: path.join(dir, name) };
 }
 

@@ -42,7 +42,7 @@ test('a settings save with rtk on and no binary triggers exactly one install', a
     resolveRtk: () => resolved,
     install: async () => {
       installs += 1;
-      resolved = '/home/test/.glissa/bin/rtk';
+      resolved = '/home/test/.glimmervoid/bin/rtk';
       return { ok: true, path: resolved, version: '0.45.0' };
     },
   });
@@ -52,7 +52,7 @@ test('a settings save with rtk on and no binary triggers exactly one install', a
 
   assert.equal(installs, 1);
   assert.deepEqual(statuses.map((status) => status.status), ['installing', 'installed']);
-  assert.deepEqual(wiring.getStatus(), { status: 'installed', path: '/home/test/.glissa/bin/rtk' });
+  assert.deepEqual(wiring.getStatus(), { status: 'installed', path: '/home/test/.glimmervoid/bin/rtk' });
 });
 
 test('an already resolved binary triggers no install', async () => {
@@ -124,7 +124,7 @@ test('two overlapping triggers install once', async () => {
     install: async () => {
       installs += 1;
       await parked;
-      return { ok: true, path: '/home/test/.glissa/bin/rtk', version: '0.45.0' };
+      return { ok: true, path: '/home/test/.glimmervoid/bin/rtk', version: '0.45.0' };
     },
   });
 

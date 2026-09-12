@@ -16,7 +16,7 @@ function isExternal(id: string): boolean {
 function copyPackSpecs(): Plugin {
   const specsDir = path.join(repoRoot, 'packs', 'specs');
   return {
-    name: 'glissa-copy-pack-specs',
+    name: 'glimmervoid-copy-pack-specs',
     generateBundle() {
       for (const entry of fs.readdirSync(specsDir)) {
         if (!entry.endsWith('.pack.json')) continue;
@@ -48,7 +48,7 @@ export default defineConfig({
       external: isExternal,
       input: {
         'server/index': path.join(repoRoot, 'server', 'index.ts'),
-        'bin/glissa': path.join(repoRoot, 'bin', 'glissa.ts'),
+        'bin/glimmervoid': path.join(repoRoot, 'bin', 'glimmervoid.ts'),
         'session/hook-relay': path.join(repoRoot, 'session', 'hook-relay.ts'),
         'session/command-hook-relay': path.join(repoRoot, 'session', 'command-hook-relay.ts'),
         'session/statusline-relay': path.join(repoRoot, 'session', 'statusline-relay.ts'),

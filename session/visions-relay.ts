@@ -21,9 +21,8 @@ import {
   uriOfParams,
 } from "../server/core/visions-buffer-core.ts";
 import type { Range } from "../server/core/visions-buffer-core.ts";
-import { decideConfigPath, glissaHomeDir } from "../server/core/config-path-core.ts";
+import { decideConfigPath, glimmervoidHomeDir } from "../server/core/config-path-core.ts";
 import { ACTIVITY_METHOD } from "../server/core/ingest-editor-core.ts";
-import { packageRoot } from "../server/runtime-paths.ts";
 import {
   MAX_DAEMON_FRAME_BYTES,
   daemonMessage,
@@ -105,7 +104,7 @@ function resolvePortPlan(
   const flagPort = flagIndex >= 0 ? parsePortValue(argv[flagIndex + 1]) : null;
   if (flagPort !== null) return { ports: [flagPort], isFixed: true };
 
-  const envPort = parsePortValue(env.GLISSA_PORT);
+  const envPort = parsePortValue(env.GLIMMERVOID_PORT);
   if (envPort !== null) return { ports: [envPort], isFixed: true };
 
   const configured = parsePortValue(configPort);
@@ -116,8 +115,7 @@ function resolvePortPlan(
 function readConfiguredPort(env: Record<string, string | undefined> = process.env, fsApi: FsApi = fs): unknown {
   const decided = decideConfigPath({
     env,
-    homeDir: glissaHomeDir(os.homedir(), env),
-    packageRoot,
+    homeDir: glimmervoidHomeDir(os.homedir(), env),
   }, (candidate) => {
     try {
       return fsApi.existsSync(candidate);
@@ -151,7 +149,7 @@ function initializeResult(): Record<string, unknown> {
       codeActionProvider: true,
     },
     serverInfo: {
-      name: "glissa-visions",
+      name: "glimmervoid-visions",
     },
   };
 }
@@ -367,7 +365,7 @@ function createRelay({
   }
 
   function forwardApplyEdit(daemonId: unknown, params: unknown): void {
-    const editorId = `glissa-visions-${nextEditorRequestId}`;
+    const editorId = `glimmervoid-visions-${nextEditorRequestId}`;
     nextEditorRequestId += 1;
     applyEditDaemonIdByEditorId.set(editorId, daemonId);
     writeEditorMessage(editorRequest(editorId, APPLY_EDIT_METHOD, params));

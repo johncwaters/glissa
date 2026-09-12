@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { createConfigStore } from '../server/config-store.ts';
-import type { ConfigStore, GlissaConfig } from '../server/config-store.ts';
+import type { ConfigStore, GlimmervoidConfig } from '../server/config-store.ts';
 import { CONFIG_SCALAR_KEYS, ConfigUpdate } from '../shared/contracts/index.ts';
 import { REPLAYABLE_EXACT, isReplayable } from '../server/control-replay-core.ts';
 import { createMemoryStore } from '../server/memory-store.ts';
@@ -37,7 +37,7 @@ function block(value: unknown, ...keys: string[]): Record<string, unknown> {
   return current;
 }
 
-function harness(config: GlissaConfig, store: ConfigStore): ControlConnection<ControlFrame> {
+function harness(config: GlimmervoidConfig, store: ConfigStore): ControlConnection<ControlFrame> {
   const server = createControlServer(controlDeps(config, {
     configStore: store,
     applySettingsReload: (next) => store.applySettings(next),
@@ -46,20 +46,20 @@ function harness(config: GlissaConfig, store: ConfigStore): ControlConnection<Co
 }
 
 function withRealStore<T>(
-  config: GlissaConfig,
+  config: GlimmervoidConfig,
   fn: (driver: ControlConnection<ControlFrame>, store: ConfigStore) => T,
 ): T {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memory-negative-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-memory-negative-'));
   const configPath = path.join(dir, 'config.json');
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
-  const previous = process.env.GLISSA_CONFIG;
-  process.env.GLISSA_CONFIG = configPath;
+  const previous = process.env.GLIMMERVOID_CONFIG;
+  process.env.GLIMMERVOID_CONFIG = configPath;
   try {
     const store = createConfigStore();
     return fn(harness(store.config, store), store);
   } finally {
-    if (previous == null) delete process.env.GLISSA_CONFIG;
-    if (previous != null) process.env.GLISSA_CONFIG = previous;
+    if (previous == null) delete process.env.GLIMMERVOID_CONFIG;
+    if (previous != null) process.env.GLIMMERVOID_CONFIG = previous;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
@@ -67,12 +67,12 @@ function withRealStore<T>(
 const LIVE_MEMORY = { enabled: true, distill: { enabled: false } };
 
 const FILE_ONLY = Object.freeze({
-  memory: { ...LIVE_MEMORY, dbPath: '/tmp/glissa-memory.db' },
+  memory: { ...LIVE_MEMORY, dbPath: '/tmp/glimmervoid-memory.db' },
   ingest: {
     enabled: true,
     sources: { fs: { enabled: true, roots: ['/home/carbon/secrets'] }, shellHistory: { enabled: true, shells: ['zsh'] } },
   },
-  packDistiller: { enabled: true, packsDir: '/home/carbon/.glissa/packs' },
+  packDistiller: { enabled: true, packsDir: '/home/carbon/.glimmervoid/packs' },
 });
 
 test('no control-WS message type is memory-shaped, in any handler or broadcast', () => {
@@ -118,7 +118,7 @@ test('a file-only key of any Mill block is dropped from the settings echo', () =
     driver.send({ type: 'get-settings' });
     const replied = driver.sent.find((message) => message.type === 'settings');
     assert.equal(JSON.stringify(replied).includes('/home/carbon/secrets'), false);
-    assert.equal(JSON.stringify(replied).includes('glissa-memory.db'), false);
+    assert.equal(JSON.stringify(replied).includes('glimmervoid-memory.db'), false);
   });
 });
 
@@ -173,21 +173,21 @@ test('nothing memory-shaped is replayable, so no future surface can be replayed 
 
 test('the codex memory carrier contains only the pack index path, never a remembered byte', () => {
   const args = codex.renderPackArgs(
-    [{ name: 'memory-glissa', dir: '/home/carbon/.glissa/packs/built/memory-glissa/current' }],
-    '/home/carbon/.glissa/packs/built',
+    [{ name: 'memory-glimmervoid', dir: '/home/carbon/.glimmervoid/packs/built/memory-glimmervoid/current' }],
+    '/home/carbon/.glimmervoid/packs/built',
   );
   assert.ok(args, 'a well-formed delivery renders its carrier');
   assert.equal(args.join('\n').includes(REMEMBERED), false);
   assert.equal(args.join('\n').includes('/data/'), false);
-  assert.match(args[1], /memory-glissa: \/home\/carbon\/\.glissa\/packs\/built\/memory-glissa\/current\/CLAUDE\.md/);
+  assert.match(args[1], /memory-glimmervoid: \/home\/carbon\/\.glimmervoid\/packs\/built\/memory-glimmervoid\/current\/CLAUDE\.md/);
 });
 
 test('the store logs counts and paths, never a remembered byte', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memory-negative-store-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-memory-negative-store-'));
   const lines: string[] = [];
   const store = createMemoryStore({
     dir,
-    dbPath: path.join(dir, 'glissa.db'),
+    dbPath: path.join(dir, 'glimmervoid.db'),
     config: { ...resolveMemoryConfig(null), enabled: true },
     logger: { log: (line: string) => { lines.push(line); }, warn: (line: string) => { lines.push(line); } },
     debug: true,
@@ -198,7 +198,7 @@ test('the store logs counts and paths, never a remembered byte', async () => {
     await store.append({
       kind: 'knowledge',
       layer: 'semantic',
-      project: '/repos/glissa',
+      project: '/repos/glimmervoid',
       source: { kind: 'reported', vendor: 'claude', sessionId: 'sess-1' },
       text: REMEMBERED,
     });

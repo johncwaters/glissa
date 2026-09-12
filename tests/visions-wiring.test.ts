@@ -254,7 +254,7 @@ function drivenConnection(options: VisionsWiringOptions = {}) {
 }
 
 function tempIntentStatePath(t: TestContext): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-visions-intent-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-visions-intent-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return path.join(dir, 'visions-intent.json');
 }
@@ -1779,7 +1779,7 @@ test('the standing intent rides the dispatch, and the result advances it after t
 
   assert.equal(callAt(calls, 0).intent, 'an early guess', 'the prompt is built from what the lane currently believes');
   assert.match(String(callAt(calls, 0).prompt), /Current working intent: thread t-[0-9a-f]{8}\./);
-  assert.match(String(callAt(calls, 0).prompt), /<<<GLISSA-INTENT-[0-9A-F]{16}\nt-[0-9a-f]{8}: an early guess\n>>>GLISSA-INTENT-/);
+  assert.match(String(callAt(calls, 0).prompt), /<<<GLIMMERVOID-INTENT-[0-9A-F]{16}\nt-[0-9a-f]{8}: an early guess\n>>>GLIMMERVOID-INTENT-/);
   assert.deepEqual(wiring.getIntentFor('harness', MARKDOWN_URI).active, {
     id: wiring.getIntentFor('harness', MARKDOWN_URI).active.id, text: 'a plan doc for the visions intent model', uris: [MARKDOWN_URI], ts: FIXED_TS, hits: 2,
   });
@@ -1811,7 +1811,7 @@ test('a dispatch result may open a second thread, and the next prompt names the 
   assert.equal(calls.length, 2);
   assert.equal(callAt(calls, 1).intent, 'a second story', 'the thread bound to this uri is the active one');
   assert.match(String(callAt(calls, 1).prompt), /Also in flight in this project, not this document: t-[0-9a-f]{8}\.\n/);
-  assert.match(String(callAt(calls, 1).prompt), /\nt-[0-9a-f]{8}: the first story\n>>>GLISSA-INTENT-/);
+  assert.match(String(callAt(calls, 1).prompt), /\nt-[0-9a-f]{8}: the first story\n>>>GLIMMERVOID-INTENT-/);
 });
 
 test('an ERROR result cannot move the standing intent', async (t) => {
@@ -2209,18 +2209,18 @@ interface BootedBackend {
 const booted: BootedBackend[] = [];
 
 async function bootBackend(configPatch: Record<string, unknown>, { remotePort = null }: { remotePort?: number | null } = {}): Promise<BootedBackend & { port: number }> {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-visions-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-visions-'));
   const configPath = path.join(dir, 'config.json');
   fs.writeFileSync(configPath, JSON.stringify({ projects: [{ id: 'harness', name: 'harness', path: '/tmp' }], teams: [], repoRoots: [], ...configPatch }, null, 2), 'utf8');
-  const previousEnv = process.env.GLISSA_CONFIG;
-  process.env.GLISSA_CONFIG = configPath;
+  const previousEnv = process.env.GLIMMERVOID_CONFIG;
+  process.env.GLIMMERVOID_CONFIG = configPath;
 
   const entry: BootedBackend = { dir, backend: null, server: http.createServer(), remoteServer: null, port: null, remotePort };
   try {
     entry.backend = createBackend(entry.server, { staticDir: null });
   } finally {
-    if (previousEnv == null) delete process.env.GLISSA_CONFIG;
-    if (previousEnv != null) process.env.GLISSA_CONFIG = previousEnv;
+    if (previousEnv == null) delete process.env.GLIMMERVOID_CONFIG;
+    if (previousEnv != null) process.env.GLIMMERVOID_CONFIG = previousEnv;
   }
   booted.push(entry);
   const backend = entry.backend;
@@ -2319,7 +2319,7 @@ test('an enabled lane serves /visions on the local listener and publishes markdo
   const frame = await waitForDiagnostics(client, MARKDOWN_URI);
   assert.ok(frame, 'a publishDiagnostics frame arrives on the same socket');
   assert.deepEqual(diagnosticsOf(frame).map((diagnostic) => diagnostic.code), ['repeated-word']);
-  assert.equal(frameDiagnostic(frame, 0).source, 'glissa-visions');
+  assert.equal(frameDiagnostic(frame, 0).source, 'glimmervoid-visions');
   assert.equal(frameDiagnostic(frame, 0).range?.start.line, 2);
 });
 
@@ -2360,7 +2360,7 @@ test('/visions is refused on the remote listener even with the lane enabled', as
   const remotePort = await reserveFreePort();
   const { server, port, remoteServer } = await bootBackend({
     visions: { enabled: true },
-    remote: { enabled: true, port: remotePort, publicHost: 'glissa.test', allowedOrigins: ['https://glissa.test'] },
+    remote: { enabled: true, port: remotePort, publicHost: 'glimmervoid.test', allowedOrigins: ['https://glimmervoid.test'] },
   }, { remotePort });
 
   assert.equal(
@@ -2377,19 +2377,19 @@ test('visions is echoed by getSettings and applied as a restart-required setting
   assert.equal(CONFIG_SCALAR_KEYS.includes('visions'), false);
   assert.equal('visions' in ConfigUpdate.shape, true);
 
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-visions-settings-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-visions-settings-'));
   const configPath = path.join(dir, 'config.json');
   fs.writeFileSync(configPath, JSON.stringify({ projects: [], teams: [], visions: { enabled: true } }, null, 2), 'utf8');
-  const previousEnv = process.env.GLISSA_CONFIG;
-  process.env.GLISSA_CONFIG = configPath;
+  const previousEnv = process.env.GLIMMERVOID_CONFIG;
+  process.env.GLIMMERVOID_CONFIG = configPath;
   try {
     const store = createConfigStore();
     assert.deepEqual(store.getSettings().visions, { enabled: true });
     store.applySettings({ projects: [], visions: { enabled: false } });
     assert.deepEqual(store.config.visions, { enabled: false });
   } finally {
-    if (previousEnv == null) delete process.env.GLISSA_CONFIG;
-    if (previousEnv != null) process.env.GLISSA_CONFIG = previousEnv;
+    if (previousEnv == null) delete process.env.GLIMMERVOID_CONFIG;
+    if (previousEnv != null) process.env.GLIMMERVOID_CONFIG = previousEnv;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -3077,7 +3077,7 @@ test('a thread bound to this document is never listed as also in flight elsewher
 
   assert.equal(calls.length, 1);
   assert.equal(String(callAt(calls, 0).prompt).includes('a second story of this document'), false, 'a thread this uri is bound to is not elsewhere');
-  assert.match(String(callAt(calls, 0).prompt), /\nt-[0-9a-f]{8}: the story of another document\n>>>GLISSA-INTENT-/);
+  assert.match(String(callAt(calls, 0).prompt), /\nt-[0-9a-f]{8}: the story of another document\n>>>GLIMMERVOID-INTENT-/);
 });
 
 test('a thread that expires while its dispatch runs is retired, and the result opens a fresh one', async (t) => {

@@ -3,7 +3,7 @@ import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 
 import * as core from './core/memory-core.ts';
 import type { MemoryRecord } from './core/memory-core.ts';
-import { applySchema, dataVersion, openDatabase } from './glissa-db.ts';
+import { applySchema, dataVersion, openDatabase } from './glimmervoid-db.ts';
 
 const SCHEMA = Object.freeze([
   `CREATE TABLE IF NOT EXISTS memory_records (

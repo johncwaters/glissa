@@ -7,7 +7,7 @@ import { HOME_DB_REFUSED_CODE } from './core/db-path-guard.ts';
 import * as core from './core/memory-core.ts';
 import type { MemoryConfig, MemoryRecord, ProjectionManifest } from './core/memory-core.ts';
 import * as distillCore from './core/memory-distill-core.ts';
-import { isBusyError } from './glissa-db.ts';
+import { isBusyError } from './glimmervoid-db.ts';
 import { createLaneLog } from './lane-log.ts';
 import { writeTextAtomic, writeTextAtomicSync } from './json-file.ts';
 import { createMemoryDb } from './memory-db.ts';
@@ -630,7 +630,7 @@ function createMemoryStore(deps: MemoryStoreOptions = {}) {
       kind: 'tombstone',
       layer: 'episodic',
       project: null,
-      source: { kind: 'operator', vendor: 'glissa', sessionId: null },
+      source: { kind: 'operator', vendor: 'glimmervoid', sessionId: null },
       text: core.tombstoneText([...removedIds, ...redactedIds]),
     }, { now: now(), maxChars: config.maxRecordChars });
     let tombstoneId: string | null = null;

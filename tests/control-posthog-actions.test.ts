@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import type { GlissaConfig, ProjectEntry } from '../server/config-store.ts';
+import type { GlimmervoidConfig, ProjectEntry } from '../server/config-store.ts';
 import type { Session } from '../session/sessions.ts';
 import { connectControl, controlDeps, createControlServer } from './helpers/control-harness.ts';
 import { plainSession } from './helpers/fake-session.ts';
@@ -74,7 +74,7 @@ function harness(over: HarnessOverrides = {}) {
   const projects = over.projects || [{ id: 'p1', name: 'web-app', path: 'C:/code/web-app' }];
   for (const project of projects) addSession(project.id, project.name);
 
-  const config: GlissaConfig = {
+  const config: GlimmervoidConfig = {
     projects,
     posthog: over.posthog === undefined ? { projectMap: { 7: 'C:/code/web-app' } } : over.posthog,
   };
@@ -152,13 +152,13 @@ test('posthog-open-session builds the prompt from the cached tick, never from th
   assert.ok(!pasted.includes('99999'));
 });
 
-test('posthog-open-session refuses cleanly when no Glissa project maps to the PostHog project', () => {
+test('posthog-open-session refuses cleanly when no Glimmervoid project maps to the PostHog project', () => {
   const h = harness({ posthog: { projectMap: { 9: 'C:/elsewhere' } } });
 
   h.send({ type: 'posthog-open-session', requestId: 'r1', projectId: 7, issueId: 'iss-1' });
 
   assert.equal(h.sent[0].ok, false);
-  assert.match(String(h.sent[0].error), /No Glissa session is mapped/);
+  assert.match(String(h.sent[0].error), /No Glimmervoid session is mapped/);
   assert.equal(h.pastes('p1').length, 0);
 });
 
@@ -185,16 +185,16 @@ function statusNamed(projectName: string): Record<string, unknown> {
 }
 
 function tempRepos(layout: string[]): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-posthog-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-posthog-'));
   for (const relative of layout) fs.mkdirSync(path.join(root, relative), { recursive: true });
   test.after(() => fs.rmSync(root, { recursive: true, force: true }));
   return root;
 }
 
 test('posthog-open-session auto-creates the session from a projectMap directory', () => {
-  const root = tempRepos(['Projects/glissa', 'Projects/card-harbor']);
+  const root = tempRepos(['Projects/glimmervoid', 'Projects/card-harbor']);
   const h = harness({
-    projects: [{ id: 'p1', name: 'web-app', path: path.join(root, 'Projects/glissa') }],
+    projects: [{ id: 'p1', name: 'web-app', path: path.join(root, 'Projects/glimmervoid') }],
     posthog: { projectMap: { 7: path.join(root, 'Projects/card-harbor') } },
     status: statusNamed('CardHarbor'),
   });
@@ -210,9 +210,9 @@ test('posthog-open-session auto-creates the session from a projectMap directory'
 });
 
 test('posthog-open-session auto-creates from a name-derived sibling directory', () => {
-  const root = tempRepos(['Projects/glissa', 'Projects/card-harbor', 'Projects/unrelated']);
+  const root = tempRepos(['Projects/glimmervoid', 'Projects/card-harbor', 'Projects/unrelated']);
   const h = harness({
-    projects: [{ id: 'p1', name: 'web-app', path: path.join(root, 'Projects/glissa') }],
+    projects: [{ id: 'p1', name: 'web-app', path: path.join(root, 'Projects/glimmervoid') }],
     posthog: {},
     status: statusNamed('CardHarbor'),
   });
@@ -224,10 +224,10 @@ test('posthog-open-session auto-creates from a name-derived sibling directory', 
 });
 
 test('posthog-open-session refuses rather than guessing between two matching directories', () => {
-  const root = tempRepos(['A/glissa', 'A/card-harbor', 'B/other', 'B/CardHarbor']);
+  const root = tempRepos(['A/glimmervoid', 'A/card-harbor', 'B/other', 'B/CardHarbor']);
   const h = harness({
     projects: [
-      { id: 'p1', name: 'web-app', path: path.join(root, 'A/glissa') },
+      { id: 'p1', name: 'web-app', path: path.join(root, 'A/glimmervoid') },
       { id: 'p2', name: 'other', path: path.join(root, 'B/other') },
     ],
     posthog: {},
@@ -237,14 +237,14 @@ test('posthog-open-session refuses rather than guessing between two matching dir
   h.send({ type: 'posthog-open-session', requestId: 'r1', projectId: 7, issueId: 'iss-1' });
 
   assert.equal(h.sent[0].ok, false);
-  assert.match(String(h.sent[0].error), /No Glissa session is mapped/);
+  assert.match(String(h.sent[0].error), /No Glimmervoid session is mapped/);
   assert.deepEqual(h.created, []);
 });
 
 test('posthog-open-session does not auto-create when the derived name collides with a session', () => {
-  const root = tempRepos(['Projects/glissa', 'Projects/web-app']);
+  const root = tempRepos(['Projects/glimmervoid', 'Projects/web-app']);
   const h = harness({
-    projects: [{ id: 'p1', name: 'web-app', path: path.join(root, 'Projects/glissa') }],
+    projects: [{ id: 'p1', name: 'web-app', path: path.join(root, 'Projects/glimmervoid') }],
     posthog: {},
     status: statusNamed('web-app'),
   });
@@ -252,14 +252,14 @@ test('posthog-open-session does not auto-create when the derived name collides w
   h.send({ type: 'posthog-open-session', requestId: 'r1', projectId: 7, issueId: 'iss-1' });
 
   assert.equal(h.sent[0].ok, false);
-  assert.match(String(h.sent[0].error), /No Glissa session is mapped/);
+  assert.match(String(h.sent[0].error), /No Glimmervoid session is mapped/);
   assert.deepEqual(h.created, []);
 });
 
 test('posthog-open-session keeps the mapping error when no directory resolves', () => {
-  const root = tempRepos(['Projects/glissa']);
+  const root = tempRepos(['Projects/glimmervoid']);
   const h = harness({
-    projects: [{ id: 'p1', name: 'web-app', path: path.join(root, 'Projects/glissa') }],
+    projects: [{ id: 'p1', name: 'web-app', path: path.join(root, 'Projects/glimmervoid') }],
     posthog: { projectMap: { 7: path.join(root, 'Projects/gone') } },
     status: statusNamed('CardHarbor'),
   });
@@ -267,7 +267,7 @@ test('posthog-open-session keeps the mapping error when no directory resolves', 
   h.send({ type: 'posthog-open-session', requestId: 'r1', projectId: 7, issueId: 'iss-1' });
 
   assert.equal(h.sent[0].ok, false);
-  assert.equal(h.sent[0].error, 'No Glissa session is mapped to this PostHog project (set posthog.projectMap)');
+  assert.equal(h.sent[0].error, 'No Glimmervoid session is mapped to this PostHog project (set posthog.projectMap)');
   assert.deepEqual(h.created, []);
 });
 

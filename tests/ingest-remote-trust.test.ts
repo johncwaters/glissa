@@ -73,15 +73,15 @@ const isIngestFrame = (frame: ControlFrame): boolean => frame.type.startsWith('i
 
 test.before(async () => {
   const remotePort = await reserveFreePort();
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-ingest-trust-'));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-ingest-trust-'));
   const configPath = path.join(tmpDir, 'config.json');
   fs.writeFileSync(configPath, JSON.stringify({
     projects: [], teams: [], repoRoots: [],
     ingest: { enabled: true, sources: { terminal: { enabled: true } } },
-    remote: { enabled: true, port: remotePort, publicHost: 'glissa.test', allowedOrigins: ['https://glissa.test'] },
+    remote: { enabled: true, port: remotePort, publicHost: 'glimmervoid.test', allowedOrigins: ['https://glimmervoid.test'] },
   }, null, 2), 'utf8');
-  const previousConfig = process.env.GLISSA_CONFIG;
-  process.env.GLISSA_CONFIG = configPath;
+  const previousConfig = process.env.GLIMMERVOID_CONFIG;
+  process.env.GLIMMERVOID_CONFIG = configPath;
 
   const localServer = http.createServer();
   const backend = createBackend(localServer, { staticDir: null });
@@ -105,8 +105,8 @@ test.after(async () => {
     server.closeAllConnections();
     await closeServer(server);
   }
-  if (context.previousConfig == null) delete process.env.GLISSA_CONFIG;
-  if (context.previousConfig != null) process.env.GLISSA_CONFIG = context.previousConfig;
+  if (context.previousConfig == null) delete process.env.GLIMMERVOID_CONFIG;
+  if (context.previousConfig != null) process.env.GLIMMERVOID_CONFIG = context.previousConfig;
   fs.rmSync(context.tmpDir, { recursive: true, force: true });
 });
 
@@ -118,7 +118,7 @@ test('the connect-time ingest snapshot goes to a local dashboard and not to a pa
 
   const cookie = await pairDevice();
   const remote = await openRemoteSocket(`ws://127.0.0.1:${remotePort}/control`, {
-    headers: { Cookie: cookie }, origin: 'https://glissa.test',
+    headers: { Cookie: cookie }, origin: 'https://glimmervoid.test',
   });
   const localDash = await dashboardClient(localPort);
   const local = await openRecordingSocket<ControlFrame>(localDash);
@@ -143,7 +143,7 @@ test('a batched activity delta reaches a local dashboard and not a paired device
   const { backend, localPort, remotePort } = live();
   const cookie = await pairDevice();
   const remote = await openRemoteSocket(`ws://127.0.0.1:${remotePort}/control`, {
-    headers: { Cookie: cookie }, origin: 'https://glissa.test',
+    headers: { Cookie: cookie }, origin: 'https://glimmervoid.test',
   });
   const localDash = await dashboardClient(localPort);
   const local = await openRecordingSocket<ControlFrame>(localDash);

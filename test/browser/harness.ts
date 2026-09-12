@@ -263,11 +263,11 @@ async function main(): Promise<number> {
     fs.mkdirSync(directory, { recursive: true });
   }
 
-  const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-browser-'));
+  const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-browser-'));
   const previousEnvironment = {
-    GLISSA_HOME: process.env.GLISSA_HOME,
-    GLISSA_CONFIG: process.env.GLISSA_CONFIG,
-    GLISSA_PORT: process.env.GLISSA_PORT,
+    GLIMMERVOID_HOME: process.env.GLIMMERVOID_HOME,
+    GLIMMERVOID_CONFIG: process.env.GLIMMERVOID_CONFIG,
+    GLIMMERVOID_PORT: process.env.GLIMMERVOID_PORT,
     PATH: process.env.PATH,
   };
   const restoreTranscriptHomes = isolateTranscriptHomes(tempDirectory);
@@ -327,11 +327,11 @@ async function main(): Promise<number> {
     const configPath = path.join(tempDirectory, 'config.json');
     writeConfigDocument(configPath, port, cases, sessionIds, projectDirs);
 
-    const glissaHome = path.join(tempDirectory, 'home');
-    fs.mkdirSync(glissaHome, { recursive: true });
-    process.env.GLISSA_HOME = glissaHome;
-    process.env.GLISSA_CONFIG = configPath;
-    process.env.GLISSA_PORT = String(port);
+    const glimmervoidHome = path.join(tempDirectory, 'home');
+    fs.mkdirSync(glimmervoidHome, { recursive: true });
+    process.env.GLIMMERVOID_HOME = glimmervoidHome;
+    process.env.GLIMMERVOID_CONFIG = configPath;
+    process.env.GLIMMERVOID_PORT = String(port);
     const shimDirectory = path.join(tempDirectory, 'shim');
     writeAgentShim(shimDirectory);
     process.env.PATH = `${shimDirectory}${path.delimiter}${previousEnvironment.PATH ?? ''}`;

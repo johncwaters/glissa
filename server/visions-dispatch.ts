@@ -183,7 +183,7 @@ function createVisionsSpawn({
 }
 
 function makeVisionsWorkDir(): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), 'glissa-visions-'));
+  return fs.mkdtemp(path.join(os.tmpdir(), 'glimmervoid-visions-'));
 }
 
 function createVisionsDispatcher({

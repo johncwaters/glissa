@@ -10,7 +10,7 @@ import type { UserHook } from '../session/core/user-hooks-core.ts';
 import { PLAN_HOOK_EVENT, PLAN_RESULT_HOOK_EVENT, PLAN_TOOL_NAME } from '../shared/contracts/plan-review.ts';
 import { safePathSegment } from '../shared/paths.ts';
 
-const DEFAULT_BASE_DIR = path.join(os.tmpdir(), 'glissa-hooks');
+const DEFAULT_BASE_DIR = path.join(os.tmpdir(), 'glimmervoid-hooks');
 const DEFAULT_TIMEOUT_SEC = 5;
 const PLAN_HOOK_TIMEOUT_SEC = 86400;
 const PLAN_HOLD_RELEASE_LEAD_SEC = 60;
@@ -45,7 +45,7 @@ export interface HookSettings {
 
 export interface BuildHookSettingsOptions {
   port: number;
-  glissaId: string;
+  glimmervoidId: string;
   token: string;
   timeoutSec?: number;
   permissions?: SessionPermissions | null;
@@ -129,11 +129,11 @@ function buildCommandHookCommand(
   return `node ${shellQuote(toForwardSlashes(relayPath))} ${shellQuote(postUrl)}`;
 }
 
-function buildHookSettings({ port, glissaId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, observeToolCalls = false, enableProjectMcp = false, rtkPath = null, planLimits = false, planReview = false, userSettingsPath = null, relayPath = RELAY_PATH, commandHookRelayPath = COMMAND_HOOK_RELAY_PATH, userHooks = [] }: BuildHookSettingsOptions): HookSettings {
-  if (!port || !glissaId || !token) {
-    throw new Error('buildHookSettings requires port, glissaId, token');
+function buildHookSettings({ port, glimmervoidId, token, timeoutSec = DEFAULT_TIMEOUT_SEC, permissions = null, detectScheduledWakeups = true, observeToolCalls = false, enableProjectMcp = false, rtkPath = null, planLimits = false, planReview = false, userSettingsPath = null, relayPath = RELAY_PATH, commandHookRelayPath = COMMAND_HOOK_RELAY_PATH, userHooks = [] }: BuildHookSettingsOptions): HookSettings {
+  if (!port || !glimmervoidId || !token) {
+    throw new Error('buildHookSettings requires port, glimmervoidId, token');
   }
-  const base = `http://127.0.0.1:${port}/hook/${encodeURIComponent(glissaId)}`;
+  const base = `http://127.0.0.1:${port}/hook/${encodeURIComponent(glimmervoidId)}`;
   const hookUrl = (event: string) => `${base}/${event.toLowerCase()}?t=${encodeURIComponent(token)}`;
   const hooks: Record<string, SettingsHookEntry[]> = {
     SessionStart: [{ hooks: [{
@@ -205,22 +205,22 @@ function describeBuiltinHooks(
   { detectScheduledWakeups = true, observeToolCalls = false, rtkPath = null, planReview = false }:
     { detectScheduledWakeups?: boolean; observeToolCalls?: boolean; rtkPath?: string | null; planReview?: boolean } = {},
 ): { event: string; matcher: string | null; purpose: string }[] {
-  const rows = HOOK_EVENTS.map((event) => ({ event, matcher: null as string | null, purpose: 'Status detection: POST to the Glissa hook router' }));
-  if (planReview) rows.push({ event: 'PermissionRequest', matcher: PLAN_TOOL_MATCHER, purpose: 'Plan review: POST the plan to the Glissa plan endpoint' });
+  const rows = HOOK_EVENTS.map((event) => ({ event, matcher: null as string | null, purpose: 'Status detection: POST to the Glimmervoid hook router' }));
+  if (planReview) rows.push({ event: 'PermissionRequest', matcher: PLAN_TOOL_MATCHER, purpose: 'Plan review: POST the plan to the Glimmervoid plan endpoint' });
   if (detectScheduledWakeups) rows.push({ event: 'PostToolUse', matcher: WAKEUP_TOOL_MATCHER, purpose: 'Scheduled wakeup tracking' });
   if (planReview) rows.push({ event: 'PostToolUse', matcher: PLAN_TOOL_MATCHER, purpose: 'Plan review: record the approved plan' });
-  if (observeToolCalls) rows.push({ event: 'PreToolUse', matcher: null, purpose: 'Investigation trail: POST every tool call to the Glissa hook router' });
+  if (observeToolCalls) rows.push({ event: 'PreToolUse', matcher: null, purpose: 'Investigation trail: POST every tool call to the Glimmervoid hook router' });
   if (rtkPath) rows.push({ event: 'PreToolUse', matcher: buildRtkHookEntry(rtkPath).matcher, purpose: 'rtk command rewriting' });
   return rows;
 }
 
-function writeSessionSettings({ glissaId, token, baseDir = DEFAULT_BASE_DIR, ...rest }: WriteSessionSettingsOptions) {
+function writeSessionSettings({ glimmervoidId, token, baseDir = DEFAULT_BASE_DIR, ...rest }: WriteSessionSettingsOptions) {
   const tok = token || generateToken();
-  const dir = path.join(baseDir, safePathSegment(glissaId));
+  const dir = path.join(baseDir, safePathSegment(glimmervoidId));
   ensureOwnedDir(baseDir, DIR_MODE);
   ensureOwnedDir(dir, DIR_MODE);
   const settingsPath = path.join(dir, 'settings.json');
-  const settings = buildHookSettings({ ...rest, glissaId, token: tok });
+  const settings = buildHookSettings({ ...rest, glimmervoidId, token: tok });
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), { mode: FILE_MODE });
   try {
     fs.chmodSync(settingsPath, FILE_MODE);

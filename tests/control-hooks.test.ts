@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import type { GlissaConfig } from '../server/config-store.ts';
+import type { GlimmervoidConfig } from '../server/config-store.ts';
 import type { ControlMessageRecord } from '../server/control-replay-core.ts';
 import { HOOK_EVENTS } from '../detection/settings-injector.ts';
 import { MAX_TIMEOUT_SEC, rawStoredHooks, readStoredHooks } from '../session/core/user-hooks-core.ts';
@@ -28,9 +28,9 @@ interface HarnessOptions {
   rtkPath?: string | null;
 }
 
-function harness(config: GlissaConfig, { saveFails = false, rtkPath = '/usr/bin/rtk' }: HarnessOptions = {}) {
+function harness(config: GlimmervoidConfig, { saveFails = false, rtkPath = '/usr/bin/rtk' }: HarnessOptions = {}) {
   const broadcasts: ControlMessageRecord[] = [];
-  const reloads: GlissaConfig[] = [];
+  const reloads: GlimmervoidConfig[] = [];
   const server = createControlServer(controlDeps(config, {
     configStore: testConfigStore(config, { saveFails }),
     applyConfigReload: (fresh) => { reloads.push(fresh); },
@@ -46,17 +46,17 @@ const record = (overrides: Partial<UserHook> = {}): UserHook => ({
   id: 'h1', name: 'Lint', event: 'PostToolUse', matcher: 'Edit', type: 'command', command: 'npm run lint', enabled: true, ...overrides,
 });
 
-function storedIds(config: GlissaConfig): unknown[] {
+function storedIds(config: GlimmervoidConfig): unknown[] {
   return rawStoredHooks(config.hooks).map((hook) => hook.id);
 }
 
-function storedHook(config: GlissaConfig, id: string): UserHook | undefined {
+function storedHook(config: GlimmervoidConfig, id: string): UserHook | undefined {
   return readStoredHooks(config.hooks).find((hook) => hook.id === id);
 }
 
 test('request-hooks-report answers the stored records, the catalog, the built-in hooks and the projects', async () => {
-  const config: GlissaConfig = {
-    projects: [{ id: 'p1', name: 'glissa', path: '/r' }, { id: 'p2', name: 'codex', path: '/c', agent: 'codex' }],
+  const config: GlimmervoidConfig = {
+    projects: [{ id: 'p1', name: 'glimmervoid', path: '/r' }, { id: 'p2', name: 'codex', path: '/c', agent: 'codex' }],
     hooks: [record(), { id: 'broken' }],
     rtk: true,
   };
@@ -67,7 +67,7 @@ test('request-hooks-report answers the stored records, the catalog, the built-in
   assert.equal(report.requestId, 'r1');
   assert.deepEqual(report.hooks, [record()]);
   assert.ok(report.events?.some((entry) => entry.name === 'PreToolUse'));
-  assert.deepEqual(report.projects, [{ id: 'p1', name: 'glissa', agent: 'claude-code' }, { id: 'p2', name: 'codex', agent: 'codex' }]);
+  assert.deepEqual(report.projects, [{ id: 'p1', name: 'glimmervoid', agent: 'claude-code' }, { id: 'p2', name: 'codex', agent: 'codex' }]);
   const builtinEvents = (report.builtin ?? []).map((row) => row.event);
   for (const event of HOOK_EVENTS) assert.ok(builtinEvents.includes(event), event);
   assert.ok(report.builtin?.some((row) => row.event === 'PreToolUse' && row.matcher === 'Bash'), 'rtk entry when config.rtk');
@@ -85,7 +85,7 @@ test('the rtk row is listed on the resolved binary, not on config.rtk alone', as
 
 test('a stored record the core cannot read survives an unrelated save and an unrelated delete', async () => {
   const future = { id: 'future', name: 'f', event: 'NotYetKnown', type: 'command', command: 'x', enabled: true };
-  const config: GlissaConfig = { projects: [], hooks: [future, record()] };
+  const config: GlimmervoidConfig = { projects: [], hooks: [future, record()] };
   const h = harness(config);
   await h.send({ type: 'save-hook', requestId: 'r1', hook: record({ name: 'Lint 2' }) });
   assert.equal(h.sent.find((m) => m.type === 'save-hook-result')?.ok, true);
@@ -100,7 +100,7 @@ test('a stored record the core cannot read survives an unrelated save and an unr
 });
 
 test('save-hook mints an id for a new hook, persists it, reloads and broadcasts', async () => {
-  const config: GlissaConfig = { projects: [{ id: 'p1', name: 'glissa', path: '/r' }] };
+  const config: GlimmervoidConfig = { projects: [{ id: 'p1', name: 'glimmervoid', path: '/r' }] };
   const h = harness(config);
   await h.send({ type: 'save-hook', requestId: 'r1', hook: { name: ' Notify ', event: 'Stop', type: 'http', url: 'http://127.0.0.1:1/x', projects: ['p1'] } });
   const result = h.sent.find((m) => m.type === 'save-hook-result');
@@ -113,7 +113,7 @@ test('save-hook mints an id for a new hook, persists it, reloads and broadcasts'
 });
 
 test('save-hook with an id replaces that record and refuses an id it does not hold', async () => {
-  const config: GlissaConfig = { projects: [], hooks: [record()] };
+  const config: GlimmervoidConfig = { projects: [], hooks: [record()] };
   const h = harness(config);
   await h.send({ type: 'save-hook', requestId: 'r1', hook: record({ enabled: false }) });
   assert.equal(h.sent.find((m) => m.type === 'save-hook-result')?.ok, true);
@@ -130,7 +130,7 @@ test('save-hook with an id replaces that record and refuses an id it does not ho
 });
 
 test('save-hook refuses an invalid record with the core message and writes nothing', async () => {
-  const config: GlissaConfig = { projects: [] };
+  const config: GlimmervoidConfig = { projects: [] };
   const h = harness(config);
   await h.send({ type: 'save-hook', requestId: 'r1', hook: { name: 'x', event: 'Stop', matcher: 'y', type: 'command', command: 'z' } });
   const result = h.sent.find((m) => m.type === 'save-hook-result');
@@ -142,14 +142,14 @@ test('save-hook refuses an invalid record with the core message and writes nothi
 });
 
 test('save-hook refuses a project the config does not hold', async () => {
-  const config: GlissaConfig = { projects: [{ id: 'p1', name: 'glissa', path: '/r' }] };
+  const config: GlimmervoidConfig = { projects: [{ id: 'p1', name: 'glimmervoid', path: '/r' }] };
   const h = harness(config);
   await h.send({ type: 'save-hook', requestId: 'r1', hook: record({ id: undefined, projects: ['p9'] }) });
   assert.equal(h.sent.find((m) => m.type === 'save-hook-result')?.error, 'Unknown project p9');
 });
 
 test('an edit keeps a scope naming a project that left config; a new hook still may not name one', async () => {
-  const config: GlissaConfig = { projects: [{ id: 'p1', name: 'glissa', path: '/r' }], hooks: [record({ projects: ['gone'] })] };
+  const config: GlimmervoidConfig = { projects: [{ id: 'p1', name: 'glimmervoid', path: '/r' }], hooks: [record({ projects: ['gone'] })] };
   const h = harness(config);
   await h.send({ type: 'save-hook', requestId: 'r1', hook: record({ projects: ['gone'], enabled: false }) });
   const result = h.sent.find((m) => m.type === 'save-hook-result');
@@ -168,14 +168,14 @@ test('an edit keeps a scope naming a project that left config; a new hook still 
 });
 
 test('a failed config write is reported, not swallowed', async () => {
-  const config: GlissaConfig = { projects: [] };
+  const config: GlimmervoidConfig = { projects: [] };
   const h = harness(config, { saveFails: true });
   await h.send({ type: 'save-hook', requestId: 'r1', hook: record({ id: undefined }) });
   assert.equal(h.sent.find((m) => m.type === 'save-hook-result')?.error, 'Could not write config.json');
 });
 
 test('delete-hook removes the record, drops the key when none remain, and refuses an unknown id', async () => {
-  const config: GlissaConfig = { projects: [], hooks: [record(), record({ id: 'h2' })] };
+  const config: GlimmervoidConfig = { projects: [], hooks: [record(), record({ id: 'h2' })] };
   const h = harness(config);
   await h.send({ type: 'delete-hook', requestId: 'r1', id: 'h1' });
   assert.deepEqual(h.sent.find((m) => m.type === 'delete-hook-result'), { type: 'delete-hook-result', requestId: 'r1', ok: true, error: null, id: 'h1' });
@@ -204,7 +204,7 @@ test('a malformed hooks request receives its typed error reply', async () => {
 });
 
 test('delete-hook removes a stored record this build cannot read, so a hand edit is never the only way out', async () => {
-  const config: GlissaConfig = {
+  const config: GlimmervoidConfig = {
     projects: [],
     hooks: [record(), { id: 'future', name: 'f', event: 'NotYetKnown', type: 'command', command: 'x', enabled: true }],
   };

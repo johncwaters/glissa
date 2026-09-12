@@ -605,7 +605,7 @@ test('a fresh session whose vendor identity arrives mid-run is billed the whole 
 });
 
 test('a store replaced while holding unpersisted closes hands them to its replacement', async (t) => {
-  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'glissa-mill-metrics-swap-'));
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'glimmervoid-mill-metrics-swap-'));
   t.after(() => fsp.rm(root, { recursive: true, force: true }));
   const recordsPath = path.join(root, 'mill-metrics.json');
   const eventsDir = path.join(root, 'mill-metrics');

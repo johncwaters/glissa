@@ -34,7 +34,7 @@ function agentWithout(...disabled: (keyof AgentCapabilities)[]): AgentAdapter {
 }
 
 async function makeBuiltRoot(packs: Record<string, string>) {
-  const builtRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'glissa-cap-packs-'));
+  const builtRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'glimmervoid-cap-packs-'));
   for (const [name, version] of Object.entries(packs)) {
     const currentDir = path.join(builtRoot, name, 'current');
     await fsp.mkdir(currentDir, { recursive: true });
@@ -59,7 +59,7 @@ async function withHooks(
   options: Partial<SessionOptions> & { id: string; name: string },
   run: (context: { session: Session; settings: HookSettingsFile; calls: CapabilitySpawnCall[] }) => void,
 ) {
-  const hooksBaseDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glissa-cap-hooks-'));
+  const hooksBaseDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glimmervoid-cap-hooks-'));
   const { session, calls } = makeSession({
     hookRouter: new HookRouter(),
     getHookPort: () => 41234,
@@ -131,7 +131,7 @@ test('statusLine off: planLimits injects no statusLine into the settings file', 
 });
 
 test('rtk off: no PreToolUse hook and no PATH prepend, even with a resolved binary', async () => {
-  const rtkDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glissa-cap-rtk-'));
+  const rtkDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glimmervoid-cap-rtk-'));
   const rtkPath = path.join(rtkDir, 'rtk.exe');
   await fsp.writeFile(rtkPath, '', 'utf8');
   try {
@@ -198,7 +198,7 @@ test('the snapshot names the agent, defaulting to claude-code', async () => {
 });
 
 test('a claude-code recording differs only by the header agent field', async () => {
-  const recorderBase = await fsp.mkdtemp(path.join(os.tmpdir(), 'glissa-cap-rec-'));
+  const recorderBase = await fsp.mkdtemp(path.join(os.tmpdir(), 'glimmervoid-cap-rec-'));
   const { session } = makeSession({ id: 'rec', name: 'rec' });
   const recorder = new SessionRecorder({ name: 'rec', baseDir: recorderBase, recordData: false });
   session.setRecorder(recorder);
@@ -225,7 +225,7 @@ test('a claude-code recording differs only by the header agent field', async () 
 });
 
 test('a non-default agent stamps its decision records, so a recording says which vocabulary it holds', async () => {
-  const recorderBase = await fsp.mkdtemp(path.join(os.tmpdir(), 'glissa-cap-rec2-'));
+  const recorderBase = await fsp.mkdtemp(path.join(os.tmpdir(), 'glimmervoid-cap-rec2-'));
   const builtRoot = await makeBuiltRoot({ 'house-rules': 'v-abc' });
   const { session } = makeSession({
     id: 'rec2', name: 'rec2', adapter: agentWithout('packs'), packs: ['house-rules'], packsBuiltRoot: builtRoot,

@@ -78,7 +78,7 @@ async function relayResponse(
 }
 
 test('readHookUrl reads only the spawn-env variable, trimmed, and nothing else', () => {
-  assert.equal(HOOK_URL_ENV, 'GLISSA_HOOK_URL');
+  assert.equal(HOOK_URL_ENV, 'GLIMMERVOID_HOOK_URL');
   assert.equal(readHookUrl({ [HOOK_URL_ENV]: `  ${BASE}  ` }), BASE);
   assert.equal(readHookUrl({}), null);
   assert.equal(readHookUrl({ [HOOK_URL_ENV]: '   ' }), null);
@@ -209,7 +209,7 @@ test('an oversized response reaches decideHookStdout with only the overflow sent
   assert.deepEqual(decision.input, { event: 'UserPromptSubmit', status: 200, body: null });
 });
 
-test('the relay POSTs the stdin bytes untouched to /hook/:glissaId/:event', async () => {
+test('the relay POSTs the stdin bytes untouched to /hook/:glimmervoidId/:event', async () => {
   const { server, received, port } = await startIngress();
   try {
     const payload = '{"sessionId":"abc","backgroundTasks":[],"toolInput":{"file_path":"C:\\\\x"}}';

@@ -40,7 +40,7 @@ function renderedHooks(relayPath = grok.RELAY_PATH): string {
 function writeHooks(grokHome: string, contents: string = renderedHooks()) {
   const hooksDirectory = path.join(grokHome, "hooks");
   fs.mkdirSync(hooksDirectory, { recursive: true });
-  fs.writeFileSync(path.join(hooksDirectory, "glissa.json"), contents, "utf8");
+  fs.writeFileSync(path.join(hooksDirectory, "glimmervoid.json"), contents, "utf8");
 }
 
 function makeGrokSession(options: Partial<SessionOptions> = {}) {
@@ -70,7 +70,7 @@ function loadGrokHookFixture() {
 }
 
 async function withGrokHome<T>(run: (grokHome: string, tempDirectory: string) => Promise<T>) {
-  const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "glissa-grok-test-"));
+  const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "glimmervoid-grok-test-"));
   const grokHome = path.join(tempDirectory, ".grok");
   const previousHome = process.env.GROK_HOME;
   process.env.GROK_HOME = grokHome;
@@ -212,7 +212,7 @@ test("the live background-subagent fixture gates until a later Stop declares the
   });
 
   const dispatch = (record: Record_) => hookRouter.handle({
-    glissaId: "grok-session",
+    glimmervoidId: "grok-session",
     token: "fixture-token",
     event: record.event,
     payload: record.payload,
@@ -250,7 +250,7 @@ test("the live fixture holds a notice-carrying Stop and completes once on the fo
     onSignal: (signal) => session.ingestHookSignal(signal),
   });
   const dispatch = (record: Record_) => hookRouter.handle({
-    glissaId: "grok-session",
+    glimmervoidId: "grok-session",
     token: "fixture-token",
     event: record.event,
     payload: record.payload,
@@ -281,7 +281,7 @@ test("the live fixture completes a notice-less Stop immediately", (t) => {
   });
 
   hookRouter.handle({
-    glissaId: "grok-session",
+    glimmervoidId: "grok-session",
     token: "fixture-token",
     event: records[3].event,
     payload: records[3].payload,
@@ -310,36 +310,36 @@ test("the title tier recognizes only captured markers and never guesses ready", 
 });
 
 test("the setup core renders seven env-inert hooks and distinguishes managed and foreign files", () => {
-  const rendered = renderedHooks("/opt/glissa/session/hook-relay.js");
+  const rendered = renderedHooks("/opt/glimmervoid/session/hook-relay.js");
   const parsed = JSON.parse(rendered) as { hooks: Record_ };
   assert.deepEqual(Object.keys(parsed.hooks), grok.HOOK_EVENTS);
-  assert.equal(rendered.includes("GLISSA_HOOK_URL"), false);
+  assert.equal(rendered.includes("GLIMMERVOID_HOOK_URL"), false);
   assert.equal(/[?&]t=/.test(rendered), false);
   assert.equal(classifyGrokHooksFile(rendered, {
-    relayPath: "/opt/glissa/session/hook-relay.js",
+    relayPath: "/opt/glimmervoid/session/hook-relay.js",
     events: grok.HOOK_EVENTS,
   }), "current");
   assert.equal(classifyGrokHooksFile(rendered, {
-    relayPath: "/new/glissa/session/hook-relay.js",
+    relayPath: "/new/glimmervoid/session/hook-relay.js",
     events: grok.HOOK_EVENTS,
   }), "managed-stale");
   const priorManaged = renderGrokHooksFile({
-    relayPath: "/opt/glissa/session/hook-relay.js",
+    relayPath: "/opt/glimmervoid/session/hook-relay.js",
     events: grok.MANAGED_HOOK_EVENT_SETS[0],
   });
   assert.ok(priorManaged, "the prior managed spelling rendered");
   assert.equal(classifyGrokHooksFile(priorManaged, {
-    relayPath: "/opt/glissa/session/hook-relay.js",
+    relayPath: "/opt/glimmervoid/session/hook-relay.js",
     events: grok.HOOK_EVENTS,
     managedEventSets: grok.MANAGED_HOOK_EVENT_SETS,
   }), "managed-stale");
   assert.equal(classifyGrokHooksFile('{"hooks":{"Stop":[]}}', {
-    relayPath: "/opt/glissa/session/hook-relay.js",
+    relayPath: "/opt/glimmervoid/session/hook-relay.js",
     events: grok.HOOK_EVENTS,
   }), "foreign");
-  const hostile = rendered.replace("node /opt/glissa/session/hook-relay.js Stop", "node /opt/glissa/session/hook-relay.js;touch /tmp/x Stop");
+  const hostile = rendered.replace("node /opt/glimmervoid/session/hook-relay.js Stop", "node /opt/glimmervoid/session/hook-relay.js;touch /tmp/x Stop");
   assert.equal(classifyGrokHooksFile(hostile, {
-    relayPath: "/opt/glissa/session/hook-relay.js",
+    relayPath: "/opt/glimmervoid/session/hook-relay.js",
     events: grok.HOOK_EVENTS,
   }), "foreign");
 });
@@ -351,7 +351,7 @@ test("a .ts relay path is recognized as managed, and a foreign basename still is
     events: grok.HOOK_EVENTS,
   }), "current");
   assert.equal(classifyGrokHooksFile(rendered, {
-    relayPath: "/opt/glissa/session/hook-relay.js",
+    relayPath: "/opt/glimmervoid/session/hook-relay.js",
     events: grok.HOOK_EVENTS,
   }), "managed-stale");
   const foreignBasename = renderedHooks("/repo/session/hook-relay.mjs");
@@ -370,7 +370,7 @@ test("the setup command installs, refreshes managed bytes, and refuses a foreign
     assert.equal(inspectGrokAgentSetup({ env: process.env }).classification, "current");
     assert.equal(runAgentSetupCli(["setup", "grok"], deps), 0);
     assert.equal(output.some((line) => line.includes("already current")), true);
-    const target = path.join(grokHome, "hooks", "glissa.json");
+    const target = path.join(grokHome, "hooks", "glimmervoid.json");
     fs.writeFileSync(target, String(renderGrokHooksFile({
       relayPath: grok.RELAY_PATH,
       events: grok.MANAGED_HOOK_EVENT_SETS[0],
@@ -385,7 +385,7 @@ test("the setup command installs, refreshes managed bytes, and refuses a foreign
 });
 
 test("the setup command refuses symlinked Grok ancestors", async () => {
-  const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "glissa-grok-symlink-test-"));
+  const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "glimmervoid-grok-symlink-test-"));
   try {
     const realGrokHome = path.join(tempDirectory, "real-grok-home");
     const linkedGrokHome = path.join(tempDirectory, "linked-grok-home");
@@ -416,16 +416,16 @@ test("atomic hook replacement creates a private sibling before rename", () => {
       assert.fail("successful replacement must not clean up the temporary file");
     },
   };
-  replaceFileAtomically("/safe/hooks/glissa.json", "managed", fileSystem);
+  replaceFileAtomically("/safe/hooks/glimmervoid.json", "managed", fileSystem);
   assert.equal(calls[0].operation, "write");
-  assert.match(String(calls[0].filePath), /^\/safe\/hooks\/glissa\.json\.[^.]+\.[0-9a-f]+\.tmp$/);
+  assert.match(String(calls[0].filePath), /^\/safe\/hooks\/glimmervoid\.json\.[^.]+\.[0-9a-f]+\.tmp$/);
   assert.deepEqual(calls[0].options, { encoding: "utf8", mode: 0o600, flag: "wx" });
   assert.deepEqual(calls[1], {
     operation: "rename",
     source: calls[0].filePath,
-    target: "/safe/hooks/glissa.json",
+    target: "/safe/hooks/glimmervoid.json",
   });
-  assert.deepEqual(calls[2], { operation: "chmod", filePath: "/safe/hooks/glissa.json", mode: 0o600 });
+  assert.deepEqual(calls[2], { operation: "chmod", filePath: "/safe/hooks/glimmervoid.json", mode: 0o600 });
 });
 
 test("the live Grok probe keeps recordings only behind the explicit flag", () => {
@@ -482,11 +482,11 @@ test("a validated home hook file mints a token and camelCase payloads capture th
     assert.equal(calls[0].file, "/opt/grok/bin/grok-1.0.5");
     assert.deepEqual(calls[0].args, ["--no-auto-update"]);
     assert.equal(calls[0].env.GROK_CLAUDE_HOOKS_ENABLED, "false");
-    assert.match(String(calls[0].env.GLISSA_HOOK_URL), /^http:\/\/127\.0\.0\.1:4321\/hook\/grok-session\?t=[0-9a-f]{64}$/);
+    assert.match(String(calls[0].env.GLIMMERVOID_HOOK_URL), /^http:\/\/127\.0\.0\.1:4321\/hook\/grok-session\?t=[0-9a-f]{64}$/);
     assert.equal(calls[0].args.some((arg) => arg.includes(String(session._hooks.token()))), false);
     const token = session._hooks.token();
     assert.equal(hookRouter.handle({
-      glissaId: "grok-session",
+      glimmervoidId: "grok-session",
       event: "userpromptsubmit",
       token,
       payload: { sessionId: GROK_SESSION_ID },
@@ -515,7 +515,7 @@ test("Claude home settings refuse relay hooks only when they could contribute ho
       });
       await refused.session.start();
       assert.equal(refused.session._hooks.token(), null);
-      assert.equal(refused.calls[0].env.GLISSA_HOOK_URL, undefined);
+      assert.equal(refused.calls[0].env.GLIMMERVOID_HOOK_URL, undefined);
       const refusal = refused.session.getDebugState().decisions.find((decision) => decision.decision === "injection-refused");
       assert.equal(refusal?.reason, "Claude compatibility settings could contribute hooks");
       assert.equal(refusal?.agent, "grok");
@@ -531,7 +531,7 @@ test("Claude home settings refuse relay hooks only when they could contribute ho
       getHookPort: () => 4321,
     });
     await allowed.session.start();
-    assert.match(String(allowed.calls[0].env.GLISSA_HOOK_URL), /^http:\/\/127\.0\.0\.1:4321\/hook\/grok-home-benign\?t=[0-9a-f]{64}$/);
+    assert.match(String(allowed.calls[0].env.GLIMMERVOID_HOOK_URL), /^http:\/\/127\.0\.0\.1:4321\/hook\/grok-home-benign\?t=[0-9a-f]{64}$/);
     assert.notEqual(allowed.session._hooks.token(), null);
     allowed.session.destroy();
   });
@@ -548,17 +548,17 @@ test("a missing or foreign home hook file never mints a token", async () => {
       const missing = makeGrokSession({ id: "grok-missing", path: projectDirectory, hookRouter: new HookRouter(), getHookPort: () => 4321 });
       await missing.session.start();
       assert.equal(missing.session._hooks.token(), null);
-      assert.equal(missing.calls[0].env.GLISSA_HOOK_URL, undefined);
+      assert.equal(missing.calls[0].env.GLIMMERVOID_HOOK_URL, undefined);
       missing.session.destroy();
       writeHooks(grokHome, '{"hooks":{"Stop":[]}}');
       const foreign = makeGrokSession({ id: "grok-foreign", path: projectDirectory, hookRouter: new HookRouter(), getHookPort: () => 4321 });
       await foreign.session.start();
       assert.equal(foreign.session._hooks.token(), null);
-      assert.equal(foreign.calls[0].env.GLISSA_HOOK_URL, undefined);
+      assert.equal(foreign.calls[0].env.GLIMMERVOID_HOOK_URL, undefined);
       foreign.session.destroy();
     } finally {
       console.warn = originalWarn;
     }
-    assert.equal(warnings.filter((warning) => warning.includes("glissa agent setup grok")).length, 2);
+    assert.equal(warnings.filter((warning) => warning.includes("glimmervoid agent setup grok")).length, 2);
   });
 });

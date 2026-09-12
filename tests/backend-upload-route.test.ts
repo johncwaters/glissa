@@ -74,14 +74,14 @@ async function fetchAfterReset(url: string, init: RequestInit): Promise<Response
 }
 
 test.before(async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-uploadroute-'));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-uploadroute-'));
   const projectDir = path.join(tmpDir, 'project');
   fs.mkdirSync(projectDir);
   const cfgPath = path.join(tmpDir, 'config.json');
   const projects = [{ id: SESSION_ID, name: 'upload-target', path: projectDir }];
   fs.writeFileSync(cfgPath, JSON.stringify({ projects, teams: [], repoRoots: [] }, null, 2), 'utf8');
-  const prevEnv = process.env.GLISSA_CONFIG;
-  process.env.GLISSA_CONFIG = cfgPath;
+  const prevEnv = process.env.GLIMMERVOID_CONFIG;
+  process.env.GLIMMERVOID_CONFIG = cfgPath;
 
   const server = http.createServer();
   const backend = createBackend(server, { staticDir: null });
@@ -104,8 +104,8 @@ test.after(async () => {
 
   server.closeAllConnections();
   await closeServer(server);
-  if (prevEnv == null) delete process.env.GLISSA_CONFIG;
-  if (prevEnv != null) process.env.GLISSA_CONFIG = prevEnv;
+  if (prevEnv == null) delete process.env.GLIMMERVOID_CONFIG;
+  if (prevEnv != null) process.env.GLIMMERVOID_CONFIG = prevEnv;
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -142,7 +142,7 @@ test('a named non-image upload is saved with the sanitized extension and bracket
   const res = await fetch(`${ctx().base}/upload/${SESSION_ID}`, {
     method: 'POST',
     body: bytes,
-    headers: { 'content-type': 'application/pdf', 'x-glissa-upload-name': encodeURIComponent('report.pdf') },
+    headers: { 'content-type': 'application/pdf', 'x-glimmervoid-upload-name': encodeURIComponent('report.pdf') },
   });
   assert.equal(res.status, 200);
   const body = await res.json();
@@ -163,7 +163,7 @@ test('a named upload with no extension is saved with none', async () => {
   const res = await fetch(`${ctx().base}/upload/${SESSION_ID}`, {
     method: 'POST',
     body: bytes,
-    headers: { 'content-type': 'application/octet-stream', 'x-glissa-upload-name': encodeURIComponent('Makefile') },
+    headers: { 'content-type': 'application/octet-stream', 'x-glimmervoid-upload-name': encodeURIComponent('Makefile') },
   });
   assert.equal(res.status, 200);
   const body = await res.json();
@@ -189,7 +189,7 @@ test('an image is saved under the config dir and its path is bracket-pasted into
   assert.deepEqual(fs.readFileSync(body.path), bytes, 'bytes land verbatim');
 
   assert.deepEqual(ptyWrites, [`\x1b[200~${body.path} \x1b[201~`], 'exactly the bracketed paste, nothing else');
-  assert.equal(ptyWrites[0].includes('\r'), false, 'the operator presses Enter, not Glissa');
+  assert.equal(ptyWrites[0].includes('\r'), false, 'the operator presses Enter, not Glimmervoid');
   assert.equal(ptyWrites[0].includes('\n'), false);
 });
 

@@ -1,6 +1,7 @@
 import type { SettingsRange } from '#shared/settings-ranges.ts';
 import { SETTINGS_RANGES } from '#shared/settings-ranges.ts';
 import type { UpdateJournal } from '#shared/contracts/update-journal.ts';
+import { REPO_SLUG } from '#shared/repo.ts';
 import { playAlertSound, SOUND_OPTIONS } from './alert-sound.ts';
 import { sendControlMsg, sendControlRequest } from './control-ws.ts';
 import { el } from './dom-helpers.ts';
@@ -199,15 +200,15 @@ function renderShortcutGroups(container: HTMLElement) {
 function renderAbout(container: HTMLElement) {
   const about = el('div', 'settings-about');
   const version = typeof __APP_VERSION__ === 'string' && __APP_VERSION__ ? `v${__APP_VERSION__}` : 'version unknown';
-  const versionEl = el('span', 'settings-about-version', 'GLISSA ');
+  const versionEl = el('span', 'settings-about-version', 'GLIMMERVOID ');
   versionEl.appendChild(el('span', 'settings-about-v', version));
   const links = el('span', 'settings-about-links');
   const repo = el('a', 'settings-about-link', 'GitHub');
-  repo.href = 'https://github.com/johncwaters/glissa';
+  repo.href = `https://github.com/${REPO_SLUG}`;
   repo.target = '_blank';
   repo.rel = 'noopener';
   const changelog = el('a', 'settings-about-link', 'Changelog');
-  changelog.href = 'https://github.com/johncwaters/glissa/blob/main/CHANGELOG.md';
+  changelog.href = `https://github.com/${REPO_SLUG}/blob/main/CHANGELOG.md`;
   changelog.target = '_blank';
   changelog.rel = 'noopener';
   links.append(repo, changelog);
@@ -447,7 +448,6 @@ function buildLastUpdateCheckStatus() {
   const text = lastUpdateCheckText({
     status: updateStatus,
     checkForUpdates: settingsPayload.checkForUpdates,
-    isLocalConfig: settingsPayload.isLocalConfig,
     relativeTime: formatAgo(lastCheckedAt),
   });
   const block = el('div', 'settings-readonly settings-update-readout', text);
@@ -525,9 +525,9 @@ function statusText(setting: SettingsSetting) {
   }
   if (setting.status !== 'rtk-install' || !settingValue(setting) || settingsPayload.rtkAvailable) return '';
   const install = (settingsPayload.rtkInstall || { status: 'idle' }) as { status?: string; reason?: string };
-  if (install.status === 'installing') return 'No rtk binary found. Glissa is installing it into ~/.glissa/bin now.';
-  if (install.status === 'failed') return `No rtk binary found. The last install attempt failed: ${install.reason || 'unknown reason'}. Glissa retries on the next save.`;
-  return 'No rtk binary found. Glissa will install it into ~/.glissa/bin when you save.';
+  if (install.status === 'installing') return 'No rtk binary found. Glimmervoid is installing it into ~/.glimmervoid/bin now.';
+  if (install.status === 'failed') return `No rtk binary found. The last install attempt failed: ${install.reason || 'unknown reason'}. Glimmervoid retries on the next save.`;
+  return 'No rtk binary found. Glimmervoid will install it into ~/.glimmervoid/bin when you save.';
 }
 
 function buildStatusSlot(setting: SettingsSetting) {

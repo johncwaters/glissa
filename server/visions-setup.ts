@@ -136,10 +136,10 @@ function resolvedEditorPaths(
 function relayInvocationOptions(
   { platform = process.platform, exec = execSync }: { platform?: NodeJS.Platform; exec?: typeof execSync } = {},
 ): { chosen: Invocation; absolute: Invocation; onPath: boolean } {
-  const onPath = resolvePathCommandMatches('glissa', { platform, exec }).length > 0;
+  const onPath = resolvePathCommandMatches('glimmervoid', { platform, exec }).length > 0;
   return {
-    chosen: relayInvocation({ glissaOnPath: onPath, cliPath: CLI_PATH, nodePath: process.execPath }),
-    absolute: relayInvocation({ glissaOnPath: false, cliPath: CLI_PATH, nodePath: process.execPath }),
+    chosen: relayInvocation({ glimmervoidOnPath: onPath, cliPath: CLI_PATH, nodePath: process.execPath }),
+    absolute: relayInvocation({ glimmervoidOnPath: false, cliPath: CLI_PATH, nodePath: process.execPath }),
     onPath,
   };
 }

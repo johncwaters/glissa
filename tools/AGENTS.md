@@ -4,18 +4,18 @@
 # tools
 
 ## Purpose
-Auxiliary developer tooling that supports working ON Glissa; nothing here ships in the npm package or runs in the Glissa server.
+Auxiliary developer tooling that supports working ON Glimmervoid; nothing here ships in the npm package or runs in the Glimmervoid server.
 
 ## Subdirectories
 
 | Directory | Purpose |
 |-----------|---------|
 | `company-context/` | Zero-dependency MCP server feeding project reference material to OMC workflow skills; its content lives in `company-context/context/` (see `company-context/AGENTS.md`) |
-| `vscode-visions/` | Minimal VS Code extension that launches the Glissa Visions markdown LSP relay |
+| `vscode-visions/` | Minimal VS Code extension that launches the Glimmervoid Visions markdown LSP relay |
 
 ## For AI Agents
 
 ### Working In This Directory
-- Keep tools self-contained; do not import Glissa server modules from here.
+- Keep tools self-contained; do not import Glimmervoid server modules from here.
 
 <!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->

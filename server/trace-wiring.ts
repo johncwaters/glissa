@@ -80,7 +80,7 @@ interface TraceWiringOptions {
 }
 
 interface TraceBinding {
-  glissaSessionId: string;
+  glimmervoidSessionId: string;
   vendorSessionId: string;
   vendor: string;
   transcriptPath: string;
@@ -149,7 +149,7 @@ async function pruneTraceFiles({
 }: {
   traceDirectory: string;
   now?: number;
-  isBoundSessionId?: (glissaSessionId: string) => boolean;
+  isBoundSessionId?: (glimmervoidSessionId: string) => boolean;
 }): Promise<number> {
   const removed = await pruneAgedFiles({
     directory: traceDirectory,
@@ -171,7 +171,7 @@ function createTraceWiring({
 }: TraceWiringOptions = {}) {
   const traceDirectory = configSiblingPath(configPath, 'traces');
   const emitter = new EventEmitter();
-  const bindingByGlissaSessionId = new Map<string, TraceBinding>();
+  const bindingByGlimmervoidSessionId = new Map<string, TraceBinding>();
   const pendingRecordsBySessionId = new Map<string, TraceRecord[]>();
   const closedSessionIds = new Set<string>();
   const attachedSessions = new WeakSet<object>();
@@ -190,13 +190,13 @@ function createTraceWiring({
       .catch((error: unknown) => { laneLog.warn(failure, { error: errorMessage(error) }); });
   }
 
-  function traceFilePath(glissaSessionId: string): string | null {
-    if (!isSafePathSegment(glissaSessionId)) return null;
-    return path.join(traceDirectory, `${glissaSessionId}${TRACE_SUFFIX}`);
+  function traceFilePath(glimmervoidSessionId: string): string | null {
+    if (!isSafePathSegment(glimmervoidSessionId)) return null;
+    return path.join(traceDirectory, `${glimmervoidSessionId}${TRACE_SUFFIX}`);
   }
 
-  async function readTracePage(glissaSessionId: string, request: TracePageRequest): Promise<TracePage> {
-    const filePath = traceFilePath(glissaSessionId);
+  async function readTracePage(glimmervoidSessionId: string, request: TracePageRequest): Promise<TracePage> {
+    const filePath = traceFilePath(glimmervoidSessionId);
     if (!filePath) return { records: [], start: 0, next: 0, reset: isRewoundCursor(request, 0), path: '' };
     let handle: FileHandle | null = null;
     try {
@@ -208,7 +208,7 @@ function createTraceWiring({
         ...(request.endingAt !== undefined ? { endingAt: request.endingAt } : {}),
         size: stat.size,
         now: nowFn(),
-        vendorSessionId: bindingByGlissaSessionId.get(glissaSessionId)?.vendorSessionId ?? 'unknown',
+        vendorSessionId: bindingByGlimmervoidSessionId.get(glimmervoidSessionId)?.vendorSessionId ?? 'unknown',
         readBytes: async (offset: number, byteCount: number) => {
           const buffer = Buffer.alloc(byteCount);
           const { bytesRead } = await openHandle.read(buffer, 0, byteCount, offset);
@@ -224,53 +224,53 @@ function createTraceWiring({
     }
   }
 
-  function queueRecord(glissaSessionId: string, record: TraceRecord): void {
-    if (!traceFilePath(glissaSessionId)) return;
+  function queueRecord(glimmervoidSessionId: string, record: TraceRecord): void {
+    if (!traceFilePath(glimmervoidSessionId)) return;
     const parsed = TraceRecordSchema.safeParse(record);
     if (!parsed.success) {
-      laneLog.warn('record refused', { session: glissaSessionId });
+      laneLog.warn('record refused', { session: glimmervoidSessionId });
       return;
     }
-    const existing = pendingRecordsBySessionId.get(glissaSessionId);
+    const existing = pendingRecordsBySessionId.get(glimmervoidSessionId);
     if (existing) {
       existing.push(parsed.data);
       return;
     }
-    pendingRecordsBySessionId.set(glissaSessionId, [parsed.data]);
+    pendingRecordsBySessionId.set(glimmervoidSessionId, [parsed.data]);
   }
 
-  function requeueAtHead(glissaSessionId: string, records: TraceRecord[]): void {
-    const queuedSince = pendingRecordsBySessionId.get(glissaSessionId) || [];
-    pendingRecordsBySessionId.set(glissaSessionId, [...records, ...queuedSince]);
+  function requeueAtHead(glimmervoidSessionId: string, records: TraceRecord[]): void {
+    const queuedSince = pendingRecordsBySessionId.get(glimmervoidSessionId) || [];
+    pendingRecordsBySessionId.set(glimmervoidSessionId, [...records, ...queuedSince]);
   }
 
-  async function flushSession(glissaSessionId: string): Promise<boolean> {
-    const records = pendingRecordsBySessionId.get(glissaSessionId);
-    pendingRecordsBySessionId.delete(glissaSessionId);
-    const filePath = traceFilePath(glissaSessionId);
+  async function flushSession(glimmervoidSessionId: string): Promise<boolean> {
+    const records = pendingRecordsBySessionId.get(glimmervoidSessionId);
+    pendingRecordsBySessionId.delete(glimmervoidSessionId);
+    const filePath = traceFilePath(glimmervoidSessionId);
     if (!filePath || !records || records.length === 0) return true;
     try {
       await appendJsonLines(filePath, records, { mkdir: !hasEnsuredDirectory, mode: 0o600 });
       hasEnsuredDirectory = true;
-      emitter.emit('trace-appended', { id: glissaSessionId });
+      emitter.emit('trace-appended', { id: glimmervoidSessionId });
       return true;
     } catch (error) {
-      laneLog.warn('append failed', { session: glissaSessionId, error: errorMessage(error) });
-      requeueAtHead(glissaSessionId, records);
+      laneLog.warn('append failed', { session: glimmervoidSessionId, error: errorMessage(error) });
+      requeueAtHead(glimmervoidSessionId, records);
       return false;
     }
   }
 
   async function flushEverySession(): Promise<void> {
-    for (const glissaSessionId of [...pendingRecordsBySessionId.keys()]) await flushSession(glissaSessionId);
+    for (const glimmervoidSessionId of [...pendingRecordsBySessionId.keys()]) await flushSession(glimmervoidSessionId);
   }
 
   function committedOffsetOf(binding: TraceBinding): number {
     return Math.max(0, binding.tailState.offset - Buffer.byteLength(binding.tailState.carry, 'utf8'));
   }
 
-  function stampCommittedOffset(glissaSessionId: string, transcriptOffset: number): void {
-    const records = pendingRecordsBySessionId.get(glissaSessionId);
+  function stampCommittedOffset(glimmervoidSessionId: string, transcriptOffset: number): void {
+    const records = pendingRecordsBySessionId.get(glimmervoidSessionId);
     if (!records || records.length === 0) return;
     const last = records[records.length - 1];
     if (!last) return;
@@ -295,13 +295,13 @@ function createTraceWiring({
     await binding.checkpointWriter.write(checkpoint, () => JSON.stringify(checkpoint));
   }
 
-  function checkpointFilePath(glissaSessionId: string): string | null {
-    if (!isSafePathSegment(glissaSessionId)) return null;
-    return path.join(traceDirectory, `${glissaSessionId}${CHECKPOINT_SUFFIX}`);
+  function checkpointFilePath(glimmervoidSessionId: string): string | null {
+    if (!isSafePathSegment(glimmervoidSessionId)) return null;
+    return path.join(traceDirectory, `${glimmervoidSessionId}${CHECKPOINT_SUFFIX}`);
   }
 
-  async function readCheckpoint(glissaSessionId: string): Promise<TraceCheckpoint | null> {
-    const filePath = checkpointFilePath(glissaSessionId);
+  async function readCheckpoint(glimmervoidSessionId: string): Promise<TraceCheckpoint | null> {
+    const filePath = checkpointFilePath(glimmervoidSessionId);
     if (!filePath) return null;
     try {
       const raw: unknown = JSON.parse(await fs.promises.readFile(filePath, 'utf8'));
@@ -314,11 +314,11 @@ function createTraceWiring({
   }
 
   async function tracedOffsetOf(
-    glissaSessionId: string,
+    glimmervoidSessionId: string,
     transcriptPath: string,
     pathBeforeWindow: string | null,
   ): Promise<{ offset: number | null; scannedBytes: number; traceSize: number }> {
-    const filePath = traceFilePath(glissaSessionId);
+    const filePath = traceFilePath(glimmervoidSessionId);
     if (!filePath) return { offset: 0, scannedBytes: 0, traceSize: 0 };
     let handle: FileHandle | null = null;
     try {
@@ -344,13 +344,13 @@ function createTraceWiring({
   }
 
   async function resumeStateFor(
-    glissaSessionId: string,
+    glimmervoidSessionId: string,
     transcriptPath: string,
     size: number,
   ): Promise<TraceResumeState> {
-    const checkpoint = await readCheckpoint(glissaSessionId);
+    const checkpoint = await readCheckpoint(glimmervoidSessionId);
     const traceTail = await tracedOffsetOf(
-      glissaSessionId,
+      glimmervoidSessionId,
       transcriptPath,
       checkpoint ? checkpoint.transcriptPath : null,
     );
@@ -376,7 +376,7 @@ function createTraceWiring({
   }
 
   function queueSessionRecord(binding: TraceBinding, reason: string | null): void {
-    queueRecord(binding.glissaSessionId, {
+    queueRecord(binding.glimmervoidSessionId, {
       ts: nowFn(),
       uuid: null,
       parentUuid: null,
@@ -389,7 +389,7 @@ function createTraceWiring({
   }
 
   function noteSkippedBytes(binding: TraceBinding, filePath: string, skippedBytes: number): void {
-    queueRecord(binding.glissaSessionId, {
+    queueRecord(binding.glimmervoidSessionId, {
       ts: nowFn(),
       uuid: null,
       parentUuid: null,
@@ -405,7 +405,7 @@ function createTraceWiring({
     binding.notedFileRefusals.add(refusalKey);
     trimOldest(binding.notedFileRefusals, MAX_REMEMBERED_FILE_REFUSALS);
     if (reason === 'missing') return false;
-    queueRecord(binding.glissaSessionId, {
+    queueRecord(binding.glimmervoidSessionId, {
       ts: nowFn(),
       uuid: null,
       parentUuid: null,
@@ -417,7 +417,7 @@ function createTraceWiring({
   }
 
   function noteRecoveryFallback(binding: TraceBinding): void {
-    queueRecord(binding.glissaSessionId, {
+    queueRecord(binding.glimmervoidSessionId, {
       ts: nowFn(),
       uuid: null,
       parentUuid: null,
@@ -432,7 +432,7 @@ function createTraceWiring({
     if (!resumed.didFallbackToTranscriptEnd) return;
     noteRecoveryFallback(binding);
     laneLog.warn('trace recovery fell back to the transcript end', {
-      session: binding.glissaSessionId,
+      session: binding.glimmervoidSessionId,
       path: binding.transcriptPath,
       scannedBytes: resumed.scannedBytes,
     });
@@ -445,7 +445,7 @@ function createTraceWiring({
       ...context,
     });
     for (const record of records) {
-      queueRecord(binding.glissaSessionId, record);
+      queueRecord(binding.glimmervoidSessionId, record);
     }
   }
 
@@ -480,9 +480,9 @@ function createTraceWiring({
   }
 
   async function commitPending(binding: TraceBinding): Promise<PendingCommit> {
-    stampCommittedOffset(binding.glissaSessionId, committedOffsetOf(binding));
-    const recordCount = pendingRecordsBySessionId.get(binding.glissaSessionId)?.length ?? 0;
-    const didAppend = await flushSession(binding.glissaSessionId);
+    stampCommittedOffset(binding.glimmervoidSessionId, committedOffsetOf(binding));
+    const recordCount = pendingRecordsBySessionId.get(binding.glimmervoidSessionId)?.length ?? 0;
+    const didAppend = await flushSession(binding.glimmervoidSessionId);
     if (!didAppend) return { didAppend, appendedRecordCount: 0 };
     await writeCheckpoint(binding);
     return { didAppend, appendedRecordCount: recordCount };
@@ -499,7 +499,7 @@ function createTraceWiring({
           if (containmentRefusalReason(error) === 'missing') return;
         }
       }
-      if (!binding.hasWarnedUnreadable) laneLog.warn('transcript unreadable', { session: binding.glissaSessionId });
+      if (!binding.hasWarnedUnreadable) laneLog.warn('transcript unreadable', { session: binding.glimmervoidSessionId });
       binding.hasWarnedUnreadable = true;
       return;
     }
@@ -511,7 +511,7 @@ function createTraceWiring({
         binding.bindingBeforeFirstOpen = null;
         binding.transcriptPath = opened.file.realPath;
         const stat = await opened.file.handle.stat();
-        const resumed = await resumeStateFor(binding.glissaSessionId, binding.transcriptPath, stat.size);
+        const resumed = await resumeStateFor(binding.glimmervoidSessionId, binding.transcriptPath, stat.size);
         binding.committedOffsetByTranscriptPath = resumed.committedOffsetByTranscriptPath;
         binding.subagentPathsWithoutOffset = new Set<string>(resumed.subagentPathsWithoutOffset);
         binding.subagentOffsetByPath = resumed.subagentOffsetByPath;
@@ -534,7 +534,7 @@ function createTraceWiring({
     laneLog.debugNote(
       () => 'drained',
       () => ({
-        session: binding.glissaSessionId,
+        session: binding.glimmervoidSessionId,
         records: commit.appendedRecordCount,
         bytes: committedOffsetAfterRead - committedOffsetBeforeRead,
         offset: committedOffsetAfterRead,
@@ -551,18 +551,18 @@ function createTraceWiring({
   }
 
   async function bindSession(
-    glissaSessionId: string,
+    glimmervoidSessionId: string,
     vendorSessionId: string,
     vendor: string,
     requestedTranscriptPath: string,
   ): Promise<void> {
-    if (hasStopped || closedSessionIds.has(glissaSessionId)) return;
-    const checkpointPath = checkpointFilePath(glissaSessionId);
+    if (hasStopped || closedSessionIds.has(glimmervoidSessionId)) return;
+    const checkpointPath = checkpointFilePath(glimmervoidSessionId);
     if (!checkpointPath) return;
     const containedTranscript = await openContainedFile(requestedTranscriptPath, projectsRoot(), true);
     if (!containedTranscript.ok) {
-      laneLog.warnOnce(`bind:${glissaSessionId}:${containedTranscript.reason}`, 'transcript refused', {
-        session: glissaSessionId,
+      laneLog.warnOnce(`bind:${glimmervoidSessionId}:${containedTranscript.reason}`, 'transcript refused', {
+        session: glimmervoidSessionId,
         path: requestedTranscriptPath,
         root: projectsRoot(),
         reason: containedTranscript.reason,
@@ -572,18 +572,18 @@ function createTraceWiring({
     const transcriptPath = containedTranscript.file.realPath;
     const transcriptStat = 'handle' in containedTranscript.file ? containedTranscript.file.stat : null;
     if ('handle' in containedTranscript.file) await containedTranscript.file.handle.close().catch(() => {});
-    const previous = bindingByGlissaSessionId.get(glissaSessionId);
+    const previous = bindingByGlimmervoidSessionId.get(glimmervoidSessionId);
     if (previous) {
-      bindingByGlissaSessionId.delete(glissaSessionId);
+      bindingByGlimmervoidSessionId.delete(glimmervoidSessionId);
       await drainBinding(previous);
     }
     const resumed = transcriptStat
-      ? await resumeStateFor(glissaSessionId, transcriptPath, transcriptStat.size)
+      ? await resumeStateFor(glimmervoidSessionId, transcriptPath, transcriptStat.size)
       : null;
     const tailState = createTailState(transcriptStat, { path: transcriptPath });
     tailState.offset = resumed ? resumed.offset : 0;
     const binding: TraceBinding = {
-      glissaSessionId,
+      glimmervoidSessionId,
       vendorSessionId,
       vendor,
       transcriptPath,
@@ -604,31 +604,31 @@ function createTraceWiring({
       isClosing: false,
     };
     if (resumed) noteResumeOutcome(binding, resumed);
-    bindingByGlissaSessionId.set(glissaSessionId, binding);
+    bindingByGlimmervoidSessionId.set(glimmervoidSessionId, binding);
     await drainBinding(binding);
   }
 
-  function noteVendorSession(glissaSessionId: string, eventPayload: Record<string, unknown>): void {
-    if (hasStopped || closedSessionIds.has(glissaSessionId)) return;
+  function noteVendorSession(glimmervoidSessionId: string, eventPayload: Record<string, unknown>): void {
+    if (hasStopped || closedSessionIds.has(glimmervoidSessionId)) return;
     const vendorSessionId = typeof eventPayload.id === 'string' ? eventPayload.id : '';
     const vendor = typeof eventPayload.vendor === 'string' ? eventPayload.vendor : 'claude';
     if (!vendorSessionId || vendor !== 'claude') return;
-    if (!traceFilePath(glissaSessionId)) return;
+    if (!traceFilePath(glimmervoidSessionId)) return;
     const rawPath = typeof eventPayload.transcriptPath === 'string' ? eventPayload.transcriptPath : '';
     if (!rawPath) return;
     const requestedTranscriptPath = path.resolve(rawPath);
-    const bound = bindingByGlissaSessionId.get(glissaSessionId);
+    const bound = bindingByGlimmervoidSessionId.get(glimmervoidSessionId);
     if (bound
       && bound.vendorSessionId === vendorSessionId
       && bound.requestedTranscriptPath === requestedTranscriptPath) return;
-    chain(() => bindSession(glissaSessionId, vendorSessionId, vendor, requestedTranscriptPath), 'binding failed');
+    chain(() => bindSession(glimmervoidSessionId, vendorSessionId, vendor, requestedTranscriptPath), 'binding failed');
   }
 
   async function readSubagentTranscript(
-    glissaSessionId: string,
+    glimmervoidSessionId: string,
     eventPayload: Record<string, unknown>,
   ): Promise<void> {
-    const binding = bindingByGlissaSessionId.get(glissaSessionId);
+    const binding = bindingByGlimmervoidSessionId.get(glimmervoidSessionId);
     if (!binding) return;
     const rawPath = typeof eventPayload.agent_transcript_path === 'string'
       ? eventPayload.agent_transcript_path
@@ -637,8 +637,8 @@ function createTraceWiring({
     const subagentPath = path.resolve(rawPath);
     const subagentRoot = path.dirname(binding.transcriptPath);
     if (!isPathInsideRoot(projectsRoot(), subagentRoot)) {
-      laneLog.warnOnce(`subagent:${binding.glissaSessionId}:outside-root`, 'subagent transcript refused', {
-        session: binding.glissaSessionId,
+      laneLog.warnOnce(`subagent:${binding.glimmervoidSessionId}:outside-root`, 'subagent transcript refused', {
+        session: binding.glimmervoidSessionId,
         path: subagentPath,
         root: subagentRoot,
         reason: 'outside-root',
@@ -647,8 +647,8 @@ function createTraceWiring({
     }
     const opened = await openContainedFile(subagentPath, subagentRoot);
     if (!opened.ok) {
-      laneLog.warnOnce(`subagent:${binding.glissaSessionId}:${opened.reason}`, 'subagent transcript refused', {
-        session: binding.glissaSessionId,
+      laneLog.warnOnce(`subagent:${binding.glimmervoidSessionId}:${opened.reason}`, 'subagent transcript refused', {
+        session: binding.glimmervoidSessionId,
         path: subagentPath,
         root: subagentRoot,
         reason: opened.reason,
@@ -734,36 +734,36 @@ function createTraceWiring({
     await commitPending(binding);
     laneLog.debugNote(
       () => 'subagent captured',
-      () => ({ session: glissaSessionId, records: mappedLineCount, bytes: bytesRead }),
+      () => ({ session: glimmervoidSessionId, records: mappedLineCount, bytes: bytesRead }),
     );
   }
 
-  function noteHookEvent(glissaSessionId: string, eventRecord: Record<string, unknown>): void {
-    if (hasStopped || closedSessionIds.has(glissaSessionId)) return;
+  function noteHookEvent(glimmervoidSessionId: string, eventRecord: Record<string, unknown>): void {
+    if (hasStopped || closedSessionIds.has(glimmervoidSessionId)) return;
     const hookEvent = typeof eventRecord.event === 'string' ? eventRecord.event.toLowerCase() : '';
     if (hookEvent !== 'subagentstop') return;
     const payload = eventRecord.payload;
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return;
     chain(
-      () => readSubagentTranscript(glissaSessionId, payload as Record<string, unknown>),
+      () => readSubagentTranscript(glimmervoidSessionId, payload as Record<string, unknown>),
       'subagent capture failed',
     );
   }
 
-  function detachSession(glissaSessionId: string): void {
+  function detachSession(glimmervoidSessionId: string): void {
     chain(async () => {
-      const binding = bindingByGlissaSessionId.get(glissaSessionId);
+      const binding = bindingByGlimmervoidSessionId.get(glimmervoidSessionId);
       if (!binding) return;
-      bindingByGlissaSessionId.delete(glissaSessionId);
+      bindingByGlimmervoidSessionId.delete(glimmervoidSessionId);
       await drainBinding(binding);
     }, 'final drain failed');
   }
 
-  function closeSession(glissaSessionId: string): void {
-    closedSessionIds.add(glissaSessionId);
+  function closeSession(glimmervoidSessionId: string): void {
+    closedSessionIds.add(glimmervoidSessionId);
     trimOldest(closedSessionIds, MAX_REMEMBERED_CLOSED_SESSIONS);
     chain(async () => {
-      const binding = bindingByGlissaSessionId.get(glissaSessionId);
+      const binding = bindingByGlimmervoidSessionId.get(glimmervoidSessionId);
       if (!binding) return;
       binding.isClosing = true;
       await drainBinding(binding);
@@ -781,7 +781,7 @@ function createTraceWiring({
 
   async function pollBoundTranscripts(): Promise<void> {
     if (hasStopped) return;
-    for (const binding of [...bindingByGlissaSessionId.values()]) {
+    for (const binding of [...bindingByGlimmervoidSessionId.values()]) {
       if (binding.isClosing) continue;
       await drainBinding(binding);
     }
@@ -791,7 +791,7 @@ function createTraceWiring({
     await pruneTraceFiles({
       traceDirectory,
       now: nowFn(),
-      isBoundSessionId: (glissaSessionId) => bindingByGlissaSessionId.has(glissaSessionId),
+      isBoundSessionId: (glimmervoidSessionId) => bindingByGlimmervoidSessionId.has(glimmervoidSessionId),
     });
   }
 
@@ -802,7 +802,7 @@ function createTraceWiring({
     pruneTimer = setIntervalFn(() => { chain(prune, 'prune failed'); }, PRUNE_INTERVAL_MS);
     if (typeof pruneTimer.unref === 'function') pruneTimer.unref();
     pollTimer = setIntervalFn(() => {
-      if (bindingByGlissaSessionId.size === 0) return;
+      if (bindingByGlimmervoidSessionId.size === 0) return;
       chain(pollBoundTranscripts, 'poll failed');
     }, POLL_INTERVAL_MS);
     if (typeof pollTimer.unref === 'function') pollTimer.unref();
@@ -811,7 +811,7 @@ function createTraceWiring({
   async function whenIdle(): Promise<void> {
     await operationChain;
     await flushEverySession();
-    for (const binding of [...bindingByGlissaSessionId.values()]) await binding.checkpointWriter.idle();
+    for (const binding of [...bindingByGlimmervoidSessionId.values()]) await binding.checkpointWriter.idle();
   }
 
   async function stopOnce(): Promise<void> {
@@ -820,8 +820,8 @@ function createTraceWiring({
     pruneTimer = null;
     pollTimer = null;
     await operationChain;
-    for (const binding of [...bindingByGlissaSessionId.values()]) {
-      bindingByGlissaSessionId.delete(binding.glissaSessionId);
+    for (const binding of [...bindingByGlimmervoidSessionId.values()]) {
+      bindingByGlimmervoidSessionId.delete(binding.glimmervoidSessionId);
       try {
         await drainBinding(binding);
       } catch (error) {

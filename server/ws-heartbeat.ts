@@ -1,7 +1,7 @@
 import { DEFAULT_DEADLINE_MS, DEFAULT_INTERVAL_MS, planHeartbeatSweep } from './core/heartbeat-core.ts';
 
 interface HeartbeatSocket {
-  glissaLastSeenAt?: number;
+  glimmervoidLastSeenAt?: number;
   on: (event: string, listener: () => void) => unknown;
   terminate: () => void;
   ping: () => void;
@@ -42,8 +42,8 @@ function createHeartbeat({
   let timer: NodeJS.Timeout | null = null;
 
   function track(ws: HeartbeatSocket): void {
-    ws.glissaLastSeenAt = now();
-    const seen = () => { ws.glissaLastSeenAt = now(); };
+    ws.glimmervoidLastSeenAt = now();
+    const seen = () => { ws.glimmervoidLastSeenAt = now(); };
     ws.on('pong', seen);
     ws.on('message', seen);
   }
@@ -52,7 +52,7 @@ function createHeartbeat({
     for (const server of servers) {
       const clients = [...(server?.clients || [])];
       const { terminate, ping } = planHeartbeatSweep(
-        clients.map((ws) => ({ key: ws, lastSeenAt: ws.glissaLastSeenAt ?? now() })),
+        clients.map((ws) => ({ key: ws, lastSeenAt: ws.glimmervoidLastSeenAt ?? now() })),
         { now: now(), deadlineMs },
       );
       for (const ws of terminate) {

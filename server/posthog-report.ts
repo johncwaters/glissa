@@ -1,9 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { glissaHomeDir } from './config-store.ts';
+import { glimmervoidHomeDir } from './config-store.ts';
 
-const DEFAULT_POSTHOG_REPORT_DIR = path.join(glissaHomeDir(), 'posthog-reports');
+const DEFAULT_POSTHOG_REPORT_DIR = path.join(glimmervoidHomeDir(), 'posthog-reports');
 const POSTHOG_REPORT_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
 interface ReportCandidate {

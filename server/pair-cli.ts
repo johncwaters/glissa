@@ -11,7 +11,7 @@ import { formatTimestamp } from './text-format.ts';
 
 const PASSWORD_WARNING = [
   'Treat this link like a password. Anyone who opens it gets full control of this',
-  'machine through Glissa (it can start Claude Code sessions in any directory).',
+  'machine through Glimmervoid (it can start Claude Code sessions in any directory).',
   'It works once and expires in 10 minutes.',
 ].join('\n');
 
@@ -92,11 +92,11 @@ function runList(store: PairingsStore, seenStore: SeenStore): number {
 function runRevoke(store: PairingsStore, id: string): number {
   const outcome = store.revokeDevice(id);
   if (outcome.ok) {
-    console.log(`Revoked ${id}. A running Glissa applies this within ${REVOCATION_PROPAGATION_SECONDS} seconds, no restart needed.`);
+    console.log(`Revoked ${id}. A running Glimmervoid applies this within ${REVOCATION_PROPAGATION_SECONDS} seconds, no restart needed.`);
     return 0;
   }
   if (outcome.reason === 'unknown') {
-    console.error(`No paired device with id ${id}. Run "glissa pair --list" to see the ids.`);
+    console.error(`No paired device with id ${id}. Run "glimmervoid pair --list" to see the ids.`);
     return 1;
   }
   console.error('Failed to write the pairing file - nothing was revoked.');
@@ -116,7 +116,7 @@ function runPairCli(args: string[]): number {
   if (args.includes('--revoke')) {
     const id = argValue(args, '--revoke');
     if (!id) {
-      console.error('Usage: glissa pair --revoke <device-id>');
+      console.error('Usage: glimmervoid pair --revoke <device-id>');
       return 1;
     }
     return runRevoke(store, id);

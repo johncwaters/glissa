@@ -39,7 +39,7 @@ function until(predicate: () => boolean, message: string): Promise<void> {
 
 function withBackend(configExtras: Record<string, unknown>, fn: (scope: LaneScope) => Promise<void>) {
   return async () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-lane-restart-'));
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-lane-restart-'));
     const projectDir = path.join(tmpDir, 'project');
     fs.mkdirSync(projectDir);
     const cfgPath = path.join(tmpDir, 'config.json');
@@ -49,8 +49,8 @@ function withBackend(configExtras: Record<string, unknown>, fn: (scope: LaneScop
       repoRoots: [],
       ...configExtras,
     }, null, 2), 'utf8');
-    const previousConfigEnv = process.env.GLISSA_CONFIG;
-    process.env.GLISSA_CONFIG = cfgPath;
+    const previousConfigEnv = process.env.GLIMMERVOID_CONFIG;
+    process.env.GLIMMERVOID_CONFIG = cfgPath;
 
     const server = http.createServer();
     const backend = createBackend(server, { staticDir: null });
@@ -62,8 +62,8 @@ function withBackend(configExtras: Record<string, unknown>, fn: (scope: LaneScop
       backend.shutdown();
       server.closeAllConnections();
       await closeServer(server);
-      if (previousConfigEnv == null) delete process.env.GLISSA_CONFIG;
-      if (previousConfigEnv != null) process.env.GLISSA_CONFIG = previousConfigEnv;
+      if (previousConfigEnv == null) delete process.env.GLIMMERVOID_CONFIG;
+      if (previousConfigEnv != null) process.env.GLIMMERVOID_CONFIG = previousConfigEnv;
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   };

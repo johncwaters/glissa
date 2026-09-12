@@ -300,7 +300,7 @@ const PING_CTX = {
 test('pingFor: spike renders the lane tag, label, title, counts and url', () => {
   const msg = pingFor('spike', PING_CTX);
   assert.equal(msg, [
-    '[glissa/posthog] SPIKE web',
+    '[glimmervoid/posthog] SPIKE web',
     'TypeError: boom',
     '120 occurrences / 8 users',
     'https://eu.posthog.com/project/1/error_tracking/iss-1',
@@ -308,10 +308,10 @@ test('pingFor: spike renders the lane tag, label, title, counts and url', () => 
 });
 
 test('pingFor: each pinging kind renders its own label', () => {
-  assert.match(pingFor('regression', PING_CTX) as string, /^\[glissa\/posthog\] REGRESSED web$/m);
-  assert.match(pingFor('needs_human', PING_CTX) as string, /^\[glissa\/posthog\] NEEDS HUMAN web$/m);
-  assert.match(pingFor('error', PING_CTX) as string, /^\[glissa\/posthog\] ERROR web$/m);
-  assert.match(pingFor('new_issue', PING_CTX) as string, /^\[glissa\/posthog\] NEW ISSUE web$/m);
+  assert.match(pingFor('regression', PING_CTX) as string, /^\[glimmervoid\/posthog\] REGRESSED web$/m);
+  assert.match(pingFor('needs_human', PING_CTX) as string, /^\[glimmervoid\/posthog\] NEEDS HUMAN web$/m);
+  assert.match(pingFor('error', PING_CTX) as string, /^\[glimmervoid\/posthog\] ERROR web$/m);
+  assert.match(pingFor('new_issue', PING_CTX) as string, /^\[glimmervoid\/posthog\] NEW ISSUE web$/m);
 });
 
 test('displayTitle flattens whitespace and caps the length', () => {
@@ -336,7 +336,7 @@ test('pingFor truncates a crafted huge title instead of sending it whole', () =>
 });
 
 test('pingFor: a title carrying newlines cannot forge extra message lines', () => {
-  const msg = pingFor('spike', { ...PING_CTX, title: 'boom\n[glissa/posthog] SPIKE fake' });
+  const msg = pingFor('spike', { ...PING_CTX, title: 'boom\n[glimmervoid/posthog] SPIKE fake' });
   assert.equal(msg?.split('\n').length, 4);
 });
 
@@ -347,7 +347,7 @@ test('pingFor: a fix ping carries the repro status and the pull request link', (
     prUrl: 'https://github.com/o/r/pull/7',
   });
   assert.equal(msg, [
-    '[glissa/posthog] FIXED web',
+    '[glimmervoid/posthog] FIXED web',
     'TypeError: boom',
     'reproduced, then fixed',
     '120 occurrences / 8 users',
@@ -363,7 +363,7 @@ test('pingFor: a fix with no pull request renders no PR line', () => {
 });
 
 test('pingFor: an agent-written pull request url cannot forge extra message lines', () => {
-  const msg = pingFor('fixed', { ...PING_CTX, prUrl: 'https://x/1\n[glissa/posthog] FIXED fake' });
+  const msg = pingFor('fixed', { ...PING_CTX, prUrl: 'https://x/1\n[glimmervoid/posthog] FIXED fake' });
   assert.equal(msg?.split('\n').length, 5);
 });
 
@@ -663,10 +663,10 @@ test('buildInvestigationRecord carries the job mode and the pull request it prod
 test('buildInvestigationRecord flattens a multi-line summary and a hostile title', () => {
   const record = buildInvestigationRecord({
     ...RECORD_ARGS,
-    title: `line one${String.fromCharCode(10)}[glissa/posthog] FORGED`,
+    title: `line one${String.fromCharCode(10)}[glimmervoid/posthog] FORGED`,
     summaryLine: `${String.fromCharCode(10)}first real line${String.fromCharCode(10)}second`,
   });
-  assert.equal(record.title, 'line one [glissa/posthog] FORGED');
+  assert.equal(record.title, 'line one [glimmervoid/posthog] FORGED');
   assert.equal(record.summaryLine, 'first real line');
 });
 
@@ -807,7 +807,7 @@ test('isAbsolutePathish accepts posix, drive-letter and UNC paths', () => {
 
 test('projectParentDirs dedupes the folders the operator already keeps repos in', () => {
   const dirs = projectParentDirs([
-    { path: '/home/jw/Projects/glissa' },
+    { path: '/home/jw/Projects/glimmervoid' },
     { path: '/home/jw/Projects/card-harbor/' },
     { path: 'C:\\code\\keeplings' },
     { path: '/home/jw/PROJECTS/other' },
@@ -820,7 +820,7 @@ test('projectParentDirs dedupes the folders the operator already keeps repos in'
 
 test('pickDirectoryForProjectName matches a display name against directory names', () => {
   const candidates = [
-    { name: 'glissa', path: '/p/glissa' },
+    { name: 'glimmervoid', path: '/p/glimmervoid' },
     { name: 'card-harbor', path: '/p/card-harbor' },
   ];
   assert.deepEqual(pickDirectoryForProjectName('CardHarbor', candidates), {
@@ -828,7 +828,7 @@ test('pickDirectoryForProjectName matches a display name against directory names
   });
   assert.equal(pickDirectoryForProjectName('nothing-here', candidates), null);
   assert.equal(pickDirectoryForProjectName('', candidates), null);
-  assert.equal(pickDirectoryForProjectName('glissa', undefined), null);
+  assert.equal(pickDirectoryForProjectName('glimmervoid', undefined), null);
 });
 
 test('pickDirectoryForProjectName refuses an ambiguous match but tolerates a duplicate path', () => {

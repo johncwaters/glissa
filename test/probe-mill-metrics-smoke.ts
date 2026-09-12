@@ -160,7 +160,7 @@ function promptEventCount(events: MetricEvent[]): number {
 }
 
 async function main() {
-  const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-mill-metrics-smoke-'));
+  const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-mill-metrics-smoke-'));
   const projectDirectory = path.join(tempDirectory, 'project');
   const configPath = path.join(tempDirectory, 'config.json');
   const eventsDirectory = path.join(tempDirectory, 'mill-metrics');
@@ -168,8 +168,8 @@ async function main() {
   fs.mkdirSync(projectDirectory);
 
   const port = await findFreeHighPort();
-  process.env.GLISSA_CONFIG = configPath;
-  process.env.GLISSA_PORT = String(port);
+  process.env.GLIMMERVOID_CONFIG = configPath;
+  process.env.GLIMMERVOID_PORT = String(port);
   writeProbeConfig(configPath, projectDirectory, port);
   const { builtRoot, packFile } = makeProbePack(tempDirectory);
   const claudeConfigDirectory = makeClaudeConfig(tempDirectory, [projectDirectory]);

@@ -1,5 +1,5 @@
 {
-  "name": "glissa",
+  "name": "glimmervoid",
   "version": "0.24.3",
   "private": true,
   "description": "Spawn and manage Claude Code sessions on Windows and Linux with a browser dashboard and real-time xterm.js streaming",
@@ -9,7 +9,7 @@
     "#shared/*": "./shared/*"
   },
   "bin": {
-    "glissa": "dist/bin/glissa.js"
+    "glimmervoid": "dist/bin/glimmervoid.js"
   },
   "files": [
     "dist/",
@@ -26,11 +26,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/johncwaters/glissa.git"
+    "url": "git+https://github.com/johncwaters/glimmervoid.git"
   },
-  "homepage": "https://github.com/johncwaters/glissa#readme",
+  "homepage": "https://github.com/johncwaters/glimmervoid#readme",
   "bugs": {
-    "url": "https://github.com/johncwaters/glissa/issues"
+    "url": "https://github.com/johncwaters/glimmervoid/issues"
   },
   "keywords": [
     "claude",
@@ -48,7 +48,7 @@
     "test": "node --import ./tests/helpers/isolate-home.ts --test \"tests/**/*.test.ts\"",
     "typecheck": "tsc --project tsconfig.json && tsc --project tsconfig.public.json && tsc --project tsconfig.browser-harness.json",
     "test:browser": "node test/browser/harness.ts",
-    "test:container": "docker build -f test/container/Dockerfile -t glissa-remote-test . && docker run --rm glissa-remote-test",
+    "test:container": "docker build -f test/container/Dockerfile -t glimmervoid-remote-test . && docker run --rm glimmervoid-remote-test",
     "dev": "vite",
     "build": "node scripts/build.mjs",
     "postinstall": "node scripts/postinstall.mjs",

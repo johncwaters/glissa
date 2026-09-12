@@ -314,14 +314,14 @@ test('a mixed window publishes the clean lines and none of the repaint around th
     cup(9, 12), 'th', cup(9, 14), 'e',
     cup(20, 1), 'the last painted row\n',
     'npm run build\r\n',
-    '> glissa@1.0.0 build\r\n',
+    '> glimmervoid@1.0.0 build\r\n',
     cup(24, 1), el(2), RULE.repeat(20), 'Model: Fable\n',
     'built in 4.2s\r\n',
     cup(2, 3), SPINNER,
   ].join(''));
   const event = flushAccumulator(state, { now: NOW }) as TerminalIngestEvent;
-  assert.equal(event.detail.text, 'npm run build\n> glissa@1.0.0 build\nbuilt in 4.2s');
-  assert.equal(event.summary, 'npm run build > glissa@1.0.0 build built in 4.2s');
+  assert.equal(event.detail.text, 'npm run build\n> glimmervoid@1.0.0 build\nbuilt in 4.2s');
+  assert.equal(event.summary, 'npm run build > glimmervoid@1.0.0 build built in 4.2s');
 
   assert.ok(state.pendingBytes > 0);
   assert.equal(flushAccumulator(state, { now: NOW }), null);

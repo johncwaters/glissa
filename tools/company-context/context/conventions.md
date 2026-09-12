@@ -58,8 +58,8 @@ disagree, `AGENTS.md` wins and this file should be updated.
 
 ## Security boundary
 
-Glissa is localhost-only. Never bind `0.0.0.0`; preserve the per-session hook bearer-token check on `POST /hook/:glissaId/:event`.
+Glimmervoid is localhost-only. Never bind `0.0.0.0`; preserve the per-session hook bearer-token check on `POST /hook/:glimmervoidId/:event`.
 
 ## Parallel agent work
 
-When multiple agents (Claude Code native teams or several spawned agents) edit this repo at once, each works in its own git worktree (`isolation: "worktree"`) and integrates back when clean, to avoid working-tree collisions. Distinct from the Glissa Teams product feature and from the OMC `omc team` / tmux runtime (unavailable on native Windows).
+When multiple agents (Claude Code native teams or several spawned agents) edit this repo at once, each works in its own git worktree (`isolation: "worktree"`) and integrates back when clean, to avoid working-tree collisions. Distinct from the Glimmervoid Teams product feature and from the OMC `omc team` / tmux runtime (unavailable on native Windows).

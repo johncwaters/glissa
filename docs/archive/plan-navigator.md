@@ -29,17 +29,17 @@ Dogfood scenario, and the first real target: plan-doc review. A Claude session d
 
 ## Decision: where the LSP boundary lives (shim vs native vs rewrite)
 
-Something must speak LSP over stdio, because stdio is the transport every editor supports (VS Code, Neovim, Helix, Zed, JetBrains via plugin) and the only one Helix supports at all. Editors spawn their language server as a child process; they cannot spawn the Glissa daemon (single instance, already running), and socket-transport LSP support is uneven across editors. A separate spawned process at the editor boundary is therefore required by LSP's own topology. The design question is what that process is allowed to know.
+Something must speak LSP over stdio, because stdio is the transport every editor supports (VS Code, Neovim, Helix, Zed, JetBrains via plugin) and the only one Helix supports at all. Editors spawn their language server as a child process; they cannot spawn the Glimmervoid daemon (single instance, already running), and socket-transport LSP support is uneven across editors. A separate spawned process at the editor boundary is therefore required by LSP's own topology. The design question is what that process is allowed to know.
 
 Considered:
 
-1. **Fat shim.** LSP handling, buffer state, and debounce in the shim; results forwarded to Glissa for display. Rejected: this is the bandaid version. State lives in N shim processes, dies with each editor, diverges from the daemon, and none of Glissa's pure-core test discipline can reach it.
+1. **Fat shim.** LSP handling, buffer state, and debounce in the shim; results forwarded to Glimmervoid for display. Rejected: this is the bandaid version. State lives in N shim processes, dies with each editor, diverges from the daemon, and none of Glimmervoid's pure-core test discipline can reach it.
 2. **Native socket LSP, no shim.** The daemon exposes LSP over TCP and editors connect directly. Rejected: Helix cannot, per-editor config diverges, and the Vite dev restart severs every editor's LSP session with no process left behind to resync it.
-3. **Rewrite: a separate navigator daemon (Rust/Go) beside Glissa.** Rejected: Glissa already is the long-lived daemon, with sockets, wiring seams, ephemeral Claude sessions, usage attribution, and a tab system; a second daemon duplicates all of that to avoid one WS forward. Node is not the bottleneck: tsserver and Copilot's language server are both Node, and didChange byte volume is far below the PTY streams Glissa already moves.
+3. **Rewrite: a separate navigator daemon (Rust/Go) beside Glimmervoid.** Rejected: Glimmervoid already is the long-lived daemon, with sockets, wiring seams, ephemeral Claude sessions, usage attribution, and a tab system; a second daemon duplicates all of that to avoid one WS forward. Node is not the bottleneck: tsserver and Copilot's language server are both Node, and didChange byte volume is far below the PTY streams Glimmervoid already moves.
 
 **Decision: transport-only shim, brain in the daemon.**
 
-- The shim (`session/navigator-relay.js`, following the `statusline-relay.js` precedent: a standalone process Glissa code never requires) speaks LSP stdio with the editor and forwards frames over a loopback WS to the daemon. It makes zero navigator decisions.
+- The shim (`session/navigator-relay.js`, following the `statusline-relay.js` precedent: a standalone process Glimmervoid code never requires) speaks LSP stdio with the editor and forwards frames over a loopback WS to the daemon. It makes zero navigator decisions.
 - The one state it holds is a mirror of open documents (uri, version, text), maintained by applying didChange locally, solely so it can replay didOpen snapshots when the daemon connection drops and returns (the Vite dev-restart case; LSP has no server-initiated "resend everything" request, so the editor cannot be asked). Replay is mechanical, still transport. Sync is INCREMENTAL (`change: 2`): fewer bytes per keystroke on a large buffer, and the buffer store still applies whole-text changes, so a Full-sync client keeps working unchanged.
 - Everything else lives in the daemon: protocol interpretation, buffer store, debounce, tier engine, intent model, model dispatch, persistence.
 
@@ -48,7 +48,7 @@ This is not a bandaid by the project's own standard: the shim is an adapter at a
 ## Architecture
 
 ```
-editor A --LSP stdio--> navigator-relay --WS /navigator--> Glissa daemon
+editor A --LSP stdio--> navigator-relay --WS /navigator--> Glimmervoid daemon
 editor B --LSP stdio--> navigator-relay --WS /navigator-->   |
                                                              |-> navigator engine (debounce, tiers, intent)
                                                              |-> ephemeral claude -p sessions (tier 3/4 thinking)
@@ -131,27 +131,27 @@ Doc gate: the checkable claims in this plan are the milestone tests named above.
 
 ## Running the MVP (M1 + M2, shipped)
 
-1. Enable the lane in config.json: `"navigator": { "enabled": true }` (config file only, not control-WS settable, restart Glissa).
+1. Enable the lane in config.json: `"navigator": { "enabled": true }` (config file only, not control-WS settable, restart Glimmervoid).
 2. Point an editor's LSP client at the relay for markdown. Neovim 0.11+:
 
 ```lua
-vim.lsp.config['glissa-navigator'] = {
-  cmd = { 'node', 'C:/Users/johnw/Projects/glissa/session/navigator-relay.js', '--port', '5173' },
+vim.lsp.config['glimmervoid-navigator'] = {
+  cmd = { 'node', 'C:/Users/johnw/Projects/glimmervoid/session/navigator-relay.js', '--port', '5173' },
   filetypes = { 'markdown' },
 }
-vim.lsp.enable('glissa-navigator')
+vim.lsp.enable('glimmervoid-navigator')
 ```
 
 Helix (languages.toml):
 
 ```toml
-[language-server.glissa-navigator]
+[language-server.glimmervoid-navigator]
 command = "node"
-args = ["C:/Users/johnw/Projects/glissa/session/navigator-relay.js", "--port", "5173"]
+args = ["C:/Users/johnw/Projects/glimmervoid/session/navigator-relay.js", "--port", "5173"]
 
 [[language]]
 name = "markdown"
-language-servers = ["marksman", "glissa-navigator"]
+language-servers = ["marksman", "glimmervoid-navigator"]
 ```
 
 Use `--port 5173` against `npm run dev` and `--port 3000` against `npm start`; with no flag the relay tries both. VS Code has no native generic LSP client, so it needs a thin extension wrapping vscode-languageclient: deferred, tracked as part of M2's remaining scope, and the reason M2 is not fully closed by the MVP.

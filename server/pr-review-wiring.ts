@@ -5,7 +5,7 @@ import path from 'node:path';
 import type { HookRouter } from '../detection/hook-source.ts';
 import { Session } from '../session/sessions.ts';
 import type { SessionOptions } from '../session/sessions.ts';
-import { glissaHomeDir } from './config-store.ts';
+import { glimmervoidHomeDir } from './config-store.ts';
 import { millPackNames } from './core/pack-core.ts';
 import {
   awaitSessionExit, createJobResultFile, readResultFile, registerEphemeralSession,
@@ -83,8 +83,8 @@ function buildReviewPrompt(
     '- Never force-push, never delete branches or the repo, never touch other PRs, never edit files under .github/workflows/.',
     '',
     'Comment format (the reader is a busy human, often on a phone; optimize for skimming):',
-    '- The first line of the comment body is the literal marker `<!-- glissa-pr-review -->` (invisible when rendered; it lets later runs find this comment).',
-    '- The second line is exactly: "*Automated review (glissa). A separate gated process merges; no human wrote this.*" so nobody mistakes it for a human review.',
+    '- The first line of the comment body is the literal marker `<!-- glimmervoid-pr-review -->` (invisible when rendered; it lets later runs find this comment).',
+    '- The second line is exactly: "*Automated review (glimmervoid). A separate gated process merges; no human wrote this.*" so nobody mistakes it for a human review.',
     `- Before posting, check for a previous comment carrying that marker (\`gh pr view ${number} --json comments\`). If one exists, open with a delta line: "Reviewed <short head sha>. Resolved since last review: N. Still open: M." and report only still-open and new findings.`,
     '- On a re-review with 0 resolved, 0 still-open, and 0 new findings, post NO comment at all; just write the verdict. A re-review that resolves prior findings and finds nothing new posts only the delta line, the findings line, and one sentence of verification evidence.',
     '- Then a header line: "Findings: N blocking, M non-blocking." Add a summary sentence only when a common theme is worth naming. Never praise, never describe what is fine; state only what needs to change.',
@@ -171,7 +171,7 @@ function createPrReviewWiring({
     const safeSlug = String(slug).replace(/[^\w.-]+/g, '-');
     let resultFile: JobResultFile | null = null;
     try {
-      resultFile = await createJobResultFile(`glissa-pr-${safeSlug}-${pr.number}-${pr.headRefOid}`);
+      resultFile = await createJobResultFile(`glimmervoid-pr-${safeSlug}-${pr.number}-${pr.headRefOid}`);
       const prompt = buildReviewPrompt({
         slug, number: pr.number, baseRefName: pr.baseRefName, conflicting, resultPath: resultFile.path,
       });
@@ -187,7 +187,7 @@ function createPrReviewWiring({
     }
   }
 
-  const prStatePath = path.join(glissaHomeDir(), 'pr-review-state.json');
+  const prStatePath = path.join(glimmervoidHomeDir(), 'pr-review-state.json');
   async function readPrState(): Promise<PrState> {
     try { return JSON.parse(fs.readFileSync(prStatePath, 'utf8')); }
     catch { return {}; }
@@ -221,7 +221,7 @@ function createPrReviewWiring({
         makePrGh: (projectPath: string) => createPrGh(projectPath),
         gitWorkspace,
         getWorktreeBase: (projectPath: string) => config.worktreeRoot
-          || path.join(path.dirname(path.resolve(projectPath)), '.glissa-worktrees'),
+          || path.join(path.dirname(path.resolve(projectPath)), '.glimmervoid-worktrees'),
         spawnReview: prReviewSpawn,
         telegram: (text: string) => { void sendPrPing(botToken, chatId, text); },
         readState: readPrState,

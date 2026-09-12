@@ -8,7 +8,7 @@ interface VisionsFixLike {
   range?: { start?: { line?: unknown; character?: unknown } } | null;
 }
 
-const MEMORY_VENDOR = 'glissa';
+const MEMORY_VENDOR = 'glimmervoid';
 const MAX_FINDING_ID_CHARS = 120;
 const MAX_SERVED_KEYS = 500;
 const DEFAULT_BASENAME = 'document';

@@ -381,7 +381,7 @@ function createPrPoller(deps: PrPollerDependencies) {
       if (!projectPath) continue;
       const branches = await gitWorkspace.listWorktreeBranches({ projectPath }).catch(() => []);
       for (const w of branches) {
-        if (!w.branch.startsWith('glissa/pr-review/')) continue;
+        if (!w.branch.startsWith('glimmervoid/pr-review/')) continue;
         await gitWorkspace.removeWorktreeByPath({ projectPath, cwd: w.cwd, branch: w.branch }).catch(() => {});
       }
     }

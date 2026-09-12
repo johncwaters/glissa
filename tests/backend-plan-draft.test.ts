@@ -15,7 +15,7 @@ type PlanLane = ReturnType<typeof createPlanReviewWiring>;
 
 const DRAFT_DEBOUNCE_MS = 250;
 
-const claudeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-plan-draft-claude-'));
+const claudeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-plan-draft-claude-'));
 process.env.CLAUDE_CONFIG_DIR = claudeHome;
 const plansRoot = path.join(claudeHome, 'plans');
 fs.mkdirSync(plansRoot, { recursive: true });
@@ -81,7 +81,7 @@ async function openPlan(
   { sessionId = 'session-1', planFilePath = planPath('a.md'), agentId = null as string | null, plan = '# Ship it' } = {},
 ): Promise<void> {
   lane.onHookEvent({
-    glissaId: sessionId,
+    glimmervoidId: sessionId,
     event: 'permissionrequest-plan',
     payload: {
       tool_name: 'ExitPlanMode',
@@ -196,7 +196,7 @@ test('closing the review closes its watcher, and a decision leaves it open for t
   assert.equal(lane.decide('session-1', { id: 'session-1', agentId: null, revision: 1, decision: 'revise', feedback: 'no' }), null);
   assert.equal(watchers.opened[0].isClosed, false, 'a deny is exactly when the next draft is written');
 
-  lane.onHookEvent({ glissaId: 'session-1', event: 'Stop', payload: {}, accepted: true });
+  lane.onHookEvent({ glimmervoidId: 'session-1', event: 'Stop', payload: {}, accepted: true });
   await lane.whenIdle();
   assert.equal(watchers.opened[0].isClosed, true, 'a closed review watches nothing');
   await lane.stop();
@@ -207,7 +207,7 @@ test('a session end and a lane stop each close every watcher they own', async ()
   await openPlan(lane, { sessionId: 'session-1', planFilePath: planPath('one.md') });
   await openPlan(lane, { sessionId: 'session-2', planFilePath: planPath('two.md') });
 
-  lane.onHookEvent({ glissaId: 'session-1', event: 'SessionEnd', payload: {}, accepted: true });
+  lane.onHookEvent({ glimmervoidId: 'session-1', event: 'SessionEnd', payload: {}, accepted: true });
   await lane.whenIdle();
   assert.equal(watchers.opened[0].isClosed, true);
   assert.equal(watchers.opened[1].isClosed, false, 'another session keeps its own watcher');
@@ -296,7 +296,7 @@ test('a draft over the plan cap and a draft for a session with nothing stored ar
 test('a draft path outside the plans directory never opens a watch, so it raises no chip at all', async () => {
   const { lane, warnings, watchers } = watchedWorkspace('draft-outside-root');
   const notices = draftNotices(lane);
-  const outsidePath = path.join(os.tmpdir(), `glissa-plan-outside-${process.pid}.md`);
+  const outsidePath = path.join(os.tmpdir(), `glimmervoid-plan-outside-${process.pid}.md`);
   fs.writeFileSync(outsidePath, '# Whatever the attacker wrote\n');
   temporaryFiles.push(outsidePath);
   await openPlan(lane, { planFilePath: outsidePath });

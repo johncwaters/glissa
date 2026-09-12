@@ -8,7 +8,7 @@ import { createRerereWatcher, RR_CACHE_DIR } from '../detection/rerere-watch.ts'
 import { decideRerereCooldownClear } from '../session/core/rebase-gate.ts';
 
 function tempGitDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-rerere-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-rerere-'));
 }
 
 async function waitForCalls(counter: { count: number }, expected: number, deadlineMs = 5000) {

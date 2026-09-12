@@ -22,7 +22,7 @@ function refusal(result: InstallResult): string {
 }
 
 async function makeTempHome(t: TestContext): Promise<string> {
-  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glissa-rtk-'));
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glimmervoid-rtk-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
@@ -31,7 +31,7 @@ async function buildFixture(
   t: TestContext,
   { nested = true, symlink = false }: { nested?: boolean; symlink?: boolean } = {},
 ): Promise<{ bytes: Buffer; sha256: string }> {
-  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glissa-rtk-fixture-'));
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glimmervoid-rtk-fixture-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const payloadRoot = path.join(dir, 'payload');
   const binaryDir = nested ? path.join(payloadRoot, 'rtk-0.45.0') : payloadRoot;
@@ -62,13 +62,13 @@ function assetFor(sha256: string) {
   return { file: 'fixture.tar.gz', sha256, version: '0.45.0', url: 'https://example.invalid/fixture.tar.gz' };
 }
 
-test('installRtk verifies the pinned digest, extracts and lands the binary in ~/.glissa/bin', { skip: IS_WINDOWS }, async (t) => {
+test('installRtk verifies the pinned digest, extracts and lands the binary in ~/.glimmervoid/bin', { skip: IS_WINDOWS }, async (t) => {
   const homeDir = await makeTempHome(t);
   const fixture = await buildFixture(t);
   const { impl, calls } = fakeFetch(fixture.bytes);
 
   const result = await installRtk({
-    glissaHome: path.join(homeDir, '.glissa'),
+    glimmervoidHome: path.join(homeDir, '.glimmervoid'),
     platform: 'linux',
     arch: 'x64',
     fetchImpl: impl,
@@ -77,14 +77,14 @@ test('installRtk verifies the pinned digest, extracts and lands the binary in ~/
   });
 
   assert.ok(result.ok, 'the install succeeded');
-  assert.equal(result.path, path.join(homeDir, '.glissa', 'bin', 'rtk'));
+  assert.equal(result.path, path.join(homeDir, '.glimmervoid', 'bin', 'rtk'));
   assert.equal(result.version, '0.45.0');
   const stat = await fsp.stat(result.path);
   assert.equal(stat.isFile(), true);
   assert.equal(stat.mode & 0o777, 0o755);
   assert.deepEqual(calls, ['https://example.invalid/fixture.tar.gz']);
-  assert.equal(fs.existsSync(path.join(homeDir, '.glissa', 'tmp')), true);
-  assert.deepEqual(await fsp.readdir(path.join(homeDir, '.glissa', 'tmp')), []);
+  assert.equal(fs.existsSync(path.join(homeDir, '.glimmervoid', 'tmp')), true);
+  assert.deepEqual(await fsp.readdir(path.join(homeDir, '.glimmervoid', 'tmp')), []);
 });
 
 test('a digest mismatch lands nothing in bin and never extracts', { skip: IS_WINDOWS }, async (t) => {
@@ -93,7 +93,7 @@ test('a digest mismatch lands nothing in bin and never extracts', { skip: IS_WIN
   let extracted = false;
 
   const result = await installRtk({
-    glissaHome: path.join(homeDir, '.glissa'),
+    glimmervoidHome: path.join(homeDir, '.glimmervoid'),
     platform: 'linux',
     arch: 'x64',
     fetchImpl: fakeFetch(fixture.bytes).impl,
@@ -108,8 +108,8 @@ test('a digest mismatch lands nothing in bin and never extracts', { skip: IS_WIN
   assert.equal(result.ok, false);
   assert.match(refusal(result), /sha256 mismatch/);
   assert.equal(extracted, false);
-  assert.equal(fs.existsSync(path.join(homeDir, '.glissa', 'bin', 'rtk')), false);
-  assert.deepEqual(await fsp.readdir(path.join(homeDir, '.glissa', 'tmp')), []);
+  assert.equal(fs.existsSync(path.join(homeDir, '.glimmervoid', 'bin', 'rtk')), false);
+  assert.deepEqual(await fsp.readdir(path.join(homeDir, '.glimmervoid', 'tmp')), []);
 });
 
 test('a missing tar fails with a reason instead of crashing', { skip: IS_WINDOWS }, async (t) => {
@@ -118,7 +118,7 @@ test('a missing tar fails with a reason instead of crashing', { skip: IS_WINDOWS
   const enoent = Object.assign(new Error('spawn tar ENOENT'), { code: 'ENOENT' });
 
   const result = await installRtk({
-    glissaHome: path.join(homeDir, '.glissa'),
+    glimmervoidHome: path.join(homeDir, '.glimmervoid'),
     platform: 'linux',
     arch: 'x64',
     fetchImpl: fakeFetch(fixture.bytes).impl,
@@ -129,13 +129,13 @@ test('a missing tar fails with a reason instead of crashing', { skip: IS_WINDOWS
 
   assert.equal(result.ok, false);
   assert.match(refusal(result), /tar was not found on PATH/);
-  assert.equal(fs.existsSync(path.join(homeDir, '.glissa', 'bin', 'rtk')), false);
+  assert.equal(fs.existsSync(path.join(homeDir, '.glimmervoid', 'bin', 'rtk')), false);
 });
 
 test('a non-2xx response, an unsupported platform and an over-cap content-length all fail closed', async (t) => {
   const homeDir = await makeTempHome(t);
   const notFound = await installRtk({
-    glissaHome: path.join(homeDir, '.glissa'),
+    glimmervoidHome: path.join(homeDir, '.glimmervoid'),
     platform: 'linux',
     arch: 'x64',
     fetchImpl: fakeFetch(Buffer.from('nope'), { status: 404 }).impl,
@@ -145,12 +145,12 @@ test('a non-2xx response, an unsupported platform and an over-cap content-length
   assert.equal(notFound.ok, false);
   assert.match(refusal(notFound), /HTTP 404/);
 
-  const unsupported = await installRtk({ glissaHome: path.join(homeDir, '.glissa'), platform: 'sunos', arch: 'x64', log: SILENT });
+  const unsupported = await installRtk({ glimmervoidHome: path.join(homeDir, '.glimmervoid'), platform: 'sunos', arch: 'x64', log: SILENT });
   assert.equal(unsupported.ok, false);
   assert.match(refusal(unsupported), /unsupported platform sunos-x64/);
 
   const oversize = await installRtk({
-    glissaHome: path.join(homeDir, '.glissa'),
+    glimmervoidHome: path.join(homeDir, '.glimmervoid'),
     platform: 'linux',
     arch: 'x64',
     fetchImpl: fakeFetch(Buffer.from('x'), { contentLength: MAX_DOWNLOAD_BYTES + 1 }).impl,
@@ -161,12 +161,12 @@ test('a non-2xx response, an unsupported platform and an over-cap content-length
   assert.match(refusal(oversize), /byte cap/);
 });
 
-test('installRtk refuses an archive whose rtk entry is a symlink and lands nothing in ~/.glissa/bin', { skip: IS_WINDOWS }, async (t) => {
+test('installRtk refuses an archive whose rtk entry is a symlink and lands nothing in ~/.glimmervoid/bin', { skip: IS_WINDOWS }, async (t) => {
   const homeDir = await makeTempHome(t);
   const fixture = await buildFixture(t, { symlink: true });
 
   const result = await installRtk({
-    glissaHome: path.join(homeDir, '.glissa'),
+    glimmervoidHome: path.join(homeDir, '.glimmervoid'),
     platform: 'linux',
     arch: 'x64',
     fetchImpl: fakeFetch(fixture.bytes).impl,
@@ -175,7 +175,7 @@ test('installRtk refuses an archive whose rtk entry is a symlink and lands nothi
 
   assert.equal(result.ok, false);
   assert.match(refusal(result), /no rtk binary inside/);
-  assert.equal(fs.existsSync(path.join(homeDir, '.glissa', 'bin', 'rtk')), false);
+  assert.equal(fs.existsSync(path.join(homeDir, '.glimmervoid', 'bin', 'rtk')), false);
 });
 
 test('installRtk refuses an archive listing a member outside the staging dir before extracting', async (t) => {
@@ -190,7 +190,7 @@ test('installRtk refuses an archive listing a member outside the staging dir bef
   };
 
   const result = await installRtk({
-    glissaHome: path.join(homeDir, '.glissa'),
+    glimmervoidHome: path.join(homeDir, '.glimmervoid'),
     platform: 'linux',
     arch: 'x64',
     fetchImpl: fakeFetch(fixture.bytes).impl,
@@ -201,7 +201,7 @@ test('installRtk refuses an archive listing a member outside the staging dir bef
   assert.equal(result.ok, false);
   assert.match(refusal(result), /escapes the staging dir: \.\.\/escape/);
   assert.equal(extracted, false);
-  assert.equal(fs.existsSync(path.join(homeDir, '.glissa', 'bin', 'rtk')), false);
+  assert.equal(fs.existsSync(path.join(homeDir, '.glimmervoid', 'bin', 'rtk')), false);
 });
 
 test('installRtk completes through the copy path when the cross-device rename is refused', { skip: IS_WINDOWS }, async (t) => {
@@ -217,7 +217,7 @@ test('installRtk completes through the copy path when the cross-device rename is
   };
 
   const result = await installRtk({
-    glissaHome: path.join(homeDir, '.glissa'),
+    glimmervoidHome: path.join(homeDir, '.glimmervoid'),
     platform: 'linux',
     arch: 'x64',
     fetchImpl: fakeFetch(fixture.bytes).impl,
@@ -226,22 +226,22 @@ test('installRtk completes through the copy path when the cross-device rename is
   });
 
   assert.equal(result.ok, true);
-  const target = path.join(homeDir, '.glissa', 'bin', 'rtk');
+  const target = path.join(homeDir, '.glimmervoid', 'bin', 'rtk');
   assert.equal(refusedOnce, true);
   assert.equal(fs.existsSync(target), true);
   assert.equal(fs.existsSync(`${target}.partial`), false);
   assert.equal(await fsp.readFile(target, 'utf8'), '#!/bin/sh\necho "rtk 0.45.0"\n');
 });
 
-test('the installer target and the resolver probe agree under a relocated Glissa home', { skip: IS_WINDOWS }, async (t) => {
+test('the installer target and the resolver probe agree under a relocated Glimmervoid home', { skip: IS_WINDOWS }, async (t) => {
   const homeDir = await makeTempHome(t);
-  const relocatedGlissaHome = await makeTempHome(t);
+  const relocatedGlimmervoidHome = await makeTempHome(t);
   const fixture = await buildFixture(t);
-  const previousGlissaHome = process.env.GLISSA_HOME;
-  process.env.GLISSA_HOME = relocatedGlissaHome;
+  const previousGlimmervoidHome = process.env.GLIMMERVOID_HOME;
+  process.env.GLIMMERVOID_HOME = relocatedGlimmervoidHome;
   resetRtkPathCache();
   t.after(() => {
-    process.env.GLISSA_HOME = previousGlissaHome;
+    process.env.GLIMMERVOID_HOME = previousGlimmervoidHome;
     resetRtkPathCache();
   });
 
@@ -255,7 +255,7 @@ test('the installer target and the resolver probe agree under a relocated Glissa
   });
 
   assert.ok(result.ok, 'the install succeeded');
-  assert.equal(result.path, path.join(relocatedGlissaHome, 'bin', 'rtk'));
-  assert.equal(fs.existsSync(path.join(homeDir, '.glissa')), false);
+  assert.equal(result.path, path.join(relocatedGlimmervoidHome, 'bin', 'rtk'));
+  assert.equal(fs.existsSync(path.join(homeDir, '.glimmervoid')), false);
   assert.equal(getRtkPath(), result.path);
 });

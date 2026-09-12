@@ -14,7 +14,7 @@ import {
 const SCRIPT_PATH = path.join(import.meta.dirname, '..', 'scripts', 'recover-handoff.mjs');
 
 function makeRoot(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-recover-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-recover-'));
 }
 
 function writeSentinel(directoryPath: string, text: string): void {
@@ -29,7 +29,7 @@ async function runRecovery(root: string): Promise<{ stdout: string; stderr: stri
 test('recover handoff restores missing node_modules', async () => {
   const root = makeRoot();
   try {
-    writeSentinel(path.join(root, '.glissa', 'update', 'prev-node_modules'), 'dependencies');
+    writeSentinel(path.join(root, '.glimmervoid', 'update', 'prev-node_modules'), 'dependencies');
     const execution = await runRecovery(root);
     assert.equal(fs.readFileSync(path.join(root, 'node_modules', 'sentinel.txt'), 'utf8'), 'dependencies');
     assert.match(execution.stdout, /restored prev-node_modules to node_modules/);
@@ -41,7 +41,7 @@ test('recover handoff restores missing node_modules', async () => {
 test('recover handoff restores missing dist', async () => {
   const root = makeRoot();
   try {
-    writeSentinel(path.join(root, '.glissa', 'update', 'prev-dist'), 'bundle');
+    writeSentinel(path.join(root, '.glimmervoid', 'update', 'prev-dist'), 'bundle');
     const execution = await runRecovery(root);
     assert.equal(fs.readFileSync(path.join(root, 'dist', 'sentinel.txt'), 'utf8'), 'bundle');
     assert.match(execution.stdout, /restored prev-dist to dist/);
@@ -52,7 +52,7 @@ test('recover handoff restores missing dist', async () => {
 
 test('recover handoff honors restore marker entries and deletes the marker', async () => {
   const root = makeRoot();
-  const updatePath = path.join(root, '.glissa', 'update');
+  const updatePath = path.join(root, '.glimmervoid', 'update');
   try {
     writeSentinel(path.join(updatePath, 'saved-dist'), 'saved');
     const markerPath = path.join(updatePath, 'restore.json');
@@ -78,7 +78,7 @@ test('recover handoff exits zero when there is nothing to do', async () => {
 
 test('recover handoff never overwrites present targets', async () => {
   const root = makeRoot();
-  const updatePath = path.join(root, '.glissa', 'update');
+  const updatePath = path.join(root, '.glimmervoid', 'update');
   try {
     writeSentinel(path.join(root, 'dist'), 'live-dist');
     writeSentinel(path.join(root, 'node_modules'), 'live-dependencies');
@@ -96,7 +96,7 @@ test('recover handoff never overwrites present targets', async () => {
 
 test('a marker entry quarantines the live artifact it has to replace', async () => {
   const root = makeRoot();
-  const updatePath = path.join(root, '.glissa', 'update');
+  const updatePath = path.join(root, '.glimmervoid', 'update');
   try {
     writeSentinel(path.join(root, 'dist'), 'half-swapped');
     writeSentinel(path.join(updatePath, PREVIOUS_DIST_BACKUP_NAME), 'known-good');
@@ -116,7 +116,7 @@ test('a marker entry quarantines the live artifact it has to replace', async () 
 
 test('a marker entry that cannot be applied keeps the marker for the next start', async () => {
   const root = makeRoot();
-  const updatePath = path.join(root, '.glissa', 'update');
+  const updatePath = path.join(root, '.glimmervoid', 'update');
   try {
     fs.mkdirSync(updatePath, { recursive: true });
     const markerPath = path.join(updatePath, 'restore.json');

@@ -12,7 +12,7 @@ const GIT = hasGit();
 
 function configureRepository(repositoryPath: string): void {
   git(['config', 'user.email', 'test@example.com'], repositoryPath);
-  git(['config', 'user.name', 'Glissa Test'], repositoryPath);
+  git(['config', 'user.name', 'Glimmervoid Test'], repositoryPath);
   git(['config', 'commit.gpgsign', 'false'], repositoryPath);
 }
 
@@ -23,7 +23,7 @@ function commitFile(repositoryPath: string, fileName: string, content: string, m
 }
 
 function createRemoteFixture() {
-  const rootPath = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-base-origin-'));
+  const rootPath = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-base-origin-'));
   const seedPath = path.join(rootPath, 'seed');
   const remotePath = path.join(rootPath, 'origin.git');
   const repositoryPath = path.join(rootPath, 'repository');
@@ -115,7 +115,7 @@ test('auto create writes the detected marker and an existing worktree keeps it',
     const created = await createSessionWorkspace(gitWorkspace, fixture.repositoryPath, 'stable');
     assert.equal(created.base, 'main');
     assert.equal(
-      git(['config', '--get', `branch.${created.branch}.glissa-integration`], fixture.repositoryPath).trim(),
+      git(['config', '--get', `branch.${created.branch}.glimmervoid-integration`], fixture.repositoryPath).trim(),
       'main',
     );
     const adopted = await gitWorkspace.create({

@@ -71,10 +71,10 @@ test('a plan carrying no variant name sweeps nothing, so a build that saw no pro
 test('a dash-prefixed foreign group variant is only a candidate, left for the builder to filter by manifest owner', () => {
   assert.deepEqual(
     staleVariantPackNames(
-      ['memory', 'memory-notes', 'memory-notes-glissa-17fee7c4', 'memory-glissa-17fee7c4'],
-      ['memory', 'memory-glissa-17fee7c4'],
+      ['memory', 'memory-notes', 'memory-notes-glimmervoid-17fee7c4', 'memory-glimmervoid-17fee7c4'],
+      ['memory', 'memory-glimmervoid-17fee7c4'],
     ),
-    ['memory-notes-glissa-17fee7c4'],
+    ['memory-notes-glimmervoid-17fee7c4'],
   );
 });
 
@@ -90,7 +90,7 @@ test('a name that is not a plain path segment is rejected', () => {
   for (const name of ['../escape', 'has/slash', '', 'has space', '.hidden']) {
     assert.equal(validatePackSpec(validSpec({ name })).ok, false, name);
   }
-  for (const name of ['house-rules', 'glissa_docs', 'pack.v2', 'A1']) {
+  for (const name of ['house-rules', 'glimmervoid_docs', 'pack.v2', 'A1']) {
     assert.equal(validatePackSpec(validSpec({ name })).ok, true, name);
   }
 });
@@ -132,7 +132,7 @@ test('exclude and skills entries are shape-checked', () => {
 test('skill directories apply relative-path and placeholder validation', () => {
   assert.equal(validatePackSpec(validSpec({ skills: [{ dir: '..' }] })).ok, false);
   assert.equal(validatePackSpec(validSpec({ skills: [{ dir: '{{unknownHome}}/skills' }] })).ok, false);
-  assert.equal(validatePackSpec(validSpec({ skills: [{ dir: '{{glissaHome}}/memory/dist/current' }] })).ok, true);
+  assert.equal(validatePackSpec(validSpec({ skills: [{ dir: '{{glimmervoidHome}}/memory/dist/current' }] })).ok, true);
 });
 
 test('a star stays inside one path segment', () => {
@@ -543,7 +543,7 @@ test('distill must be an array when present, and is optional', () => {
 });
 
 test('isPackRelativePath accepts a plain relative path and nothing that escapes', () => {
-  assert.equal(isPackRelativePath('sources/glissa/derived/brief.md'), true);
+  assert.equal(isPackRelativePath('sources/glimmervoid/derived/brief.md'), true);
   assert.equal(isPackRelativePath('brief.md'), true);
   for (const value of ['../brief.md', '/brief.md', 'C:/brief.md', '', null, 42, 'a/../../b.md']) {
     assert.equal(isPackRelativePath(value), false, String(value));
@@ -555,12 +555,12 @@ test('isPackRelativePath accepts a plain relative path and nothing that escapes'
 
 test('packConsumerSources lists one row per project plus one per lane, and every project names every spec', () => {
   const sources = packConsumerSources({
-    projects: [{ id: 'p1', name: 'glissa' }, { path: 'C:/x' }],
+    projects: [{ id: 'p1', name: 'glimmervoid' }, { path: 'C:/x' }],
     prReview: { packs: ['b'] },
     posthog: { packs: ['c'] },
   }, ['a', 'd']);
   assert.deepEqual(sources.map((s) => [s.kind, s.id, s.label]), [
-    ['project', 'p1', 'glissa'],
+    ['project', 'p1', 'glimmervoid'],
     ['project', null, 'project'],
     ['prReview', null, 'prReview.packs'],
     ['posthog', null, 'posthog.packs'],
@@ -570,7 +570,7 @@ test('packConsumerSources lists one row per project plus one per lane, and every
 });
 
 test('with the mill off the lane rows carry no pack, so an ephemeral lane gets nothing either', () => {
-  const config = { projects: [{ id: 'p1', name: 'glissa' }], prReview: { packs: ['b'] }, posthog: { packs: ['c'] } };
+  const config = { projects: [{ id: 'p1', name: 'glimmervoid' }], prReview: { packs: ['b'] }, posthog: { packs: ['c'] } };
   const off = packConsumerSources({ ...config, millEnabled: false }, []);
   assert.deepEqual(off.filter((s) => s.kind !== 'project').map((s) => s.packs), [[], []]);
   const on = packConsumerSources({ ...config, millEnabled: true }, ['a']);
@@ -585,7 +585,7 @@ test('millPackNames returns the normalized list when the mill is on and nothing 
 });
 
 test('with no spec on disk a project consumes nothing', () => {
-  const sources = packConsumerSources({ projects: [{ id: 'p1', name: 'glissa' }] }, []);
+  const sources = packConsumerSources({ projects: [{ id: 'p1', name: 'glimmervoid' }] }, []);
   assert.deepEqual(sources.filter((s) => s.kind === 'project').map((s) => s.packs), [[]]);
 });
 
@@ -597,13 +597,13 @@ function projectRows(config: Record<string, unknown>) {
 test('two records on one path are ONE group: first id, first label, every spec', () => {
   const groups = projectRows({
     projects: [
-      { id: 'p1', name: 'glissa', path: 'C:/repo' },
-      { id: 'p2', name: 'glissa (2)', path: 'C:/repo' },
+      { id: 'p1', name: 'glimmervoid', path: 'C:/repo' },
+      { id: 'p2', name: 'glimmervoid (2)', path: 'C:/repo' },
     ],
   });
   assert.equal(groups.length, 1);
   assert.equal(groups[0].id, 'p1', 'the primary id is the first record in config order');
-  assert.equal(groups[0].label, 'glissa');
+  assert.equal(groups[0].label, 'glimmervoid');
   assert.equal(groups[0].path, 'C:/repo');
   assert.deepEqual(groups[0].recordIds, ['p1', 'p2'], 'the report counts sessions per checkout, not per card');
   assert.deepEqual(groups[0].packs, ['a', 'b']);
@@ -612,8 +612,8 @@ test('two records on one path are ONE group: first id, first label, every spec',
 test('distinct paths stay distinct, even sharing a basename', () => {
   const groups = projectRows({
     projects: [
-      { id: 'p1', name: 'glissa', path: 'C:/work/glissa' },
-      { id: 'p2', name: 'glissa fork', path: 'C:/forks/glissa' },
+      { id: 'p1', name: 'glimmervoid', path: 'C:/work/glimmervoid' },
+      { id: 'p2', name: 'glimmervoid fork', path: 'C:/forks/glimmervoid' },
     ],
   });
   assert.deepEqual(groups.map((group) => group.id), ['p1', 'p2'], 'a basename is not an identity');
@@ -650,7 +650,7 @@ test('an oversized list is judged entry by entry and capped at the per-session l
 
 function dataSpec(overrides = {}) {
   return validSpec({
-    sources: [{ path: '{{glissaHome}}/memory/dist/current/MEMORY.md', data: true, optional: true }],
+    sources: [{ path: '{{glimmervoidHome}}/memory/dist/current/MEMORY.md', data: true, optional: true }],
     rules: undefined,
     ...overrides,
   });
@@ -660,8 +660,8 @@ function dataFile(relPath: string, content: string) {
   return { relPath, content, sourceIndex: 0 };
 }
 
-test('a {{glissaHome}} source must declare itself data, so its bytes can never be loaded as rules', () => {
-  const spec = dataSpec({ sources: [{ path: '{{glissaHome}}/memory/dist/current/MEMORY.md' }] });
+test('a {{glimmervoidHome}} source must declare itself data, so its bytes can never be loaded as rules', () => {
+  const spec = dataSpec({ sources: [{ path: '{{glimmervoidHome}}/memory/dist/current/MEMORY.md' }] });
   const check = validatePackSpec(spec);
   assert.equal(check.ok, false);
   assert.equal(check.errors.some((error) => error.includes('"data": true')), true);
@@ -669,13 +669,13 @@ test('a {{glissaHome}} source must declare itself data, so its bytes can never b
 
 test('a placeholder path that escapes the config directory is a validation error', () => {
   const escaping = validatePackSpec(dataSpec({
-    sources: [{ path: '{{glissaHome}}/../.ssh/id_rsa', data: true }],
+    sources: [{ path: '{{glimmervoidHome}}/../.ssh/id_rsa', data: true }],
   }));
   assert.equal(escaping.ok, false);
   assert.equal(escaping.errors.some((error) => error.includes('".." segment')), true);
 
   const unanchored = validatePackSpec(dataSpec({
-    sources: [{ path: 'sources/{{glissaHome}}/x.md', data: true }],
+    sources: [{ path: 'sources/{{glimmervoidHome}}/x.md', data: true }],
   }));
   assert.equal(unanchored.ok, false);
 });
@@ -687,7 +687,7 @@ test('an unknown placeholder is refused rather than passed through to the walker
 });
 
 test('data files are published under data/, never as a rules file, and the index only points at them', () => {
-  const plan = planPackBuild(dataSpec(), [dataFile('MEMORY.md', '# Glissa memory\n\n- [m-0123456789abcdef] (reported) the gate lives in rebase-gate.js\n')], { builtAt: BUILT_AT });
+  const plan = planPackBuild(dataSpec(), [dataFile('MEMORY.md', '# Glimmervoid memory\n\n- [m-0123456789abcdef] (reported) the gate lives in rebase-gate.js\n')], { builtAt: BUILT_AT });
   assert.equal(plan.ok, true);
   const paths = plan.outputs.map((file) => file.relPath).sort();
   assert.deepEqual(paths, [INDEX_FILE, 'data/01-memory/MEMORY.md', MANIFEST_FILE]);
@@ -702,7 +702,7 @@ test('data files are published under data/, never as a rules file, and the index
 test('a remembered line reaching the index or a rules file fails the build, publishing nothing', () => {
   const remembered = '- [m-0123456789abcdef] (reported) the gate lives in rebase-gate.js';
   const spec = dataSpec({ rules: [remembered] });
-  const plan = planPackBuild(spec, [dataFile('MEMORY.md', `# Glissa memory\n\n${remembered}\n`)], { builtAt: BUILT_AT });
+  const plan = planPackBuild(spec, [dataFile('MEMORY.md', `# Glimmervoid memory\n\n${remembered}\n`)], { builtAt: BUILT_AT });
   assert.equal(plan.ok, false);
   assert.deepEqual(plan.outputs, []);
   assert.equal(plan.errors.some((error) => error.includes('instruction-tier')), true);
@@ -744,7 +744,7 @@ test('an unfilled template stub in any delivered source fails with a named error
 });
 
 test('a data build stays deterministic: the same bytes plan the same version', () => {
-  const files = [dataFile('MEMORY.md', '# Glissa memory\n\n- [m-0123456789abcdef] (model) something\n')];
+  const files = [dataFile('MEMORY.md', '# Glimmervoid memory\n\n- [m-0123456789abcdef] (model) something\n')];
   const first = planPackBuild(dataSpec(), files, { builtAt: BUILT_AT });
   const second = planPackBuild(dataSpec(), files, { builtAt: '2027-01-01T00:00:00.000Z' });
   assert.equal(first.manifest?.version, second.manifest?.version);
@@ -767,8 +767,8 @@ function variantSpec(overrides = {}) {
     perProjectVariants: true,
     rules: undefined,
     sources: [
-      { path: '{{glissaHome}}/memory/dist/current/MEMORY.md', data: true, optional: true },
-      { path: '{{glissaHome}}/memory/dist/current/projects/{{projectSlug}}.md', data: true },
+      { path: '{{glimmervoidHome}}/memory/dist/current/MEMORY.md', data: true, optional: true },
+      { path: '{{glimmervoidHome}}/memory/dist/current/projects/{{projectSlug}}.md', data: true },
     ],
     ...overrides,
   });
@@ -795,7 +795,7 @@ test('{{projectSlug}} is refused unless the spec declares perProjectVariants', (
 
 test('a {{projectSlug}} source must declare itself data, like every other runtime path', () => {
   const spec = variantSpec({
-    sources: [{ path: '{{glissaHome}}/memory/dist/current/projects/{{projectSlug}}.md' }],
+    sources: [{ path: '{{glimmervoidHome}}/memory/dist/current/projects/{{projectSlug}}.md' }],
   });
   const check = validatePackSpec(spec);
   assert.equal(check.ok, false);
@@ -810,7 +810,7 @@ test('{{projectSlug}} may not anchor a pattern and may not carry a .. segment', 
   assert.equal(anchored.errors.some((error) => error.includes('never the pattern')), true);
 
   const escaping = validatePackSpec(variantSpec({
-    sources: [{ path: '{{glissaHome}}/memory/../../{{projectSlug}}.md', data: true }],
+    sources: [{ path: '{{glimmervoidHome}}/memory/../../{{projectSlug}}.md', data: true }],
   }));
   assert.equal(escaping.ok, false);
   assert.equal(escaping.errors.some((error) => error.includes('".." segment')), true);
@@ -818,7 +818,7 @@ test('{{projectSlug}} may not anchor a pattern and may not carry a .. segment', 
 
 test('perProjectVariants without a project-scoped source is a spec error, not N identical packs', () => {
   const check = validatePackSpec(variantSpec({
-    sources: [{ path: '{{glissaHome}}/memory/dist/current/MEMORY.md', data: true }],
+    sources: [{ path: '{{glimmervoidHome}}/memory/dist/current/MEMORY.md', data: true }],
   }));
   assert.equal(check.ok, false);
   assert.equal(check.errors.some((error) => error.includes('no source names')), true);
@@ -828,7 +828,7 @@ test('a distill entry may not name {{projectSlug}}: a distill lane has no varian
   const check = validatePackSpec(variantSpec({
     distill: [{
       output: 'sources/derived.md',
-      sources: [{ path: '{{glissaHome}}/memory/dist/current/projects/{{projectSlug}}.md', data: true }],
+      sources: [{ path: '{{glimmervoidHome}}/memory/dist/current/projects/{{projectSlug}}.md', data: true }],
       instructions: 'summarize',
     }],
   }));
@@ -837,9 +837,9 @@ test('a distill entry may not name {{projectSlug}}: a distill lane has no varian
 });
 
 test('the variant slug IS the memory projection slug, so a variant resolves its own project layer', () => {
-  const slug = projectVariantSlug('/repos/a/glissa');
-  assert.equal(slug, projectFileSlug(normalizeProjectTag('/repos/a/glissa')));
-  assert.notEqual(slug, projectVariantSlug('/repos/b/glissa'));
+  const slug = projectVariantSlug('/repos/a/glimmervoid');
+  assert.equal(slug, projectFileSlug(normalizeProjectTag('/repos/a/glimmervoid')));
+  assert.notEqual(slug, projectVariantSlug('/repos/b/glimmervoid'));
   assert.equal(projectVariantSlug(''), null);
   assert.equal(variantPackName('memory', slug), `memory-${slug}`);
   assert.equal(variantPackName('memory', null), null);
@@ -855,11 +855,11 @@ test('a plain spec plans exactly one build of itself', () => {
 
 test('a group plans its base plus one flattened pack per project', () => {
   const projects = [
-    project('p1', '/repos/a/glissa'),
+    project('p1', '/repos/a/glimmervoid'),
     project('p2', '/repos/b/other'),
   ];
   const plan = planPackVariants(variantSpec(), projects);
-  const slugA = projectVariantSlug('/repos/a/glissa');
+  const slugA = projectVariantSlug('/repos/a/glimmervoid');
   const slugB = projectVariantSlug('/repos/b/other');
   assert.deepEqual(plan.builds.map((build) => build.name), ['demo', `demo-${slugA}`, `demo-${slugB}`]);
 
@@ -884,21 +884,21 @@ test('a consuming project with no usable path is warned about and delivered the 
 
 test('two projects on one path derive one variant, not two racing builds of the same name', () => {
   const plan = planPackVariants(variantSpec(), [
-    project('p1', '/repos/a/glissa'),
-    project('p2', '/repos/a/glissa'),
+    project('p1', '/repos/a/glimmervoid'),
+    project('p2', '/repos/a/glimmervoid'),
   ]);
   assert.equal(plan.builds.length, 2);
 });
 
 test('packVariantProjects carries id, name and path only: a stale packs key is ignored', () => {
   const projects = packVariantProjects({
-    projects: [{ id: 'p1', name: 'glissa', path: '/repos/a', packs: ['demo'] }],
+    projects: [{ id: 'p1', name: 'glimmervoid', path: '/repos/a', packs: ['demo'] }],
   });
-  assert.deepEqual(projects, [{ id: 'p1', name: 'glissa', path: '/repos/a' }]);
+  assert.deepEqual(projects, [{ id: 'p1', name: 'glimmervoid', path: '/repos/a' }]);
 });
 
 test('a variant carrying another project layer fails the build, publishing nothing', () => {
-  const slugA = projectVariantSlug('/repos/a/glissa');
+  const slugA = projectVariantSlug('/repos/a/glimmervoid');
   const slugB = projectVariantSlug('/repos/b/other');
   const spec = validSpec({ name: `demo-${slugA}`, rules: undefined, sources: [{ glob: 'projects/*.md', data: true }] });
   const ours = { relPath: `${slugA}.md`, content: '- [m-0123456789abcdef] (model) ours\n', sourceIndex: 0 };
@@ -914,13 +914,13 @@ test('a variant carrying another project layer fails the build, publishing nothi
 });
 
 test('a project-scoped source rejects an unknown project layer', () => {
-  const slug = projectVariantSlug('/repos/a/glissa');
+  const slug = projectVariantSlug('/repos/a/glimmervoid');
   const spec = validSpec({
     perProjectVariants: true,
     rules: undefined,
     sources: [{ glob: 'projects/*.md', exclude: [`projects/{{projectSlug}}.md`], data: true }],
   });
-  const variants = planPackVariants(spec, [project('p1', '/repos/a/glissa')]);
+  const variants = planPackVariants(spec, [project('p1', '/repos/a/glimmervoid')]);
   const variantBuild = variants.builds.find((build) => build.projectSlug === slug);
   const retiredSlug = 'retired-12345678';
   const files = [{ relPath: `${retiredSlug}.md`, sourcePath: `projects/${retiredSlug}.md`, content: 'retired\n', sourceIndex: 0 }];
@@ -932,7 +932,7 @@ test('a project-scoped source rejects an unknown project layer', () => {
 });
 
 test('the base build refuses any project layer at all: it is the pack every consumer shares', () => {
-  const slugA = projectVariantSlug('/repos/a/glissa');
+  const slugA = projectVariantSlug('/repos/a/glimmervoid');
   const spec = validSpec({ rules: undefined, sources: [{ glob: 'projects/*.md', data: true }] });
   const files = [{ relPath: `${slugA}.md`, content: '- [m-0123456789abcdef] (model) ours\n', sourceIndex: 0 }];
   const plan = planPackBuild(spec, files, {
@@ -952,14 +952,14 @@ test('a group base manifest says so and a variant manifest names its group and p
   assert.equal(base.manifest?.perProjectVariants, true);
   assert.equal(base.manifest?.group, undefined);
 
-  const variant = planPackBuild(validSpec({ name: 'demo-glissa-12345678', rules: undefined }), [sourceFile('a.md', 'x')], {
+  const variant = planPackBuild(validSpec({ name: 'demo-glimmervoid-12345678', rules: undefined }), [sourceFile('a.md', 'x')], {
     builtAt: BUILT_AT,
-    variant: { group: 'demo', isGroupBase: false, projectId: 'p1', projectSlug: 'glissa-12345678', foreignSlugs: [] },
+    variant: { group: 'demo', isGroupBase: false, projectId: 'p1', projectSlug: 'glimmervoid-12345678', foreignSlugs: [] },
   });
   assert.equal(variant.manifest?.perProjectVariants, undefined);
   assert.equal(variant.manifest?.group, 'demo');
   assert.equal(variant.manifest?.projectId, 'p1');
-  assert.equal(variant.manifest?.projectSlug, 'glissa-12345678');
+  assert.equal(variant.manifest?.projectSlug, 'glimmervoid-12345678');
 });
 
 test('a plain build is byte-identical to the pre-variant one: no variant fields, same version', () => {
@@ -977,8 +977,8 @@ function builtManifest(extra = {}) {
 }
 
 test('a pack whose sources live inside the consumer project is refused as self-referential', () => {
-  const manifest = builtManifest({ sourceRoots: ['/home/dev/glissa/docs'] });
-  const verdict = decidePackDelivery({ manifest, projectPath: '/home/dev/glissa' });
+  const manifest = builtManifest({ sourceRoots: ['/home/dev/glimmervoid/docs'] });
+  const verdict = decidePackDelivery({ manifest, projectPath: '/home/dev/glimmervoid' });
   assert.equal(verdict.deliver, false);
   assert.equal(verdict.reason, DELIVERY_SKIP_SELF_REFERENTIAL);
   assert.equal((verdict.detail ?? '').includes('/home/dev'), false, 'the detail reaches a paired phone, so it carries no path');
@@ -994,26 +994,26 @@ test('the project path itself, and a Windows-shaped one, count as inside it', ()
 });
 
 test('a sibling directory sharing a prefix is not inside the project', () => {
-  const verdict = decidePackDelivery({ manifest: builtManifest({ sourceRoots: ['/home/dev/glissa-notes'] }), projectPath: '/home/dev/glissa' });
+  const verdict = decidePackDelivery({ manifest: builtManifest({ sourceRoots: ['/home/dev/glimmervoid-notes'] }), projectPath: '/home/dev/glimmervoid' });
   assert.equal(verdict.deliver, true);
 });
 
 test('a packs-relative source root is judged against the packs dir it was recorded from', () => {
   const manifest = builtManifest({ sourceRoots: ['../docs'] });
-  assert.equal(decidePackDelivery({ manifest, projectPath: '/home/dev/glissa', packsDir: '/home/dev/glissa/packs' }).deliver, false);
-  assert.equal(decidePackDelivery({ manifest, projectPath: '/home/dev/other', packsDir: '/home/dev/glissa/packs' }).deliver, true);
+  assert.equal(decidePackDelivery({ manifest, projectPath: '/home/dev/glimmervoid', packsDir: '/home/dev/glimmervoid/packs' }).deliver, false);
+  assert.equal(decidePackDelivery({ manifest, projectPath: '/home/dev/other', packsDir: '/home/dev/glimmervoid/packs' }).deliver, true);
 });
 
 test('a relative source root with no packs dir to resolve against decides nothing', () => {
   const manifest = builtManifest({ sourceRoots: ['../docs'] });
-  assert.equal(decidePackDelivery({ manifest, projectPath: '/home/dev/glissa' }).deliver, true);
+  assert.equal(decidePackDelivery({ manifest, projectPath: '/home/dev/glimmervoid' }).deliver, true);
 });
 
 test('a legacy manifest that recorded no source roots still delivers', () => {
-  assert.equal(decidePackDelivery({ manifest: builtManifest(), projectPath: '/home/dev/glissa' }).deliver, true);
+  assert.equal(decidePackDelivery({ manifest: builtManifest(), projectPath: '/home/dev/glimmervoid' }).deliver, true);
 });
 
-test('a build carrying only the Glissa-authored index is refused as empty', () => {
+test('a build carrying only the Glimmervoid-authored index is refused as empty', () => {
   const verdict = decidePackDelivery({ manifest: builtManifest({ sources: [], rules: [], skills: [] }) });
   assert.equal(verdict.deliver, false);
   assert.equal(verdict.reason, DELIVERY_SKIP_EMPTY);

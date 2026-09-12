@@ -50,7 +50,7 @@ const URI = 'file:///tmp/plan-visions.md';
 const TEXT = '# Title\n\nA plan with three lines.\n';
 
 function tempFile(contents: string | null) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-visions-result-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-visions-result-'));
   const file = path.join(dir, RESULT_FILE);
   if (contents != null) fs.writeFileSync(file, contents, 'utf8');
   return { file, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
@@ -96,7 +96,7 @@ test('a COMMENTS verdict whose every entry is junk reports NONE and says why', a
 });
 
 test('a missing, unparsable, non-object or unknown-verdict file is an ERROR, never a comment', async (t) => {
-  const missing = path.join(os.tmpdir(), `glissa-visions-absent-${process.pid}.json`);
+  const missing = path.join(os.tmpdir(), `glimmervoid-visions-absent-${process.pid}.json`);
   assert.deepEqual(await readCommentsResult(missing), {
     verdict: 'ERROR', comments: [], diagnostics: [], intent: null, hand: null, outOfRange: 0, errorSource: 'transport', reason: 'no readable result file',
   });
@@ -108,7 +108,7 @@ test('a missing, unparsable, non-object or unknown-verdict file is an ERROR, nev
   const unparsable = await readCommentsResult(bad.file);
   assert.equal(unparsable.errorSource, 'session');
   assert.equal(unparsable.reason, 'result file is not JSON');
-  const absent = await readCommentsResult(path.join(os.tmpdir(), `glissa-visions-gone-${process.pid}.json`));
+  const absent = await readCommentsResult(path.join(os.tmpdir(), `glimmervoid-visions-gone-${process.pid}.json`));
   assert.equal(
     absent.errorSource, 'transport',
     'NO file is the rate-limit signature the backoff exists to catch, so it stays transport',
@@ -160,7 +160,7 @@ test('onBytesRead reports what was read without changing the result shape', asyn
   });
   assert.deepEqual(sizes, [Buffer.byteLength(content)]);
 
-  const missing = path.join(os.tmpdir(), `glissa-visions-absent-${process.pid}.json`);
+  const missing = path.join(os.tmpdir(), `glimmervoid-visions-absent-${process.pid}.json`);
   const missed: number[] = [];
   assert.equal((await readCommentsResult(missing, { onBytesRead: (bytes) => missed.push(bytes) })).verdict, 'ERROR');
   assert.deepEqual(missed, []);
@@ -267,7 +267,7 @@ function dispatcherWithSpawn(spawnSession: VisionsSpawn, overrides: DispatcherOp
   const dispatch = createVisionsDispatcher({
     spawnSession,
     makeWorkDir: async () => {
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-visions-test-'));
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-visions-test-'));
       workDirs.push(dir);
       return dir;
     },
@@ -305,7 +305,7 @@ test('a session that writes the result file yields its comments, and the work di
   });
 
   assert.equal(seen.length, 1);
-  assert.match(promptOnDisk, /<<<GLISSA-INTENT-[0-9A-F]{16}\na plan doc about the spawn path\n>>>GLISSA-INTENT-/);
+  assert.match(promptOnDisk, /<<<GLIMMERVOID-INTENT-[0-9A-F]{16}\na plan doc about the spawn path\n>>>GLIMMERVOID-INTENT-/);
   assert.equal(spawnAt(seen, 0).id, `visions:${URI}`);
   assert.equal(spawnAt(seen, 0).model, 'sonnet', 'the configured model reaches the spawn');
   assert.equal(spawnAt(seen, 0).cwd, workDirs[0], 'the session runs in the throwaway dir, never a repo');

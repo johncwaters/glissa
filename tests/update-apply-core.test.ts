@@ -105,11 +105,11 @@ test('planSteps links dependencies when the lockfile did not change', () => {
 });
 
 test('planHandOffRenames orders dist before dependency replacement', () => {
-  assert.deepEqual(planHandOffRenames({ root: '/root', stagingPath: '/root/.glissa/update/next', lockfileChanged: true }).renames, [
-    { from: '/root/dist', to: `/root/.glissa/update/${PREVIOUS_DIST_BACKUP_NAME}`, artifact: 'dist' },
-    { from: '/root/.glissa/update/next/dist', to: '/root/dist', artifact: 'dist' },
-    { from: '/root/node_modules', to: `/root/.glissa/update/${PREVIOUS_DEPENDENCIES_BACKUP_NAME}`, artifact: 'node_modules' },
-    { from: '/root/.glissa/update/next/node_modules', to: '/root/node_modules', artifact: 'node_modules' },
+  assert.deepEqual(planHandOffRenames({ root: '/root', stagingPath: '/root/.glimmervoid/update/next', lockfileChanged: true }).renames, [
+    { from: '/root/dist', to: `/root/.glimmervoid/update/${PREVIOUS_DIST_BACKUP_NAME}`, artifact: 'dist' },
+    { from: '/root/.glimmervoid/update/next/dist', to: '/root/dist', artifact: 'dist' },
+    { from: '/root/node_modules', to: `/root/.glimmervoid/update/${PREVIOUS_DEPENDENCIES_BACKUP_NAME}`, artifact: 'node_modules' },
+    { from: '/root/.glimmervoid/update/next/node_modules', to: '/root/node_modules', artifact: 'node_modules' },
   ]);
 });
 

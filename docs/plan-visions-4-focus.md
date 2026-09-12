@@ -232,7 +232,7 @@ The one slice that removes "random unrelated" outright. Ship first, alone.
   leave zero lifted threads while the canon records, keyed by path, survive.
   The prefix carries NO square brackets: `sanitizeProjectionText` rewrites `[` and `]` to parentheses
   on every line `projectionBulletFrom` renders, which is the delivered bullet as much as the projected
-  one, and brackets there are reserved for the Glissa-authored id and rank. A
+  one, and brackets there are reserved for the Glimmervoid-authored id and rank. A
   schema-level thread field was specified and withdrawn (review, 2026-08-27): appending to the
   positional signature payload forces a re-signing migration of every row on disk, and that cost
   belongs to a milestone that needs it, which none of M19 to M21 does.

@@ -18,20 +18,20 @@ interface Fixture {
 }
 
 function makeTempRoot(): Fixture {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-update-'));
-  const packageRoot = path.join(dir, 'node_modules', 'glissa');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-update-'));
+  const packageRoot = path.join(dir, 'node_modules', 'glimmervoid');
   fs.mkdirSync(packageRoot, { recursive: true });
-  fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({ name: 'glissa', version: '0.20.0' }), 'utf8');
+  fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({ name: 'glimmervoid', version: '0.20.0' }), 'utf8');
   return { dir, packageRoot, statePath: path.join(dir, 'update-check.json') };
 }
 
 function writeLockfile(packageRoot: string, resolved: string): void {
   const lockfilePath = path.join(packageRoot, '..', '.package-lock.json');
-  fs.writeFileSync(lockfilePath, JSON.stringify({ packages: { 'node_modules/glissa': { resolved } } }), 'utf8');
+  fs.writeFileSync(lockfilePath, JSON.stringify({ packages: { 'node_modules/glimmervoid': { resolved } } }), 'utf8');
 }
 
 function writeGitHead(packageRoot: string, gitHead: string): void {
-  fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({ name: 'glissa', version: '0.20.0', gitHead }), 'utf8');
+  fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({ name: 'glimmervoid', version: '0.20.0', gitHead }), 'utf8');
 }
 
 function tagsStdout({ version = '0.21.0', tagSha = SHA_RELEASE_TAG, commitSha = SHA_RELEASE_COMMIT } = {}): string {
@@ -104,14 +104,14 @@ function baseOptions(fixture: Fixture, overrides: Partial<CheckForUpdateOptions>
 
 test('reads the installed commit from the hidden npm lockfile and reports the pinned npm-global command', async () => {
   const fixture = makeTempRoot();
-  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glissa.git#${SHA_LOCAL}`);
+  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glimmervoid.git#${SHA_LOCAL}`);
   const result = await checkForUpdate(baseOptions(fixture));
   assert.equal(statusOf(result).updateAvailable, true);
   assert.equal(statusOf(result).currentSha, SHA_LOCAL);
   assert.equal(statusOf(result).latestSha, SHA_RELEASE_COMMIT);
   assert.equal(statusOf(result).flavor, 'npm-global');
-  assert.equal(statusOf(result).command, 'npm install -g github:johncwaters/glissa#v0.21.0 --allow-git=root');
-  assert.equal(statusOf(result).releaseUrl, 'https://github.com/johncwaters/glissa/releases/tag/v0.21.0');
+  assert.equal(statusOf(result).command, 'npm install -g github:johncwaters/glimmervoid#v0.21.0 --allow-git=root');
+  assert.equal(statusOf(result).releaseUrl, 'https://github.com/johncwaters/glimmervoid/releases/tag/v0.21.0');
 });
 
 test('falls back to package.json gitHead when no lockfile entry is readable', async () => {
@@ -197,7 +197,7 @@ test('an unresolvable installed commit still compares versions', async () => {
   assert.equal(statusOf(result).currentSha, null);
   assert.equal(statusOf(result).latestSha, SHA_RELEASE_COMMIT);
   assert.equal(statusOf(result).flavor, 'unknown');
-  assert.equal(statusOf(result).releaseUrl, 'https://github.com/johncwaters/glissa/releases/tag/v0.21.0');
+  assert.equal(statusOf(result).releaseUrl, 'https://github.com/johncwaters/glimmervoid/releases/tag/v0.21.0');
 });
 
 test('a broken git binary never throws, it uses releases/latest as fallback', async () => {
@@ -214,7 +214,7 @@ test('a broken git binary never throws, it uses releases/latest as fallback', as
 
 test('git ls-remote tags is primary and releases/latest is not fetched when it succeeds', async () => {
   const fixture = makeTempRoot();
-  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glissa.git#${SHA_LOCAL}`);
+  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glimmervoid.git#${SHA_LOCAL}`);
   let fetchCalls = 0;
   const result = await checkForUpdate(baseOptions(fixture, {
     fetchFn: async () => {
@@ -229,7 +229,7 @@ test('git ls-remote tags is primary and releases/latest is not fetched when it s
 
 test('releases/latest is the fallback when git ls-remote tags fails', async () => {
   const fixture = makeTempRoot();
-  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glissa.git#${SHA_LOCAL}`);
+  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glimmervoid.git#${SHA_LOCAL}`);
   const requested: { url: string; accept: string | null }[] = [];
   const result = await checkForUpdate(baseOptions(fixture, {
     runCommand: fakeGit({}),
@@ -241,7 +241,7 @@ test('releases/latest is the fallback when git ls-remote tags fails', async () =
   assert.equal(statusOf(result).latest, '0.21.0');
   assert.equal(statusOf(result).latestSha, null);
   assert.equal(requested.length, 1);
-  assert.equal(requested[0].url, 'https://api.github.com/repos/johncwaters/glissa/releases/latest');
+  assert.equal(requested[0].url, 'https://api.github.com/repos/johncwaters/glimmervoid/releases/latest');
   assert.equal(requested[0].accept, 'application/vnd.github+json');
 });
 
@@ -266,7 +266,7 @@ test('records a failed status when the releases/latest fallback body is not JSON
 
 test('same version is no update even when shas differ', async () => {
   const fixture = makeTempRoot();
-  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glissa.git#${SHA_LOCAL}`);
+  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glimmervoid.git#${SHA_LOCAL}`);
   const result = await checkForUpdate(baseOptions(fixture, {
     currentVersion: '0.21.0',
   }));
@@ -277,7 +277,7 @@ test('same version is no update even when shas differ', async () => {
 
 test('records a failed status when no latest release version could be read', async () => {
   const fixture = makeTempRoot();
-  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glissa.git#${SHA_LOCAL}`);
+  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glimmervoid.git#${SHA_LOCAL}`);
   const result = await checkForUpdate(baseOptions(fixture, {
     runCommand: fakeGit({}),
     fetchFn: fakeFetch({ throws: new Error('network down') }),
@@ -329,7 +329,7 @@ test('aborts an in-flight request when the caller aborts', async () => {
 
 test('an unwritable state path never breaks the check', async () => {
   const fixture = makeTempRoot();
-  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glissa.git#${SHA_LOCAL}`);
+  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glimmervoid.git#${SHA_LOCAL}`);
   const result = await checkForUpdate(baseOptions(fixture, {
     statePath: path.join(fixture.packageRoot, 'package.json', 'nested', 'state.json'),
   }));
@@ -338,7 +338,7 @@ test('an unwritable state path never breaks the check', async () => {
 
 test('a real check persists the latest version and nullable sha', async () => {
   const fixture = makeTempRoot();
-  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glissa.git#${SHA_LOCAL}`);
+  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glimmervoid.git#${SHA_LOCAL}`);
   await checkForUpdate(baseOptions(fixture));
   const state = JSON.parse(fs.readFileSync(fixture.statePath, 'utf8'));
   assert.deepEqual(state, {
@@ -370,7 +370,7 @@ test('a releases/latest fallback persists a nullable sha', async () => {
 
 test('a fresh state is reused and no network call is made', async () => {
   const fixture = makeTempRoot();
-  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glissa.git#${SHA_LOCAL}`);
+  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glimmervoid.git#${SHA_LOCAL}`);
   fs.writeFileSync(fixture.statePath, JSON.stringify({
     lastCheckAt: 1000,
     channel: 'release',
@@ -416,7 +416,7 @@ test('a fresh cache with no channel is ignored', async () => {
 
 test('a stale state is ignored and refreshed', async () => {
   const fixture = makeTempRoot();
-  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glissa.git#${SHA_LOCAL}`);
+  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glimmervoid.git#${SHA_LOCAL}`);
   fs.writeFileSync(fixture.statePath, JSON.stringify({ lastCheckAt: 1000, latestVersion: '0.19.0', latestSha: SHA_LOCAL }), 'utf8');
   const staleNow = 1000 + 7 * 60 * 60 * 1000;
   const result = await checkForUpdate(baseOptions(fixture, { now: staleNow }));
@@ -429,7 +429,7 @@ test('a stale state is ignored and refreshed', async () => {
 
 test('a corrupt state file is ignored rather than fatal', async () => {
   const fixture = makeTempRoot();
-  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glissa.git#${SHA_LOCAL}`);
+  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glimmervoid.git#${SHA_LOCAL}`);
   fs.writeFileSync(fixture.statePath, 'not json', 'utf8');
   let lsRemoteCalls = 0;
   const runCommand: RunCommand = async (file: string, ...rest: unknown[]) => {
@@ -443,7 +443,7 @@ test('a corrupt state file is ignored rather than fatal', async () => {
 
 test('a corrupt state file is replaced after a successful check', async () => {
   const fixture = makeTempRoot();
-  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glissa.git#${SHA_LOCAL}`);
+  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glimmervoid.git#${SHA_LOCAL}`);
   fs.writeFileSync(fixture.statePath, 'not json', 'utf8');
   const result = await checkForUpdate(baseOptions(fixture));
   assert.equal(statusOf(result).latestSha, SHA_RELEASE_COMMIT);
@@ -512,7 +512,7 @@ test('main channel reports no-upstream without querying a remote tip', async () 
 
 test('a cache entry is ignored when its channel does not match', async () => {
   const fixture = makeTempRoot();
-  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glissa.git#${SHA_LOCAL}`);
+  writeLockfile(fixture.packageRoot, `git+https://github.com/johncwaters/glimmervoid.git#${SHA_LOCAL}`);
   fs.writeFileSync(fixture.statePath, JSON.stringify({
     lastCheckAt: 1000,
     channel: 'main',

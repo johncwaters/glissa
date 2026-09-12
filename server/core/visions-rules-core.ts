@@ -1,5 +1,5 @@
 const WARNING = 2;
-const SOURCE = 'glissa-visions';
+const SOURCE = 'glimmervoid-visions';
 const FENCE = '```';
 const FENCE_RE = /^(\s*)```/;
 const HEADING_RE = /^( {0,3})(#{1,6})(?:\s|$)/;

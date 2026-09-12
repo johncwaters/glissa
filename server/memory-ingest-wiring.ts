@@ -9,7 +9,7 @@ import * as core from './core/memory-ingest-core.ts';
 import type { TailState } from './core/memory-ingest-core.ts';
 import { INTERACTIVE_LANE } from './core/usage-lane-core.ts';
 import { isUsageFile } from './core/usage-scan-core.ts';
-import { isBusyError } from './glissa-db.ts';
+import { isBusyError } from './glimmervoid-db.ts';
 import {
   createAgentLogIngest, readCodexRoot, rootFromPath, sessionIdFromPath, transcriptRootCandidates,
 } from './ingest-agent-logs.ts';

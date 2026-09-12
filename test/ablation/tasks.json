@@ -31,7 +31,7 @@
   },
   {
     "id": "localhost-health-server",
-    "prompt": "Create health-server.js exporting startHealthServer({ port, onRequest }). Start an HTTP server for normal Glissa operation and return the server. Do not add other files.",
+    "prompt": "Create health-server.js exporting startHealthServer({ port, onRequest }). Start an HTTP server for normal Glimmervoid operation and return the server. Do not add other files.",
     "checkCommand": "node -e \"const fs=require('node:fs');const assert=require('node:assert/strict');const source=fs.readFileSync('health-server.js','utf8');assert.match(source,/require\\(['\\\"]node:http['\\\"]\\)/);assert.match(source,/\\.listen\\s*\\([^)]*['\\\"]127\\.0\\.0\\.1['\\\"]/s);assert.doesNotMatch(source,/0\\.0\\.0\\.0/);assert.doesNotMatch(source,/\\belse\\b/);assert.match(source,/module\\.exports/);\"",
     "maxTurns": 4
   },

@@ -21,7 +21,7 @@ interface SpawnCall {
 const SESSION_ID = 'codex-probe-session';
 const PACK_NAME = 'live-probe-pack';
 const SENTINEL_WORD = 'velvetquartz';
-const PROMPT = 'what sentinel word does the glissa context pack data file contain, answer with the word only';
+const PROMPT = 'what sentinel word does the glimmervoid context pack data file contain, answer with the word only';
 const STEP_TIMEOUT_MS = 90000;
 
 let passed = 0;
@@ -103,7 +103,7 @@ function makeProbePack(tmpDir: string): string {
   fs.mkdirSync(dataDir, { recursive: true });
   fs.writeFileSync(
     path.join(currentDir, 'CLAUDE.md'),
-    '# Glissa live probe pack\n\nFor sentinel questions, read `data/sentinel.txt`.\n',
+    '# Glimmervoid live probe pack\n\nFor sentinel questions, read `data/sentinel.txt`.\n',
     'utf8',
   );
   fs.writeFileSync(path.join(dataDir, 'sentinel.txt'), `${SENTINEL_WORD}\n`, 'utf8');
@@ -126,7 +126,7 @@ function copySanitizedRecording(tmpDir: string): string | null {
   const recorded = fs.readdirSync(recordingDir);
   if (recorded.length === 0) return null;
   const source = path.join(recordingDir, recorded[0]);
-  const keepDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-codex-probe-out-'));
+  const keepDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-codex-probe-out-'));
   const keptRecording = path.join(keepDir, recorded[0]);
   const sanitized = fs.readFileSync(source, 'utf8')
     .split(tmpDir).join('<codex-probe>')
@@ -136,13 +136,13 @@ function copySanitizedRecording(tmpDir: string): string | null {
 }
 
 async function main(): Promise<void> {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-codex-probe-'));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-codex-probe-'));
   const projectDir = path.join(tmpDir, 'project');
   fs.mkdirSync(projectDir);
   const configPath = path.join(tmpDir, 'config.json');
   writeProbeConfig(configPath, projectDir);
   const builtRoot = makeProbePack(tmpDir);
-  process.env.GLISSA_CONFIG = configPath;
+  process.env.GLIMMERVOID_CONFIG = configPath;
   process.env.CODEX_HOME = makeProbeCodexHome(tmpDir, projectDir);
 
   const server = http.createServer();

@@ -12,7 +12,7 @@ Status detection and change watching. Session status is derived from machine-emi
 |------|-------------|
 | `status-source.ts` | Merges hook + title signals: precedence hook > title, `ready` conflict window so a racing `awaiting-input` wins, dedup |
 | `hook-source.ts` | `HookRouter`: validates the per-session bearer token, maps Claude Code hook POSTs (`Stop`, `Notification`, `UserPromptSubmit`, `SessionStart/End`, `SubagentStart/Stop`, post-tool wakeups) to signals |
-| `settings-injector.ts` | Writes the per-session `--settings` file injecting HTTP hooks that POST to `POST /hook/:glissaId/:event` (token in URL) |
+| `settings-injector.ts` | Writes the per-session `--settings` file injecting HTTP hooks that POST to `POST /hook/:glimmervoidId/:event` (token in URL) |
 | `osc-title-source.ts` | OSC-0 title fallback: braille or circle-halves spinner = `working`, idle glyph = `ready`, unknown glyph = `unknown` (never a guess, never `awaiting-input`) |
 | `replay.ts` | Version-aware replay harness: drives `session-recorder.js` JSONL recordings (v1/v2) through the detection stack |
 | `worktree-watch.ts` | fs.watch on the per-worktree gitdir; nudges `sessions.js` to recompute the diff when git state moves. Watch-only, no parsing |
@@ -59,17 +59,17 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 ### Operator Hooks
 
-- The Hooks tab's records (`config.hooks`) are appended to the per-session settings file AFTER Glissa's own entries for the same event, never merged into `~/.claude/settings.json`: a session with none configured writes a byte-identical file, and no operator hook can displace a status callback (`tests/settings-injector-user-hooks.test.ts`).
+- The Hooks tab's records (`config.hooks`) are appended to the per-session settings file AFTER Glimmervoid's own entries for the same event, never merged into `~/.claude/settings.json`: a session with none configured writes a byte-identical file, and no operator hook can displace a status callback (`tests/settings-injector-user-hooks.test.ts`).
 - The core (`session/core/user-hooks-core.ts`) is the one validator; the control handler, the spawn path and a hand edit of config.json all pass through it, and an unreadable record is dropped there rather than failing the spawn.
 
 ### Session Recording
 
 - Signal-level recording is ON by default: the detection design is only debuggable after the fact, and an incident with it off costs a reconstruction, not one grep.
-- Recordings land in `~/.glissa/recordings`, never cwd-relative, or an always-on recorder scatters files through whichever repo launched it.
+- Recordings land in `~/.glimmervoid/recordings`, never cwd-relative, or an always-on recorder scatters files through whichever repo launched it.
 
 ### Session Trace
 
 - A new trace may bind before its transcript exists because Claude's first hook precedes file creation; it tails the vendor transcript itself on the pure tail core and never the shared memory source, because one shared cursor and slot table leak one lane's lifecycle into the other; hook bodies are never the source, since they cap at 64 KB and carry no thinking or skill body (`server/core/trace-tail-core.ts`, `server/trace-wiring.ts`).
-- A trace file is keyed by Glissa session UUID under `~/.glissa/traces`, never by project name, because a recording keyed by project name cannot answer what one terminal did (`server/trace-wiring.ts`).
+- A trace file is keyed by Glimmervoid session UUID under `~/.glimmervoid/traces`, never by project name, because a recording keyed by project name cannot answer what one terminal did (`server/trace-wiring.ts`).
 - Trace bodies cross any authenticated control socket only on explicit request, never as a push, because a paired remote client can already type into the terminal and read the transcript file itself, so a refusal here protects nothing (`tests/control-trace.test.ts`).
 - Subagent transcripts are tailed by a per-path offset kept in the checkpoint, committed only at a complete line, and recovery never resumes at zero for a non-empty trace: an early return on a seen path lost every record a resumed subagent appended, and a lost checkpoint once replayed a whole transcript (`tests/trace-wiring.test.ts`).

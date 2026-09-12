@@ -51,13 +51,13 @@ interface VisionsScope {
 
 function withVisionsBackend(fn: (scope: VisionsScope) => Promise<void>) {
   return async () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-visions-tab-'));
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-visions-tab-'));
     const cfgPath = path.join(tmpDir, 'config.json');
     fs.writeFileSync(cfgPath, JSON.stringify({
       projects: [{ id: 'harness', name: 'harness', path: '/tmp' }], teams: [], repoRoots: [], visions: { enabled: true },
     }, null, 2), 'utf8');
-    const prevEnv = process.env.GLISSA_CONFIG;
-    process.env.GLISSA_CONFIG = cfgPath;
+    const prevEnv = process.env.GLIMMERVOID_CONFIG;
+    process.env.GLIMMERVOID_CONFIG = cfgPath;
 
     const server = http.createServer();
     const backend = createBackend(server, { staticDir: null });
@@ -73,8 +73,8 @@ function withVisionsBackend(fn: (scope: VisionsScope) => Promise<void>) {
       backend.shutdown();
       server.closeAllConnections();
       await closeServer(server);
-      if (prevEnv == null) delete process.env.GLISSA_CONFIG;
-      if (prevEnv != null) process.env.GLISSA_CONFIG = prevEnv;
+      if (prevEnv == null) delete process.env.GLIMMERVOID_CONFIG;
+      if (prevEnv != null) process.env.GLIMMERVOID_CONFIG = prevEnv;
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   };
@@ -160,11 +160,11 @@ test('a model intent proposal broadcasts and rides the snapshot repair', withVis
 }));
 
 test('a control client connecting with the lane off is told nothing about the visions', async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-visions-off-'));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-visions-off-'));
   const cfgPath = path.join(tmpDir, 'config.json');
   fs.writeFileSync(cfgPath, JSON.stringify({ projects: [], teams: [], repoRoots: [] }, null, 2), 'utf8');
-  const prevEnv = process.env.GLISSA_CONFIG;
-  process.env.GLISSA_CONFIG = cfgPath;
+  const prevEnv = process.env.GLIMMERVOID_CONFIG;
+  process.env.GLIMMERVOID_CONFIG = cfgPath;
 
   const server = http.createServer();
   const backend = createBackend(server, { staticDir: null });
@@ -181,8 +181,8 @@ test('a control client connecting with the lane off is told nothing about the vi
     backend.shutdown();
     server.closeAllConnections();
     await closeServer(server);
-    if (prevEnv == null) delete process.env.GLISSA_CONFIG;
-    if (prevEnv != null) process.env.GLISSA_CONFIG = prevEnv;
+    if (prevEnv == null) delete process.env.GLIMMERVOID_CONFIG;
+    if (prevEnv != null) process.env.GLIMMERVOID_CONFIG = prevEnv;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });

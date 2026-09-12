@@ -67,7 +67,7 @@ test.afterEach(async () => {
 });
 
 function tempDir(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memory-distill-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-memory-distill-'));
   fixtureDirs.push(dir);
   return dir;
 }
@@ -75,7 +75,7 @@ function tempDir(): string {
 function openStore(dir: string, clock: Clock): MemoryStore {
   const store = createMemoryStore({
     dir,
-    dbPath: path.join(dir, 'glissa.db'),
+    dbPath: path.join(dir, 'glimmervoid.db'),
     config: { ...resolveMemoryConfig(null), enabled: true },
     logger: QUIET,
     now: () => clock.at,
@@ -91,7 +91,7 @@ function requireRecord(record: MemoryRecord | null): MemoryRecord {
   return record;
 }
 
-function knowledge(text: string, project: string | null = '/repos/glissa'): KnowledgeInput {
+function knowledge(text: string, project: string | null = '/repos/glimmervoid'): KnowledgeInput {
   return {
     kind: 'knowledge',
     layer: 'episodic',
@@ -111,7 +111,7 @@ function makeLane(store: MemoryStore, clock: Clock, { result = null, onSpawn = n
     config: { ...resolveDistillConfig(config, { memoryEnabled: true }), ...config },
     logger: QUIET,
     now: () => clock.at,
-    makeWorkDir: async () => fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-distill-work-')),
+    makeWorkDir: async () => fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-distill-work-')),
     removeWorkDir: async (dir: string) => fs.rmSync(dir, { recursive: true, force: true }),
     spawnDistill: async ({ prompt, cwd }) => {
       const promptFile = path.join(cwd, PROMPT_FILE);
@@ -177,7 +177,7 @@ test('a DISTILLED run publishes the claims and rotates the fallback build to pre
     const { distiller, spawns } = makeLane(store, clock, {
       result: distilledResult([{
         kind: 'knowledge',
-        project: '/repos/glissa',
+        project: '/repos/glimmervoid',
         rank: 'model',
         ids: [first.id, second.id],
         text: 'the opt-in poller ticks every 15 minutes',
@@ -235,7 +235,7 @@ test('an unreadable or hallucinating result leaves the published build untouched
     clock.at += 2 * HOUR;
     const hallucinated = makeLane(store, clock, {
       result: distilledResult([{
-        kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: ['m-deadbeefdeadbeef'], text: 'invented',
+        kind: 'knowledge', project: '/repos/glimmervoid', rank: 'model', ids: ['m-deadbeefdeadbeef'], text: 'invented',
       }]),
     });
     const report = await hallucinated.distiller.runOnce();
@@ -259,7 +259,7 @@ test('a run past its timeout publishes nothing', async () => {
       config: { ...resolveDistillConfig(null, { memoryEnabled: true }), timeoutSeconds: 60 },
       logger: QUIET,
       now: () => clock.at,
-      makeWorkDir: async () => fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-distill-work-')),
+      makeWorkDir: async () => fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-distill-work-')),
       removeWorkDir: async (workDir) => fs.rmSync(workDir, { recursive: true, force: true }),
       spawnDistill: () => new Promise((resolve) => { setTimeout(resolve, 200); }),
       readResult: async () => distilledResult([]),
@@ -277,7 +277,7 @@ test('an unmoved canon and a canon still being appended to both spawn nothing', 
     const store = openStore(dir, clock);
     const [first] = await seed(store, clock, ['the poller ticks every 15 minutes']);
     const claims = [{
-      kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [first.id], text: 'the poller ticks every 15 minutes',
+      kind: 'knowledge', project: '/repos/glimmervoid', rank: 'model', ids: [first.id], text: 'the poller ticks every 15 minutes',
     }];
     clock.at += 2 * HOUR;
     assert.equal((await makeLane(store, clock, { result: distilledResult(claims) }).distiller.runOnce()).status, 'published');
@@ -300,7 +300,7 @@ test('a distilled build is not re-run before its interval has elapsed', async ()
     const [first] = await seed(store, clock, ['the poller ticks every 15 minutes']);
     clock.at += 2 * HOUR;
     const claims = [{
-      kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [first.id], text: 'the poller ticks every 15 minutes',
+      kind: 'knowledge', project: '/repos/glimmervoid', rank: 'model', ids: [first.id], text: 'the poller ticks every 15 minutes',
     }];
     const lane = makeLane(store, clock, { result: distilledResult(claims) });
     assert.equal((await lane.distiller.runOnce()).status, 'published');
@@ -325,7 +325,7 @@ test('a build that would re-render a locked record is held for review, never pub
       kind: 'preference',
       layer: 'semantic',
       project: null,
-      source: { kind: 'operator', vendor: 'glissa', sessionId: null },
+      source: { kind: 'operator', vendor: 'glimmervoid', sessionId: null },
       text: 'never write else statements',
       locked: true,
     }));
@@ -356,7 +356,7 @@ test('once a distilled build is published the fallback renderer stops overwritin
     clock.at += 2 * HOUR;
     const { distiller } = makeLane(store, clock, {
       result: distilledResult([{
-        kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [first.id], text: 'one distilled claim',
+        kind: 'knowledge', project: '/repos/glimmervoid', rank: 'model', ids: [first.id], text: 'one distilled claim',
       }]),
     });
     assert.equal((await distiller.runOnce()).status, 'published');
@@ -377,7 +377,7 @@ test('a forget forces the expunged text out of a distilled build without waiting
     clock.at += 2 * HOUR;
     const { distiller } = makeLane(store, clock, {
       result: distilledResult([{
-        kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [doomed.id], text: 'the staging passphrase is in the prompt',
+        kind: 'knowledge', project: '/repos/glimmervoid', rank: 'model', ids: [doomed.id], text: 'the staging passphrase is in the prompt',
       }]),
     });
     assert.equal((await distiller.runOnce()).status, 'published');
@@ -409,13 +409,13 @@ test('the scratch cwd carries the prefix the ingest exclusion recognizes', async
       now: () => clock.at,
       spawnDistill: async () => {},
       readResult: async () => distilledResult([{
-        kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [first.id], text: 'one claim',
+        kind: 'knowledge', project: '/repos/glimmervoid', rank: 'model', ids: [first.id], text: 'one claim',
       }]),
     });
 
     const report = await lane.runOnce();
     assert.equal(report.status, 'published');
-    assert.equal(WORK_DIR_PREFIX, 'glissa-memory-distill-');
+    assert.equal(WORK_DIR_PREFIX, 'glimmervoid-memory-distill-');
     assert.equal(isDispatchWorkdir(path.join(os.tmpdir(), `${WORK_DIR_PREFIX}work-ab12`)), true);
 
     for (const tool of ['Read', 'Write', 'Glob', 'Grep']) {
@@ -429,7 +429,7 @@ test('a poisoned manifest cannot walk the read out of the published build', asyn
   const warnings: string[] = [];
     const store = createMemoryStore({
       dir,
-      dbPath: path.join(dir, 'glissa.db'),
+      dbPath: path.join(dir, 'glimmervoid.db'),
       config: { ...resolveMemoryConfig(null), enabled: true },
       logger: { log() {}, warn: (line: string) => { warnings.push(line); } },
       now: () => clock.at,
@@ -467,7 +467,7 @@ test('a run reads only the records above the cursor and moves it once the build 
     clock.at += 2 * HOUR;
     const firstRun = makeLane(store, clock, {
       result: distilledResult([{
-        kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [first.id], text: 'the poller ticks every 15 minutes',
+        kind: 'knowledge', project: '/repos/glimmervoid', rank: 'model', ids: [first.id], text: 'the poller ticks every 15 minutes',
       }]),
     });
     assert.equal((await firstRun.distiller.runOnce()).status, 'published');
@@ -478,7 +478,7 @@ test('a run reads only the records above the cursor and moves it once the build 
     clock.at += 25 * HOUR;
     const secondRun = makeLane(store, clock, {
       result: distilledResult([{
-        kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [second.id], text: 'the poller is opt in',
+        kind: 'knowledge', project: '/repos/glimmervoid', rank: 'model', ids: [second.id], text: 'the poller is opt in',
       }]),
     });
     const report = await secondRun.distiller.runOnce();
@@ -501,7 +501,7 @@ test('a failed run leaves the cursor where it was and counts against the delta w
     clock.at += 2 * HOUR;
     assert.equal((await makeLane(store, clock, {
       result: distilledResult([{
-        kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [first.id], text: 'the poller ticks every 15 minutes',
+        kind: 'knowledge', project: '/repos/glimmervoid', rank: 'model', ids: [first.id], text: 'the poller ticks every 15 minutes',
       }]),
     }).distiller.runOnce()).status, 'published');
     const cursor = store.distillCursorSeq();
@@ -522,7 +522,7 @@ test('a held locked diff blocks the cursor, so the same delta is re-read once th
       kind: 'preference',
       layer: 'semantic',
       project: null,
-      source: { kind: 'operator', vendor: 'glissa', sessionId: null },
+      source: { kind: 'operator', vendor: 'glimmervoid', sessionId: null },
       text: 'never write else statements',
       locked: true,
     }));
@@ -547,7 +547,7 @@ test('a NO_CHANGE verdict publishes nothing and still moves the cursor past what
     clock.at += 2 * HOUR;
     assert.equal((await makeLane(store, clock, {
       result: distilledResult([{
-        kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [first.id], text: 'the poller ticks every 15 minutes',
+        kind: 'knowledge', project: '/repos/glimmervoid', rank: 'model', ids: [first.id], text: 'the poller ticks every 15 minutes',
       }]),
     }).distiller.runOnce()).status, 'published');
     const version = manifestOf(dir).version;
@@ -570,10 +570,10 @@ test('a superseded record loses its claim mechanically, with nothing spawned at 
     assert.equal((await makeLane(store, clock, {
       result: distilledResult([
         {
-          kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [stale.id], text: 'the poller ticks every 5 minutes',
+          kind: 'knowledge', project: '/repos/glimmervoid', rank: 'model', ids: [stale.id], text: 'the poller ticks every 5 minutes',
         },
         {
-          kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [kept.id], text: 'the poller is opt in',
+          kind: 'knowledge', project: '/repos/glimmervoid', rank: 'model', ids: [kept.id], text: 'the poller is opt in',
         },
       ]),
     }).distiller.runOnce()).status, 'published');
@@ -605,7 +605,7 @@ test('a project past its claim threshold is re-distilled in full, and only that 
       maxProjectClaims: 20,
       result: distilledResult([
         ...big.map((entry) => ({
-          kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [entry.id], text: `standing ${entry.text}`,
+          kind: 'knowledge', project: '/repos/glimmervoid', rank: 'model', ids: [entry.id], text: `standing ${entry.text}`,
         })),
         {
           kind: 'knowledge', project: '/repos/other', rank: 'model', ids: [other.id], text: 'a standing claim elsewhere',
@@ -619,7 +619,7 @@ test('a project past its claim threshold is re-distilled in full, and only that 
     const compacting = makeLane(store, clock, {
       maxProjectClaims: 2,
       result: fullResult([{
-        kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: big.map((entry) => entry.id), text: 'one compacted claim',
+        kind: 'knowledge', project: '/repos/glimmervoid', rank: 'model', ids: big.map((entry) => entry.id), text: 'one compacted claim',
       }]),
     });
     const report = await compacting.distiller.runOnce();
@@ -643,7 +643,7 @@ test('the published projection is capped in bytes, whatever the model asked to p
       maxProjectChars: 1200,
       result: distilledResult(seeds.map((entry, index) => ({
         kind: 'knowledge',
-        project: '/repos/glissa',
+        project: '/repos/glimmervoid',
         rank: 'model',
         ids: [entry.id],
         text: `standing ${index} ${'x'.repeat(500)}`,
@@ -663,7 +663,7 @@ test('a compaction that does not shrink its project is refused rather than publi
     const seeds = await seed(store, clock, ['one', 'two', 'three']);
     clock.at += 2 * HOUR;
     const claims = seeds.map((entry) => ({
-      kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [entry.id], text: `standing ${entry.text}`,
+      kind: 'knowledge', project: '/repos/glimmervoid', rank: 'model', ids: [entry.id], text: `standing ${entry.text}`,
     }));
     assert.equal((await makeLane(store, clock, {
       maxProjectClaims: 20, result: distilledResult(claims),
@@ -688,10 +688,10 @@ test('a forget drops the distilled claims, so the cursor falls back and the cano
     assert.equal((await makeLane(store, clock, {
       result: distilledResult([
         {
-          kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [doomed.id], text: 'the staging passphrase is hunter2',
+          kind: 'knowledge', project: '/repos/glimmervoid', rank: 'model', ids: [doomed.id], text: 'the staging passphrase is hunter2',
         },
         {
-          kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [kept.id], text: 'the poller is opt in',
+          kind: 'knowledge', project: '/repos/glimmervoid', rank: 'model', ids: [kept.id], text: 'the poller is opt in',
         },
       ]),
     }).distiller.runOnce()).status, 'published');
@@ -704,7 +704,7 @@ test('a forget drops the distilled claims, so the cursor falls back and the cano
     clock.at += 25 * HOUR;
     const after = makeLane(store, clock, {
       result: distilledResult([{
-        kind: 'knowledge', project: '/repos/glissa', rank: 'model', ids: [kept.id], text: 'the poller is opt in',
+        kind: 'knowledge', project: '/repos/glimmervoid', rank: 'model', ids: [kept.id], text: 'the poller is opt in',
       }]),
     });
     assert.equal((await after.distiller.runOnce()).status, 'published');

@@ -130,7 +130,7 @@ test('upgrade: a refused origin loses on both listeners, before any auth conside
     for (const trust of ['local', 'remote']) {
       assert.deepEqual(
         decideUpgradeAccess({
-          remoteEnabled, trust, origin: 'https://evil.example', allowedOrigins: ['https://glissa.test'],
+          remoteEnabled, trust, origin: 'https://evil.example', allowedOrigins: ['https://glimmervoid.test'],
           authenticated: true,
         }),
         { allow: false, reason: 'origin' },
@@ -149,7 +149,7 @@ test('upgrade: with remote disabled, an allowed origin passes without a cookie',
 
 test('upgrade: the local listener never needs a cookie even with remote enabled', () => {
   assert.deepEqual(
-    decideUpgradeAccess({ remoteEnabled: true, trust: 'local', origin: 'http://localhost:3000', allowedOrigins: ['https://glissa.test'], authenticated: false, listenerPorts: [3000] }),
+    decideUpgradeAccess({ remoteEnabled: true, trust: 'local', origin: 'http://localhost:3000', allowedOrigins: ['https://glimmervoid.test'], authenticated: false, listenerPorts: [3000] }),
     { allow: true, reason: null }
   );
 });
@@ -187,7 +187,7 @@ test('upgrade: a non-dashboard route still accepts a tokenless client with no Or
 test('upgrade: a paired remote device needs no page token (its cookie is the credential)', () => {
   assert.deepEqual(
     decideUpgradeAccess({
-      remoteEnabled: true, trust: 'remote', origin: 'https://glissa.test', allowedOrigins: ['https://glissa.test'],
+      remoteEnabled: true, trust: 'remote', origin: 'https://glimmervoid.test', allowedOrigins: ['https://glimmervoid.test'],
       authenticated: true, dashboardRoute: true, tokenOk: false,
     }),
     { allow: true, reason: null }
@@ -196,11 +196,11 @@ test('upgrade: a paired remote device needs no page token (its cookie is the cre
 
 test('upgrade: a remote socket needs both an allowed origin and a cookie', () => {
   assert.deepEqual(
-    decideUpgradeAccess({ remoteEnabled: true, trust: 'remote', origin: 'https://glissa.test', allowedOrigins: ['https://glissa.test'], authenticated: false }),
+    decideUpgradeAccess({ remoteEnabled: true, trust: 'remote', origin: 'https://glimmervoid.test', allowedOrigins: ['https://glimmervoid.test'], authenticated: false }),
     { allow: false, reason: 'auth' }
   );
   assert.deepEqual(
-    decideUpgradeAccess({ remoteEnabled: true, trust: 'remote', origin: 'https://glissa.test', allowedOrigins: ['https://glissa.test'], authenticated: true }),
+    decideUpgradeAccess({ remoteEnabled: true, trust: 'remote', origin: 'https://glimmervoid.test', allowedOrigins: ['https://glimmervoid.test'], authenticated: true }),
     { allow: true, reason: null }
   );
 });

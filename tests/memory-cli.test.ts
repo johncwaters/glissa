@@ -30,11 +30,11 @@ interface StopCounter {
 const QUIET = { log() {}, warn() {} };
 
 function storeWithForget(t: TestContext, result: ForgetResult): MemoryStore & StopCounter {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memory-cli-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-memory-cli-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const store = createMemoryStore({
     dir,
-    dbPath: path.join(dir, 'glissa.db'),
+    dbPath: path.join(dir, 'glimmervoid.db'),
     config: { ...resolveMemoryConfig(null), enabled: true },
     logger: QUIET,
   });
@@ -48,7 +48,7 @@ function storeWithForget(t: TestContext, result: ForgetResult): MemoryStore & St
 
 function fakeIngest(result: BackfillResult): CliIngest & StopCounter {
   const ingest = {
-    statePath: '/tmp/glissa-memory/tail-state.json',
+    statePath: '/tmp/glimmervoid-memory/tail-state.json',
     stopped: 0,
     backfill: async () => result,
     stats: () => ({ ...NO_COUNTS, written: 3, rejected: 1 }),

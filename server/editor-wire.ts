@@ -90,7 +90,7 @@ function editorTargets({ homeDir = os.homedir(), platform = process.platform, en
   const targets: EditorTarget[] = [];
   if (exists(nvimDir) || onPath('nvim', { platform, exec })) {
     targets.push({
-      id: 'neovim', label: 'Neovim', filePath: path.join(nvimDir, 'plugin', 'glissa-visions.lua'), owned: true, create: true,
+      id: 'neovim', label: 'Neovim', filePath: path.join(nvimDir, 'plugin', 'glimmervoid-visions.lua'), owned: true, create: true,
     });
   }
   if (exists(helixDir) || onPath('hx', { platform, exec })) {
@@ -122,7 +122,7 @@ function readIfPresent(filePath: string): string | null {
 }
 
 function backupOnce(filePath: string, existingText: string | null): string | null {
-  const backupPath = `${filePath}.glissa.bak`;
+  const backupPath = `${filePath}.glimmervoid.bak`;
   if (existingText === null || exists(backupPath)) return null;
   fs.writeFileSync(backupPath, existingText);
   return backupPath;

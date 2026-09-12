@@ -279,8 +279,8 @@ test('healthAnomalyRows: labels match the health monitor wording', () => {
 
 test('updateAvailableRow: needs both versions, carries the command', () => {
   assert.deepEqual(
-    updateAvailableRow({ updateAvailable: true, current: '1.2.0', latest: '1.3.0', command: 'npm i -g glissa' }),
-    { text: 'Update available: 1.2.0 -> 1.3.0', command: 'npm i -g glissa' },
+    updateAvailableRow({ updateAvailable: true, current: '1.2.0', latest: '1.3.0', command: 'npm i -g glimmervoid' }),
+    { text: 'Update available: 1.2.0 -> 1.3.0', command: 'npm i -g glimmervoid' },
   );
   assert.equal(updateAvailableRow({ updateAvailable: true, current: '1.2.0' }), null);
   assert.equal(updateAvailableRow({ updateAvailable: true, latest: '1.3.0' }), null);
@@ -300,9 +300,9 @@ test('updateAvailableRow: ignores shas and renders the version pair', () => {
       latest: '1.3.0',
       currentSha: '0123456789abcdef0123456789abcdef01234567',
       latestSha: 'FEDCBA9876543210fedcba9876543210fedcba98',
-      command: 'npm i -g glissa',
+      command: 'npm i -g glimmervoid',
     }),
-    { text: 'Update available: 1.2.0 -> 1.3.0', command: 'npm i -g glissa' },
+    { text: 'Update available: 1.2.0 -> 1.3.0', command: 'npm i -g glimmervoid' },
   );
   const versionFallback = updateAvailableRow({ updateAvailable: true, current: '1.2.0', latest: '1.3.0', currentSha: 'not-a-sha', command: 'c' });
   assert.equal(versionFallback?.text, 'Update available: 1.2.0 -> 1.3.0');

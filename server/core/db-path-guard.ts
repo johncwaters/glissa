@@ -1,7 +1,7 @@
 import path from 'node:path';
 
-const HOME_DB_REFUSED_CODE = 'GLISSA_HOME_DB_REFUSED';
-const HOME_DB_REFUSED_NAME = 'GlissaHomeDbRefusedError';
+const HOME_DB_REFUSED_CODE = 'GLIMMERVOID_HOME_DB_REFUSED';
+const HOME_DB_REFUSED_NAME = 'GlimmervoidHomeDbRefusedError';
 
 function isUnder(child: unknown, parent: unknown): boolean {
   if (typeof child !== 'string' || typeof parent !== 'string' || !child || !parent) return false;

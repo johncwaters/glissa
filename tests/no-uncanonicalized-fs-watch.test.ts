@@ -15,9 +15,9 @@ const SKIP_DIRS = new Set([
   "scripts",
   ".git",
   ".omc",
-  ".glissa",
+  ".glimmervoid",
   ".claude",
-  ".glissa-worktrees",
+  ".glimmervoid-worktrees",
 ]);
 
 const FS_WATCH_CALL = /\b(?:fs\w*\.watch|watchFn)\(/g;

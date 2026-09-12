@@ -1,4 +1,4 @@
-const COOKIE_NAME = 'glissa_device';
+const COOKIE_NAME = 'glimmervoid_device';
 
 export interface SetCookieOptions {
   maxAgeSeconds?: number | null;

@@ -12,7 +12,7 @@ import type { PlanReadResult } from '../server/plan-review-wiring.ts';
 import { plainSession } from './helpers/fake-session.ts';
 import { connectControl, controlDeps, createControlServer } from './helpers/control-harness.ts';
 
-const claudeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-control-plan-claude-'));
+const claudeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-control-plan-claude-'));
 process.env.CLAUDE_CONFIG_DIR = claudeHome;
 
 const temporaryDirectories: string[] = [claudeHome];
@@ -89,7 +89,7 @@ test('a plan body crosses the control socket only on request, never as a push', 
   const pushed: Record<string, unknown>[] = [];
   lane.on('plan-changed', (summary: Record<string, unknown>) => { pushed.push(summary); });
   await openPlan(lane, {
-    glissaId: 'session-1',
+    glimmervoidId: 'session-1',
     event: 'permissionrequest-plan',
     payload: planRequest('# Ship it\n\nthe body'),
     accepted: true,
@@ -118,7 +118,7 @@ test('a named revision is served by its own offset, not the newest', async () =>
   const lane = planWorkspace('by-revision');
   for (const plan of ['# First plan', '# Second plan']) {
     await openPlan(lane, {
-      glissaId: 'session-1', event: 'permissionrequest-plan', payload: planRequest(plan), accepted: true,
+      glimmervoidId: 'session-1', event: 'permissionrequest-plan', payload: planRequest(plan), accepted: true,
     });
   }
   const connection = planHarness(lane.readPlanRevision);
@@ -135,10 +135,10 @@ test('a named revision is served by its own offset, not the newest', async () =>
 test('two subagent reviews in one session keep their own revision numbering and bodies', async () => {
   const lane = planWorkspace('subagents');
   await openPlan(lane, {
-    glissaId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# Main plan'), accepted: true,
+    glimmervoidId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# Main plan'), accepted: true,
   });
   await openPlan(lane, {
-    glissaId: 'session-1',
+    glimmervoidId: 'session-1',
     event: 'permissionrequest-plan',
     payload: planRequest('# Explore plan', 'sub-1', 'Explore'),
     accepted: true,
@@ -156,9 +156,9 @@ test('two subagent reviews in one session keep their own revision numbering and 
 test('an ended session is served from the file the lane no longer holds in memory', async () => {
   const lane = planWorkspace('ended-session');
   await openPlan(lane, {
-    glissaId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# Ship it'), accepted: true,
+    glimmervoidId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# Ship it'), accepted: true,
   });
-  lane.onHookEvent({ glissaId: 'session-1', event: 'SessionEnd', payload: {}, accepted: true });
+  lane.onHookEvent({ glimmervoidId: 'session-1', event: 'SessionEnd', payload: {}, accepted: true });
   const connection = planHarness(lane.readPlanRevision);
   await connection.send({ type: 'session-plan', id: 'session-1', agentId: null });
   const response = connection.sent.find((frame) => frame.type === 'session-plan-response');
@@ -183,7 +183,7 @@ test('a missing plan and a disabled lane are both reported through session-error
 test('a session id that is not a safe path segment never reaches the plans directory', async () => {
   const lane = planWorkspace('unsafe-id');
   await openPlan(lane, {
-    glissaId: '../escape', event: 'permissionrequest-plan', payload: planRequest('# Ship it'), accepted: true,
+    glimmervoidId: '../escape', event: 'permissionrequest-plan', payload: planRequest('# Ship it'), accepted: true,
   });
   assert.equal(lane.port.hasPlan('../escape'), false);
   assert.equal(await lane.readPlanRevision('../escape', {}), null);
@@ -195,10 +195,10 @@ test('an approval on the terminal closes the review and records which revision w
   const states: string[] = [];
   lane.on('plan-changed', (summary: { state: string }) => { states.push(summary.state); });
   await openPlan(lane, {
-    glissaId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# Ship it'), accepted: true,
+    glimmervoidId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# Ship it'), accepted: true,
   });
   lane.onHookEvent({
-    glissaId: 'session-1',
+    glimmervoidId: 'session-1',
     event: 'PostToolUse',
     payload: { tool_name: 'ExitPlanMode', tool_response: { plan: '# Ship it' } },
     accepted: true,
@@ -213,9 +213,9 @@ test('an approval on the terminal closes the review and records which revision w
 test('a tool result for another tool leaves the review alone', async () => {
   const lane = planWorkspace('other-tool');
   await openPlan(lane, {
-    glissaId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# Ship it'), accepted: true,
+    glimmervoidId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# Ship it'), accepted: true,
   });
-  lane.onHookEvent({ glissaId: 'session-1', event: 'PostToolUse', payload: { tool_name: 'Read' }, accepted: true });
+  lane.onHookEvent({ glimmervoidId: 'session-1', event: 'PostToolUse', payload: { tool_name: 'Read' }, accepted: true });
   assert.equal(reviewOf(await lane.readPlanRevision('session-1', {}))?.state, 'open');
   await lane.stop();
 });
@@ -223,19 +223,19 @@ test('a tool result for another tool leaves the review alone', async () => {
 test('a turn end closes the main review and a subagent stop closes only its own', async () => {
   const lane = planWorkspace('turn-end');
   await openPlan(lane, {
-    glissaId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# Main plan'), accepted: true,
+    glimmervoidId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# Main plan'), accepted: true,
   });
   await openPlan(lane, {
-    glissaId: 'session-1',
+    glimmervoidId: 'session-1',
     event: 'permissionrequest-plan',
     payload: planRequest('# Explore plan', 'sub-1', 'Explore'),
     accepted: true,
   });
-  lane.onHookEvent({ glissaId: 'session-1', event: 'SubagentStop', payload: { agent_id: 'sub-1' }, accepted: true });
+  lane.onHookEvent({ glimmervoidId: 'session-1', event: 'SubagentStop', payload: { agent_id: 'sub-1' }, accepted: true });
   assert.equal(reviewOf(await lane.readPlanRevision('session-1', { agentId: 'sub-1' }), 'sub-1')?.state, 'closed');
   assert.equal(reviewOf(await lane.readPlanRevision('session-1', {}))?.state, 'open', 'a subagent stop leaves the main review actionable');
 
-  lane.onHookEvent({ glissaId: 'session-1', event: 'Stop', payload: {}, accepted: true });
+  lane.onHookEvent({ glimmervoidId: 'session-1', event: 'Stop', payload: {}, accepted: true });
   assert.equal(reviewOf(await lane.readPlanRevision('session-1', {}))?.state, 'closed');
   await lane.stop();
 });
@@ -243,7 +243,7 @@ test('a turn end closes the main review and a subagent stop closes only its own'
 test('a hook the router refused is never stored, whatever its body says', async () => {
   const lane = planWorkspace('refused-hook');
   await openPlan(lane, {
-    glissaId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# Ship it'), accepted: false,
+    glimmervoidId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# Ship it'), accepted: false,
   });
   assert.equal(lane.port.hasPlan('session-1'), false);
   await lane.stop();
@@ -252,11 +252,11 @@ test('a hook the router refused is never stored, whatever its body says', async 
 test('a revision after a close reopens the same review at the next number', async () => {
   const lane = planWorkspace('reopen');
   await openPlan(lane, {
-    glissaId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# First'), accepted: true,
+    glimmervoidId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# First'), accepted: true,
   });
-  lane.onHookEvent({ glissaId: 'session-1', event: 'Stop', payload: {}, accepted: true });
+  lane.onHookEvent({ glimmervoidId: 'session-1', event: 'Stop', payload: {}, accepted: true });
   await openPlan(lane, {
-    glissaId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# Second'), accepted: true,
+    glimmervoidId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# Second'), accepted: true,
   });
   const result = await lane.readPlanRevision('session-1', {});
   assert.equal(result?.body?.revision, 2);
@@ -267,7 +267,7 @@ test('a revision after a close reopens the same review at the next number', asyn
 test('a subagent-only plan is discoverable from the index request the reloaded client sends', async () => {
   const lane = planWorkspace('index-after-reload');
   await openPlan(lane, {
-    glissaId: 'session-1',
+    glimmervoidId: 'session-1',
     event: 'permissionrequest-plan',
     payload: planRequest('# Explore plan', 'sub-1', 'Explore'),
     accepted: true,
@@ -288,7 +288,7 @@ test('a subagent-only plan is discoverable from the index request the reloaded c
 test('a revision the client names but the store never held is refused rather than answered empty', async () => {
   const lane = planWorkspace('missing-revision');
   await openPlan(lane, {
-    glissaId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# Ship it'), accepted: true,
+    glimmervoidId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# Ship it'), accepted: true,
   });
   const connection = planHarness(lane.readPlanRevision);
   await connection.send({ type: 'session-plan', id: 'session-1', agentId: null, revision: 9 });
@@ -307,7 +307,7 @@ test('every plan summary reaches every control client, and the body request reac
 });
 
 test('a plan read for a session with no live Session never pins its file against the retention window', async () => {
-  const configDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-control-plan-retention-'));
+  const configDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-control-plan-retention-'));
   temporaryDirectories.push(configDirectory);
   const lane = createPlanReviewWiring({
     configPath: path.join(configDirectory, 'config.json'),
@@ -317,7 +317,7 @@ test('a plan read for a session with no live Session never pins its file against
   lane.attachSession(liveSession);
   for (const sessionId of ['dormant-session', 'live-session']) {
     await openPlan(lane, {
-      glissaId: sessionId, event: 'permissionrequest-plan', payload: planRequest('# Ship it'), accepted: true,
+      glimmervoidId: sessionId, event: 'permissionrequest-plan', payload: planRequest('# Ship it'), accepted: true,
     });
   }
 
@@ -344,13 +344,13 @@ test('the title the notification reads is the title of the entry the lane pushed
   assert.equal(lane.latestPlanTitle('session-1'), null, 'a session with nothing stored names no plan');
 
   await openPlan(lane, {
-    glissaId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# Ship the rollout'), accepted: true,
+    glimmervoidId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# Ship the rollout'), accepted: true,
   });
   assert.equal(lane.latestPlanTitle('session-1'), 'Ship the rollout');
   assert.equal(pushed.at(-1)?.title, 'Ship the rollout');
 
   await openPlan(lane, {
-    glissaId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# Ship it again', 'sub-3', 'Explore'), accepted: true,
+    glimmervoidId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# Ship it again', 'sub-3', 'Explore'), accepted: true,
   });
   assert.equal(lane.latestPlanTitle('session-1'), 'Ship it again');
   assert.equal(pushed.at(-1)?.title, 'Ship it again');
@@ -361,7 +361,7 @@ test('the title the notification reads is the title of the entry the lane pushed
 test('a decision is refused unless it names the open revision of an open review', async () => {
   const lane = planWorkspace('decision-guards');
   await openPlan(lane, {
-    glissaId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# Ship it'), accepted: true,
+    glimmervoidId: 'session-1', event: 'permissionrequest-plan', payload: planRequest('# Ship it'), accepted: true,
   });
   const connection = planHarness(lane.readPlanRevision, lane.decide);
 
@@ -405,7 +405,7 @@ test('deciding one subagent review leaves the other actionable', async () => {
   const lane = planWorkspace('two-subagents');
   for (const agentId of ['sub-1', 'sub-2']) {
     await openPlan(lane, {
-      glissaId: 'session-1',
+      glimmervoidId: 'session-1',
       event: 'permissionrequest-plan',
       payload: planRequest(`# ${agentId} plan`, agentId, 'Explore'),
       accepted: true,
@@ -428,7 +428,7 @@ interface HeldReply {
 
 async function openHeld(lane: PlanLane, plan = '# Ship it'): Promise<HeldReply> {
   const held = lane.onHookEvent({
-    glissaId: 'session-1',
+    glimmervoidId: 'session-1',
     event: 'permissionrequest-plan',
     payload: planRequest(plan),
     accepted: true,
@@ -544,7 +544,7 @@ test('a draft body crosses the socket only when the client asks for one', async 
   const planFilePath = path.join(plansDirectory, 'draft.md');
   fs.writeFileSync(planFilePath, '# Ship it');
   lane.onHookEvent({
-    glissaId: 'session-1',
+    glimmervoidId: 'session-1',
     event: 'permissionrequest-plan',
     payload: { tool_name: 'ExitPlanMode', tool_input: { plan: '# Ship it', planFilePath } },
     accepted: true,

@@ -6,7 +6,7 @@ import path from 'node:path';
 import { Session } from '../session/sessions.ts';
 
 function tmpDir() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-wt-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-wt-'));
   return { dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 

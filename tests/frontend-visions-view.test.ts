@@ -12,7 +12,7 @@ function finding(line: number, character: number, code: string, message: string)
   return {
     range: { start: { line, character }, end: { line, character: character + 1 } },
     severity: 2,
-    source: 'glissa-visions',
+    source: 'glimmervoid-visions',
     code,
     message,
   };

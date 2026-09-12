@@ -88,8 +88,8 @@ interface SpawnCall {
 const REPOSITORY_ROOT = path.resolve(import.meta.dirname, '..', '..');
 const REPOSITORY_NODE_MODULES = path.join(REPOSITORY_ROOT, 'node_modules');
 const DEFAULT_TASKS_PATH = path.join(import.meta.dirname, 'tasks.json');
-const PACK_NAME = 'glissa-ablation-house-rules';
-const PACK_VERSION = 'glissa-ablation-v1';
+const PACK_NAME = 'glimmervoid-ablation-house-rules';
+const PACK_VERSION = 'glimmervoid-ablation-v1';
 const SESSION_TIMEOUT_MS = 180000;
 const CHECK_TIMEOUT_MS = 30000;
 const METRICS_TIMEOUT_MS = 10000;
@@ -218,10 +218,10 @@ function makeAblationPack(tempDirectory: string) {
   fs.mkdirSync(rulesDirectory, { recursive: true });
   fs.writeFileSync(
     path.join(currentDirectory, 'CLAUDE.md'),
-    `# Glissa ablation pack\n\nBefore working, use the Read tool to read \`${rulesPath}\` and follow it.\n`,
+    `# Glimmervoid ablation pack\n\nBefore working, use the Read tool to read \`${rulesPath}\` and follow it.\n`,
     'utf8',
   );
-  fs.writeFileSync(rulesPath, `# Glissa house rules\n\n${selectedRules}\n`, 'utf8');
+  fs.writeFileSync(rulesPath, `# Glimmervoid house rules\n\n${selectedRules}\n`, 'utf8');
   fs.writeFileSync(
     path.join(currentDirectory, 'manifest.json'),
     `${JSON.stringify({ name: PACK_NAME, version: PACK_VERSION, tokenEstimate: 1200 }, null, 2)}\n`,
@@ -233,7 +233,7 @@ function makeAblationPack(tempDirectory: string) {
 function seedProject(projectDirectory: string): void {
   fs.mkdirSync(projectDirectory, { recursive: true });
   const packageDocument = {
-    name: 'glissa-ablation-task',
+    name: 'glimmervoid-ablation-task',
     private: true,
     type: 'commonjs',
     dependencies: {
@@ -526,11 +526,11 @@ async function main() {
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, '', { encoding: 'utf8', flag: 'wx' });
 
-  const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-ablation-'));
+  const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-ablation-'));
   const configPath = path.join(tempDirectory, 'config.json');
   const recordsPath = path.join(tempDirectory, 'mill-metrics.json');
-  const previousConfigPath = process.env.GLISSA_CONFIG;
-  const previousPort = process.env.GLISSA_PORT;
+  const previousConfigPath = process.env.GLIMMERVOID_CONFIG;
+  const previousPort = process.env.GLIMMERVOID_PORT;
   let backend: ReturnType<typeof createBackend> | null = null;
   let controlSocket: Awaited<ReturnType<typeof connectControl>> | null = null;
   let server: http.Server | null = null;
@@ -547,8 +547,8 @@ async function main() {
         console.error(`server cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
       }
       removeHarnessTempDirectory(tempDirectory);
-      restoreEnvironmentVariable('GLISSA_CONFIG', previousConfigPath);
-      restoreEnvironmentVariable('GLISSA_PORT', previousPort);
+      restoreEnvironmentVariable('GLIMMERVOID_CONFIG', previousConfigPath);
+      restoreEnvironmentVariable('GLIMMERVOID_PORT', previousPort);
     })();
     return cleanupRun;
   };
@@ -573,8 +573,8 @@ async function main() {
       pair.arms.off.projectDirectory,
     ]);
     const claudeConfigDirectory = makeClaudeConfig(tempDirectory, projectDirectories);
-    process.env.GLISSA_CONFIG = configPath;
-    process.env.GLISSA_PORT = String(port);
+    process.env.GLIMMERVOID_CONFIG = configPath;
+    process.env.GLIMMERVOID_PORT = String(port);
     server = http.createServer();
     backend = createBackend(server, { staticDir: null, checkForUpdate: null });
     server.on('request', backend.app);

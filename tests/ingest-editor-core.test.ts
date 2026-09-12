@@ -5,8 +5,8 @@ import type { EditorState } from '../server/core/ingest-editor-core.ts';
 import { applyEditorNotification, createEditorState } from '../server/core/ingest-editor-core.ts';
 import { deepestRootFor } from '../server/core/visions-scope-core.ts';
 
-const ROOTS = ['/home/op/Projects/glissa', '/home/op/Projects/glissa/vendor/inner'];
-const URI = 'file:///home/op/Projects/glissa/docs/plan.md';
+const ROOTS = ['/home/op/Projects/glimmervoid', '/home/op/Projects/glimmervoid/vendor/inner'];
+const URI = 'file:///home/op/Projects/glimmervoid/docs/plan.md';
 
 function note(state: EditorState, method: string, uri = URI, now = 1) {
   return applyEditorNotification(state, { method, uri, roots: ROOTS, now });
@@ -18,7 +18,7 @@ test('an open, a save and a close each publish one marker carrying no buffer tex
   assert.equal(opened?.source, 'editor');
   assert.equal(opened?.kind, 'doc-open');
   assert.equal(opened?.summary, 'opened docs/plan.md');
-  assert.equal(opened?.scope.root, '/home/op/Projects/glissa');
+  assert.equal(opened?.scope.root, '/home/op/Projects/glimmervoid');
   assert.deepEqual(Object.keys(opened?.detail), ['path']);
 
   assert.equal(note(state, 'textDocument/didSave').event?.summary, 'saved docs/plan.md');
@@ -42,8 +42,8 @@ test('a save always publishes, since it is the operator acting rather than a rel
 });
 
 test('the deepest containing root wins and a file under none is machine scope', () => {
-  assert.equal(deepestRootFor('/home/op/Projects/glissa/vendor/inner/x.md', ROOTS), '/home/op/Projects/glissa/vendor/inner');
-  assert.equal(deepestRootFor('/home/op/Projects/glissa/docs/x.md', ROOTS), '/home/op/Projects/glissa');
+  assert.equal(deepestRootFor('/home/op/Projects/glimmervoid/vendor/inner/x.md', ROOTS), '/home/op/Projects/glimmervoid/vendor/inner');
+  assert.equal(deepestRootFor('/home/op/Projects/glimmervoid/docs/x.md', ROOTS), '/home/op/Projects/glimmervoid');
   assert.equal(deepestRootFor('/tmp/x.md', ROOTS), null);
 
   const state = createEditorState();

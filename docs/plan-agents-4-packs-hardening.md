@@ -19,10 +19,10 @@ Probed on 0.149.0 (`codex debug prompt-input`, credential-free):
 | `--add-dir <pack>` | Pack `CLAUDE.md` NOT discovered. Flag grants a WRITABLE root, which a pack dir must never be. Reject. |
 | `model_instructions_file` | REPLACES the built-in system prompt, one file only, can 400 on GPT-5 models. Reject. |
 | AGENTS.md overlay | Discovery is git-root-to-cwd only; would mean writing into the supervised repo or `~/.codex`. Reject. |
-| `-c developer_instructions="<string>"` | Additive developer-role text, repo `AGENTS.md` still loaded, sentinel visible in prompt-input. `workspace-write` sandbox already READS `~/.glissa/packs`. Select. |
+| `-c developer_instructions="<string>"` | Additive developer-role text, repo `AGENTS.md` still loaded, sentinel visible in prompt-input. `workspace-write` sandbox already READS `~/.glimmervoid/packs`. Select. |
 
 Design: one `-c developer_instructions=<TOML literal>` argv token carrying a CONSTANT
-Glissa-authored directive plus, per delivered pack, `<name>: <abs path to current/CLAUDE.md>`.
+Glimmervoid-authored directive plus, per delivered pack, `<name>: <abs path to current/CLAUDE.md>`.
 Nothing else may enter the string: no manifest description, no rule text, no memory byte. The
 pack index is the only entry point, so the M16 build gate (no memory byte in `CLAUDE.md` or
 `.claude/rules/`) still bounds what a pointer can reach, and the memory pack's own index already
@@ -31,9 +31,9 @@ labels its `data/` files as recorded observation, never instructions.
 Staleness notice: Codex documents `hookSpecificOutput.additionalContext` on `UserPromptSubmit`,
 and `server/backend.js:576` already answers in that shape, but `session/hook-relay.js:36`
 discards the response body. The relay gains a bounded read and writes to stdout ONLY a validated
-`UserPromptSubmit` object whose `additionalContext` came from the Glissa server (accepted
+`UserPromptSubmit` object whose `additionalContext` came from the Glimmervoid server (accepted
 callback, size-capped); every other event, status, or shape stays silent. With hook trust
-withheld (bypass opt-in off) the spawn-time carrier still works and notices do not; `glissa
+withheld (bypass opt-in off) the spawn-time carrier still works and notices do not; `glimmervoid
 doctor` says so.
 
 Change list:
@@ -48,7 +48,7 @@ Change list:
   atomically after resolution).
 - `session/hook-relay.js` plus `session/core/hook-relay-core.js`: `decideHookStdout(event,
   status, body)` pure; relay prints it or nothing.
-- `bin/glissa.js doctor`: per-agent carrier line and the hook-trust caveat.
+- `bin/glimmervoid.js doctor`: per-agent carrier line and the hook-trust caveat.
 - Pack read telemetry: Codex does not subscribe `PreToolUse`, so read counts are OMITTED for a
   Codex card rather than shown as zero.
 
@@ -94,12 +94,12 @@ cycle, `Stop(end_turn)` and `StopFailure`/`StopCancelled` ready, any other `Stop
 Spawn: resolved native binary, argv array, never a shim: `--no-auto-update [--always-approve]
 [-r <id>] [extra] [prompt]`. Env adds `GROK_CLAUDE_HOOKS_ENABLED=false` (or the operator's
 `~/.claude/settings.json` hooks fire inside a Grok card, which is the CC detection tier
-misattributed) and `GLISSA_HOOK_URL`. `dangerouslySkipPermissions` maps to `--always-approve`.
+misattributed) and `GLIMMERVOID_HOOK_URL`. `dangerouslySkipPermissions` maps to `--always-approve`.
 `usageVendor: 'grok'`; the M5 composite key, rollup and chip join need no change.
 
-Relay: opt-in `glissa agent setup grok` writes `$GROK_HOME/hooks/glissa.json` subscribing the five
+Relay: opt-in `glimmervoid agent setup grok` writes `$GROK_HOME/hooks/glimmervoid.json` subscribing the five
 events above, each `node "<packaged>/session/hook-relay.js" <Event>`; no URL, no token in the file,
-inert without `GLISSA_HOOK_URL` (negative test invokes every extracted command with the env absent
+inert without `GLIMMERVOID_HOOK_URL` (negative test invokes every extracted command with the env absent
 and asserts exit 0, `reason: no-hook-url`, zero sockets). The shell-safe command builder moves out
 of `codex.js` into `session/core/hook-command-core.js` with a byte-identical pin.
 
@@ -114,7 +114,7 @@ Change list: `session/adapters/grok.js`, `session/adapters/index.js`, `session/c
 `session/sessions.js` (adapter `sessionIdOf(payload)` instead of hardcoded `payload.session_id`;
 `home-hooks-file` injection kind that validates the installed file before minting a token),
 `server/core/grok-agent-setup-core.js` (pure file render, foreign-file refusal),
-`server/agent-setup-cli.js`, `bin/glissa.js`, `tests/agent-grok.test.js`, replay fixture
+`server/agent-setup-cli.js`, `bin/glimmervoid.js`, `tests/agent-grok.test.js`, replay fixture
 `tests/fixtures/v2-grok-approval-turn.jsonl`, `test/probe-grok-session.js` (isolated `GROK_HOME`,
 credentials linked not copied, sanitized recording copied out, temp tree removed).
 
@@ -152,7 +152,7 @@ and `d4e54f6`; V4 through V7 shipped in `b9e1294` and `afa49f9`; V9 shipped in `
 7. M9. SHIPPED `ffa3c67` (`server/pack-distiller.js:47,97`): `dangerouslySkipPermissions` plus bare `Edit(*)`/`Write(*)`
    denies, which `AGENTS.md` (Ephemeral Lane Write Boundaries) records as NOT a boundary and possibly
    as refusing the one write the lane needs. Move the distiller onto the `lane-permissions-core`
-   posture (acceptEdits, throwaway cwd, result file rendered by Glissa). Test replaces the string
+   posture (acceptEdits, throwaway cwd, result file rendered by Glimmervoid). Test replaces the string
    presence check at `tests/pack-distiller.test.js:198`.
 8. M5 + M8. SHIPPED `656e9de`, `9c49f40`, `d4e54f6` (`server/pack-builder.js:396,429,440`, `server/pack-service.js:134,168`): one throwing
    publish or watch-root provider escapes `buildPacks` or leaves no sweep timer. Per-spec isolation;

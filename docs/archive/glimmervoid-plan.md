@@ -1,18 +1,18 @@
 > Historical document, superseded. Kept for design rationale: it describes the pre-0.12 screen-scraping detection architecture, which no longer exists (status detection today is structural, see AGENTS.md). Current behavior: see AGENTS.md and CHANGELOG.md.
 
-## Claude Code Session Manager, Glissa
+## Claude Code Session Manager, Glimmervoid
 
 ---
 
-### Glissa Backstory
+### Glimmervoid Backstory
 
-Glissa's canonical role is tracking and interacting with Myr across Mirrodin. Memnarch orchestrates, Glissa watches and manages on the ground. That maps cleanly onto what this tool does: sitting between you (Memnarch) and the Myr sessions, keeping tabs on all of them.
+Glimmervoid's canonical role is tracking and interacting with Myr across Mirrodin. Memnarch orchestrates, Glimmervoid watches and manages on the ground. That maps cleanly onto what this tool does: sitting between you (Memnarch) and the Myr sessions, keeping tabs on all of them.
 
-`glissa` as a CLI command also just sounds good.
+`glimmervoid` as a CLI command also just sounds good.
 
 ### What It Is
 
-Glissa is a lightweight Node.js background process you start once. It spawns and owns all your Claude Code sessions, streams their output live to a browser dashboard at `localhost:3000`, and alerts you via Windows toast notifications when any session needs attention. Your VS Code windows stay open for editing. The terminals inside them are replaced by the manager.
+Glimmervoid is a lightweight Node.js background process you start once. It spawns and owns all your Claude Code sessions, streams their output live to a browser dashboard at `localhost:3000`, and alerts you via Windows toast notifications when any session needs attention. Your VS Code windows stay open for editing. The terminals inside them are replaced by the manager.
 
 ---
 

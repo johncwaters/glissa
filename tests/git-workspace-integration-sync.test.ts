@@ -21,12 +21,12 @@ type GitHijack = (args: string[], cwd: string) => void;
 
 function configureRepository(directory: string): void {
   git(['config', 'user.email', 'test@example.com'], directory);
-  git(['config', 'user.name', 'Glissa Test'], directory);
+  git(['config', 'user.name', 'Glimmervoid Test'], directory);
   git(['config', 'commit.gpgsign', 'false'], directory);
 }
 
 function createFixture(): Fixture {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-integration-sync-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-integration-sync-'));
   const remote = path.join(root, 'remote.git');
   const repo = path.join(root, 'repo');
   const publisher = path.join(root, 'publisher');

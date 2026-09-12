@@ -24,11 +24,11 @@ export interface SetupGuide {
 }
 
 function relayInvocation({
-  glissaOnPath = true,
+  glimmervoidOnPath = true,
   cliPath = '',
   nodePath = 'node',
-}: { glissaOnPath?: boolean; cliPath?: string; nodePath?: string } = {}): Invocation {
-  if (glissaOnPath) return { command: 'glissa', args: ['visions', 'relay'] };
+}: { glimmervoidOnPath?: boolean; cliPath?: string; nodePath?: string } = {}): Invocation {
+  if (glimmervoidOnPath) return { command: 'glimmervoid', args: ['visions', 'relay'] };
   return { command: nodePath, args: [cliPath, 'visions', 'relay'] };
 }
 
@@ -49,7 +49,7 @@ function neovimSnippet(invocation: Invocation): string {
     "vim.api.nvim_create_autocmd('FileType', {",
     "  pattern = 'markdown',",
     '  callback = function()',
-    `    vim.lsp.start({ name = 'glissa-visions', cmd = { ${invocationParts(invocation).map((part) => `'${part}'`).join(', ')} } })`,
+    `    vim.lsp.start({ name = 'glimmervoid-visions', cmd = { ${invocationParts(invocation).map((part) => `'${part}'`).join(', ')} } })`,
     '  end,',
     '})',
   ].join('\n');
@@ -57,13 +57,13 @@ function neovimSnippet(invocation: Invocation): string {
 
 function helixSnippet(invocation: Invocation): string {
   return [
-    '[language-server.glissa-visions]',
+    '[language-server.glimmervoid-visions]',
     `command = "${invocation.command}"`,
     `args = ${JSON.stringify(invocation.args)}`,
     '',
     '[[language]]',
     'name = "markdown"',
-    'language-servers = ["marksman", "glissa-visions"]',
+    'language-servers = ["marksman", "glimmervoid-visions"]',
   ].join('\n');
 }
 
@@ -79,7 +79,7 @@ function sublimeSnippet(invocation: Invocation): string {
   return [
     '{',
     '  "clients": {',
-    '    "glissa-visions": {',
+    '    "glimmervoid-visions": {',
     '      "enabled": true,',
     `      "command": ${jsonCommandArray(invocation)},`,
     '      "selector": "text.html.markdown"',
@@ -111,7 +111,7 @@ const EDITOR_RECIPES: EditorRecipe[] = [
     id: 'vscode',
     label: 'VS Code, VSCodium, Cursor, Windsurf',
     where: 'installed for you',
-    build: () => 'glissa visions install',
+    build: () => 'glimmervoid visions install',
   },
   {
     id: 'neovim',

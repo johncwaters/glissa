@@ -6,7 +6,7 @@ import path from 'node:path';
 const REPO_ROOT = path.join(import.meta.dirname, '..');
 const MAX_ROOT_BYTES = 10000;
 const MAX_NESTED_BYTES = 18000;
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', '.glissa-worktrees']);
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', '.glimmervoid-worktrees']);
 const CITATION_EXTENSIONS = /\.(js|mjs|cjs|ts|mts|cts|json|md|css|html|toml|yml|yaml|sh|ps1)$/;
 
 function agentsMdFiles(dir: string, found: string[] = []): string[] {

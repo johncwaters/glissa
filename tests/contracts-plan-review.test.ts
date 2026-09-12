@@ -30,7 +30,7 @@ function hookPayload(overrides: Record<string, unknown> = {}, inputOverrides: Re
   return {
     session_id: 'vendor-1',
     transcript_path: '/home/u/.claude/projects/a.jsonl',
-    cwd: '/repo/glissa',
+    cwd: '/repo/glimmervoid',
     permission_mode: 'plan',
     hook_event_name: 'PermissionRequest',
     tool_name: 'ExitPlanMode',

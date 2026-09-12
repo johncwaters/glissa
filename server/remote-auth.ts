@@ -127,7 +127,7 @@ function createRemoteAuth({
     }
     res.status(401)
       .type('html')
-      .send(htmlPage('Pairing required', 'This device is not paired with Glissa. Run "glissa pair" on the host machine and open the link it prints.'));
+      .send(htmlPage('Pairing required', 'This device is not paired with Glimmervoid. Run "glimmervoid pair" on the host machine and open the link it prints.'));
   }
 
   function isUpgradeAuthorized(req: IncomingMessage): boolean {
@@ -143,11 +143,11 @@ function createRemoteAuth({
         log(`[remote] pairing rejected (${outcome.reason})`);
         res.status(403)
           .type('html')
-          .send(htmlPage('Pairing link not valid', 'This link was already used, has expired, or is not recognized. Run "glissa pair" on the host machine for a fresh one.'));
+          .send(htmlPage('Pairing link not valid', 'This link was already used, has expired, or is not recognized. Run "glimmervoid pair" on the host machine for a fresh one.'));
         return;
       }
       if (!outcome.device) {
-        res.status(403).type('html').send(htmlPage('Pairing link not valid', 'This link was already used, has expired, or is not recognized. Run "glissa pair" on the host machine for a fresh one.'));
+        res.status(403).type('html').send(htmlPage('Pairing link not valid', 'This link was already used, has expired, or is not recognized. Run "glimmervoid pair" on the host machine for a fresh one.'));
         return;
       }
       const flags = decideCookieFlags({ forwardedProto: req.headers['x-forwarded-proto'] });

@@ -34,7 +34,7 @@ test('runtime sources contain no hardcoded integration branch', () => {
 });
 
 test('L6 hardcoded branch gate catches quoted, template, and prose forms', () => {
-  const scratchDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-hardcoded-branch-'));
+  const scratchDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-hardcoded-branch-'));
   const scratchFile = path.join(scratchDirectory, 'scratch.js');
   try {
     fs.writeFileSync(scratchFile, "'develop'\n\"develop\"\n`develop`\ninto develop\n", 'utf8');

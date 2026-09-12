@@ -23,7 +23,7 @@ after(() => {
 });
 
 function laneWorkspace(name: string, options: PlanReviewWiringOptions = {}): PlanLane {
-  const configDirectory = fs.mkdtempSync(path.join(os.tmpdir(), `glissa-plan-hold-${name}-`));
+  const configDirectory = fs.mkdtempSync(path.join(os.tmpdir(), `glimmervoid-plan-hold-${name}-`));
   temporaryDirectories.push(configDirectory);
   return createPlanReviewWiring({
     configPath: path.join(configDirectory, 'config.json'),
@@ -65,7 +65,7 @@ async function openHold(
   },
 ): Promise<Watched> {
   const watched = watch(lane.onHookEvent({
-    glissaId: sessionId,
+    glimmervoidId: sessionId,
     event: 'permissionrequest-plan',
     payload: planRequest(plan, agentId),
     accepted: true,
@@ -182,7 +182,7 @@ test('a PostToolUse on an open review is the terminal answering: release the hol
   const lane = laneWorkspace('terminal-answered');
   const held = await openHold(lane, {});
   lane.onHookEvent({
-    glissaId: 'session-1',
+    glimmervoidId: 'session-1',
     event: 'posttooluse-plan',
     payload: { tool_name: 'ExitPlanMode', tool_response: { plan: '# Ship it' } },
     accepted: true,
@@ -204,13 +204,13 @@ test('a PostToolUse on an open review is the terminal answering: release the hol
 test('a PostToolUse landing in the same tick as the plan request still releases the hold it never saw', async () => {
   const lane = laneWorkspace('same-tick-terminal');
   const held = watch(lane.onHookEvent({
-    glissaId: 'session-1',
+    glimmervoidId: 'session-1',
     event: 'permissionrequest-plan',
     payload: planRequest('# Ship it'),
     accepted: true,
   }));
   lane.onHookEvent({
-    glissaId: 'session-1',
+    glimmervoidId: 'session-1',
     event: 'posttooluse-plan',
     payload: { tool_name: 'ExitPlanMode', tool_response: { plan: '# Ship it' } },
     accepted: true,
@@ -226,12 +226,12 @@ test('a PostToolUse landing in the same tick as the plan request still releases 
 test('a turn end landing in the same tick as the plan request closes the review it never saw', async () => {
   const lane = laneWorkspace('same-tick-stop');
   const held = watch(lane.onHookEvent({
-    glissaId: 'session-1',
+    glimmervoidId: 'session-1',
     event: 'permissionrequest-plan',
     payload: planRequest('# Ship it'),
     accepted: true,
   }));
-  lane.onHookEvent({ glissaId: 'session-1', event: 'Stop', payload: {}, accepted: true });
+  lane.onHookEvent({ glimmervoidId: 'session-1', event: 'Stop', payload: {}, accepted: true });
   await lane.whenIdle();
   await flush();
   assert.equal(held.isSettled, true);
@@ -245,7 +245,7 @@ test('a PostToolUse after a deny records the terminal approval the deny never go
   lane.decide('session-1', { id: 'session-1', agentId: null, revision: 1, decision: 'revise', feedback: 'no' });
   assert.equal(await stateOf(lane, 'session-1'), 'decided');
   lane.onHookEvent({
-    glissaId: 'session-1',
+    glimmervoidId: 'session-1',
     event: 'PostToolUse',
     payload: { tool_name: 'ExitPlanMode', tool_response: { plan: '# Ship it' } },
     accepted: true,
@@ -261,7 +261,7 @@ test('a turn end, a subagent stop and a session end each release their own held 
   const main = await openHold(lane, { plan: '# Main' });
   const subagent = await openHold(lane, { plan: '# Explore', agentId: 'sub-1' });
 
-  lane.onHookEvent({ glissaId: 'session-1', event: 'SubagentStop', payload: { agent_id: 'sub-1' }, accepted: true });
+  lane.onHookEvent({ glimmervoidId: 'session-1', event: 'SubagentStop', payload: { agent_id: 'sub-1' }, accepted: true });
   await flush();
   assert.equal(subagent.isSettled, true);
   assert.deepEqual(subagent.reply, {});
@@ -269,14 +269,14 @@ test('a turn end, a subagent stop and a session end each release their own held 
   assert.equal(await stateOf(lane, 'session-1'), 'open');
   assert.equal(await stateOf(lane, 'session-1', 'sub-1'), 'closed');
 
-  lane.onHookEvent({ glissaId: 'session-1', event: 'Stop', payload: {}, accepted: true });
+  lane.onHookEvent({ glimmervoidId: 'session-1', event: 'Stop', payload: {}, accepted: true });
   await flush();
   assert.equal(main.isSettled, true);
   assert.deepEqual(main.reply, {});
   assert.equal(await stateOf(lane, 'session-1'), 'closed');
 
   const other = await openHold(lane, { sessionId: 'session-2', plan: '# Other' });
-  lane.onHookEvent({ glissaId: 'session-2', event: 'SessionEnd', payload: {}, accepted: true });
+  lane.onHookEvent({ glimmervoidId: 'session-2', event: 'SessionEnd', payload: {}, accepted: true });
   await flush();
   assert.equal(other.isSettled, true);
   assert.deepEqual(other.reply, {});
@@ -314,7 +314,7 @@ test('a session killed while its plan append is in flight still answers the requ
   const lane = laneWorkspace('teardown-race');
   const killSession = attachKillableSession(lane, 'session-1');
   const held = watch(lane.onHookEvent({
-    glissaId: 'session-1',
+    glimmervoidId: 'session-1',
     event: 'permissionrequest-plan',
     payload: planRequest('# Ship it'),
     accepted: true,
@@ -332,7 +332,7 @@ test('a plan request arriving after the lane stopped is answered at once and nev
   const lane = laneWorkspace('stopped-lane');
   await lane.stop();
   assert.equal(lane.onHookEvent({
-    glissaId: 'session-1',
+    glimmervoidId: 'session-1',
     event: 'permissionrequest-plan',
     payload: planRequest('# Ship it'),
     accepted: true,
@@ -365,19 +365,19 @@ test('the lane writes its own empty reply a minute before the hook timeout would
 test('a refused parse and a refused hook are answered as the route answers today', async () => {
   const lane = laneWorkspace('fail-open');
   assert.equal(await lane.onHookEvent({
-    glissaId: 'session-1',
+    glimmervoidId: 'session-1',
     event: 'permissionrequest-plan',
     payload: { tool_name: 'ExitPlanMode', tool_input: {} },
     accepted: true,
   }), null);
   assert.equal(lane.onHookEvent({
-    glissaId: 'session-1',
+    glimmervoidId: 'session-1',
     event: 'permissionrequest-plan',
     payload: planRequest('# Ship it'),
     accepted: false,
   }), null);
   assert.equal(await lane.onHookEvent({
-    glissaId: '../escape',
+    glimmervoidId: '../escape',
     event: 'permissionrequest-plan',
     payload: planRequest('# Ship it'),
     accepted: true,
@@ -392,7 +392,7 @@ interface HoldServer {
 }
 
 async function startHoldServer(name: string): Promise<HoldServer> {
-  const configDirectory = fs.mkdtempSync(path.join(os.tmpdir(), `glissa-plan-route-${name}-`));
+  const configDirectory = fs.mkdtempSync(path.join(os.tmpdir(), `glimmervoid-plan-route-${name}-`));
   temporaryDirectories.push(configDirectory);
   const warnings: string[] = [];
   const lane = createPlanReviewWiring({
@@ -507,7 +507,7 @@ test('a PostToolUse carrying the plan twice clears the cap, so a terminal answer
     assert.ok(answered, 'the held request came back once the terminal answered');
     const body = await answered.json();
     assert.equal(body.ok, true);
-    assert.equal(Object.hasOwn(body, 'hookSpecificOutput'), false, 'the terminal answered, so Glissa decides nothing');
+    assert.equal(Object.hasOwn(body, 'hookSpecificOutput'), false, 'the terminal answered, so Glimmervoid decides nothing');
     const review = reviewOf(await harness.lane.readPlanRevision('session-1', { agentId: null }));
     assert.equal(review?.state, 'closed');
     assert.equal(review?.approvedRevision, revision);

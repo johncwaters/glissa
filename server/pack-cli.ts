@@ -12,7 +12,7 @@ import type { PackDistiller } from './pack-distiller.ts';
 import { formatTimestamp, shortVersion } from './text-format.ts';
 
 const USAGE = [
-  'Usage: glissa pack <command>',
+  'Usage: glimmervoid pack <command>',
   '',
   'Commands:',
   '  build [name]     Build one pack, or every spec when no name is given',

@@ -5,7 +5,7 @@ Standing bug-watch report. Findings only, no fixes applied. Updated by the monit
 Resolution (2026-08-24): `docs/plan-agents-4-packs-hardening.md` records the shipped dispositions.
 
 - Last pass: 2026-08-22 (pass 1, full audit)
-- Baseline HEAD at audit: 204a9da (branch glissa/session/5290c049), recent scope commits reviewed through 6be6370, bf13fdb, 04820ad
+- Baseline HEAD at audit: 204a9da (branch glimmervoid/session/5290c049), recent scope commits reviewed through 6be6370, bf13fdb, 04820ad
 - Method: two independent opus audit agents (context mill, Visions lane), findings probe-confirmed where stated, all pack tests (142) and visions/ingest tests (225) passing
 
 ## Visions Lane
@@ -54,7 +54,7 @@ Not fully holding: DATA fence (V8), result contract vs intent (V5), stated cwd w
 `server/pack-builder.js:240-247`: `publishBuild` renames `current` to `previous`, then renames tmp in. If the second rename fails (probe-confirmed with forced EPERM), the pack has no `current/`; every later spawn silently skips the pack. Realistic triggers: concurrent-build tmp deletion (M2), Windows lock on the tmp tree, process kill in the window (`backend.js:1921` does not await `packService.stop()`). Worst at boot: `scheduleAutoResume()` (backend.js:1410) runs before `packService.start()` (:1421), neither awaited, so auto-resumed sessions can spawn pack-less until the first sweep republishes.
 
 ### M2 [MAJOR] `clearStaleTmpDirs` deletes any process's in-flight tmp dir, no cross-process lock
-`pack-builder.js:217-228` (called at :234) rm-rfs every `tmp-*` with no ownership check. The promise chain serializes one process only, but concurrent publishers are ordinary: `glissa pack build` while the server runs, a second Glissa sharing `~/.glissa/packs/built`, and `npm test` backends (see M6). Process B deletes A's tmp mid-write; A rotates then ENOENTs, landing in M1. The `pairings-store.js` O_EXCL lockfile pattern would close it.
+`pack-builder.js:217-228` (called at :234) rm-rfs every `tmp-*` with no ownership check. The promise chain serializes one process only, but concurrent publishers are ordinary: `glimmervoid pack build` while the server runs, a second Glimmervoid sharing `~/.glimmervoid/packs/built`, and `npm test` backends (see M6). Process B deletes A's tmp mid-write; A rotates then ENOENTs, landing in M1. The `pairings-store.js` O_EXCL lockfile pattern would close it.
 
 ### M3 [MAJOR] Two skill dirs sharing a basename silently overwrite each other
 `pack-core.js:415-419` keys skill outputs on basename. Probe-confirmed: build reports ok, delivered file holds only the second skill, `manifest.outputs` lists the same relPath twice with two sha256 values, one matching nothing on disk. Version stays deterministic so no staleness check ever sees it. Should be a build error like a no-match source.
@@ -63,10 +63,10 @@ Not fully holding: DATA fence (V8), result contract vs intent (V5), stated cwd w
 `pack-builder.js:37-41,128-135`: a `**`-leading pattern yields empty root, `walkFiles('')` throws ENOENT, candidate list empty, build fails "matched no files" despite matching files existing. `packWatchRoots` (:107-114) also drops the root. Documented form is dead in walk and watch.
 
 ### M5 [MINOR] Publish IO errors escape `buildPacks` despite its never-throws docstring
-`pack-builder.js:344-348 vs :351`: `publishBuild` sits outside the try. One pack's publish error aborts remaining specs in a `glissa pack build` run and the error names no pack. Service catches it; CLI exits 1.
+`pack-builder.js:344-348 vs :351`: `publishBuild` sits outside the try. One pack's publish error aborts remaining specs in a `glimmervoid pack build` run and the error names no pack. Service catches it; CLI exits 1.
 
 ### M6 [MINOR] Most backend-booting tests start the real pack service
-Only 4 test files set `packsAutoRebuild: false`; roughly 14 others boot with it on, installing watchers on the checkout's real `packs/` and publishing into the operator's real `~/.glissa/packs/built` (installed pack's builtAt matches a test run). Also makes M2 reproducible via `npm test` beside a live server.
+Only 4 test files set `packsAutoRebuild: false`; roughly 14 others boot with it on, installing watchers on the checkout's real `packs/` and publishing into the operator's real `~/.glimmervoid/packs/built` (installed pack's builtAt matches a test run). Also makes M2 reproducible via `npm test` beside a live server.
 
 ### M7 [MINOR] `pack-updated` landing mid-spawn loses its notice
 `backend.js:1070` vs `sessions.js:2276-2296`: `_resolvePacks` clears delivered packs then awaits per pack; a broadcast in that window finds no delivered entry, `notePackUpdate` returns false, no notice armed. Dashboard chip still shows stale, so surfaces disagree. Small window, self-heals on next publish.
@@ -78,12 +78,12 @@ Only 4 test files set `packsAutoRebuild: false`; roughly 14 others boot with it 
 `pack-distiller.js:54-56`: bare `Edit(*)`/`Write(*)` in `PACK_DISTILL_DENY`; if CC's matcher treats slash-less patterns as any-depth, every write is denied and each run ends "DISTILLED but output file missing". Tests only assert string presence. Needs one real distill run to confirm.
 
 ### Mill contract checks
-Holding: deterministic builds, version hashes all delivered files excluding manifest; budget hard gates incl index cap; plan failure writes nothing; unchanged version publishes nothing; in-process rebuild serialization; `pack-updated` absent from replay retention; notice Glissa-authored, 600-char cap, consumed on read, re-armed only by newer version; injection only on accepted 200 UserPromptSubmit; unresolvable pack never blocks spawn; read-telemetry matcher only for pack-carrying sessions.
+Holding: deterministic builds, version hashes all delivered files excluding manifest; budget hard gates incl index cap; plan failure writes nothing; unchanged version publishes nothing; in-process rebuild serialization; `pack-updated` absent from replay retention; notice Glimmervoid-authored, 600-char cap, consumed on read, re-armed only by newer version; injection only on accepted 200 UserPromptSubmit; unresolvable pack never blocks spawn; read-telemetry matcher only for pack-carrying sessions.
 Qualified/failing: "failed build leaves last good current/ untouched" fails for publish-time IO errors (test covers plan-stage only); serialization is single-process; symlink skip does not always catch Windows junctions (loop-safe via realpath set); AGENTS.md does not mention the `optional: true` no-match exemption (pack-core.js:339-344).
 
 ### Mill recent-commit risks
 - `6be6370` (repo-wide dedup): pack-scope moves checked line by line (isPlainObject, shortVersion with `'-'` fallback, validateOptionalArray), semantics identical, removed exports have no importers. Clean.
-- Design note: every install/worktree publishes into the same `~/.glissa/packs/built/<name>` from its own sources; two servers on different branches would flip-flop publishes and arm notices on live sessions. Not occurring today (versions identical).
+- Design note: every install/worktree publishes into the same `~/.glimmervoid/packs/built/<name>` from its own sources; two servers on different branches would flip-flop publishes and arm notices on live sessions. Not occurring today (versions identical).
 
 ## Verdict (pass 1)
 

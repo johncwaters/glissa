@@ -81,8 +81,8 @@ const PLAN_REVIEW = {
 };
 const SESSION = {
   id: 'session-1',
-  name: 'glissa',
-  path: '/repo/glissa',
+  name: 'glimmervoid',
+  path: '/repo/glimmervoid',
   agent: 'claude-code',
   state: STATES.RUNNING,
   stateSince: NOW,
@@ -108,25 +108,25 @@ const REAL_SERVER_PAYLOADS: ServerPayload[] = [
   { type: 'pack-updated', name: 'rules', version: 'def456' },
   { type: 'mill-report', requestId: 'mill-1', ts: NOW, autoRebuild: true, distillerEnabled: false, watcherCount: 2, projects: [], maxPacksPerProject: 4, packs: [], configWarnings: [], totals: {}, error: null },
   { type: 'session-packs', id: 'session-1', packs: [{ name: 'rules', version: 'abc123' }] },
-  { type: 'state-change', id: 'session-1', session: 'glissa', from: STATES.IDLE, to: STATES.RUNNING, event: 'user_input', timestamp: NOW },
-  { type: 'session-added', id: 'session-1', session: 'glissa', path: '/repo/glissa', state: STATES.DORMANT, stateSince: NOW, skipPerms: true, worktree: false, resumeSessionId: null },
-  { type: 'session-removed', id: 'session-1', session: 'glissa' },
-  { type: 'session-renamed', id: 'session-1', oldName: 'old', newName: 'glissa' },
-  { type: 'session-modified', id: 'session-1', session: 'glissa', path: '/repo/glissa', state: STATES.DORMANT, stateSince: NOW, skipPerms: true, worktree: false, resumeSessionId: null },
+  { type: 'state-change', id: 'session-1', session: 'glimmervoid', from: STATES.IDLE, to: STATES.RUNNING, event: 'user_input', timestamp: NOW },
+  { type: 'session-added', id: 'session-1', session: 'glimmervoid', path: '/repo/glimmervoid', state: STATES.DORMANT, stateSince: NOW, skipPerms: true, worktree: false, resumeSessionId: null },
+  { type: 'session-removed', id: 'session-1', session: 'glimmervoid' },
+  { type: 'session-renamed', id: 'session-1', oldName: 'old', newName: 'glimmervoid' },
+  { type: 'session-modified', id: 'session-1', session: 'glimmervoid', path: '/repo/glimmervoid', state: STATES.DORMANT, stateSince: NOW, skipPerms: true, worktree: false, resumeSessionId: null },
   { type: 'session-git', id: 'session-1', worktree: true },
   { type: 'session-resume', id: 'session-1', resumeSessionId: null },
-  { type: 'session-agents', id: 'session-1', activeAgents: 2, session: 'glissa', timestamp: NOW },
-  { type: 'session-wakeup', id: 'session-1', pendingWakeup: { at: NOW, kind: 'cron', reason: null }, session: 'glissa', timestamp: NOW },
-  { type: 'session-prompt', id: 'session-1', pendingPromptKind: 'permission', session: 'glissa', timestamp: NOW },
-  { type: 'session-sleep', id: 'session-1', session: 'glissa', timestamp: NOW },
-  { type: 'session-wake', id: 'session-1', session: 'glissa', timestamp: NOW },
-  { type: 'session-merge-status', id: 'session-1', session: 'glissa', mergeStatus: 'pending-review', reason: null, parked: false, timestamp: NOW },
-  { type: 'session-worktree-blocked', id: 'session-1', session: 'glissa', branch: 'develop', notice: 'missing branch', timestamp: NOW },
-  { type: 'session-worktree-ready', id: 'session-1', session: 'glissa', branch: 'glissa/session/1', base: 'develop', timestamp: NOW },
+  { type: 'session-agents', id: 'session-1', activeAgents: 2, session: 'glimmervoid', timestamp: NOW },
+  { type: 'session-wakeup', id: 'session-1', pendingWakeup: { at: NOW, kind: 'cron', reason: null }, session: 'glimmervoid', timestamp: NOW },
+  { type: 'session-prompt', id: 'session-1', pendingPromptKind: 'permission', session: 'glimmervoid', timestamp: NOW },
+  { type: 'session-sleep', id: 'session-1', session: 'glimmervoid', timestamp: NOW },
+  { type: 'session-wake', id: 'session-1', session: 'glimmervoid', timestamp: NOW },
+  { type: 'session-merge-status', id: 'session-1', session: 'glimmervoid', mergeStatus: 'pending-review', reason: null, parked: false, timestamp: NOW },
+  { type: 'session-worktree-blocked', id: 'session-1', session: 'glimmervoid', branch: 'develop', notice: 'missing branch', timestamp: NOW },
+  { type: 'session-worktree-ready', id: 'session-1', session: 'glimmervoid', branch: 'glimmervoid/session/1', base: 'develop', timestamp: NOW },
   { type: 'session-diff', id: 'session-1', committed: { stat: '1 file', diff: 'patch' }, uncommitted: { stat: '', diff: '' }, hasCommits: true },
   { type: 'branch-sync-status', id: 'session-1', branch: 'develop', upstream: 'origin/develop', state: 'ahead', ahead: 1, behind: 0, fetched: true },
   { type: 'session-changed', id: 'session-1', sig: 'sha' },
-  { type: 'post-turn-result', id: 'session-1', session: 'glissa', mode: 'fix', skipped: null, filesFixed: 1, findings: [{ file: 'a.js', rule: 'finalNewline', count: 1 }], timestamp: NOW },
+  { type: 'post-turn-result', id: 'session-1', session: 'glimmervoid', mode: 'fix', skipped: null, filesFixed: 1, findings: [{ file: 'a.js', rule: 'finalNewline', count: 1 }], timestamp: NOW },
   { type: 'debug-state-response', id: 'session-1', payload: { state: STATES.RUNNING } },
   { type: 'session-trace-response', id: 'session-1', records: [], start: 0, next: 0, reset: false, path: '/traces/session-1.jsonl' },
   { type: 'session-trace-changed', id: 'session-1' },
@@ -144,19 +144,19 @@ const REAL_SERVER_PAYLOADS: ServerPayload[] = [
   },
   { type: 'update-progress', journal: UPDATE_JOURNAL },
   { type: 'error', message: 'refused' },
-  { type: 'session-error', id: 'session-1', session: 'glissa', message: 'failed' },
+  { type: 'session-error', id: 'session-1', session: 'glimmervoid', message: 'failed' },
   { type: 'settings', requestId: 'settings-1', settings: { cursorBlink: false } },
   { type: 'settings-error', requestId: 'settings-1', message: 'invalid' },
   { type: 'settings-updated', requestId: 'settings-1', settings: { cursorBlink: true } },
   { type: 'pong', requestId: 'ping-1' },
   { type: 'agents-listed', requestId: 'agents-1', agents: [{ id: 'claude-code', label: 'Claude Code', resolvable: true }] },
-  { type: 'repo-roots-scanned', requestId: 'roots-1', directories: [{ root: '/repo', projects: [{ name: 'glissa', path: '/repo/glissa' }] }] },
+  { type: 'repo-roots-scanned', requestId: 'roots-1', directories: [{ root: '/repo', projects: [{ name: 'glimmervoid', path: '/repo/glimmervoid' }] }] },
   { type: 'conversations', requestId: 'conversations-1', id: 'session-1', current: null, conversations: [{
     id: 'conversation-1',
     title: 'Fix contracts',
-    cwd: '/repo/glissa',
-    worktreePath: '/repo/glissa',
-    worktreeName: 'glissa',
+    cwd: '/repo/glimmervoid',
+    worktreePath: '/repo/glimmervoid',
+    worktreeName: 'glimmervoid',
     gitBranch: 'refs/heads/feat/typed-contracts',
     mtime: NOW,
   }] },
@@ -185,7 +185,7 @@ const REAL_SERVER_PAYLOADS: ServerPayload[] = [
   { type: 'ingest-snapshot', events: [], sources: { terminal: true }, ts: NOW },
   { type: 'client-trust', trust: 'local' },
   { type: 'sessions-reordered', order: ['session-1'] },
-  { type: 'session-worktree-warning', id: 'session-1', session: 'Session 1', branch: 'glissa/session/session-1', notice: 'offline', timestamp: NOW },
+  { type: 'session-worktree-warning', id: 'session-1', session: 'Session 1', branch: 'glimmervoid/session/session-1', notice: 'offline', timestamp: NOW },
   { type: 'shutting-down' },
   { type: 'restarting' },
   {
@@ -193,7 +193,7 @@ const REAL_SERVER_PAYLOADS: ServerPayload[] = [
     hooks: [{ id: 'h1', name: 'lint', event: 'PostToolUse', matcher: 'Edit', type: 'command', command: 'npm run lint', enabled: true }],
     builtin: [{ event: 'Stop', matcher: null, purpose: 'Status detection' }],
     events: [{ name: 'PostToolUse', matcher: 'tool name (regex)', description: 'After a tool succeeds.' }],
-    projects: [{ id: 'p1', name: 'glissa', agent: 'claude-code' }],
+    projects: [{ id: 'p1', name: 'glimmervoid', agent: 'claude-code' }],
     limits: { maxTimeoutSec: 600 },
     error: null,
   },
@@ -311,13 +311,13 @@ test('both error frames declare the scope and the id the plan face keys on', () 
   assert.equal(ServerMessage.parse({ type: 'error', id: 'session-1', message: 'Plan revision not found', scope: 'plan' }).id, 'session-1');
   assert.equal(ServerMessage.parse({ type: 'error', id: 'session-1', message: 'Plan revision not found', scope: 'plan' }).scope, 'plan');
   assert.equal(
-    ServerMessage.parse({ type: 'session-error', id: 'session-1', session: 'glissa', message: 'refused', scope: 'plan-decision' }).scope,
+    ServerMessage.parse({ type: 'session-error', id: 'session-1', session: 'glimmervoid', message: 'refused', scope: 'plan-decision' }).scope,
     'plan-decision',
   );
 });
 
 test('id-only client variants reject the removed session-name fallback', () => {
-  assert.equal(ClientMessage.safeParse({ type: 'kill', session: 'glissa' }).success, false);
+  assert.equal(ClientMessage.safeParse({ type: 'kill', session: 'glimmervoid' }).success, false);
   assert.equal(ClientMessage.safeParse({ type: 'kill', id: 'session-1' }).success, true);
 });
 

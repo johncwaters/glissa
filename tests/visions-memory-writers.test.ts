@@ -50,7 +50,7 @@ function threadIdOfNamed(threads: { id: string; text: string }[], text: string):
 }
 
 const PROJECT_ID = 'e1f4c0de-0000-4000-8000-000000000001';
-const PROJECT_PATH = '/tmp/glissa-memory-writers';
+const PROJECT_PATH = '/tmp/glimmervoid-memory-writers';
 const MARKDOWN_URI = `file://${PROJECT_PATH}/plan.md`;
 const OUTSIDE_URI = 'file:///tmp/elsewhere/plan.md';
 const SCOPE_PROJECTS = [{ id: PROJECT_ID, path: PROJECT_PATH }];
@@ -174,7 +174,7 @@ test('an accepted intent proposal is remembered as a model-stamped record tagged
     kind: 'intent',
     layer: 'semantic',
     project: PROJECT_PATH,
-    source: { kind: 'model', vendor: 'glissa', sessionId: null },
+    source: { kind: 'model', vendor: 'glimmervoid', sessionId: null },
     text: `thread ${threadId}: shipping the memory writers`,
     supersedes: null,
   });
@@ -254,7 +254,7 @@ test('the intent chain is seeded from the loaded canon by project and thread, so
       { kind: 'intent', project: PROJECT_PATH, id: 'm-other', ts: 50, text: 'thread t-0badf00d: story B' },
     ],
   });
-  const intentStatePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-intent-')), 'visions-intent.json');
+  const intentStatePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-intent-')), 'visions-intent.json');
   fs.writeFileSync(intentStatePath, JSON.stringify({
     byProject: { [PROJECT_ID]: [{ id: 't-716d49b4', text: 'story A', uris: [MARKDOWN_URI], ts: FIXED_TS - 1000, hits: 1 }] },
     unowned: [],
@@ -394,7 +394,7 @@ test('a dispatch result cannot stamp its own trust fields', async (t) => {
   await driver.wiring.whenMemoryIdle();
 
   for (const input of store.appended) {
-    assert.deepEqual(input.source, { kind: 'model', vendor: 'glissa', sessionId: null });
+    assert.deepEqual(input.source, { kind: 'model', vendor: 'glimmervoid', sessionId: null });
     assert.equal(input.locked, undefined);
     assert.equal(input.sig, undefined);
   }
@@ -425,7 +425,7 @@ test('an applied tier 1 fix is remembered as action-ranked feedback, a refused o
   await driver.wiring.whenMemoryIdle();
 
   assert.equal(store.appended.length, 1);
-  assert.deepEqual(appendedAt(store, 0).source, { kind: 'action', vendor: 'glissa', sessionId: null });
+  assert.deepEqual(appendedAt(store, 0).source, { kind: 'action', vendor: 'glimmervoid', sessionId: null });
   assert.equal(appendedAt(store, 0).kind, 'feedback');
   assert.match(appendedAt(store, 0).text, /^applied repeated-word at plan\.md:\d+$/);
 
@@ -454,7 +454,7 @@ test('served findings are remembered once per uri and version', async (t) => {
 
   assert.equal(store.appended.length, 1);
   assert.equal(appendedAt(store, 0).kind, 'feedback');
-  assert.deepEqual(appendedAt(store, 0).source, { kind: 'action', vendor: 'glissa', sessionId: null });
+  assert.deepEqual(appendedAt(store, 0).source, { kind: 'action', vendor: 'glimmervoid', sessionId: null });
   assert.match(appendedAt(store, 0).text, /^served repeated-word@\d+:\d+ at plan\.md:\d+$/);
 
   driver.lsp('textDocument/didChange', {
@@ -480,7 +480,7 @@ test('an explicit dismissal is remembered as action-ranked feedback', async (t) 
     kind: 'feedback',
     layer: 'episodic',
     project: PROJECT_PATH,
-    source: { kind: 'action', vendor: 'glissa', sessionId: null },
+    source: { kind: 'action', vendor: 'glimmervoid', sessionId: null },
     text: 'dismissed repeated-word@3:12 at plan.md',
     supersedes: null,
   }]);

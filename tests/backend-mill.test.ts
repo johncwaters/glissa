@@ -119,7 +119,7 @@ function withBackend(
 ) {
   return async () => {
     BUILD_LOG.length = 0;
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-mill-'));
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-mill-'));
     const projectDir = path.join(tmpDir, 'project');
     fs.mkdirSync(projectDir);
     const fixture = writePackFixture(tmpDir);
@@ -134,8 +134,8 @@ function withBackend(
       usage: { enabled: false },
       millEnabled,
     }, null, 2), 'utf8');
-    const prevEnv = process.env.GLISSA_CONFIG;
-    process.env.GLISSA_CONFIG = cfgPath;
+    const prevEnv = process.env.GLIMMERVOID_CONFIG;
+    process.env.GLIMMERVOID_CONFIG = cfgPath;
 
     const server = http.createServer();
     const backend = createBackend(server, {
@@ -159,8 +159,8 @@ function withBackend(
       backend.shutdown();
       server.closeAllConnections();
       await closeServer(server);
-      if (prevEnv == null) delete process.env.GLISSA_CONFIG;
-      if (prevEnv != null) process.env.GLISSA_CONFIG = prevEnv;
+      if (prevEnv == null) delete process.env.GLIMMERVOID_CONFIG;
+      if (prevEnv != null) process.env.GLIMMERVOID_CONFIG = prevEnv;
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   };

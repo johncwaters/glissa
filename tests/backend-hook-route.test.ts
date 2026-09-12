@@ -31,7 +31,7 @@ function ctx(): HookRouteContext {
 }
 
 test.before(async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-hookroute-'));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-hookroute-'));
   const projectDir = path.join(tmpDir, 'project');
   fs.mkdirSync(projectDir);
   const cfgPath = path.join(tmpDir, 'config.json');
@@ -42,8 +42,8 @@ test.before(async () => {
     millEnabled: false,
     autoResume: false,
   }, null, 2), 'utf8');
-  const prevEnv = process.env.GLISSA_CONFIG;
-  process.env.GLISSA_CONFIG = cfgPath;
+  const prevEnv = process.env.GLIMMERVOID_CONFIG;
+  process.env.GLIMMERVOID_CONFIG = cfgPath;
 
   const server = http.createServer();
   const backend = createBackend(server, { staticDir: null });
@@ -67,8 +67,8 @@ test.after(async () => {
 
   server.closeAllConnections();
   await closeServer(server);
-  if (prevEnv == null) delete process.env.GLISSA_CONFIG;
-  if (prevEnv != null) process.env.GLISSA_CONFIG = prevEnv;
+  if (prevEnv == null) delete process.env.GLIMMERVOID_CONFIG;
+  if (prevEnv != null) process.env.GLIMMERVOID_CONFIG = prevEnv;
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 

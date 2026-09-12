@@ -15,7 +15,7 @@ after(() => {
 });
 
 function workspace(name: string, files: Record<string, number>): string {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), `glissa-prune-${name}-`));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), `glimmervoid-prune-${name}-`));
   directories.push(directory);
   for (const [name_, ageDays] of Object.entries(files)) {
     const filePath = path.join(directory, name_);
@@ -57,7 +57,7 @@ test('a retained id survives the walk however old its file is', async () => {
 
 test('a missing directory is not an error, since a lane prunes before it ever writes', async () => {
   assert.deepEqual(
-    await pruneAgedFiles({ directory: path.join(os.tmpdir(), 'glissa-prune-absent'), suffixes: ['.jsonl'], retainDays: 30 }),
+    await pruneAgedFiles({ directory: path.join(os.tmpdir(), 'glimmervoid-prune-absent'), suffixes: ['.jsonl'], retainDays: 30 }),
     [],
   );
 });
@@ -74,7 +74,7 @@ test('one id with two suffixes is reported once per file removed', async () => {
 });
 
 test('directory mode removes an aged directory and preserves a live directory', async () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-prune-directories-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-prune-directories-'));
   directories.push(directory);
   for (const name of ['old', 'live']) {
     const target = path.join(directory, name);

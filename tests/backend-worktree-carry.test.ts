@@ -39,7 +39,7 @@ function fakeOldSession({ path: projectPath = 'C:/proj', worktreeDir = 'C:/wts/p
   const calls = { settleChecks: 0, discard: 0 };
   const session = sessionAt('old', projectPath);
   const carry: WorktreeCarry | null = workspace === undefined
-    ? { cwd: worktreeDir ?? '', isGit: true, branch: 'glissa/session/sess-1', base: 'develop' }
+    ? { cwd: worktreeDir ?? '', isGit: true, branch: 'glimmervoid/session/sess-1', base: 'develop' }
     : workspace;
   session._killReap = killReap ?? null;
   session.getWorktreeCarry = () => {
@@ -70,7 +70,7 @@ test('same path: the new session adopts the surviving worktree (dir, branch, bas
   assert.equal(newSess.adopted.length, 1, 'adopted once');
   assert.deepEqual(newSess.adopted[0], {
     worktreeDir: 'C:/wts/proj-abc',
-    branch: 'glissa/session/sess-1',
+    branch: 'glimmervoid/session/sess-1',
     base: 'develop',
   });
   assert.equal(oldSess.calls.discard, 0, 'nothing discarded');

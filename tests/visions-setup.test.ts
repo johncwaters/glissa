@@ -78,7 +78,7 @@ test('a config under the operator home is refused while the test runner is what 
   const setup = createVisionsSetup({
     getConfig: () => config,
     configStore: {
-      configPath: path.join(os.homedir(), '.glissa', 'config.json'),
+      configPath: path.join(os.homedir(), '.glimmervoid', 'config.json'),
       save() {
         saves += 1;
         return config;

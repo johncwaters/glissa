@@ -246,7 +246,7 @@ test('start() investigates a new issue, arms an unref-d interval, stop() clears 
   assert.equal(entryOf(poller, KEY).verdict, 'ROOT_CAUSE');
   assert.equal(entryOf(poller, KEY).inFlight, false);
   assert.equal(pings.length, 1, 'a ROOT_CAUSE verdict is digest-only, so only the new-issue ping fires');
-  assert.match(pings[0], /^\[glissa\/posthog\] NEW ISSUE web$/m);
+  assert.match(pings[0], /^\[glimmervoid\/posthog\] NEW ISSUE web$/m);
   assert.equal(typeof armed.cb, 'function', 'interval armed');
 
   await poller.stop();
@@ -280,7 +280,7 @@ test('a spike event on an undiagnosed issue pings and investigates', async () =>
   await flush();
   assert.equal(spawned, 1);
   assert.equal(pings.length, 1);
-  assert.match(pings[0], /^\[glissa\/posthog\] SPIKE web$/m);
+  assert.match(pings[0], /^\[glimmervoid\/posthog\] SPIKE web$/m);
   assert.match(pings[0], /120 occurrences \/ 8 users/);
 });
 
@@ -323,7 +323,7 @@ test('a resolved issue turning active again pings as a regression', async () => 
   await poller.start();
   await flush();
   assert.equal(pings.length, 1);
-  assert.match(pings[0], /^\[glissa\/posthog\] REGRESSED web$/m);
+  assert.match(pings[0], /^\[glimmervoid\/posthog\] REGRESSED web$/m);
   assert.equal(entryOf(poller, KEY).status, 'active', 'the entry is written back active, so it cannot re-ping');
 });
 
@@ -446,8 +446,8 @@ test('a hung investigation is force-resolved to ERROR by the timeout and frees i
   assert.equal(entryOf(poller, KEY).verdict, 'ERROR');
   assert.equal(entryOf(poller, KEY).inFlight, false, 'slot freed');
   assert.equal(pings.length, 2);
-  assert.match(pings[0], /^\[glissa\/posthog\] NEW ISSUE web$/m);
-  assert.match(pings[1], /^\[glissa\/posthog\] ERROR web$/m);
+  assert.match(pings[0], /^\[glimmervoid\/posthog\] NEW ISSUE web$/m);
+  assert.match(pings[1], /^\[glimmervoid\/posthog\] ERROR web$/m);
 });
 
 test('an issue that vanished from the active list is marked resolved, not deleted, with no ping', async () => {
@@ -480,7 +480,7 @@ test('the full vanish-then-return cycle classifies the return as a regression', 
   await poller.tick();
   await flush();
   assert.equal(pings.length, 1);
-  assert.match(pings[0], /^\[glissa\/posthog\] REGRESSED web$/m);
+  assert.match(pings[0], /^\[glimmervoid\/posthog\] REGRESSED web$/m);
   assert.equal(entryOf(poller, KEY).status, 'active', 'written back active, so it cannot re-ping');
   assert.equal(entryOf(poller, KEY).vanishedAt, undefined, 'the vanish stamp is cleared on return');
 });
@@ -838,8 +838,8 @@ test('a FIXED verdict pings once with the repro status and the pull request', as
   await poller.start();
   await flush();
   assert.equal(pings.length, 2);
-  assert.match(pings[0], /^\[glissa\/posthog\] NEW ISSUE web$/m);
-  assert.match(pings[1], /^\[glissa\/posthog\] FIXED web$/m);
+  assert.match(pings[0], /^\[glimmervoid\/posthog\] NEW ISSUE web$/m);
+  assert.match(pings[1], /^\[glimmervoid\/posthog\] FIXED web$/m);
   assert.match(pings[1], /reproduced, then fixed/);
   assert.match(pings[1], /PR: https:\/\/github\.com\/o\/r\/pull\/7/);
 });
@@ -960,7 +960,7 @@ test('a fix that only needs a carbon unit reuses the needs_human ping and record
   });
   await poller.start();
   await flush();
-  assert.match(lastPing(pings), /^\[glissa\/posthog\] NEEDS HUMAN web$/m);
+  assert.match(lastPing(pings), /^\[glimmervoid\/posthog\] NEEDS HUMAN web$/m);
   assert.doesNotMatch(lastPing(pings), /PR:/);
   assert.equal(investigationAt(stateStore.value, 0).prUrl, null);
   assert.equal(fixOf(poller, KEY).verdict, 'NEEDS_HUMAN');
@@ -978,7 +978,7 @@ test('a hung fix is force-resolved to ERROR, freeing its slot and naming the mod
   assert.equal(entryOf(poller, KEY).verdict, 'ERROR');
   assert.equal(entryOf(poller, KEY).inFlight, false, 'slot freed');
   assert.equal(fixOf(poller, KEY).verdict, 'ERROR', 'the failed attempt is still recorded');
-  assert.match(lastPing(pings), /^\[glissa\/posthog\] ERROR web$/m);
+  assert.match(lastPing(pings), /^\[glimmervoid\/posthog\] ERROR web$/m);
 });
 
 test('a fix the wiring downgraded is recorded as the investigation it actually was', async () => {
@@ -1244,7 +1244,7 @@ test('the configured repeat escalates: a real investigation runs and the phone h
   assert.deepEqual(spawned, ['iss-4'], 'the third repeat is paid for');
   const recurring = pings.filter((ping) => /RECURRING/.test(ping));
   assert.equal(recurring.length, 1);
-  assert.match(String(recurring[0]), /^\[glissa\/posthog\] RECURRING web$/m);
+  assert.match(String(recurring[0]), /^\[glimmervoid\/posthog\] RECURRING web$/m);
   assert.match(String(recurring[0]), /recurring transient escalated: repeat 3 within 7 days of issue iss-1/);
   const cluster = signatureBlock(poller._state(), 'ph.test/1#iss-1');
   assert.equal(cluster.escalated, true, 'the cluster stops being reusable');
@@ -1432,7 +1432,7 @@ test('a traffic spike pings once and persists its state slice', async () => {
   await flush();
 
   assert.equal(pings.length, 1);
-  assert.match(pings[0], /^\[glissa\/posthog\] TRAFFIC SPIKE web$/m);
+  assert.match(pings[0], /^\[glimmervoid\/posthog\] TRAFFIC SPIKE web$/m);
   assert.match(pings[0], /87 users in the last hour, ~8\.7x normal \(p90 10\)/);
   assert.equal(pings[0].includes('occurrences'), false, 'a project-level ping carries no issue counts');
   assert.deepEqual(trafficBlock(stateStore.value)['1'], {
@@ -1459,7 +1459,7 @@ test('a spike that doubles again escalates with its own label', async () => {
   await flush();
 
   assert.equal(pings.length, 2);
-  assert.match(pings[1], /^\[glissa\/posthog\] TRAFFIC CLIMBING web$/m);
+  assert.match(pings[1], /^\[glimmervoid\/posthog\] TRAFFIC CLIMBING web$/m);
   assert.match(pings[1], /200 users in the last hour/);
   assert.equal(trafficProject(poller._state(), '1').lastPingedUsers, 200);
 });

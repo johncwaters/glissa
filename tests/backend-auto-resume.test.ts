@@ -24,16 +24,16 @@ interface SpawnCall {
 }
 
 function withStore<T>(cfg: Record<string, unknown>, fn: (store: ConfigStore, configPath: string) => T): T {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-autoresume-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-autoresume-'));
   const p = path.join(dir, 'config.json');
   fs.writeFileSync(p, JSON.stringify(cfg, null, 2), 'utf8');
-  const prev = process.env.GLISSA_CONFIG;
-  process.env.GLISSA_CONFIG = p;
+  const prev = process.env.GLIMMERVOID_CONFIG;
+  process.env.GLIMMERVOID_CONFIG = p;
   try {
     return fn(createConfigStore(), p);
   } finally {
-    if (prev == null) delete process.env.GLISSA_CONFIG;
-    if (prev != null) process.env.GLISSA_CONFIG = prev;
+    if (prev == null) delete process.env.GLIMMERVOID_CONFIG;
+    if (prev != null) process.env.GLIMMERVOID_CONFIG = prev;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
@@ -42,16 +42,16 @@ async function withStoreAsync<T>(
   cfg: Record<string, unknown>,
   fn: (store: ConfigStore, configPath: string) => Promise<T>,
 ): Promise<T> {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-autoresume-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-autoresume-'));
   const p = path.join(dir, 'config.json');
   fs.writeFileSync(p, JSON.stringify(cfg, null, 2), 'utf8');
-  const prev = process.env.GLISSA_CONFIG;
-  process.env.GLISSA_CONFIG = p;
+  const prev = process.env.GLIMMERVOID_CONFIG;
+  process.env.GLIMMERVOID_CONFIG = p;
   try {
     return await fn(createConfigStore(), p);
   } finally {
-    if (prev == null) delete process.env.GLISSA_CONFIG;
-    if (prev != null) process.env.GLISSA_CONFIG = prev;
+    if (prev == null) delete process.env.GLIMMERVOID_CONFIG;
+    if (prev != null) process.env.GLIMMERVOID_CONFIG = prev;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
@@ -245,8 +245,8 @@ test('runAutoResume does not double-spawn a session started externally while que
 });
 
 test('createBackend defers boot auto-resume until the HTTP listener has a hook port', async () => {
-  const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-autoresume-cfg-'));
-  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-autoresume-proj-'));
+  const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-autoresume-cfg-'));
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-autoresume-proj-'));
   const cfgPath = path.join(cfgDir, 'config.json');
   const resumeSessionId = '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5';
   fs.writeFileSync(cfgPath, JSON.stringify({
@@ -262,11 +262,11 @@ test('createBackend defers boot auto-resume until the HTTP listener has a hook p
     teams: [],
     repoRoots: [],
   }, null, 2), 'utf8');
-  const prevEnv = process.env.GLISSA_CONFIG;
+  const prevEnv = process.env.GLIMMERVOID_CONFIG;
   const originalSpawn = pty.spawn;
   const calls: SpawnCall[] = [];
   const live: { backend: ReturnType<typeof createBackend> | null } = { backend: null };
-  process.env.GLISSA_CONFIG = cfgPath;
+  process.env.GLIMMERVOID_CONFIG = cfgPath;
   pty.spawn = (file: string, args: string[] | string) => {
     calls.push({ file, args: Array.isArray(args) ? args : [args] });
     return fakeIPty();
@@ -291,16 +291,16 @@ test('createBackend defers boot auto-resume until the HTTP listener has a hook p
     if (live.backend) live.backend.shutdown();
     if (server.listening) await closeServer(server);
     pty.spawn = originalSpawn;
-    if (prevEnv == null) delete process.env.GLISSA_CONFIG;
-    if (prevEnv != null) process.env.GLISSA_CONFIG = prevEnv;
+    if (prevEnv == null) delete process.env.GLIMMERVOID_CONFIG;
+    if (prevEnv != null) process.env.GLIMMERVOID_CONFIG = prevEnv;
     fs.rmSync(cfgDir, { recursive: true, force: true });
     fs.rmSync(projectDir, { recursive: true, force: true });
   }
 });
 
 test('createBackend shutdown removes pending boot listeners before listen', async () => {
-  const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-autoresume-cfg-'));
-  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-autoresume-proj-'));
+  const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-autoresume-cfg-'));
+  const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-autoresume-proj-'));
   const cfgPath = path.join(cfgDir, 'config.json');
   fs.writeFileSync(cfgPath, JSON.stringify({
     autoResume: true,
@@ -315,10 +315,10 @@ test('createBackend shutdown removes pending boot listeners before listen', asyn
     teams: [],
     repoRoots: [],
   }, null, 2), 'utf8');
-  const prevEnv = process.env.GLISSA_CONFIG;
+  const prevEnv = process.env.GLIMMERVOID_CONFIG;
   const originalSpawn = pty.spawn;
   const live: { backend: ReturnType<typeof createBackend> | null } = { backend: null };
-  process.env.GLISSA_CONFIG = cfgPath;
+  process.env.GLIMMERVOID_CONFIG = cfgPath;
   pty.spawn = () => fakeIPty();
   const server = http.createServer();
   try {
@@ -332,8 +332,8 @@ test('createBackend shutdown removes pending boot listeners before listen', asyn
     if (live.backend) live.backend.shutdown();
     if (server.listening) await closeServer(server);
     pty.spawn = originalSpawn;
-    if (prevEnv == null) delete process.env.GLISSA_CONFIG;
-    if (prevEnv != null) process.env.GLISSA_CONFIG = prevEnv;
+    if (prevEnv == null) delete process.env.GLIMMERVOID_CONFIG;
+    if (prevEnv != null) process.env.GLIMMERVOID_CONFIG = prevEnv;
     fs.rmSync(cfgDir, { recursive: true, force: true });
     fs.rmSync(projectDir, { recursive: true, force: true });
   }

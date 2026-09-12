@@ -76,8 +76,8 @@ function buildPackDistillPrompt({
     (source) => `- ${source.fullPath || source.path}`
   );
   return [
-    'You are an automated documentation distiller for the Glissa context mill.',
-    `Prepare replacement content for ${outputPath}. Glissa alone writes that output file.`,
+    'You are an automated documentation distiller for the Glimmervoid context mill.',
+    `Prepare replacement content for ${outputPath}. Glimmervoid alone writes that output file.`,
     '',
     'Source files to distill (read every one of them):',
     ...sourceList,
@@ -91,7 +91,7 @@ function buildPackDistillPrompt({
     '',
     'Hard rules:',
     `- Write only ${resultPath}. Do not write ${outputPath} or any other path.`,
-    '- Return the whole distilled document body from base, without a Glissa stamp.',
+    '- Return the whole distilled document body from base, without a Glimmervoid stamp.',
     '- Do not run commands, fetch from the network, or start sub-agents.',
     '- No em dash, en dash, ellipsis character, or emoji in the content.',
     '',

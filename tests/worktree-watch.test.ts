@@ -14,8 +14,8 @@ function tmpdir(prefix: string) {
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 test('resolveWorktreeGitDir resolves an absolute gitdir pointer with a worktrees/ segment', () => {
-  const wt = tmpdir('glissa-ww-wt-');
-  const gitDir = path.join(tmpdir('glissa-ww-git-'), 'worktrees', 'feature');
+  const wt = tmpdir('glimmervoid-ww-wt-');
+  const gitDir = path.join(tmpdir('glimmervoid-ww-git-'), 'worktrees', 'feature');
   fs.mkdirSync(gitDir, { recursive: true });
   fs.writeFileSync(path.join(wt, '.git'), `gitdir: ${gitDir}\n`, 'utf8');
   try {
@@ -27,7 +27,7 @@ test('resolveWorktreeGitDir resolves an absolute gitdir pointer with a worktrees
 });
 
 test('resolveWorktreeGitDir resolves a relative pointer against the worktree dir', () => {
-  const base = tmpdir('glissa-ww-rel-');
+  const base = tmpdir('glimmervoid-ww-rel-');
   const wt = path.join(base, 'wt');
   fs.mkdirSync(wt);
   const gitDir = path.join(base, '.git', 'worktrees', 'feature');
@@ -42,10 +42,10 @@ test('resolveWorktreeGitDir resolves a relative pointer against the worktree dir
 });
 
 test('resolveWorktreeGitDir returns null for a normal checkout, a submodule, and a missing dir', () => {
-  const repo = tmpdir('glissa-ww-repo-');
+  const repo = tmpdir('glimmervoid-ww-repo-');
   fs.mkdirSync(path.join(repo, '.git'));
 
-  const sub = tmpdir('glissa-ww-sub-');
+  const sub = tmpdir('glimmervoid-ww-sub-');
   fs.writeFileSync(path.join(sub, '.git'), 'gitdir: /repo/.git/modules/x\n', 'utf8');
   try {
     assert.equal(resolveWorktreeGitDir(repo), null);
@@ -59,7 +59,7 @@ test('resolveWorktreeGitDir returns null for a normal checkout, a submodule, and
 });
 
 test('resolveWorktreeGitDir returns null when the pointer target does not exist', () => {
-  const wt = tmpdir('glissa-ww-gone-');
+  const wt = tmpdir('glimmervoid-ww-gone-');
   fs.writeFileSync(path.join(wt, '.git'), 'gitdir: /no/such/.git/worktrees/x\n', 'utf8');
   try {
     assert.equal(resolveWorktreeGitDir(wt), null);
@@ -69,7 +69,7 @@ test('resolveWorktreeGitDir returns null when the pointer target does not exist'
 });
 
 function fakeLinkedWorktree() {
-  const base = tmpdir('glissa-ww-live-');
+  const base = tmpdir('glimmervoid-ww-live-');
   const wt = path.join(base, 'wt');
   fs.mkdirSync(wt);
   const gitDir = path.join(base, '.git', 'worktrees', 'feature');
@@ -120,7 +120,7 @@ test('stop() halts the watcher: no onChange after stop', async () => {
 });
 
 test('the watcher survives a gitdir under an 8.3 short parent', { skip: !SHORT_NAMES_AVAILABLE }, async () => {
-  const base = tmpdir('glissa-ww-shortbase-');
+  const base = tmpdir('glimmervoid-ww-shortbase-');
   const shortBase = shortPathOf(base);
   assert.ok(shortBase, 'the volume mints an 8.3 alias');
   const wt = path.join(shortBase, 'wt');
@@ -144,7 +144,7 @@ test('the watcher survives a gitdir under an 8.3 short parent', { skip: !SHORT_N
 });
 
 test('start() is a safe no-op for a non-worktree dir (in-place session)', async () => {
-  const repo = tmpdir('glissa-ww-inplace-');
+  const repo = tmpdir('glimmervoid-ww-inplace-');
   fs.mkdirSync(path.join(repo, '.git'));
   let calls = 0;
   const w = createWorktreeWatcher({ worktreeDir: repo, onChange: () => { calls++; }, debounceMs: 50 });

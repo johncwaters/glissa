@@ -10,7 +10,7 @@ import { parseRecording } from '../detection/replay.ts';
 import { projectHookPayload } from '../session/core/hook-payload-projection.ts';
 import { STATES } from '../shared/states.ts';
 function makeBaseDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-recorder-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-recorder-'));
 }
 
 function readLines(filepath: string): Record<string, unknown>[] {

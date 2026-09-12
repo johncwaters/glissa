@@ -67,8 +67,8 @@ test('buildUsageReport uses local date buckets and rolls up totals, models and s
 test('session rows carry project from cwd, fallback project, or null', () => {
   const now = Date.UTC(2026, 7, 20);
   const cwdEntry = entry(now, 'session-cwd', 'claude-a', { input: 1 });
-  cwdEntry.cwd = '/worktrees/glissa';
-  cwdEntry.project = '-worktrees-glissa';
+  cwdEntry.cwd = '/worktrees/glimmervoid';
+  cwdEntry.project = '-worktrees-glimmervoid';
   const projectEntry = entry(now + 1, 'session-project', 'claude-a', { input: 1 });
   projectEntry.project = '-encoded-project';
   const nullEntry = entry(now + 2, 'session-null', 'claude-a', { input: 1 });
@@ -77,7 +77,7 @@ test('session rows carry project from cwd, fallback project, or null', () => {
   const report = buildUsageReport([cwdEntry, projectEntry, nullEntry], { now: now + 10, retainDays: 30 });
   const backfilledReport = buildUsageReport([nullEntry, laterBackfill], { now: now + 10, retainDays: 30 });
 
-  assert.equal(sessionProject(report, 'session-cwd'), '/worktrees/glissa');
+  assert.equal(sessionProject(report, 'session-cwd'), '/worktrees/glimmervoid');
   assert.equal(sessionProject(report, 'session-project'), '-encoded-project');
   assert.equal(sessionProject(report, 'session-null'), null);
   assert.equal(sessionProject(backfilledReport, 'session-null'), '/later/project');

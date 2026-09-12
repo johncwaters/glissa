@@ -7,14 +7,14 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { SCHEMA, createMemoryDb, ftsMatchExpression, recordToRow } from '../server/memory-db.ts';
 import type { MemoryDb } from '../server/memory-db.ts';
-import { SCHEMA_VERSION, isBusyError, isSqliteAvailable, openDatabase } from '../server/glissa-db.ts';
+import { SCHEMA_VERSION, isBusyError, isSqliteAvailable, openDatabase } from '../server/glimmervoid-db.ts';
 import type { MemoryRecord } from '../server/core/memory-core.ts';
 
 const START = Date.UTC(2026, 7, 22, 12, 0, 0);
 const opened: MemoryDb[] = [];
 
 function tempDbPath(): string {
-  return path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memdb-')), 'glissa.db');
+  return path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-memdb-')), 'glimmervoid.db');
 }
 
 function openDb(dbPath: string, busyTimeoutMs?: number): MemoryDb {
@@ -46,7 +46,7 @@ function record(overrides: Partial<MemoryRecord> = {}): MemoryRecord {
     ts: START,
     kind: 'knowledge',
     layer: 'semantic',
-    project: '/repos/glissa',
+    project: '/repos/glimmervoid',
     source: { kind: 'reported', vendor: 'claude', sessionId: 's-1' },
     text: 'the rebase gate refuses a dirty worktree',
     validFrom: START,

@@ -77,12 +77,12 @@ test('an empty payload, an rtk failure and unusable output all emit nothing and 
 });
 
 test('runRtk resolves the empty verdict when the binary does not exist', async () => {
-  const missing = path.join(os.tmpdir(), 'glissa-rtk-missing', 'rtk');
+  const missing = path.join(os.tmpdir(), 'glimmervoid-rtk-missing', 'rtk');
   assert.equal(await runRtk(missing, Buffer.from(ENVELOPE, 'utf8')), '');
 });
 
 test('runRtk pipes the envelope to the child and keeps only a clean exit', { skip: process.platform === 'win32' }, async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-rtk-relay-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-rtk-relay-'));
   const writeExecutable = (name: string, script: string) => {
     const scriptPath = path.join(dir, `${name}.cjs`);
     fs.writeFileSync(scriptPath, script, 'utf8');

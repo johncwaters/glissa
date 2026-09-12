@@ -17,9 +17,9 @@ const SKIP_DIRS = new Set([
   "scripts",
   ".git",
   ".omc",
-  ".glissa",
+  ".glimmervoid",
   ".claude",
-  ".glissa-worktrees",
+  ".glimmervoid-worktrees",
 ]);
 
 const EXTENSION = path.join(ROOT, "tools", "vscode-visions", "extension.ts");

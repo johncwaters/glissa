@@ -45,7 +45,7 @@ interface HookRouterOutput {
 interface PlanReviewHookPort {
   hookBodyCapBytes(event: string): number;
   onHookEvent(event: {
-    glissaId: string;
+    glimmervoidId: string;
     event: string;
     payload: Record<string, unknown>;
     accepted: boolean;
@@ -199,7 +199,7 @@ function createBackendHttpApp(dependencies: BackendHttpDependencies): Express {
     res.json({ token: pageToken });
   });
 
-  app.post('/hook/:glissaId/:event', (req, res) => {
+  app.post('/hook/:glimmervoidId/:event', (req, res) => {
     const ip = req.socket.remoteAddress || '';
     if (!(ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1')) {
       res.status(403).end();
@@ -228,7 +228,7 @@ function createBackendHttpApp(dependencies: BackendHttpDependencies): Express {
       } catch {}
       const token = req.query?.t || (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || null;
       const output = hookRouter.handle({
-        glissaId: req.params.glissaId,
+        glimmervoidId: req.params.glimmervoidId,
         event: req.params.event,
         token,
         payload,
@@ -237,7 +237,7 @@ function createBackendHttpApp(dependencies: BackendHttpDependencies): Express {
         getUsage().ingestStatusline(payload);
       }
       const reply: Record<string, unknown> = { ok: output.status === 200, reason: output.reason };
-      const hookSession = getSession(req.params.glissaId);
+      const hookSession = getSession(req.params.glimmervoidId);
       const packNotice = output.status === 200 && isPackNoticeHookEvent(req.params.event, hookSession)
         ? hookSession?.takePackNoticeContext() || null
         : null;
@@ -253,7 +253,7 @@ function createBackendHttpApp(dependencies: BackendHttpDependencies): Express {
       };
       const abandonedByClaudeCode = new AbortController();
       const planDecision = getPlanReview()?.onHookEvent({
-        glissaId: req.params.glissaId,
+        glimmervoidId: req.params.glimmervoidId,
         event: req.params.event,
         payload,
         accepted: output.status === 200,
@@ -278,7 +278,7 @@ function createBackendHttpApp(dependencies: BackendHttpDependencies): Express {
       res.status(404).json({ error: 'unknown session' });
       return;
     }
-    const typeVerdict = decideUploadType(req.headers['content-type'], req.headers['x-glissa-upload-name']);
+    const typeVerdict = decideUploadType(req.headers['content-type'], req.headers['x-glimmervoid-upload-name']);
     if (!typeVerdict.ok) {
       res.status(typeVerdict.status).json({ error: typeVerdict.error });
       return;
@@ -313,7 +313,7 @@ function createBackendHttpApp(dependencies: BackendHttpDependencies): Express {
     if (!fs.existsSync(path.join(clientDir, 'index.html'))) {
       throw Object.assign(
         new Error('Dashboard build not found (dist/client). Run `npm run build` first, or use `npm run dev`.'),
-        { glissaBoot: true },
+        { glimmervoidBoot: true },
       );
     }
     app.use(express.static(clientDir));

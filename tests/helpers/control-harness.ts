@@ -4,12 +4,12 @@ import path from 'node:path';
 import { WebSocketServer } from 'ws';
 
 import { createConfigStore } from '../../server/config-store.ts';
-import type { ConfigStore, GlissaConfig } from '../../server/config-store.ts';
+import type { ConfigStore, GlimmervoidConfig } from '../../server/config-store.ts';
 import { registerControlHandlers } from '../../server/control-handlers.ts';
 import type { ControlHandlerDeps } from '../../server/control-handlers.ts';
 import type { RequestTrust } from '../../server/core/request-trust.ts';
 
-const HARNESS_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-control-harness-'));
+const HARNESS_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-control-harness-'));
 process.on('exit', () => {
   fs.rmSync(HARNESS_CONFIG_DIR, { recursive: true, force: true });
 });
@@ -20,13 +20,13 @@ function realConfigStore(): ConfigStore {
   storesCreated += 1;
   const configPath = path.join(HARNESS_CONFIG_DIR, `config-${storesCreated}.json`);
   fs.writeFileSync(configPath, JSON.stringify({ projects: [] }), 'utf8');
-  const previous = process.env.GLISSA_CONFIG;
-  process.env.GLISSA_CONFIG = configPath;
+  const previous = process.env.GLIMMERVOID_CONFIG;
+  process.env.GLIMMERVOID_CONFIG = configPath;
   try {
     return createConfigStore();
   } finally {
-    if (previous == null) delete process.env.GLISSA_CONFIG;
-    if (previous != null) process.env.GLISSA_CONFIG = previous;
+    if (previous == null) delete process.env.GLIMMERVOID_CONFIG;
+    if (previous != null) process.env.GLIMMERVOID_CONFIG = previous;
   }
 }
 
@@ -35,12 +35,12 @@ interface TestConfigStoreOptions {
   onSave?: () => void;
 }
 
-function testConfigStore(config: GlissaConfig, options: TestConfigStoreOptions = {}): ConfigStore {
+function testConfigStore(config: GlimmervoidConfig, options: TestConfigStoreOptions = {}): ConfigStore {
   const real = realConfigStore();
   real.applySettings(config);
   return {
     ...real,
-    save(mutate: (draft: GlissaConfig) => void): GlissaConfig | null {
+    save(mutate: (draft: GlimmervoidConfig) => void): GlimmervoidConfig | null {
       if (options.onSave) options.onSave();
       if (options.saveFails === true) return null;
       mutate(config);
@@ -50,7 +50,7 @@ function testConfigStore(config: GlissaConfig, options: TestConfigStoreOptions =
   };
 }
 
-function controlDeps(config: GlissaConfig, overrides: Partial<ControlHandlerDeps> = {}): ControlHandlerDeps {
+function controlDeps(config: GlimmervoidConfig, overrides: Partial<ControlHandlerDeps> = {}): ControlHandlerDeps {
   return {
     sessions: new Map(),
     config,
@@ -89,7 +89,7 @@ function connectControl<TFrame>(
   const sent: TFrame[] = [];
   let messageListener: ControlMessageListener | null = null;
   const socket = {
-    glissaTrust: trust,
+    glimmervoidTrust: trust,
     send(raw: string): void {
       sent.push(JSON.parse(raw));
     },

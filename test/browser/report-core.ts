@@ -215,7 +215,7 @@ function renderArtifacts(report: BrowserRunReport): string[] {
 
 export function renderMarkdown(report: BrowserRunReport): string {
   const lines = [
-    `# Glissa browser harness ${report.runId}`,
+    `# Glimmervoid browser harness ${report.runId}`,
     '',
     renderVerdictLine(report),
     ...renderSelfCheckNote(report),

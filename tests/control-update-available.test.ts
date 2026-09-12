@@ -94,7 +94,6 @@ test('getStatus projects the latest journal summary', async () => {
   const journal = makeJournal();
   const updateCheck = createBackendUpdateCheck({
     config: { checkForUpdates: true },
-    isLocalConfig: false,
     currentVersion: '0.16.0',
     checkForUpdate: async () => makeUpdateStatus('0.17.0'),
     getUpdateJournal: () => journal,
@@ -119,7 +118,6 @@ test('the recorded status carries the preflight verdict instead of leaving it to
   const journal = makeJournal();
   const updateCheck = createBackendUpdateCheck({
     config: { checkForUpdates: true, updateChannel: 'release' },
-    isLocalConfig: false,
     currentVersion: '0.16.0',
     platform: 'linux',
     checkForUpdate: async () => makeCloneStatus(),
@@ -133,7 +131,6 @@ test('the recorded status carries the preflight verdict instead of leaving it to
 
   const dirty = createBackendUpdateCheck({
     config: { checkForUpdates: true, updateChannel: 'release' },
-    isLocalConfig: false,
     currentVersion: '0.16.0',
     platform: 'linux',
     checkForUpdate: async () => makeCloneStatus({ isTreeClean: false }),
@@ -148,7 +145,6 @@ test('the recorded status carries the preflight verdict instead of leaving it to
 
   const windows = createBackendUpdateCheck({
     config: { checkForUpdates: true, updateChannel: 'release' },
-    isLocalConfig: false,
     currentVersion: '0.16.0',
     platform: 'win32',
     checkForUpdate: async () => makeCloneStatus({ platform: 'win32' }),
@@ -165,7 +161,6 @@ test('the apply refusal tracks the lane and re-broadcasts the status when it cha
   const broadcasts: ControlMessageRecord[] = [];
   const updateCheck = createBackendUpdateCheck({
     config: { checkForUpdates: true, updateChannel: 'release' },
-    isLocalConfig: false,
     currentVersion: '0.16.0',
     platform: 'linux',
     checkForUpdate: async () => makeCloneStatus(),
@@ -216,7 +211,6 @@ test('every check broadcasts update-status while banner logging stays deduplicat
   let logs = 0;
   const updateCheck = createBackendUpdateCheck({
     config: { checkForUpdates: true },
-    isLocalConfig: false,
     currentVersion: '0.16.0',
     checkForUpdate: async () => results[checksRun++] ?? null,
     getControlClientCount: () => 1,
@@ -245,7 +239,6 @@ test('up-to-date and failed checks are both recorded and broadcast', async () =>
   const results: Array<UpdateStatus | null> = [makeUpdateStatus('0.16.0'), null];
   const updateCheck = createBackendUpdateCheck({
     config: { checkForUpdates: true },
-    isLocalConfig: false,
     currentVersion: '0.16.0',
     checkForUpdate: async () => results.shift() ?? null,
     getControlClientCount: () => 0,
@@ -269,7 +262,6 @@ test('a recheck is skipped while no control client is connected', async (t) => {
   let checksRun = 0;
   const updateCheck = createBackendUpdateCheck({
     config: { checkForUpdates: true },
-    isLocalConfig: false,
     currentVersion: '0.16.0',
     checkForUpdate: async () => { checksRun += 1; return null; },
     getControlClientCount: () => 0,
@@ -291,7 +283,6 @@ test('checkNow forces ttl zero and returns the in-flight promise', async () => {
   const seenTtls: Array<number | undefined> = [];
   const updateCheck = createBackendUpdateCheck({
     config: { checkForUpdates: true, updateChannel: 'release' },
-    isLocalConfig: false,
     currentVersion: '0.16.0',
     checkForUpdate: (options) => {
       seenTtls.push(options.ttlMs);
@@ -317,7 +308,6 @@ test('changing updateChannel clears status and triggers a forced check', async (
   const channels: string[] = [];
   const updateCheck = createBackendUpdateCheck({
     config,
-    isLocalConfig: false,
     currentVersion: '0.16.0',
     checkForUpdate: async (options) => {
       channels.push(options.updateChannel);
@@ -404,7 +394,6 @@ test('a channel change queued during a check never starts another one after stop
   let release = (_status: UpdateStatus): void => { throw new Error('the check did not expose its resolver'); };
   const updateCheck = createBackendUpdateCheck({
     config,
-    isLocalConfig: false,
     currentVersion: '0.16.0',
     checkForUpdate: (options) => {
       channels.push(options.updateChannel);

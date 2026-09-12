@@ -235,7 +235,7 @@ export function updateAggregateStatus() {
     }
   }
 
-  document.title = alertCount > 0 ? `(${alertCount}) Glissa` : 'Glissa';
+  document.title = alertCount > 0 ? `(${alertCount}) Glimmervoid` : 'Glimmervoid';
 }
 
 export function createSessionCard(sessionId: unknown, sessionName: unknown, initialState: unknown, options: CardOptions = {}) {

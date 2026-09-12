@@ -77,11 +77,11 @@ test('fetches before listing, deletes separately, continues after failure, and p
       return {
         ok: true,
         branches: [
-          { name: 'glissa/session/merged', tipSha: 'merged-sha', tipCommitTimeMs: NOW_MS - DAY_MS },
-          { name: 'glissa/session/failed-delete', tipSha: 'failed-delete-sha', tipCommitTimeMs: NOW_MS - DAY_MS },
-          { name: 'glissa/session/stale', tipSha: 'stale-sha', tipCommitTimeMs: NOW_MS - 20 * DAY_MS },
-          { name: 'glissa/session/live', tipSha: 'live-sha', tipCommitTimeMs: NOW_MS - 20 * DAY_MS },
-          { name: 'glissa/session/fresh', tipSha: 'fresh-sha', tipCommitTimeMs: NOW_MS - DAY_MS },
+          { name: 'glimmervoid/session/merged', tipSha: 'merged-sha', tipCommitTimeMs: NOW_MS - DAY_MS },
+          { name: 'glimmervoid/session/failed-delete', tipSha: 'failed-delete-sha', tipCommitTimeMs: NOW_MS - DAY_MS },
+          { name: 'glimmervoid/session/stale', tipSha: 'stale-sha', tipCommitTimeMs: NOW_MS - 20 * DAY_MS },
+          { name: 'glimmervoid/session/live', tipSha: 'live-sha', tipCommitTimeMs: NOW_MS - 20 * DAY_MS },
+          { name: 'glimmervoid/session/fresh', tipSha: 'fresh-sha', tipCommitTimeMs: NOW_MS - DAY_MS },
         ],
       };
     },
@@ -104,7 +104,7 @@ test('fetches before listing, deletes separately, continues after failure, and p
     },
     async deleteRemoteBranch({ projectPath, name, tipSha }) {
       calls.push(['delete', projectPath, name, tipSha]);
-      if (name === 'glissa/session/failed-delete') return { ok: false, err: 'rejected' };
+      if (name === 'glimmervoid/session/failed-delete') return { ok: false, err: 'rejected' };
       return { ok: true };
     },
   });
@@ -129,17 +129,17 @@ test('fetches before listing, deletes separately, continues after failure, and p
   assert.deepEqual(
     calls.filter(([operation]) => operation === 'delete'),
     [
-      ['delete', '/repo', 'glissa/session/merged', 'merged-sha'],
-      ['delete', '/repo', 'glissa/session/failed-delete', 'failed-delete-sha'],
-      ['delete', '/repo', 'glissa/session/stale', 'stale-sha'],
+      ['delete', '/repo', 'glimmervoid/session/merged', 'merged-sha'],
+      ['delete', '/repo', 'glimmervoid/session/failed-delete', 'failed-delete-sha'],
+      ['delete', '/repo', 'glimmervoid/session/stale', 'stale-sha'],
     ],
   );
-  assert.equal(calls.some((call) => call[0] === 'delete' && call[2] === 'glissa/session/live'), false);
-  assert.ok(traces.some((entry) => entry.name === 'glissa/session/live' && entry.reason === 'live-session'));
-  assert.ok(traces.some((entry) => entry.name === 'glissa/session/failed-delete' && entry.reason === 'delete-error'));
+  assert.equal(calls.some((call) => call[0] === 'delete' && call[2] === 'glimmervoid/session/live'), false);
+  assert.ok(traces.some((entry) => entry.name === 'glimmervoid/session/live' && entry.reason === 'live-session'));
+  assert.ok(traces.some((entry) => entry.name === 'glimmervoid/session/failed-delete' && entry.reason === 'delete-error'));
   assert.deepEqual(deletionsOfFirstProject(statuses[0]), [
-    'glissa/session/merged',
-    'glissa/session/stale',
+    'glimmervoid/session/merged',
+    'glimmervoid/session/stale',
   ]);
 });
 
@@ -150,7 +150,7 @@ test('dryRun traces and reports planned deletions without deleting remote branch
   const poller = createBranchGcPoller({
     gitWorkspace: branchGcGitWorkspace({
       async listRemoteBranches() {
-        return { ok: true, branches: [{ name: 'glissa/session/merged', tipSha: 'merged-sha', tipCommitTimeMs: NOW_MS - DAY_MS }] };
+        return { ok: true, branches: [{ name: 'glimmervoid/session/merged', tipSha: 'merged-sha', tipCommitTimeMs: NOW_MS - DAY_MS }] };
       },
       async listIntegrationTips() { return { ok: true, integrationTips: [{ branch: 'develop', sha: 'develop-sha' }] }; },
       async isAncestor() { return { ok: true, isAncestor: true }; },
@@ -172,10 +172,10 @@ test('dryRun traces and reports planned deletions without deleting remote branch
 
   assert.deepEqual(deletedBranches, []);
   assert.deepEqual(
-    traces.filter((entry) => entry.name === 'glissa/session/merged'),
-    [{ kind: 'branch-gc', ts: NOW_MS, projectPath: '/repo', name: 'glissa/session/merged', decision: 'would-delete', reason: 'ancestor' }],
+    traces.filter((entry) => entry.name === 'glimmervoid/session/merged'),
+    [{ kind: 'branch-gc', ts: NOW_MS, projectPath: '/repo', name: 'glimmervoid/session/merged', decision: 'would-delete', reason: 'ancestor' }],
   );
-  assert.deepEqual(deletionsOfFirstProject(statuses[0]), ['glissa/session/merged']);
+  assert.deepEqual(deletionsOfFirstProject(statuses[0]), ['glimmervoid/session/merged']);
   assert.equal(statuses[0]?.dryRun, true);
   const [firstProject] = statuses[0]?.projects as Record<string, unknown>[];
   assert.deepEqual(Object.keys(firstProject).sort(), ['deletions', 'errors', 'kept', 'projectPath', 'worktreeRemovals', 'worktreesKept']);
@@ -425,12 +425,12 @@ test('a prunable worktree is reported as missing-directory without an error', as
 });
 
 function initRepoWithOrigin(): { repo: string; origin: string } {
-  const origin = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-branch-gc-origin-'));
+  const origin = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-branch-gc-origin-'));
   try { git(['init', '--bare', '-b', 'main'], origin); } catch { git(['init', '--bare'], origin); }
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-branch-gc-repo-'));
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-branch-gc-repo-'));
   try { git(['init', '-b', 'main'], repo); } catch { git(['init'], repo); }
   git(['config', 'user.email', 'test@example.com'], repo);
-  git(['config', 'user.name', 'Glissa Test'], repo);
+  git(['config', 'user.name', 'Glimmervoid Test'], repo);
   git(['config', 'commit.gpgsign', 'false'], repo);
   fs.writeFileSync(path.join(repo, 'README.md'), '# repo\n', 'utf8');
   git(['add', '-A'], repo);
@@ -540,7 +540,7 @@ async function deletionsAfterTick({ branchIds, configuredProjectIds, injectedLiv
       return {
         ok: true,
         branches: branchIds.map((branchId) => ({
-          name: `glissa/session/${branchId}`,
+          name: `glimmervoid/session/${branchId}`,
           tipSha: `${branchId}-sha`,
           tipCommitTimeMs: NOW_MS - DAY_MS,
         })),
@@ -600,7 +600,7 @@ test('deletes a merged branch whose id is neither configured nor injected', asyn
     injectedLiveSessionIds: ['injected-session'],
   });
 
-  assert.deepEqual(deletedBranches, ['glissa/session/abandoned-session']);
+  assert.deepEqual(deletedBranches, ['glimmervoid/session/abandoned-session']);
 });
 
 function branchProofGitWorkspace({ mergeTreeResult, treeResult, tipCommitTimeMs = NOW_MS - DAY_MS, probeEnvResult = { ok: true, probeEnv: {} } }: {
@@ -613,7 +613,7 @@ function branchProofGitWorkspace({ mergeTreeResult, treeResult, tipCommitTimeMs 
     async listRemoteBranches() {
       return {
         ok: true,
-        branches: [{ name: 'glissa/session/abandoned', tipSha: 'branch-sha', tipCommitTimeMs }],
+        branches: [{ name: 'glimmervoid/session/abandoned', tipSha: 'branch-sha', tipCommitTimeMs }],
       };
     },
     async resolveMergeProbeEnv() {
@@ -708,7 +708,7 @@ test('a stale unmerged branch is deleted with a staleness reason rather than a m
 
   assert.deepEqual(
     traces.filter((entry) => entry.decision === 'deleted'),
-    [{ kind: 'branch-gc', ts: NOW_MS, projectPath: '/repo', name: 'glissa/session/abandoned', decision: 'deleted', reason: 'stale-orphan' }],
+    [{ kind: 'branch-gc', ts: NOW_MS, projectPath: '/repo', name: 'glimmervoid/session/abandoned', decision: 'deleted', reason: 'stale-orphan' }],
   );
 });
 
@@ -721,9 +721,9 @@ test('each integration tip tree and the merge probe env are resolved once per ti
         return {
           ok: true,
           branches: [
-            { name: 'glissa/session/one', tipSha: 'one-sha', tipCommitTimeMs: NOW_MS - DAY_MS },
-            { name: 'glissa/session/two', tipSha: 'two-sha', tipCommitTimeMs: NOW_MS - DAY_MS },
-            { name: 'glissa/session/three', tipSha: 'three-sha', tipCommitTimeMs: NOW_MS - DAY_MS },
+            { name: 'glimmervoid/session/one', tipSha: 'one-sha', tipCommitTimeMs: NOW_MS - DAY_MS },
+            { name: 'glimmervoid/session/two', tipSha: 'two-sha', tipCommitTimeMs: NOW_MS - DAY_MS },
+            { name: 'glimmervoid/session/three', tipSha: 'three-sha', tipCommitTimeMs: NOW_MS - DAY_MS },
           ],
         };
       },
@@ -794,7 +794,7 @@ test('a failed ancestry probe leaves the branch undecidable rather than reading 
   assert.deepEqual(deletedBranches, []);
   assert.deepEqual(deletionsOfFirstProject(statuses[0]), []);
   assert.equal((statuses[0]?.projects as { errors: number }[])[0]?.errors, 1);
-  assert.ok(traces.some((entry) => entry.name === 'glissa/session/abandoned' && entry.reason === 'ancestor-check-error'));
+  assert.ok(traces.some((entry) => entry.name === 'glimmervoid/session/abandoned' && entry.reason === 'ancestor-check-error'));
 });
 
 test('a tree probe failure keeps the branch, names it in the trace, and increments errors', async () => {
@@ -818,7 +818,7 @@ test('a tree probe failure keeps the branch, names it in the trace, and incremen
 
   assert.deepEqual(deletionsOfFirstProject(statuses[0]), []);
   assert.equal((statuses[0]?.projects as { errors: number }[])[0]?.errors, 1);
-  assert.ok(traces.some((entry) => entry.name === 'glissa/session/abandoned' && entry.reason === 'tree-check-error'));
+  assert.ok(traces.some((entry) => entry.name === 'glimmervoid/session/abandoned' && entry.reason === 'tree-check-error'));
 });
 
 test('a merge probe env that never resolves keeps the branch and increments errors', async () => {
@@ -851,7 +851,7 @@ test('a merge probe env that never resolves keeps the branch and increments erro
   assert.deepEqual(mergedTreeCalls, []);
   assert.deepEqual(deletionsOfFirstProject(statuses[0]), []);
   assert.equal((statuses[0]?.projects as { errors: number }[])[0]?.errors, 1);
-  assert.ok(traces.some((entry) => entry.name === 'glissa/session/abandoned' && entry.reason === 'merge-probe-env-error'));
+  assert.ok(traces.some((entry) => entry.name === 'glimmervoid/session/abandoned' && entry.reason === 'merge-probe-env-error'));
 });
 
 test('git helpers delete a remote ref with no-verify while retaining normalized protected refs', async () => {
@@ -862,7 +862,7 @@ test('git helpers delete a remote ref with no-verify while retaining normalized 
       if (args[0] === 'for-each-ref' && args[1] === 'refs/remotes/origin/') {
         return [
           'refs/remotes/origin/HEAD main-sha 1700000000 refs/remotes/origin/main',
-          'refs/remotes/origin/glissa/session/abc abc-sha 1700000000 ',
+          'refs/remotes/origin/glimmervoid/session/abc abc-sha 1700000000 ',
           'refs/remotes/origin/worktree-agent-123 agent-sha 1700000100 ',
           'refs/remotes/origin/release/x release-sha 1700000200 ',
         ].join('\n');
@@ -882,7 +882,7 @@ test('git helpers delete a remote ref with no-verify while retaining normalized 
     },
   });
 
-  const branches = await gitWorkspace.listRemoteBranches({ projectPath: '/repo', prefixes: ['glissa/session/', 'worktree-agent-'] });
+  const branches = await gitWorkspace.listRemoteBranches({ projectPath: '/repo', prefixes: ['glimmervoid/session/', 'worktree-agent-'] });
   const tips = await gitWorkspace.listIntegrationTips({ projectPath: '/repo', integrationBranch: 'develop' });
   const ancestor = await gitWorkspace.isAncestor({
     projectPath: '/repo',
@@ -890,12 +890,12 @@ test('git helpers delete a remote ref with no-verify while retaining normalized 
     descendantSha: 'develop-sha',
   });
   await gitWorkspace.fetchOrigin({ projectPath: '/repo' });
-  await gitWorkspace.deleteRemoteBranch({ projectPath: '/repo', name: 'glissa/session/abc', tipSha: 'abc-sha' });
+  await gitWorkspace.deleteRemoteBranch({ projectPath: '/repo', name: 'glimmervoid/session/abc', tipSha: 'abc-sha' });
 
   assert.deepEqual(branches, {
     ok: true,
     branches: [
-      { name: 'glissa/session/abc', tipSha: 'abc-sha', tipCommitTimeMs: 1700000000000 },
+      { name: 'glimmervoid/session/abc', tipSha: 'abc-sha', tipCommitTimeMs: 1700000000000 },
       { name: 'worktree-agent-123', tipSha: 'agent-sha', tipCommitTimeMs: 1700000100000 },
     ],
   });
@@ -911,7 +911,7 @@ test('git helpers delete a remote ref with no-verify while retaining normalized 
   assert.ok(calls.some(({ args }) => args.join(' ') === 'fetch --prune origin'));
   assert.ok(calls.some(({ args }) => args.join(' ') === 'for-each-ref refs/remotes/origin/ --format=%(refname) %(objectname) %(committerdate:unix) %(symref)'));
   assert.equal(calls.find(({ args }) => args[0] === 'for-each-ref' && args[1] === 'refs/remotes/origin/')?.extra?.maxBuffer, 64 * 1024 * 1024);
-  assert.ok(calls.some(({ args }) => args.join(' ') === 'push --no-verify origin --force-with-lease=refs/heads/glissa/session/abc:abc-sha :refs/heads/glissa/session/abc'));
+  assert.ok(calls.some(({ args }) => args.join(' ') === 'push --no-verify origin --force-with-lease=refs/heads/glimmervoid/session/abc:abc-sha :refs/heads/glimmervoid/session/abc'));
 });
 
 test('an empty prefix list lists no branches and never runs git', async () => {

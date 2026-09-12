@@ -95,7 +95,7 @@ test('buildReviewPrompt carries the human-readable comment format rules', () => 
   const p = buildReviewPrompt({ slug: 'me/repo', number: 12, baseRefName: 'main', conflicting: false, resultPath: '/tmp/r.json' });
   assert.match(p, /Comment format/);
   assert.match(p, /### Blocking/);
-  assert.match(p, /<!-- glissa-pr-review -->/);
+  assert.match(p, /<!-- glimmervoid-pr-review -->/);
   assert.match(p, /Resolved since last review/);
   assert.match(p, /https:\/\/github\.com\/me\/repo\/blob\/<full head sha>/);
   assert.match(p, /Skip style and formatting nitpicks/);
@@ -103,7 +103,7 @@ test('buildReviewPrompt carries the human-readable comment format rules', () => 
   assert.match(p, /<details><summary>Details<\/summary>/);
   assert.match(p, /Prompt for AI agents/);
   assert.match(p, /following the comment format above/);
-  assert.match(p, /Automated review \(glissa\)/, 'comment self-identifies as automated');
+  assert.match(p, /Automated review \(glimmervoid\)/, 'comment self-identifies as automated');
   assert.match(p, /post NO comment at all/, 'zero-delta re-review stays silent');
   assert.match(p, /Never praise/, 'summary bans praise filler');
   assert.match(p, /Omit the block entirely when there are no findings/, 'AI-agents block is conditional');
@@ -118,7 +118,7 @@ test('buildReviewPrompt (conflict lane) includes checkout+rebase+push and forbid
 });
 
 function withResultFile<T>(contents: string | null, fn: (resultPath: string) => T): T {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-prresult-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-prresult-'));
   const p = path.join(dir, 'result.json');
   if (contents != null) fs.writeFileSync(p, contents);
   try { return fn(p); }
@@ -192,11 +192,11 @@ test('with the mill off the PR review lane spawns with no pack at all', () => {
 
 function withBackend(fn: (t: TestContext, dash: DashboardClient) => Promise<void>) {
   return async (t: TestContext) => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-prrestart-'));
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-prrestart-'));
     const cfgPath = path.join(tmpDir, 'config.json');
     fs.writeFileSync(cfgPath, JSON.stringify({ projects: [], teams: [], repoRoots: [] }, null, 2), 'utf8');
-    const prevEnv = process.env.GLISSA_CONFIG;
-    process.env.GLISSA_CONFIG = cfgPath;
+    const prevEnv = process.env.GLIMMERVOID_CONFIG;
+    process.env.GLIMMERVOID_CONFIG = cfgPath;
 
     const server = http.createServer();
     const backend = createBackend(server, { staticDir: null });
@@ -210,8 +210,8 @@ function withBackend(fn: (t: TestContext, dash: DashboardClient) => Promise<void
       backend.shutdown();
       server.closeAllConnections();
       await closeServer(server);
-      if (prevEnv == null) delete process.env.GLISSA_CONFIG;
-      if (prevEnv != null) process.env.GLISSA_CONFIG = prevEnv;
+      if (prevEnv == null) delete process.env.GLIMMERVOID_CONFIG;
+      if (prevEnv != null) process.env.GLIMMERVOID_CONFIG = prevEnv;
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   };

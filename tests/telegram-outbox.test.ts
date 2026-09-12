@@ -11,7 +11,7 @@ import {
 import type { OutboxEntry } from '../notifications/core/outbox-core.ts';
 
 function tempFile() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-outbox-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-outbox-'));
   return { dir, filePath: path.join(dir, 'telegram-outbox.json') };
 }
 

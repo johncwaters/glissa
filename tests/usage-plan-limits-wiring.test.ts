@@ -16,7 +16,7 @@ const COMPLETE_PASS: Awaited<ReturnType<UsageScannerApi['runPass']>> = {
   durationMs: 0,
 };
 
-const GLISSA_ID = 'a0000000-0000-4000-8000-000000000001';
+const GLIMMERVOID_ID = 'a0000000-0000-4000-8000-000000000001';
 const CLAUDE_ID = 'c1c1c1c1-2222-4333-8444-555555555555';
 
 interface RateWindow {
@@ -73,7 +73,7 @@ function harness({ usage = {} }: { usage?: Record<string, unknown> } = {}) {
   };
   const wiring = createUsageWiring({
     config: { usage: { ...usage } },
-    sessions: new Map([[GLISSA_ID, { resumeSessionId: CLAUDE_ID, ephemeral: false }]]),
+    sessions: new Map([[GLIMMERVOID_ID, { resumeSessionId: CLAUDE_ID, ephemeral: false }]]),
     broadcast: (message) => { sent.push(message); },
     controlClientCount: () => 1,
     createScanner: () => scanner,
@@ -171,7 +171,7 @@ test('officialCostUSD rides the per-card push, keyed by the Claude session id', 
   const lane = harness();
   await lane.wiring.start();
   const before = lastSessionRow(lane.sessionMessages());
-  assert.equal(before.id, GLISSA_ID);
+  assert.equal(before.id, GLIMMERVOID_ID);
   assert.equal(before.officialCostUSD, null);
   assert.equal(before.costUSD, 0.42, 'the scanner estimate is untouched');
 

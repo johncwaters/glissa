@@ -177,7 +177,7 @@ test('initialize handshake returns visions capabilities', async () => {
         codeActionProvider: true,
       },
       serverInfo: {
-        name: 'glissa-visions',
+        name: 'glimmervoid-visions',
       },
     });
   });
@@ -509,7 +509,7 @@ test('shutdown and exit terminate the relay cleanly', async () => {
 
 test('the port plan puts the daemon\'s configured port ahead of the defaults', () => {
   assert.deepEqual(resolvePortPlan(['--port', '4100'], {}, 3000), { ports: [4100], isFixed: true });
-  assert.deepEqual(resolvePortPlan([], { GLISSA_PORT: '4100' }, 3000), { ports: [4100], isFixed: true });
+  assert.deepEqual(resolvePortPlan([], { GLIMMERVOID_PORT: '4100' }, 3000), { ports: [4100], isFixed: true });
 
   assert.deepEqual(resolvePortPlan([], {}, 4100), { ports: [4100, 5173, 3000], isFixed: false });
   assert.deepEqual(resolvePortPlan([], {}, 3000), { ports: [3000, 5173], isFixed: false });
@@ -518,16 +518,16 @@ test('the port plan puts the daemon\'s configured port ahead of the defaults', (
 });
 
 test('the configured port is read from the resolved config, never seeded', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-relay-config-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-relay-config-'));
   const configPath = path.join(dir, 'config.json');
   fs.writeFileSync(configPath, JSON.stringify({ port: 4321, projects: [] }), 'utf8');
   try {
-    assert.equal(readConfiguredPort({ GLISSA_CONFIG: configPath }), 4321);
-    assert.equal(readConfiguredPort({ GLISSA_CONFIG: path.join(dir, 'missing.json') }), null);
+    assert.equal(readConfiguredPort({ GLIMMERVOID_CONFIG: configPath }), 4321);
+    assert.equal(readConfiguredPort({ GLIMMERVOID_CONFIG: path.join(dir, 'missing.json') }), null);
     assert.equal(fs.existsSync(path.join(dir, 'missing.json')), false);
 
     fs.writeFileSync(configPath, '{ not json', 'utf8');
-    assert.equal(readConfiguredPort({ GLISSA_CONFIG: configPath }), null);
+    assert.equal(readConfiguredPort({ GLIMMERVOID_CONFIG: configPath }), null);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

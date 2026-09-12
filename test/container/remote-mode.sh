@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 # Remote-mode integration suite. Runs INSIDE the container built from test/container/Dockerfile
-# (npm run test:container), because it needs real listeners, a real ~/.glissa, and a Linux host.
+# (npm run test:container), because it needs real listeners, a real ~/.glimmervoid, and a Linux host.
 #
 # It exercises the whole pairing lifecycle against two live listeners: the unauthenticated local one
 # and the cookie-gated remote one. Everything the unit tests cannot reach (actual sockets, actual
 # cookies, actual fs.watch propagation of a revocation) lives here.
 set -uo pipefail
 
-GLISSA_DIR=/root/.glissa
-CONFIG=$GLISSA_DIR/config.json
+GLIMMERVOID_DIR=/root/.glimmervoid
+CONFIG=$GLIMMERVOID_DIR/config.json
 WORK=/tmp/remote-mode
 LOCAL=http://127.0.0.1:3000
 REMOTE=http://127.0.0.1:3001
 
-mkdir -p "$GLISSA_DIR" "$WORK"
-rm -f "$GLISSA_DIR/pairings.json" "$GLISSA_DIR/pairings-seen.json"
+mkdir -p "$GLIMMERVOID_DIR" "$WORK"
+rm -f "$GLIMMERVOID_DIR/pairings.json" "$GLIMMERVOID_DIR/pairings-seen.json"
 
 failures=0
 assert() {
@@ -36,8 +36,8 @@ write_config() {
   "remote": {
     "enabled": $remote_enabled,
     "port": 3001,
-    "publicHost": "glissa.test",
-    "allowedOrigins": ["https://glissa.test"]
+    "publicHost": "glimmervoid.test",
+    "allowedOrigins": ["https://glimmervoid.test"]
   },
   "projects": []
 }
@@ -76,10 +76,10 @@ grep -q 'remote listener' "$WORK/server.log" || { echo "  FAIL no remote listene
 assert 1 200 "$(status "$LOCAL/")" "local listener serves the dashboard unauthenticated"
 assert 2 401 "$(status "$REMOTE/")" "remote listener refuses an unpaired device"
 
-PAIR_OUT="$(node dist/bin/glissa.js pair --name test-device)"
+PAIR_OUT="$(node dist/bin/glimmervoid.js pair --name test-device)"
 echo "$PAIR_OUT" | sed 's/^/    | /'
 TOKEN="$(printf '%s' "$PAIR_OUT" | grep -o '/pair/[A-Za-z0-9_-]\+' | head -1 | sed 's|/pair/||')"
-URL_PRINTED="$(printf '%s' "$PAIR_OUT" | grep -c 'https://glissa.test/pair/')"
+URL_PRINTED="$(printf '%s' "$PAIR_OUT" | grep -c 'https://glimmervoid.test/pair/')"
 PAIR_URL_OK=no
 if [ -n "$TOKEN" ] && [ "$URL_PRINTED" = "1" ]; then PAIR_URL_OK=yes; fi
 assert 3 yes "$PAIR_URL_OK" "pair prints a single-use URL built from publicHost"
@@ -91,37 +91,37 @@ REDEEM_CODE="$(curl -s -o /dev/null -D "$WORK/pair-headers.txt" -c "$WORK/jar.tx
 assert 4 303 "$REDEEM_CODE" "redeeming the pairing link redirects"
 SET_COOKIE="$(grep -i '^set-cookie:' "$WORK/pair-headers.txt" | tr -d '\r')"
 case "$SET_COOKIE" in
-  *glissa_device=*HttpOnly*) echo "  PASS [4b] Set-Cookie glissa_device is HttpOnly" ;;
-  *) echo "  FAIL [4b] expected an HttpOnly glissa_device cookie, got '$SET_COOKIE'"; failures=$((failures + 1)) ;;
+  *glimmervoid_device=*HttpOnly*) echo "  PASS [4b] Set-Cookie glimmervoid_device is HttpOnly" ;;
+  *) echo "  FAIL [4b] expected an HttpOnly glimmervoid_device cookie, got '$SET_COOKIE'"; failures=$((failures + 1)) ;;
 esac
 COOKIE="$(printf '%s' "$SET_COOKIE" | sed 's/^[Ss]et-[Cc]ookie: *//' | cut -d';' -f1)"
 
 assert 5 200 "$(status -b "$WORK/jar.txt" "$REMOTE/")" "the paired cookie jar reaches the dashboard"
-assert 5b 600 "$(stat -c '%a' "$GLISSA_DIR/pairings.json")" "pairings.json is created 0600"
-assert 5c 0 "$(ls "$GLISSA_DIR" | grep -c 'pairings.json.lock')" "no write lock is left behind"
+assert 5b 600 "$(stat -c '%a' "$GLIMMERVOID_DIR/pairings.json")" "pairings.json is created 0600"
+assert 5c 0 "$(ls "$GLIMMERVOID_DIR" | grep -c 'pairings.json.lock')" "no write lock is left behind"
 assert 6 403 "$(status "$REMOTE/pair/$TOKEN")" "replaying the pairing link is refused (single use)"
 
 WS_NO_COOKIE="$(node test/container/ws-check.js ws://127.0.0.1:3001/control | cut -d' ' -f1)"
 assert 7 REJECTED "$WS_NO_COOKIE" "control WS on the remote listener is refused without a cookie"
 # An Origin is mandatory on the dashboard channels since the 2026-08 security pass, so the paired
 # device sends the one it was configured with (a browser always does).
-WS_COOKIE="$(node test/container/ws-check.js ws://127.0.0.1:3001/control --cookie "$COOKIE" --origin https://glissa.test | cut -d' ' -f1)"
+WS_COOKIE="$(node test/container/ws-check.js ws://127.0.0.1:3001/control --cookie "$COOKIE" --origin https://glimmervoid.test | cut -d' ' -f1)"
 assert 7 OK "$WS_COOKIE" "control WS with the paired cookie connects and receives a snapshot"
 WS_NO_ORIGIN="$(node test/container/ws-check.js ws://127.0.0.1:3001/control --cookie "$COOKIE" | cut -d' ' -f1)"
 assert 7b REJECTED "$WS_NO_ORIGIN" "a control WS with no Origin at all is refused"
 
 WS_EVIL="$(node test/container/ws-check.js ws://127.0.0.1:3001/control --cookie "$COOKIE" --origin https://evil.example | cut -d' ' -f1)"
 assert 8 REJECTED "$WS_EVIL" "a foreign Origin is refused even with a valid cookie"
-WS_GOOD="$(node test/container/ws-check.js ws://127.0.0.1:3001/control --cookie "$COOKIE" --origin https://glissa.test | cut -d' ' -f1)"
+WS_GOOD="$(node test/container/ws-check.js ws://127.0.0.1:3001/control --cookie "$COOKIE" --origin https://glimmervoid.test | cut -d' ' -f1)"
 assert 8 OK "$WS_GOOD" "the configured Origin is accepted"
 
-LIST_OUT="$(node dist/bin/glissa.js pair --list)"
+LIST_OUT="$(node dist/bin/glimmervoid.js pair --list)"
 echo "$LIST_OUT" | sed 's/^/    | /'
 DEVICE_ID="$(printf '%s' "$LIST_OUT" | awk 'NR==2 {print $1}')"
 printf '%s' "$LIST_OUT" | grep -q 'test-device' \
   && echo "  PASS [9] pair --list shows the paired device" \
   || { echo "  FAIL [9] pair --list did not show test-device"; failures=$((failures + 1)); }
-REVOKE_OUT="$(node dist/bin/glissa.js pair --revoke "$DEVICE_ID")"
+REVOKE_OUT="$(node dist/bin/glimmervoid.js pair --revoke "$DEVICE_ID")"
 echo "$REVOKE_OUT" | sed 's/^/    | /'
 printf '%s' "$REVOKE_OUT" | grep -q '30 seconds' \
   && echo "  PASS [9b] revoke quotes the worst-case propagation, not an instant promise" \
@@ -129,7 +129,7 @@ printf '%s' "$REVOKE_OUT" | grep -q '30 seconds' \
 sleep 2  # fs.watch debounce: the running server reloads the device list without a restart
 assert 9 401 "$(status -b "$WORK/jar.txt" "$REMOTE/")" "revocation locks the device out with no restart"
 
-FRESH_OUT="$(node dist/bin/glissa.js pair --name expiring-device)"
+FRESH_OUT="$(node dist/bin/glimmervoid.js pair --name expiring-device)"
 FRESH_TOKEN="$(printf '%s' "$FRESH_OUT" | grep -o '/pair/[A-Za-z0-9_-]\+' | head -1 | sed 's|/pair/||')"
 node -e '
 const fs = require("node:fs");
@@ -137,7 +137,7 @@ const p = process.argv[1];
 const doc = JSON.parse(fs.readFileSync(p, "utf8"));
 doc.pending[doc.pending.length - 1].expiresAt = 1;
 fs.writeFileSync(p, JSON.stringify(doc, null, 2));
-' "$GLISSA_DIR/pairings.json"
+' "$GLIMMERVOID_DIR/pairings.json"
 assert 10 403 "$(status "$REMOTE/pair/$FRESH_TOKEN")" "an expired pending token cannot be redeemed"
 
 echo "== remote mode disabled =="

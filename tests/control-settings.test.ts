@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { createConfigStore } from '../server/config-store.ts';
-import type { ConfigStore, DefaultConfig, GlissaConfig } from '../server/config-store.ts';
+import type { ConfigStore, DefaultConfig, GlimmervoidConfig } from '../server/config-store.ts';
 import type { ControlMessageRecord } from '../server/control-replay-core.ts';
 import { connectControl, controlDeps, createControlServer, testConfigStore } from './helpers/control-harness.ts';
 
@@ -19,14 +19,14 @@ interface SettingsHarness {
   send(message: unknown): unknown;
   sent: SettingsFrame[];
   broadcasts: ControlMessageRecord[];
-  reloadCalls: GlissaConfig[];
-  cfg: GlissaConfig;
+  reloadCalls: GlimmervoidConfig[];
+  cfg: GlimmervoidConfig;
   store: ConfigStore;
 }
 
-function harness(cfg: GlissaConfig, store: ConfigStore = testConfigStore(cfg)): SettingsHarness {
+function harness(cfg: GlimmervoidConfig, store: ConfigStore = testConfigStore(cfg)): SettingsHarness {
   const broadcasts: ControlMessageRecord[] = [];
-  const reloadCalls: GlissaConfig[] = [];
+  const reloadCalls: GlimmervoidConfig[] = [];
   const server = createControlServer(controlDeps(cfg, {
     configStore: store,
     applySettingsReload: (fresh) => { reloadCalls.push(fresh); store.applySettings(fresh); },
@@ -170,7 +170,7 @@ test('a valid branchGc payload is sanitized, persisted, and echoed, and file-onl
   assert.notDeepEqual(h.cfg.branchGc?.prefixes, ['evil/']);
   const echoed = blockOf(updatedFrom(h)?.settings, 'branchGc');
   assert.equal(blockOf(echoed, 'staleDays'), 21);
-  assert.deepEqual(blockOf(echoed, 'prefixes'), ['glissa/session/', 'worktree-agent-']);
+  assert.deepEqual(blockOf(echoed, 'prefixes'), ['glimmervoid/session/', 'worktree-agent-']);
 });
 
 test('a branchGc control update keeps the stored file-only keys', () => {
@@ -187,16 +187,6 @@ test('branchGc rejects non-boolean enablement and non-positive numeric fields', 
     assert.ok(h.sent.some((message) => message.type === 'settings-error'));
     assert.equal(h.cfg.branchGc, undefined);
   }
-});
-
-test('the settings payload tells the dashboard whether the config is the package-local one', () => {
-  const h = harness({ projects: [] });
-  h.send({ type: 'update-settings', settings: { cursorBlink: true } });
-
-  const updated = updatedFrom(h);
-  assert.ok(updated, 'replied settings-updated');
-  assert.equal(holdsKey(updated.settings, 'isLocalConfig'), true);
-  assert.equal(updated.settings?.isLocalConfig, h.store.isLocalConfig);
 });
 
 test('a settings save that omits branchGc preserves its existing opt-out', () => {
@@ -579,17 +569,17 @@ function withRealStore(
   storeOpts: { settingsDefaults?: Partial<DefaultConfig> } | undefined,
   fn: (h: SettingsHarness, store: ConfigStore, readDisk: () => Record<string, unknown>) => void,
 ): void {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-ctl-settings-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-ctl-settings-'));
   const configPath = path.join(dir, 'config.json');
   fs.writeFileSync(configPath, JSON.stringify(seed, null, 2), 'utf8');
-  const prev = process.env.GLISSA_CONFIG;
-  process.env.GLISSA_CONFIG = configPath;
+  const prev = process.env.GLIMMERVOID_CONFIG;
+  process.env.GLIMMERVOID_CONFIG = configPath;
   try {
     const store = createConfigStore(storeOpts);
     fn(harness(store.config, store), store, () => JSON.parse(fs.readFileSync(configPath, 'utf8')));
   } finally {
-    if (prev == null) delete process.env.GLISSA_CONFIG;
-    if (prev != null) process.env.GLISSA_CONFIG = prev;
+    if (prev == null) delete process.env.GLIMMERVOID_CONFIG;
+    if (prev != null) process.env.GLIMMERVOID_CONFIG = prev;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }

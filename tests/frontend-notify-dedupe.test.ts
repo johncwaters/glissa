@@ -51,6 +51,6 @@ test('a throwing store fails open (single-tab must never be silenced)', async ()
 
 test('claimKey is stable and null-safe', async () => {
   const { claimKey } = await importCore();
-  assert.equal(claimKey('s1', 'waiting'), 'glissa-notify-claim-s1-waiting');
-  assert.equal(claimKey(undefined, undefined), 'glissa-notify-claim--');
+  assert.equal(claimKey('s1', 'waiting'), 'glimmervoid-notify-claim-s1-waiting');
+  assert.equal(claimKey(undefined, undefined), 'glimmervoid-notify-claim--');
 });

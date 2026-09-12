@@ -2,8 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import type { UpdateChannel } from '../shared/contracts/update-journal.ts';
+import { REPO_SLUG } from '../shared/repo.ts';
 import { execFileAsync } from './child-process-safe.ts';
-import { glissaHomeDir } from './config-store.ts';
+import { glimmervoidHomeDir } from './config-store.ts';
 import { parseLeftRightCount, parseRemoteFromUpstream } from './core/branch-sync-core.ts';
 import {
   decideInstallFlavor,
@@ -18,8 +19,8 @@ import type { InstallFlavor } from './core/update-core.ts';
 import { writeJsonAtomicSync } from './json-file.ts';
 import { packageRoot as resolvedPackageRoot } from './runtime-paths.ts';
 
-const GIT_REMOTE_URL = 'https://github.com/johncwaters/glissa.git';
-const GITHUB_LATEST_RELEASE_URL = 'https://api.github.com/repos/johncwaters/glissa/releases/latest';
+const GIT_REMOTE_URL = `https://github.com/${REPO_SLUG}.git`;
+const GITHUB_LATEST_RELEASE_URL = `https://api.github.com/repos/${REPO_SLUG}/releases/latest`;
 const DEFAULT_TIMEOUT_MS = 8000;
 const GIT_HEAD_TIMEOUT_MS = 3000;
 const LS_REMOTE_TIMEOUT_MS = 5000;
@@ -82,7 +83,7 @@ type UpdateCheckStatus = CoreUpdateStatus & {
 };
 
 function defaultStatePath(): string {
-  return path.join(glissaHomeDir(), STATE_FILE_NAME);
+  return path.join(glimmervoidHomeDir(), STATE_FILE_NAME);
 }
 
 function readJsonFile(filePath: string): unknown {
@@ -101,7 +102,7 @@ function readRecord(value: unknown): Record<string, unknown> | null {
 function readLockfileSha(packageRoot: string): string | null {
   const document = readRecord(readJsonFile(path.join(packageRoot, '..', '.package-lock.json')));
   const packages = readRecord(document?.packages);
-  const entry = readRecord(packages?.['node_modules/glissa']);
+  const entry = readRecord(packages?.['node_modules/glimmervoid']);
   if (!entry) return null;
   return parseResolvedSha(entry.resolved);
 }
@@ -195,7 +196,7 @@ async function resolveLatestRelease(
   try {
     const response = await fetchFn(GITHUB_LATEST_RELEASE_URL, {
       signal,
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'glissa-update-check' },
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'glimmervoid-update-check' },
     });
     if (!response || !response.ok) return { version: null, sha: null, behindCount: null, reason: 'release-check-failed' };
     const release = parseLatestReleaseTag(await response.json());

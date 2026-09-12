@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import type { GlissaConfig } from '../server/config-store.ts';
+import type { GlimmervoidConfig } from '../server/config-store.ts';
 import type { ControlMessageRecord } from '../server/control-replay-core.ts';
 import type { Session } from '../session/sessions.ts';
 import { connectControl, controlDeps, createControlServer, testConfigStore } from './helpers/control-harness.ts';
@@ -15,7 +15,7 @@ interface ResumeFrame {
   resumeSessionId?: string | null;
 }
 
-function harness(sessions: Map<string, Session>, config: GlissaConfig) {
+function harness(sessions: Map<string, Session>, config: GlimmervoidConfig) {
   const broadcasts: ControlMessageRecord[] = [];
   const saveCalls: number[] = [];
   const server = createControlServer(controlDeps(config, {
@@ -30,7 +30,7 @@ function harness(sessions: Map<string, Session>, config: GlissaConfig) {
 
 test('resume-conversation persists the id, sets it on the session, broadcasts + acks', () => {
   const s = plainSession('p1');
-  const cfg: GlissaConfig = { projects: [{ id: 'p1', name: 'p1', path: 'C:/repo' }] };
+  const cfg: GlimmervoidConfig = { projects: [{ id: 'p1', name: 'p1', path: 'C:/repo' }] };
   const h = harness(new Map([['p1', s]]), cfg);
 
   h.send({ type: 'resume-conversation', id: 'p1', conversationId: '4a3d4462-4cf7-4a23-8f00-ccec89a48ba5' });
@@ -46,7 +46,7 @@ test('resume-conversation persists the id, sets it on the session, broadcasts + 
 test('resume-conversation with an empty id clears the binding', () => {
   const s = plainSession('p1');
   s.setResumeConversation('prior-0000-0000-0000-000000000000');
-  const cfg: GlissaConfig = { projects: [{ id: 'p1', name: 'p1', path: 'C:/repo', resumeSessionId: 'prior-0000-0000-0000-000000000000' }] };
+  const cfg: GlimmervoidConfig = { projects: [{ id: 'p1', name: 'p1', path: 'C:/repo', resumeSessionId: 'prior-0000-0000-0000-000000000000' }] };
   const h = harness(new Map([['p1', s]]), cfg);
 
   h.send({ type: 'resume-conversation', id: 'p1', conversationId: '' });
@@ -57,7 +57,7 @@ test('resume-conversation with an empty id clears the binding', () => {
 
 test('resume-conversation rejects an unsafe id without saving or mutating the session', () => {
   const s = plainSession('p1');
-  const cfg: GlissaConfig = { projects: [{ id: 'p1', name: 'p1', path: 'C:/repo' }] };
+  const cfg: GlimmervoidConfig = { projects: [{ id: 'p1', name: 'p1', path: 'C:/repo' }] };
   const h = harness(new Map([['p1', s]]), cfg);
 
   h.send({ type: 'resume-conversation', id: 'p1', conversationId: '../../etc/passwd' });
@@ -81,7 +81,7 @@ test('restart passes only boolean true as the fresh flag', () => {
   const s = plainSession('p1');
   s.restart = (options = {}) => { restartOptions.push(options); return true; };
   s.forceRestart = (options = {}) => { forceRestartOptions.push(options); return true; };
-  const cfg: GlissaConfig = { projects: [{ id: 'p1', name: 'p1', path: 'C:/repo' }] };
+  const cfg: GlimmervoidConfig = { projects: [{ id: 'p1', name: 'p1', path: 'C:/repo' }] };
   const h = harness(new Map([['p1', s]]), cfg);
 
   h.send({ type: 'restart', id: 'p1', fresh: true });

@@ -10,7 +10,7 @@ const EVENTS: HookEvent[] = [
   { name: 'Stop', matcher: null, description: 'When the main agent finishes a turn.' },
   { name: 'SessionStart', matcher: 'startup, resume, clear or compact', description: 'When a session starts.', http: false },
 ];
-const PROJECTS = [{ id: 'p1', name: 'glissa', agent: 'claude-code' }];
+const PROJECTS = [{ id: 'p1', name: 'glimmervoid', agent: 'claude-code' }];
 const hook = (overrides: Partial<HookRecord> = {}): HookRecord => ({ id: 'h1', name: 'Lint', event: 'PreToolUse', matcher: 'Edit', type: 'command', command: 'npm run lint', enabled: true, ...overrides });
 
 test('totals chips count yours, enabled and built in, and warn when every hook is off', async () => {
@@ -38,7 +38,7 @@ test('row text: event chip, target, type, timeout and scope', async () => {
   assert.equal(core.timeoutLabel(hook()), '');
   assert.equal(core.timeoutLabel(hook({ timeout: 30 })), '30s timeout');
   assert.equal(core.scopeLabel(hook(), PROJECTS), 'All projects');
-  assert.equal(core.scopeLabel(hook({ projects: ['p1', 'gone'] }), PROJECTS), 'glissa, gone');
+  assert.equal(core.scopeLabel(hook({ projects: ['p1', 'gone'] }), PROJECTS), 'glimmervoid, gone');
   assert.deepEqual(core.missingProjectIds(hook({ projects: ['p1', 'gone'] }), PROJECTS), ['gone']);
   assert.equal(core.builtinLine({ event: 'PostToolUse', matcher: 'ScheduleWakeup', purpose: 'wakeup tracking' }), 'PostToolUse / ScheduleWakeup');
   assert.equal(core.builtinLine({ event: 'PostToolUse', matcher: 'Read', purpose: 'Pack read tracking' }), 'PostToolUse / Read');

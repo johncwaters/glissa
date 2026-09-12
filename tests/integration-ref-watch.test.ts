@@ -10,7 +10,7 @@ import { SHORT_NAMES_AVAILABLE, shortPathOf } from './helpers/short-path.ts';
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function fakeCommonGitDir(branches = ['develop']) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-irw-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-irw-'));
   const logsHeads = path.join(dir, 'logs', 'refs', 'heads');
   fs.mkdirSync(logsHeads, { recursive: true });
   for (const b of branches) {
@@ -77,7 +77,7 @@ test('handles a nested integration branch (release/x)', async () => {
 });
 
 test('the watcher survives a commonGitDir under an 8.3 short parent', { skip: !SHORT_NAMES_AVAILABLE }, async () => {
-  const outer = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-irw-shortbase-'));
+  const outer = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-irw-shortbase-'));
   const dir = shortPathOf(outer);
   assert.ok(dir, 'the volume mints an 8.3 alias');
   const logsHeads = path.join(dir, 'logs', 'refs', 'heads');
@@ -97,7 +97,7 @@ test('the watcher survives a commonGitDir under an 8.3 short parent', { skip: !S
 });
 
 test('start() declines when the reflog dir does not exist yet', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-irw-none-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-irw-none-'));
   const w = createIntegrationRefWatcher({ commonGitDir: dir, branch: 'develop', onChange: () => {}, debounceMs: 50 });
   try {
     assert.equal(w.start(), false, 'no logs/refs/heads dir -> start() declines, leans on the floor');

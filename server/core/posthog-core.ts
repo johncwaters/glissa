@@ -299,7 +299,7 @@ function pingFor(
 ): string | null {
   const label = PING_LABELS[kind];
   if (!label) return null;
-  const head = ctx.projectName ? `[glissa/posthog] ${label} ${ctx.projectName}` : `[glissa/posthog] ${label}`;
+  const head = ctx.projectName ? `[glimmervoid/posthog] ${label} ${ctx.projectName}` : `[glimmervoid/posthog] ${label}`;
   const lines = [head, displayTitle(ctx.title)];
   if (ctx.detail) lines.push(displayTitle(ctx.detail));
   if (ctx.occurrences !== undefined || ctx.users !== undefined) {
@@ -597,7 +597,7 @@ function buildIssueSessionPrompt({
   const lines = [
     'Investigate a production error reported by PostHog error tracking.',
     '',
-    'Issue facts (fetched by Glissa from the PostHog API, not written by me):',
+    'Issue facts (fetched by Glimmervoid from the PostHog API, not written by me):',
     `- project: ${scrubForPaste(projectName || '', 80)}${where}`,
     `- issue id: ${scrubForPaste(facts.issueId || '', 128)}`,
     `- title: ${scrubForPaste(facts.title || '(untitled)')}`,

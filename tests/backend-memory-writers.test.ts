@@ -18,12 +18,12 @@ interface BootedBackend {
 }
 
 async function bootWithConfig(extra: Record<string, unknown>): Promise<BootedBackend> {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memory-writers-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-memory-writers-'));
   const configPath = path.join(dir, 'config.json');
   const base = { projects: [], teams: [], repoRoots: [] };
   fs.writeFileSync(configPath, JSON.stringify({ ...base, ...extra }, null, 2), 'utf8');
-  const previousConfig = process.env.GLISSA_CONFIG;
-  process.env.GLISSA_CONFIG = configPath;
+  const previousConfig = process.env.GLIMMERVOID_CONFIG;
+  process.env.GLIMMERVOID_CONFIG = configPath;
 
   const restoreHomes = isolateTranscriptHomes(dir);
   const server = http.createServer();
@@ -38,8 +38,8 @@ async function bootWithConfig(extra: Record<string, unknown>): Promise<BootedBac
       server.closeAllConnections();
       await closeServer(server);
       restoreHomes();
-      if (previousConfig == null) delete process.env.GLISSA_CONFIG;
-      if (previousConfig != null) process.env.GLISSA_CONFIG = previousConfig;
+      if (previousConfig == null) delete process.env.GLIMMERVOID_CONFIG;
+      if (previousConfig != null) process.env.GLIMMERVOID_CONFIG = previousConfig;
       fs.rmSync(dir, { recursive: true, force: true });
     },
   };
@@ -60,7 +60,7 @@ test('an accepted intent proposal reaches the memory store the lane was handed',
     const written = store.records().filter((record) => record.kind === 'intent');
     assert.match(written[0].text, /^thread t-[0-9a-f]{8}: the writers are wired$/);
     assert.equal(written[0].source.kind, 'model');
-    assert.equal(written[0].source.vendor, 'glissa');
+    assert.equal(written[0].source.vendor, 'glimmervoid');
   } finally {
     await booted.close();
   }

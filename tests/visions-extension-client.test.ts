@@ -195,7 +195,7 @@ test('the extension mirrors buffers to the daemon and renders what it sends back
         range: { start: { line: 2, character: 0 }, end: { line: 2, character: 7 } },
         message: 'Repeated word',
         severity: 2,
-        source: 'glissa-visions',
+        source: 'glimmervoid-visions',
       }],
     },
   });
@@ -308,7 +308,7 @@ test('an absent relay reports itself instead of spawning anything', () => {
   const context: { subscriptions: { dispose?: () => void }[] } = { subscriptions: [] };
   extension.activate(context);
   assert.equal(context.subscriptions.length, 2);
-  assert.match(String(vscode.__test.state.errors[0]), /glissa visions install/);
+  assert.match(String(vscode.__test.state.errors[0]), /glimmervoid visions install/);
 });
 
 test('the packed extension names the same activity method the daemon answers', () => {

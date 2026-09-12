@@ -25,8 +25,8 @@ const NO_HOOK_INJECTION: HookInjectionResult = Object.freeze({
 const MAX_PROJECT_CONFIG_DEPTH = 12;
 
 interface HookRouterPort {
-  register(glissaId: string, registration: HookRegistration): void;
-  unregister(glissaId: string): void;
+  register(glimmervoidId: string, registration: HookRegistration): void;
+  unregister(glimmervoidId: string): void;
 }
 
 interface SessionHookOptions {
@@ -120,7 +120,7 @@ function createSessionHookLifecycle(options: SessionHookOptions): SessionHookLif
     if (!Array.isArray(candidates) || candidates.length === 0) return true;
     const found = findProjectAgentConfig(candidates, injection.mayContributeHooks);
     if (!found) return true;
-    console.warn(`[session:${options.name}] hook-trust bypass refused: ${found} could contribute hooks Glissa did not write - falling back to OSC title only`);
+    console.warn(`[session:${options.name}] hook-trust bypass refused: ${found} could contribute hooks Glimmervoid did not write - falling back to OSC title only`);
     options.recordDecision({ kind: "hook-trust", ts: Date.now(), decision: "bypass-refused", reason: "project agent config could contribute hooks" });
     return false;
   }
@@ -168,7 +168,7 @@ function createSessionHookLifecycle(options: SessionHookOptions): SessionHookLif
       injection.mayContributeHooks,
     );
     if (contributingConfig) {
-      console.warn(`[session:${options.name}] home hook injection refused: ${contributingConfig} could contribute hooks Glissa did not write - falling back to OSC title only`);
+      console.warn(`[session:${options.name}] home hook injection refused: ${contributingConfig} could contribute hooks Glimmervoid did not write - falling back to OSC title only`);
       options.recordDecision({
         kind: "hook-trust",
         ts: Date.now(),
@@ -185,12 +185,12 @@ function createSessionHookLifecycle(options: SessionHookOptions): SessionHookLif
       contents = fs.readFileSync(resolvedHooksPath, "utf8");
     } catch (error) {
       const reason = errorCode(error) === "ENOENT" ? "not installed" : errorMessage(error);
-      console.warn(`[session:${options.name}] Grok hook injection skipped: ${reason}; run "glissa agent setup grok"`);
+      console.warn(`[session:${options.name}] Grok hook injection skipped: ${reason}; run "glimmervoid agent setup grok"`);
       return NO_HOOK_INJECTION;
     }
     const classification = injection.classifyContents(contents);
     if (classification !== "current") {
-      console.warn(`[session:${options.name}] Grok hook injection skipped: ${hooksPath} is ${classification}; run "glissa agent setup grok"`);
+      console.warn(`[session:${options.name}] Grok hook injection skipped: ${hooksPath} is ${classification}; run "glimmervoid agent setup grok"`);
       return NO_HOOK_INJECTION;
     }
     return registerRelayHooks(port, []);
@@ -216,7 +216,7 @@ function createSessionHookLifecycle(options: SessionHookOptions): SessionHookLif
       }
       const nextSettingsHandle = writeSessionSettings({
         port,
-        glissaId: options.id,
+        glimmervoidId: options.id,
         baseDir: options.hooksBaseDir,
         permissions: options.settingsPermissions,
         detectScheduledWakeups: options.detectScheduledWakeups,

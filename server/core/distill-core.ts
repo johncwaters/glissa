@@ -1,4 +1,4 @@
-const STAMP_PREFIX = '<!-- glissa-distill v1 ';
+const STAMP_PREFIX = '<!-- glimmervoid-distill v1 ';
 const STAMP_SUFFIX = ' -->';
 
 const STAMP_HASH_CHARS = 16;

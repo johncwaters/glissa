@@ -271,9 +271,8 @@ test('update identity rows show installed state, latest metadata and main-channe
   });
 });
 
-test('lastUpdateCheckText explains disabled checks, local config, unknown flavor and failures', () => {
+test('lastUpdateCheckText explains disabled checks, unknown flavor and failures', () => {
   assert.equal(lastUpdateCheckText({ status: status(), checkForUpdates: false, relativeTime: '1m ago' }), 'Update checks are off.');
-  assert.equal(lastUpdateCheckText({ status: status(), isLocalConfig: true, relativeTime: '1m ago' }), 'Update checks are off for local config.');
   assert.equal(lastUpdateCheckText({ status: status({ flavor: 'unknown' }), relativeTime: '1m ago' }), 'The install flavor is unknown.');
   assert.equal(lastUpdateCheckText({ status: status({ reason: 'update-check-failed' }), relativeTime: '1m ago' }), 'The last update check failed.');
   assert.equal(lastUpdateCheckText({ status: status(), relativeTime: '1m ago' }), '1m ago');

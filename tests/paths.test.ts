@@ -16,8 +16,8 @@ test('isSameDirectoryPath matches spellings differing by separator, trailing sla
 });
 
 test('isSameDirectoryPath keeps genuinely different directories apart', () => {
-  const a = path.join(os.tmpdir(), 'glissa-paths-a');
-  const b = path.join(os.tmpdir(), 'glissa-paths-b');
+  const a = path.join(os.tmpdir(), 'glimmervoid-paths-a');
+  const b = path.join(os.tmpdir(), 'glimmervoid-paths-b');
   assert.ok(!isSameDirectoryPath(a, b));
 });
 
@@ -41,6 +41,6 @@ test('canonicalizePath expands an 8.3 short path to its long form', { skip: !SHO
 });
 
 test('canonicalizePath returns the input untouched when the path is not on disk', () => {
-  const absent = path.join(os.tmpdir(), `glissa-paths-absent-${process.pid}`);
+  const absent = path.join(os.tmpdir(), `glimmervoid-paths-absent-${process.pid}`);
   assert.equal(canonicalizePath(absent), absent);
 });

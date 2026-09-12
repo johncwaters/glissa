@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 
-import type { GlissaConfig } from '../server/config-store.ts';
+import type { GlimmervoidConfig } from '../server/config-store.ts';
 import type { ControlHandlerDeps } from '../server/control-handlers.ts';
 import type { ControlMessageRecord } from '../server/control-replay-core.ts';
 import { connectControl, controlDeps, createControlServer } from './helpers/control-harness.ts';
@@ -20,17 +20,17 @@ interface UsageHarness {
   send(message: unknown): unknown;
   sent: UsageFrame[];
   broadcasts: ControlMessageRecord[];
-  reloadCalls: GlissaConfig[];
-  cfg: GlissaConfig;
+  reloadCalls: GlimmervoidConfig[];
+  cfg: GlimmervoidConfig;
 }
 
 function harness(
-  cfg: GlissaConfig,
+  cfg: GlimmervoidConfig,
   deps: Partial<ControlHandlerDeps> = {},
   { preserveConnectFrames = false }: { preserveConnectFrames?: boolean } = {},
 ): UsageHarness {
   const broadcasts: ControlMessageRecord[] = [];
-  const reloadCalls: GlissaConfig[] = [];
+  const reloadCalls: GlimmervoidConfig[] = [];
   const server = createControlServer(controlDeps(cfg, {
     applySettingsReload: (fresh) => { reloadCalls.push(fresh); },
     broadcastControl: (message) => { broadcasts.push(message); },
@@ -41,7 +41,7 @@ function harness(
   return { send: connection.send, sent: connection.sent, broadcasts, reloadCalls, cfg };
 }
 
-function baseCfg(): GlissaConfig {
+function baseCfg(): GlimmervoidConfig {
   return { projects: [], repoRoots: [] };
 }
 
@@ -55,7 +55,7 @@ function errorFrom(h: UsageHarness): UsageFrame | undefined {
   return h.sent.find((m) => m.type === 'settings-error');
 }
 
-function usageBlock(cfg: GlissaConfig): Record<string, unknown> {
+function usageBlock(cfg: GlimmervoidConfig): Record<string, unknown> {
   const usage = cfg.usage;
   assert.ok(usage && typeof usage === 'object', 'expected a persisted usage block');
   return usage;

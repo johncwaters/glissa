@@ -1,5 +1,5 @@
-const MARKER_NAME = 'glissa-visions';
-const SERVER_ID = 'glissa-visions';
+const MARKER_NAME = 'glimmervoid-visions';
+const SERVER_ID = 'glimmervoid-visions';
 const HELIX_BEGIN = `# >>> ${MARKER_NAME}`;
 const HELIX_END = `# <<< ${MARKER_NAME}`;
 const EMACS_BEGIN = `;; >>> ${MARKER_NAME}`;
@@ -57,7 +57,7 @@ function replaceMarkedBlock(text: string, begin: string, end: string, block: str
 
 function neovimDropIn(invocation: WireInvocation): string {
   return [
-    `-- Written by glissa; edit glissa's config, not this file. Delete it to unwire ${MARKER_NAME}.`,
+    `-- Written by glimmervoid; edit glimmervoid's config, not this file. Delete it to unwire ${MARKER_NAME}.`,
     "vim.api.nvim_create_autocmd('FileType', {",
     "  pattern = 'markdown',",
     `  callback = function()`,
@@ -193,7 +193,7 @@ function emacsMerge(existingText: unknown, invocation: WireInvocation): WireResu
   const text = typeof existingText === 'string' ? existingText : '';
   const block = [
     EMACS_BEGIN,
-    ";; Written by glissa. Delete this block to unwire glissa-visions.",
+    ";; Written by glimmervoid. Delete this block to unwire glimmervoid-visions.",
     "(with-eval-after-load 'eglot",
     "  (add-to-list 'eglot-server-programs",
     `               '(markdown-mode . (${parts(invocation).map((part) => `"${part}"`).join(' ')}))))`,

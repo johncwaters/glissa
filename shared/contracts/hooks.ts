@@ -3,7 +3,7 @@ import { z } from 'zod';
 export const HookPayload = z.record(z.string(), z.unknown());
 
 export const HookEnvelope = z.object({
-  glissaId: z.string().min(1),
+  glimmervoidId: z.string().min(1),
   event: z.string().min(1),
   token: z.string().nullable().optional(),
   payload: HookPayload,

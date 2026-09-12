@@ -4,7 +4,7 @@
 # scripts
 
 ## Purpose
-Maintainer scripts for cutting a release and validating the install tarball. Glissa is not published to a registry: distribution is the GitHub repo, provisioned by the dotfiles repo on servers and by `npm i -g github:johncwaters/glissa` for a standalone CLI (see `../docs/distribution.md`).
+Maintainer scripts for cutting a release and validating the install tarball. Glimmervoid is not published to a registry: distribution is the GitHub repo, provisioned by the dotfiles repo on servers and by `npm i -g github:johncwaters/glimmervoid` for a standalone CLI (see `../docs/distribution.md`).
 
 ## Key Files
 
@@ -18,7 +18,7 @@ Maintainer scripts for cutting a release and validating the install tarball. Gli
 ## For AI Agents
 
 ### Working In This Directory
-- After adding a server module that ships, check `package.json` `files`; a miss means a broken `npm i -g github:johncwaters/glissa`, which the packaged-install job in `.github/workflows/test.yml` catches.
+- After adding a server module that ships, check `package.json` `files`; a miss means a broken `npm i -g github:johncwaters/glimmervoid`, which the packaged-install job in `.github/workflows/test.yml` catches.
 - These are one-shot cold paths: sync `execSync`/fs is acceptable here (unlike server runtime paths).
 
 ### Testing Requirements

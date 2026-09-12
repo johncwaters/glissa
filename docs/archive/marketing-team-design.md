@@ -1,26 +1,26 @@
-> Historical document, superseded. Predates the `.glissa/` pack path convention and project-level shared packs described in AGENTS.md. Current behavior: see AGENTS.md and CHANGELOG.md.
+> Historical document, superseded. Predates the `.glimmervoid/` pack path convention and project-level shared packs described in AGENTS.md. Current behavior: see AGENTS.md and CHANGELOG.md.
 
-## Glissa Teams: Marketing Pipeline Design
+## Glimmervoid Teams: Marketing Pipeline Design
 
-A four-agent marketing pipeline that researches, plans, writes, and edits Milepost marketing content on a schedule. Built as a reusable "team" inside Glissa. The shape borrows from the Planner, Coder, Tester, Reviewer pattern used in agentic coding, adapted for marketing, where success criteria are softer and topic choice matters as much as execution.
+A four-agent marketing pipeline that researches, plans, writes, and edits Milepost marketing content on a schedule. Built as a reusable "team" inside Glimmervoid. The shape borrows from the Planner, Coder, Tester, Reviewer pattern used in agentic coding, adapted for marketing, where success criteria are softer and topic choice matters as much as execution.
 
 ---
 
-### Architecture: capability in Glissa, data in the project
+### Architecture: capability in Glimmervoid, data in the project
 
-Glissa opens Claude Code projects in terminals and manages them in one place: one project across several terminals, or several projects at once. This feature adds premade **teams** that Glissa can spawn automatically and run on a schedule.
+Glimmervoid opens Claude Code projects in terminals and manages them in one place: one project across several terminals, or several projects at once. This feature adds premade **teams** that Glimmervoid can spawn automatically and run on a schedule.
 
 The design separates two concerns:
 
-- **Team definitions live in Glissa.** The agent roster, prompts, orchestration logic, and schedule are owned by Glissa and reusable across any project it opens. A team is a portable unit Glissa knows how to spawn.
+- **Team definitions live in Glimmervoid.** The agent roster, prompts, orchestration logic, and schedule are owned by Glimmervoid and reusable across any project it opens. A team is a portable unit Glimmervoid knows how to spawn.
 - **Team output writes to the target project.** When a team runs against the Milepost project, it writes working state and outputs into that project's `./team/` folder.
 
-Glissa knows *how* to run a team; the project supplies *what* the brand sounds like and stores *what* was produced. The same marketing team can therefore be pointed at any project: run it against Milepost and it writes to Milepost's `./team/marketing/`; the same definition could later run against a different product and write there instead.
+Glimmervoid knows *how* to run a team; the project supplies *what* the brand sounds like and stores *what* was produced. The same marketing team can therefore be pointed at any project: run it against Milepost and it writes to Milepost's `./team/marketing/`; the same definition could later run against a different product and write there instead.
 
-#### Glissa side: the reusable team
+#### Glimmervoid side: the reusable team
 
 ```
-glissa/
+glimmervoid/
   teams/
     marketing/
       team.json           # roster, schedule, model assignments, output path
@@ -63,7 +63,7 @@ Each run gets a dated folder so history is preserved and auditable. `log.md` is 
 Researcher -> Strategist -> Writer -> Editor -> (optional) Postiz queueing
 ```
 
-Each agent reads the previous agent's output file from `./team/marketing/runs/<date>/` and writes the next. Glissa's orchestrator runs the chain. Approved output lands in Postiz as drafts for morning review, not auto-published.
+Each agent reads the previous agent's output file from `./team/marketing/runs/<date>/` and writes the next. Glimmervoid's orchestrator runs the chain. Approved output lands in Postiz as drafts for morning review, not auto-published.
 
 A `FIX` verdict is not a dead end: the orchestrator runs a bounded revision loop (default two rounds). On `FIX` the Writer is re-run with the Editor's FIX list plus its prior drafts, then the Editor re-audits, until the verdict is `SHIP` (the publisher then runs), `BLOCK`, the drafts stop changing, or the round budget is spent. The publisher still runs only on a final `SHIP`.
 
@@ -142,7 +142,7 @@ After a SHIP verdict, push approved drafts to Postiz as drafts (not scheduled). 
 
 ### The orchestrator
 
-Glissa runs the team on schedule. Sequence:
+Glimmervoid runs the team on schedule. Sequence:
 
 1. Create the dated run folder under the target project's `./team/marketing/runs/`.
 2. Delegate to Researcher. Wait for `brief.md`.
@@ -162,7 +162,7 @@ Each stage confirms the previous handoff file exists and has its expected sectio
 
 **Already available:**
 
-- Glissa (the orchestration tool, extensible and user-owned)
+- Glimmervoid (the orchestration tool, extensible and user-owned)
 - Blog writer skill
 - Post writer skill (X, Facebook, LinkedIn in one skill)
 - Postiz Cloud subscription
@@ -171,11 +171,11 @@ Each stage confirms the previous handoff file exists and has its expected sectio
 
 **To build:**
 
-- Glissa "team" abstraction (the reusable unit: roster, schedule, orchestrator, output path)
+- Glimmervoid "team" abstraction (the reusable unit: roster, schedule, orchestrator, output path)
 - Researcher agent/skill
 - Strategist agent/skill
 - Editor agent/skill
-- Orchestrator sequence in Glissa
+- Orchestrator sequence in Glimmervoid
 - `./team/` folder convention, written into the target project at runtime
 - Postiz draft-queueing integration (optional, v2)
 
@@ -183,18 +183,18 @@ Each stage confirms the previous handoff file exists and has its expected sectio
 
 ### Scheduling
 
-Glissa triggers the team on a schedule, replacing local cron. Start at three runs per week (Tuesday, Thursday, Saturday, early morning MT), so drafts are waiting in Postiz by morning review. Three per week builds the habit without flooding accounts before the voice is validated.
+Glimmervoid triggers the team on a schedule, replacing local cron. Start at three runs per week (Tuesday, Thursday, Saturday, early morning MT), so drafts are waiting in Postiz by morning review. Three per week builds the habit without flooding accounts before the voice is validated.
 
 ---
 
 ### Build order
 
-1. **Glissa team abstraction.** Define a team: roster, orchestrator sequence, schedule, target output path. Everything else plugs into this.
-2. **`./team/` folder convention.** Glissa writes this structure into whatever project the team runs against. Config files are populated from the existing Notion docs.
+1. **Glimmervoid team abstraction.** Define a team: roster, orchestrator sequence, schedule, target output path. Everything else plugs into this.
+2. **`./team/` folder convention.** Glimmervoid writes this structure into whatever project the team runs against. Config files are populated from the existing Notion docs.
 3. **Editor skill.** Immediate value, no new dependencies; it audits output from the existing writer skills.
 4. **Researcher skill.** The topic engine. Makes the pipeline autonomous instead of prompt-fed.
 5. **Strategist skill.** Refinement. The Researcher can cover this initially; split it out when needed.
-6. **Orchestrator sequence.** Chains the agents inside Glissa.
+6. **Orchestrator sequence.** Chains the agents inside Glimmervoid.
 7. **Schedule wiring.** Tuesday, Thursday, Saturday, early AM MT.
 8. **Postiz draft queueing.** Final polish. The pipeline is useful before this; drafts can be copy-pasted manually until the integration ships.
 
@@ -215,7 +215,7 @@ Glissa triggers the team on a schedule, replacing local cron. Start at three run
 
 #### Build (definition of done per component)
 
-- **Team abstraction:** a valid `team.json` loads and Glissa can list its roster, ordered stages, schedule, and output path; an invalid `team.json` is rejected with a specific error naming the missing or malformed field.
+- **Team abstraction:** a valid `team.json` loads and Glimmervoid can list its roster, ordered stages, schedule, and output path; an invalid `team.json` is rejected with a specific error naming the missing or malformed field.
 - **`./team/` convention:** running the team against a project with no `./team/` folder creates the full structure shown above; a second run reuses existing `config/` and prior `runs/` folders without overwriting them, and adds only the new dated run folder.
 - **Editor skill:** against a fixture of 10 seeded drafts containing known violations (em dash, emoji, urgency trope, uncited numeric claim, competitor name), the Editor flags 100% of seeded violations and emits exactly one `VERDICT:` line per run.
 - **Researcher skill:** every `brief.md` populates all six required sections, and the chosen topic does not duplicate any topic in the last 5 `log.md` entries.
@@ -243,7 +243,7 @@ The team abstraction generalizes. Once marketing works, the same four-stage shap
 - **Listening:** Researcher (pull Reddit mentions) -> Strategist (classify relevance) -> Writer (draft reply when worth engaging) -> Editor (tone) -> Notion queue
 - **Support:** Researcher (read user email and account context) -> Strategist (categorize: feature request, bug, refund) -> Writer (draft reply) -> Editor (voice and accuracy) -> Gmail drafts
 
-Each is the same shape with different agents and a different output target. Building marketing well is the investment that pays off across all of them, and because teams live in Glissa and write to the target project, one team can serve multiple products.
+Each is the same shape with different agents and a different output target. Building marketing well is the investment that pays off across all of them, and because teams live in Glimmervoid and write to the target project, one team can serve multiple products.
 
 ---
 
@@ -252,4 +252,4 @@ Each is the same shape with different agents and a different output target. Buil
 1. **Team schema scope.** Does `team.json` carry only roster, schedule, and output path, or also model assignments, retry policy, and notification settings? Start minimal and expand.
 2. **Spawn model.** Does a scheduled run open a fresh Claude Code terminal in the target project and issue the orchestrator command, or run headless? This determines how the orchestrator is invoked.
 3. **Postiz integration boundary.** Build queueing into the orchestrator, or as a separate post-pipeline step? Likely separate: the orchestrator finishes at the Editor verdict, and queueing is a discrete next action.
-4. **Writer skill reach.** Confirm the existing post-writer skill is installed where a Glissa-spawned session in the Milepost project can invoke it.
+4. **Writer skill reach.** Confirm the existing post-writer skill is installed where a Glimmervoid-spawned session in the Milepost project can invoke it.

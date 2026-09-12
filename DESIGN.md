@@ -1,5 +1,5 @@
 ---
-name: Glissa
+name: Glimmervoid
 description: A calm operator console for watching and steering many live Claude Code sessions.
 colors:
   accent: "#c084fc"
@@ -98,17 +98,17 @@ components:
     padding: "0 8px"
 ---
 
-# Design System: Glissa
+# Design System: Glimmervoid
 
 ## 1. Overview
 
 **Creative North Star: "The Phyrexian Console"**
 
-Glissa is a machine intelligence watching its constructs through the night. The surface is deep oil-black tinted toward violet; a single iridescent orchid accent is the only chromatic voice in the chrome. State surfaces as cold, exact glints, a glow here, a flash there, only when something actually changes. The console is precise, unsentimental, and a little uncanny: it never blinks and never raises its voice. The operator should feel in command of a board of live agents, not entertained by it.
+Glimmervoid is a machine intelligence watching its constructs through the night. The surface is deep oil-black tinted toward violet; a single iridescent orchid accent is the only chromatic voice in the chrome. State surfaces as cold, exact glints, a glow here, a flash there, only when something actually changes. The console is precise, unsentimental, and a little uncanny: it never blinks and never raises its voice. The operator should feel in command of a board of live agents, not entertained by it.
 
 Everything is monospace. Type is the voice of the interface, and the voice is even, technical, and quiet. Density is welcome where it pays for itself: the operator is watching several terminals at 2am and the layout must reward sustained attention, not a glance. Chrome recedes so the terminal output (the real product) holds the eye. Ornament is treated as suspicious. If a pixel does not carry data or guide the eye to data, it is cut.
 
-This system explicitly rejects the generic AI-SaaS dashboard (no gradient hero, no rounded glass cards, no purple-to-blue gradient, no Inter), the IDE clone (Glissa is a monitor, not an editor), the toy aesthetic (no cartoonish rounding, no primary-color palettes), and the safe corporate committee look (no IBM-blue enterprise design). It is a control room, not a marketing page.
+This system explicitly rejects the generic AI-SaaS dashboard (no gradient hero, no rounded glass cards, no purple-to-blue gradient, no Inter), the IDE clone (Glimmervoid is a monitor, not an editor), the toy aesthetic (no cartoonish rounding, no primary-color palettes), and the safe corporate committee look (no IBM-blue enterprise design). It is a control room, not a marketing page.
 
 **Key Characteristics:**
 - Mono-forward: one typeface family carries headings, labels, data, and body.
@@ -164,7 +164,7 @@ Always paired with a glyph or shape; never carried by hue alone.
 **Character:** One programmer's-typeface voice for everything. It reads as an instrument readout, not a document. Because the family is fixed and the size range is narrow, hierarchy is carried by weight, letter-spacing, color, and uppercase, not by large type.
 
 ### Hierarchy
-- **Headline** (700, 16px, 0.1em tracking, uppercase): The GLISSA wordmark and top-level bar titles. The only place tracking opens up this wide.
+- **Headline** (700, 16px, 0.1em tracking, uppercase): The GLIMMERVOID wordmark and top-level bar titles. The only place tracking opens up this wide.
 - **Title** (700, 14px to 16px, 0.03em to 0.04em): Dialog titles, panel names, empty-state titles.
 - **Body** (400, 14px, line-height 1.5): Base reading size; the document default.
 - **Caption** (400, 11px to 12px, 0.02em, line-height ~1.55): Descriptions, summaries, secondary metadata. The workhorse of the dense panels.
@@ -263,7 +263,7 @@ A primary view with a 220px grouped sidebar and one scrolling section page.
 
 ### Don't:
 - **Don't** build the generic AI-SaaS dashboard: no gradient hero, no rounded glass cards, no purple-to-blue gradient, no Inter.
-- **Don't** make it look like a VS Code or IDE clone. Glissa is a monitor, not an editor.
+- **Don't** make it look like a VS Code or IDE clone. Glimmervoid is a monitor, not an editor.
 - **Don't** use a children's or toy aesthetic: no cartoonish rounded-everything, no primary-color palette.
 - **Don't** fall back to safe corporate enterprise design (IBM-blue committee look).
 - **Don't** use gradient text (`background-clip: text` over a gradient). Emphasis comes from weight and color.

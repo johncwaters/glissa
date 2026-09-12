@@ -1,7 +1,7 @@
 import type { WebSocket, WebSocketServer } from 'ws';
 import type { Session } from '../session/sessions.ts';
 import type { ControlBroadcast, ControlSocket } from './backend-websockets.ts';
-import type { ConfigStore, GlissaConfig, ProjectEntry } from './config-store.ts';
+import type { ConfigStore, GlimmervoidConfig, ProjectEntry } from './config-store.ts';
 import { registerControlHandlers } from './control-handlers.ts';
 import type { MillControl } from './control-handlers.ts';
 import type { ReplayLog } from './control-replay-core.ts';
@@ -45,16 +45,16 @@ interface UsageControl {
 interface BackendControlDependencies {
   controlWss: WebSocketServer;
   sessions: Map<string, Session>;
-  config: GlissaConfig;
+  config: GlimmervoidConfig;
   configStore: ConfigStore;
   broadcastControl: ControlBroadcast;
   controlReplayLog: ReplayLog;
   getRtkInstallStatus: () => Record<string, unknown> | null;
   generateProjectId: () => string;
-  makeSession: (project: ProjectEntry, config: GlissaConfig) => Session;
+  makeSession: (project: ProjectEntry, config: GlimmervoidConfig) => Session;
   wireSessionEvents: (session: Session) => void;
-  applyConfigReload: (config: GlissaConfig) => void;
-  applySettingsReload: (config: GlissaConfig) => void;
+  applyConfigReload: (config: GlimmervoidConfig) => void;
+  applySettingsReload: (config: GlimmervoidConfig) => void;
   requestShutdown: () => unknown;
   requestRestart: () => unknown;
   handleClientFocus: (socket: ControlSocket, focused: boolean) => void;
@@ -71,7 +71,7 @@ interface BackendControlDependencies {
   packService: PackControl;
   usage: UsageControl;
   mill: MillControl;
-  readTracePage: ((glissaSessionId: string, request: TracePageRequest) => Promise<TracePage>) | null;
+  readTracePage: ((glimmervoidSessionId: string, request: TracePageRequest) => Promise<TracePage>) | null;
   readPlanRevision: ((
     sessionId: string,
     request: { agentId?: string | null; revision?: number | null },
@@ -143,7 +143,7 @@ function createBackendControl(dependencies: BackendControlDependencies): void {
   ): void => {
     controlWss.on('connection', (socket: WebSocket) => {
       if (socket.readyState !== 1) return;
-      if (refuseRemote && (socket as ControlSocket).glissaTrust === 'remote') return;
+      if (refuseRemote && (socket as ControlSocket).glimmervoidTrust === 'remote') return;
       const lane = readLane();
       if (!lane) return;
       try {

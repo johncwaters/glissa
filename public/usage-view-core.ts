@@ -415,7 +415,7 @@ const LANE_LABELS: Readonly<Record<string, string>> = Object.freeze({
   other: 'Other',
 });
 
-export const LANE_SCOPE_HINT = 'Sessions spawned by Glissa; terminal sessions count as other';
+export const LANE_SCOPE_HINT = 'Sessions spawned by Glimmervoid; terminal sessions count as other';
 
 export function laneLabel(lane: unknown) {
   const key = typeof lane === 'string' ? lane.trim() : '';
@@ -939,7 +939,7 @@ export function pricingSourceLine(pricing: { source?: unknown } | null | undefin
     if (!ago) return 'Prices from the cached public model price table.';
     return `Prices from the cached public model price table, ${ago}.`;
   }
-  if (source === 'snapshot') return 'Prices from the price table bundled with this Glissa build.';
+  if (source === 'snapshot') return 'Prices from the price table bundled with this Glimmervoid build.';
   if (source === 'unavailable') return 'Model prices could not be loaded, so every cost below counts as zero.';
   return 'Pricing source not reported yet.';
 }
@@ -989,7 +989,7 @@ export function usageErrorLine(report: UsageReport | null | undefined) {
 export function usageWarningLine(report: UsageReport | null | undefined) {
   const warning = typeof report?.warning === 'string' ? report.warning.trim() : '';
   if (!warning) return '';
-  return `Glissa could not read every transcript location: ${warning}`;
+  return `Glimmervoid could not read every transcript location: ${warning}`;
 }
 
 export function isUsageUnavailable(report: UsageReport | null | undefined) {
@@ -1012,13 +1012,13 @@ function projectBasename(path: unknown) {
   return segments[segments.length - 1];
 }
 
-export function isGlissaSessionRow(row: UsageWireRow | null | undefined) {
+export function isGlimmervoidSessionRow(row: UsageWireRow | null | undefined) {
   return typeof row?.id === 'string' && row.id !== '';
 }
 
 export function sessionRowLabel(row: UsageWireRow | null | undefined) {
   const label = typeof row?.label === 'string' ? row.label.trim() : '';
-  if (isGlissaSessionRow(row) && label) return label;
+  if (isGlimmervoidSessionRow(row) && label) return label;
   const project = projectBasename(row?.project);
   if (project) return project;
   if (label) return label;

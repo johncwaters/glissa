@@ -26,7 +26,7 @@ interface CapturedOut {
 }
 
 function tempDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-purge-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-purge-'));
 }
 
 function knowledge(text: string, project: string | null, sessionId: string): KnowledgeInput {
@@ -47,13 +47,13 @@ function silentOut(): CapturedOut {
 async function seedStore(dir: string, realProject: string): Promise<number> {
   const store = createMemoryStore({
     dir,
-    dbPath: path.join(dir, 'glissa.db'),
+    dbPath: path.join(dir, 'glimmervoid.db'),
     config: { ...resolveMemoryConfig(null), enabled: true },
     logger: QUIET,
     projectionDebounceMs: 5,
   });
   if (!store) throw new Error('this node build has no node:sqlite');
-  await store.append(knowledge(CANARY, '/repos/glissa', 'sess-1'));
+  await store.append(knowledge(CANARY, '/repos/glimmervoid', 'sess-1'));
   await store.append(knowledge('the poller ticks every 15 minutes', 'repo/fixture', 's-1'));
   await store.append(knowledge('the review sidebar reads the worktree diff', realProject, 'a1f0c1de-0000-4000-8000-000000000003'));
   await store.append(knowledge('a fixture that borrowed a real project path', realProject, 'sess-2'));
@@ -62,7 +62,7 @@ async function seedStore(dir: string, realProject: string): Promise<number> {
   const liveTranscript = path.join(dir, 'live.jsonl');
   fs.writeFileSync(liveTranscript, '{}\n', 'utf8');
   store.saveTailOffset({ path: liveTranscript, size: 3, mtimeMs: 1, offset: 3, ts: 1 });
-  store.saveTailOffset({ path: path.join(os.tmpdir(), 'glissa-gone-fixture', 'sess-1.jsonl'), size: 3, mtimeMs: 1, offset: 3, ts: 1 });
+  store.saveTailOffset({ path: path.join(os.tmpdir(), 'glimmervoid-gone-fixture', 'sess-1.jsonl'), size: 3, mtimeMs: 1, offset: 3, ts: 1 });
   const total = store.records().length;
   await store.stop();
   return total;
@@ -72,7 +72,7 @@ test('the fixture rule keeps a real project, a global record and a tombstone', (
   const real = tempDir();
   try {
     assert.equal(fixtureReason(knowledge('x', 'repo/fixture', 'u-1')), 'project', 'a relative key never named a place here');
-    assert.equal(fixtureReason(knowledge('x', '/repos/glissa', 'u-1')), 'project', 'no such root on this machine');
+    assert.equal(fixtureReason(knowledge('x', '/repos/glimmervoid', 'u-1')), 'project', 'no such root on this machine');
     assert.equal(fixtureReason(knowledge('x', path.join(real, 'pruned-worktree'), 'u-1')), null, 'a pruned worktree is still a real project');
     assert.equal(fixtureReason(knowledge('x', real, 'sess-1')), 'session');
     assert.equal(fixtureReason(knowledge('x', real, 'b3f0c1de-0000-4000-8000-000000000001')), null);
@@ -89,7 +89,7 @@ test('a purge removes the fixtures, backs the database up first and leaves the r
   try {
     const before = await seedStore(dir, realProject);
     assert.equal(before, 6);
-    const dbPath = path.join(dir, 'glissa.db');
+    const dbPath = path.join(dir, 'glimmervoid.db');
     const out = silentOut();
     const result = await purgeFixtures({ dbPath, memoryDir: dir, now: () => 1234567890123, out });
 
@@ -131,7 +131,7 @@ test('a second pass is a no-op that writes nothing, tombstones included', async 
   const realProject = tempDir();
   try {
     await seedStore(dir, realProject);
-    const dbPath = path.join(dir, 'glissa.db');
+    const dbPath = path.join(dir, 'glimmervoid.db');
     await purgeFixtures({ dbPath, memoryDir: dir, now: () => 1, out: silentOut() });
     const second = await purgeFixtures({ dbPath, memoryDir: dir, now: () => 2, out: silentOut() });
     assert.equal(second.removed, 0);
@@ -149,7 +149,7 @@ test('a dry run reports the fixtures and writes nothing', async () => {
   const realProject = tempDir();
   try {
     await seedStore(dir, realProject);
-    const dbPath = path.join(dir, 'glissa.db');
+    const dbPath = path.join(dir, 'glimmervoid.db');
     const out = silentOut();
     const result = await purgeFixtures({ dbPath, memoryDir: dir, dryRun: true, now: () => 7, out });
     assert.equal(result.removed, 0);

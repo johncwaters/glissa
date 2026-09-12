@@ -72,7 +72,7 @@ const DEFAULTS = Object.freeze({
     '**/node_modules/**',
     '**/dist/**',
     '**/.git/**',
-    '**/.glissa/**',
+    '**/.glimmervoid/**',
     '**/*.lock',
     '**/package-lock.json',
     '**/pnpm-lock.yaml',
@@ -95,7 +95,7 @@ const DEFAULTS = Object.freeze({
   maxFileBytes: 524288,
   debounceMs: 1500,
   runOnExit: false,
-  reportDir: '.glissa/post-turn',
+  reportDir: '.glimmervoid/post-turn',
 });
 
 interface MutableCheckConfig {

@@ -66,7 +66,7 @@ const TOOL_TARGET_KEYS: readonly string[] = Object.freeze([
 ]);
 
 const DISPATCH_WORKDIR_MARKERS: readonly string[] = Object.freeze([
-  'glissa-visions', 'glissa-memory-distill', 'glissa-wt-pr-review', 'glissa-wt-radar-fix',
+  'glimmervoid-visions', 'glimmervoid-memory-distill', 'glimmervoid-wt-pr-review', 'glimmervoid-wt-radar-fix',
 ]);
 const DISPATCH_WORKDIR_PATTERN = new RegExp(`(^|[\\\\/-])(${DISPATCH_WORKDIR_MARKERS.join('|')})-`, 'i');
 

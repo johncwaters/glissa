@@ -5,11 +5,11 @@ import type { ControlBroadcast } from './backend-websockets.ts';
 import { comparableDirectoryPath } from '../shared/paths.ts';
 import { createBranchGcWiring } from './branch-gc-wiring.ts';
 import { DEFAULT_CONFIG } from './config-store.ts';
-import type { ConfigStore, GlissaConfig } from './config-store.ts';
+import type { ConfigStore, GlimmervoidConfig } from './config-store.ts';
 import { configSiblingPath } from './pairings-store.ts';
 import { createGitWorkspace, createGitWorkspaceSync } from './git-workspace.ts';
 import { createIngestLane } from './ingest-wiring.ts';
-import { dbPathForConfig } from './glissa-db.ts';
+import { dbPathForConfig } from './glimmervoid-db.ts';
 import { createMemoryDistillSpawn, createMemoryDistiller } from './memory-distill.ts';
 import { createMemoryIngest, earliestLaneEntryMs } from './memory-ingest-wiring.ts';
 import { createMemoryStore } from './memory-store.ts';
@@ -55,7 +55,7 @@ interface BackendLaneOptions {
 }
 
 interface BackendLaneDependencies {
-  config: GlissaConfig;
+  config: GlimmervoidConfig;
   configStore: ConfigStore;
   sessions: Map<string, Session>;
   reviewSessions: Map<string, Session>;

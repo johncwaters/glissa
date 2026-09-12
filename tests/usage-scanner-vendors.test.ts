@@ -22,7 +22,7 @@ const pricingTable = normalizePricingTable({
 });
 
 async function makeTempRoot(): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), 'glissa-usage-vendors-'));
+  return fs.mkdtemp(path.join(os.tmpdir(), 'glimmervoid-usage-vendors-'));
 }
 
 function makeScanner(root: string, overrides: UsageScannerOptions = {}): Scanner {

@@ -39,7 +39,7 @@ loader._load = function loadWithVscodeStub(this: unknown, request: string, ...re
 };
 
 function unpack(vsix: Buffer): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-vsix-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-vsix-'));
   const archive = path.join(dir, 'extension.vsix');
   fs.writeFileSync(archive, vsix);
   execFileSync('unzip', ['-o', '-q', archive, '-d', dir]);

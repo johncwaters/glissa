@@ -113,7 +113,7 @@ const RULES: Readonly<Record<string, { fix: (content: string, ctx?: RuleContext)
 
 const RULE_ORDER = ['bom', 'trailingWs', 'finalNewline', 'slop'];
 
-const EXEMPT_MARKER = 'glissa-no-fix';
+const EXEMPT_MARKER = 'glimmervoid-no-fix';
 
 function exemptions(content: string): { all: boolean; rules: Set<string> } {
   const head = content.slice(0, 4096);

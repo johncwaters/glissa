@@ -1,6 +1,6 @@
 import path from "node:path";
 
-const GLISSA_SCRUB_KEYS = ["GLISSA_PORT", "GLISSA_CONFIG"];
+const GLIMMERVOID_SCRUB_KEYS = ["GLIMMERVOID_PORT", "GLIMMERVOID_CONFIG"];
 
 type SpawnEnv = Record<string, string | undefined>;
 
@@ -62,7 +62,7 @@ function buildAgentEnv(
 ): SpawnEnv {
   const env: SpawnEnv = { ...baseEnv, ...(extraEnv || {}) };
   for (const key of profile.scrub || []) delete env[key];
-  for (const key of GLISSA_SCRUB_KEYS) delete env[key];
+  for (const key of GLIMMERVOID_SCRUB_KEYS) delete env[key];
   Object.assign(env, profile.set || {});
   if (profile.additionalDirsEnvVar) delete env[profile.additionalDirsEnvVar];
   if (additionalDirsClaudeMd && profile.additionalDirsEnvVar) env[profile.additionalDirsEnvVar] = "1";

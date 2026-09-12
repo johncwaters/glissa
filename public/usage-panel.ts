@@ -47,7 +47,7 @@ import {
   heatmapCellTitle,
   heatmapCells,
   historyNote,
-  isGlissaSessionRow,
+  isGlimmervoidSessionRow,
   isUsageUnavailable,
   laneLabel,
   laneRows,
@@ -385,7 +385,7 @@ function paintPlanAge() {
 function buildLanesSection() {
   if (!hasLaneAttribution(_report)) return null;
   const rows = laneRows(_report);
-  const section = buildSection('Glissa lanes', LANE_SCOPE_HINT);
+  const section = buildSection('Glimmervoid lanes', LANE_SCOPE_HINT);
   const totalCost = rows.reduce((sum, row) => sum + (typeof row.costUSD === 'number' && Number.isFinite(row.costUSD) ? row.costUSD : 0), 0);
   const { wrap, body } = buildTable(
     [
@@ -814,7 +814,7 @@ function buildSessionsSection() {
   );
   for (const row of visible.rows) {
     const tr = el('tr', 'usage-row');
-    if (isGlissaSessionRow(row)) tr.dataset.managed = 'true';
+    if (isGlimmervoidSessionRow(row)) tr.dataset.managed = 'true';
     const label = sessionRowLabel(row);
     const agoCell = el('span', 'usage-ago', '');
     appendCells(tr, [

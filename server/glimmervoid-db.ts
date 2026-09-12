@@ -7,7 +7,7 @@ import { decideDbOpenRefusal, homeDbRefusedError, underTestRunner } from './core
 
 const SCHEMA_VERSION = 1;
 const DEFAULT_BUSY_TIMEOUT_MS = 5000;
-const DB_FILE_NAME = 'glissa.db';
+const DB_FILE_NAME = 'glimmervoid.db';
 const DB_FILE_MODE = 0o600;
 
 type SqliteModule = typeof import('node:sqlite');

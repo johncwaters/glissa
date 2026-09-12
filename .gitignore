@@ -10,29 +10,26 @@ dist/
 !.claude/omc.jsonc
 !.claude/release-profile.json
 config.json
-# Remote-mode device pairings (hashes only, but machine-local state). Sits next to config.json, so a
-# dev run with the in-repo config.json lands them here.
+# Remote-mode device pairings (hashes only, but machine-local state). A repo-local GLIMMERVOID_CONFIG lands them here.
 pairings.json
 pairings-seen.json
-# Images uploaded from the phone (POST /upload/:sessionId). Same story: a dev run resolves the in-repo
-# config.json, so they land beside it and must never be swept into a commit by a `git add -A`.
+# Images uploaded from the phone (POST /upload/:sessionId). Same story, and a `git add -A` must never sweep them into a commit.
 uploads/
-# Long-term memory signing key and projection. Same story again: a dev run resolves the in-repo
-# config.json, and durable remembered content must never become git-visible.
+# Long-term memory signing key and projection. Same story again, and remembered content must never become git-visible.
 /memory/
 # The machine-wide sqlite database (the memory canon lives in it). Same reason, same place.
-/glissa.db
-/glissa.db-wal
-/glissa.db-shm
+/glimmervoid.db
+/glimmervoid.db-wal
+/glimmervoid.db-shm
 .pty-capture/
 # Runtime output (team runs, post-turn checker telemetry, etc). Not a deliverable.
-# Excludes the project pack (.glissa/pack/, .glissa/teams/*/pack/), which AGENTS.md documents as committed.
-.glissa/post-turn/
-.glissa/update/
-.glissa/teams/*/runs/
-.glissa/teams/*/log.md
+# Excludes the project pack (.glimmervoid/pack/, .glimmervoid/teams/*/pack/), which AGENTS.md documents as committed.
+.glimmervoid/post-turn/
+.glimmervoid/update/
+.glimmervoid/teams/*/runs/
+.glimmervoid/teams/*/log.md
 # Leftovers from a retired team id; the live teams are listed in teams/.
-.glissa/teams/release-notes/
+.glimmervoid/teams/release-notes/
 # Local scratch repo used for integration testing; not part of the package.
 ita-test/
 # Ablation run output (session tails from a real billed run). Runtime output, not a deliverable.

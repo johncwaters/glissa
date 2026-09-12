@@ -847,7 +847,7 @@ test('a name-based zero must not wipe a live counted subagent from the counted m
   assert.equal(s.state, STATES.RUNNING, 'sub1 alone still gates');
   hook(s, 'ready', { payload: { background_tasks: [{ id: 't1', type: 'teammate', status: 'running' }] } });
   t.mock.timers.tick(40);
-  assert.equal(s.state, STATES.RUNNING, 'sub1 must survive: the name-based zero is Glissa bookkeeping, not an authoritative drain');
+  assert.equal(s.state, STATES.RUNNING, 'sub1 must survive: the name-based zero is Glimmervoid bookkeeping, not an authoritative drain');
   assert.equal(s.toSnapshot().activeAgents, 1, 'only sub1 remains counted; t1 is offset by the idle name');
   s.destroy();
 });

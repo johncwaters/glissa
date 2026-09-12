@@ -4,18 +4,18 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { DEFAULT_CONFIG } from '../server/config-store.ts';
-import type { GlissaConfig, ProjectEntry } from '../server/config-store.ts';
+import type { GlimmervoidConfig, ProjectEntry } from '../server/config-store.ts';
 import { createSessionFactory } from '../server/session-factory.ts';
 
-const PROJECT: ProjectEntry = { id: 'p1', name: 'glissa', path: path.join(os.tmpdir(), 'glissa-factory-probe') };
+const PROJECT: ProjectEntry = { id: 'p1', name: 'glimmervoid', path: path.join(os.tmpdir(), 'glimmervoid-factory-probe') };
 
-function configWith(overrides: Partial<GlissaConfig>): GlissaConfig {
-  return { ...DEFAULT_CONFIG, projects: [PROJECT], teams: [], repoRoots: [], ...overrides } as GlissaConfig;
+function configWith(overrides: Partial<GlimmervoidConfig>): GlimmervoidConfig {
+  return { ...DEFAULT_CONFIG, projects: [PROJECT], teams: [], repoRoots: [], ...overrides } as GlimmervoidConfig;
 }
 
-function factory(listPackNames: () => string[], liveConfig: GlissaConfig) {
+function factory(listPackNames: () => string[], liveConfig: GlimmervoidConfig) {
   return createSessionFactory({
-    configStore: { configPath: path.join(os.tmpdir(), 'glissa-factory-probe', 'config.json') },
+    configStore: { configPath: path.join(os.tmpdir(), 'glimmervoid-factory-probe', 'config.json') },
     getConfig: () => liveConfig,
     hookRouter: null,
     getHookPort: () => null,
@@ -27,7 +27,7 @@ function factory(listPackNames: () => string[], liveConfig: GlissaConfig) {
   });
 }
 
-function sessionFor(listPackNames: () => string[], config: GlissaConfig, project: ProjectEntry = PROJECT) {
+function sessionFor(listPackNames: () => string[], config: GlimmervoidConfig, project: ProjectEntry = PROJECT) {
   return factory(listPackNames, config)(project, config);
 }
 

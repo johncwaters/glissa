@@ -58,8 +58,8 @@ test('the persisted mill measurement block keeps its retention setting', () => {
 });
 
 test('branchGc prefixes parse as string arrays and reject non-arrays', () => {
-  assert.equal(BranchGcFileSettings.safeParse({ prefixes: ['glissa/session/', 'worktree-agent-'] }).success, true);
-  assert.equal(BranchGcFileSettings.safeParse({ prefixes: 'glissa/session/' }).success, false);
+  assert.equal(BranchGcFileSettings.safeParse({ prefixes: ['glimmervoid/session/', 'worktree-agent-'] }).success, true);
+  assert.equal(BranchGcFileSettings.safeParse({ prefixes: 'glimmervoid/session/' }).success, false);
 });
 
 test('branchGc worktrees is file-only and boolean', () => {
@@ -69,7 +69,7 @@ test('branchGc worktrees is file-only and boolean', () => {
 });
 
 test('a branchGc prefix that would select every origin branch fails closed', () => {
-  const parsed = BranchGcFileSettings.safeParse({ prefixes: ['glissa/session/', ''] });
+  const parsed = BranchGcFileSettings.safeParse({ prefixes: ['glimmervoid/session/', ''] });
   assert.equal(parsed.success, false);
   assert.equal(parsed.success === false && configIssueMessage(parsed.error), 'branchGc.prefixes entries must be non-empty strings');
 });
@@ -109,18 +109,18 @@ test('any hooks value parses, so one hand edit cannot cost the boot', () => {
 });
 
 test('hidden persisted config keys never enter the browser settings projection', () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-contract-config-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-contract-config-'));
   const configPath = path.join(directory, 'config.json');
   fs.writeFileSync(configPath, JSON.stringify({ ...DEFAULT_CONFIG, trace: {} }), 'utf8');
-  const previousConfig = process.env.GLISSA_CONFIG;
-  process.env.GLISSA_CONFIG = configPath;
+  const previousConfig = process.env.GLIMMERVOID_CONFIG;
+  process.env.GLIMMERVOID_CONFIG = configPath;
   try {
     const settings = createConfigStore().getSettings();
     assert.deepEqual(HIDDEN_CONFIG_KEYS.filter((key) => Object.hasOwn(settings, key)), []);
     assert.deepEqual(settings.trace, { enabled: true });
   } finally {
-    if (previousConfig == null) delete process.env.GLISSA_CONFIG;
-    if (previousConfig != null) process.env.GLISSA_CONFIG = previousConfig;
+    if (previousConfig == null) delete process.env.GLIMMERVOID_CONFIG;
+    if (previousConfig != null) process.env.GLIMMERVOID_CONFIG = previousConfig;
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });

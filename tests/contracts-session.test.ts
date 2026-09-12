@@ -5,8 +5,8 @@ import { Session } from '../session/sessions.ts';
 test('SessionSnapshot preserves nested extension fields', () => {
   const parsed = SessionSnapshot.parse({
     id: 'session-1',
-    name: 'glissa',
-    path: '/repo/glissa',
+    name: 'glimmervoid',
+    path: '/repo/glimmervoid',
     agent: 'claude-code',
     state: 'DORMANT',
     stateSince: 1,

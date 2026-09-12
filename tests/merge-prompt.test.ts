@@ -4,14 +4,14 @@ import { buildMergePrompt } from '../session/core/merge-prompt.ts';
 
 test('buildMergePrompt (rebase-conflict): names branch, target, conflicting files, and the rebase steps', () => {
   const p = buildMergePrompt({
-    branch: 'glissa/session/abc',
+    branch: 'glimmervoid/session/abc',
     target: 'develop',
     reason: 'rebase-conflict',
     conflicts: ['src/a.js', 'src/b.js'],
     worktreeDir: '/wt/abc',
   });
   assert.match(p, /manual merge/i);
-  assert.match(p, /glissa\/session\/abc/);
+  assert.match(p, /glimmervoid\/session\/abc/);
   assert.match(p, /develop/);
   assert.match(p, /overlap/i);
   assert.ok(p.includes('Conflicting files:'));

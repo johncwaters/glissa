@@ -3,7 +3,7 @@
 # vscode-visions
 
 ## Purpose
-Minimal VS Code extension that launches the Glissa Visions markdown LSP relay.
+Minimal VS Code extension that launches the Glimmervoid Visions markdown LSP relay.
 
 ## For AI Agents
 

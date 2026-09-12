@@ -46,16 +46,16 @@ test('no lane leans on a path deny: probed, it does not refuse a Write tool call
 test('the managed settings file carries the mode, or the boundary never reaches the session', () => {
   const posture = buildLanePermissions({ denyTools: ['Bash'] });
   const settings = buildHookSettings({
-    port: 3000, glissaId: 'sess-1', token: 't', permissions: posture.permissions,
+    port: 3000, glimmervoidId: 'sess-1', token: 't', permissions: posture.permissions,
   });
   assert.deepEqual(settings.permissions, { deny: ['Bash'], defaultMode: 'acceptEdits' });
 });
 
 test('a lane passing neither deny nor mode leaves an ordinary session byte-identical', () => {
-  const bare = buildHookSettings({ port: 3000, glissaId: 'sess-1', token: 't' });
+  const bare = buildHookSettings({ port: 3000, glimmervoidId: 'sess-1', token: 't' });
   assert.equal(Object.hasOwn(bare, 'permissions'), false);
   const denyOnly = buildHookSettings({
-    port: 3000, glissaId: 'sess-1', token: 't', permissions: { deny: ['Bash(gh:*)'] },
+    port: 3000, glimmervoidId: 'sess-1', token: 't', permissions: { deny: ['Bash(gh:*)'] },
   });
   assert.deepEqual(denyOnly.permissions, { deny: ['Bash(gh:*)'] }, 'the deny-only lanes are unchanged');
 });

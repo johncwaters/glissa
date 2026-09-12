@@ -226,7 +226,7 @@ test('with the mill off the PostHog lane spawns with no pack at all', () => {
 });
 
 test('an investigation session reports its tool trail from routed hooks, pretooluse only, newest last', async () => {
-  const hooksBaseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-ph-hooks-'));
+  const hooksBaseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-ph-hooks-'));
   const hookRouter = new HookRouter();
   const created: Session[] = [];
   const makeSession = (options: SessionOptions): Session => {
@@ -256,7 +256,7 @@ test('an investigation session reports its tool trail from routed hooks, pretool
     const settings = JSON.parse(fs.readFileSync(path.join(hooksBaseDir, safePathSegment('posthog:1#iss-9'), 'settings.json'), 'utf8'));
     assert.match(String(settings.hooks.PreToolUse[0].hooks[0].url), /\/hook\/posthog%3A1%23iss-9\/pretooluse\?t=/, 'the trail only exists because the session subscribes to PreToolUse');
     const token = session._hooks.token();
-    const post = (event: string, payload: Record<string, unknown>) => hookRouter.handle({ glissaId: 'posthog:1#iss-9', event, token, payload });
+    const post = (event: string, payload: Record<string, unknown>) => hookRouter.handle({ glimmervoidId: 'posthog:1#iss-9', event, token, payload });
     post('pretooluse', { tool_name: 'Grep', tool_input: { pattern: 'TypeError' } });
     post('posttooluse', { tool_name: 'Grep', tool_input: { pattern: 'TypeError' } });
     post('pretooluse', { tool_name: 'Bash', tool_input: { command: 'npm test' } });
@@ -293,13 +293,13 @@ interface FixHarness {
 }
 
 function fixWiringHarness({ createResult }: { createResult?: PosthogWorkspace } = {}): FixHarness {
-  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-phrepo-'));
+  const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-phrepo-'));
   const calls: { create: CreateCall[]; discard: DiscardCall[] } = { create: [], discard: [] };
   const gitWorkspace: PosthogGitWorkspace = {
     create: async (args) => {
       calls.create.push({ ...args, worktreeBase: args.worktreeBase });
       if (createResult) return createResult;
-      return { cwd: path.join(repoDir, 'wt'), isGit: true, branch: `glissa/radar-fix/${args.label}`, base: 'main' };
+      return { cwd: path.join(repoDir, 'wt'), isGit: true, branch: `glimmervoid/radar-fix/${args.label}`, base: 'main' };
     },
     discard: async (args) => { calls.discard.push(args); },
   };
@@ -428,7 +428,7 @@ function fixPromptFor(over: Record<string, unknown> = {}): string {
     projectId: 1,
     resultPath: '/tmp/r.json',
     repoPath: '/wt',
-    branch: 'glissa/radar-fix/1-iss-1',
+    branch: 'glimmervoid/radar-fix/1-iss-1',
     baseBranch: 'main',
     ...over,
   });
@@ -457,7 +457,7 @@ test('buildFixPrompt requires a suite run and stops the agent at the commit', ()
 test('buildFixPrompt names the worktree, its branch, its fork base, and the result contract', () => {
   const p = fixPromptFor();
   assert.match(p, /ISOLATED git worktree at \/wt/);
-  assert.match(p, /glissa\/radar-fix\/1-iss-1/);
+  assert.match(p, /glimmervoid\/radar-fix\/1-iss-1/);
   assert.match(p, /forked from main/);
   assert.match(p, /\/tmp\/r\.json/);
   assert.match(p, /FIXED\|NEEDS_HUMAN\|TRANSIENT\|ERROR/);
@@ -573,7 +573,7 @@ test('buildInvestigationPrompt adds the source cross-reference step only when a 
 });
 
 test('sweepReports keeps the newest N reports and drops the rest', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-phreports-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-phreports-'));
   try {
     for (let i = 0; i < 6; i += 1) {
       const file = path.join(dir, `iss-${i}.html`);
@@ -592,11 +592,11 @@ test('sweepReports keeps the newest N reports and drops the rest', async () => {
 });
 
 test('sweepReports on a missing directory resolves quietly', async () => {
-  await sweepReports(path.join(os.tmpdir(), 'glissa-phreports-does-not-exist'), 2);
+  await sweepReports(path.join(os.tmpdir(), 'glimmervoid-phreports-does-not-exist'), 2);
 });
 
 test('sweepReports counts markdown reports with html reports', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-phreports-markdown-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-phreports-markdown-'));
   try {
     fs.writeFileSync(path.join(dir, 'old.md'), 'report');
     fs.writeFileSync(path.join(dir, 'new.html'), 'report');
@@ -611,7 +611,7 @@ test('sweepReports counts markdown reports with html reports', async () => {
 });
 
 function withResultFile<T>(contents: string | null, fn: (resultPath: string) => T): T {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-phresult-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-phresult-'));
   const p = path.join(dir, 'result.json');
   if (contents != null) fs.writeFileSync(p, contents);
   try { return fn(p); }
@@ -734,7 +734,7 @@ test('readFixResult: a missing or malformed file is ERROR and the file is remove
 });
 
 const WORKSPACE: PosthogWorkspace = {
-  cwd: '/wt', isGit: true, branch: 'glissa/radar-fix/1-iss-1-abc', base: 'main', baseSha: 'deadbeef',
+  cwd: '/wt', isGit: true, branch: 'glimmervoid/radar-fix/1-iss-1-abc', base: 'main', baseSha: 'deadbeef',
 };
 
 interface RunCall {
@@ -781,11 +781,11 @@ test('pushFixBranch pushes the server-chosen branch and reads the PR url from gh
   const { res, calls } = await handoff(CLEAN_SCRIPT);
   assert.deepEqual(res, { verdict: 'FIXED', prUrl: 'https://github.com/owner/repo/pull/42', summary: null });
   const push = callFor(calls, 'git push');
-  assert.deepEqual(push.args, ['push', 'origin', 'glissa/radar-fix/1-iss-1-abc']);
+  assert.deepEqual(push.args, ['push', 'origin', 'glimmervoid/radar-fix/1-iss-1-abc']);
   assert.equal(push.cwd, '/wt');
   const create = callFor(calls, 'gh pr');
   assert.deepEqual(create.args, [
-    'pr', 'create', '--repo', 'owner/repo', '--head', 'glissa/radar-fix/1-iss-1-abc',
+    'pr', 'create', '--repo', 'owner/repo', '--head', 'glimmervoid/radar-fix/1-iss-1-abc',
     '--title', 'fix: guard it', '--body', 'body', '--base', 'main',
   ]);
   assert.equal(create.cwd, '/repo');
@@ -849,7 +849,7 @@ test('pushFixBranch reports a failed pr create as ERROR that admits the branch I
   assert.equal(res.verdict, 'ERROR');
   assert.ok(res.summary);
   assert.match(res.summary, /opening the pull request/);
-  assert.match(res.summary, /glissa\/radar-fix\/1-iss-1-abc is pushed with no pull request/);
+  assert.match(res.summary, /glimmervoid\/radar-fix\/1-iss-1-abc is pushed with no pull request/);
 });
 
 test('pushFixBranch reports an unresolvable repository as ERROR before it can guess a slug', async () => {

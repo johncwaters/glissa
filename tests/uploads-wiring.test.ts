@@ -21,7 +21,7 @@ function seedUploads(root: string, ids: string[]): string {
 }
 
 test('one prune pass snapshots the live session set once rather than rebuilding it per uploads directory', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-uploads-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-uploads-'));
   try {
     const uploadsRoot = seedUploads(root, ['aged-one', 'aged-two', 'aged-three', 'live-session']);
     let liveSessionIdsCalls = 0;
@@ -43,7 +43,7 @@ test('one prune pass snapshots the live session set once rather than rebuilding 
 });
 
 test('a second prune pass takes a fresh snapshot, so a session that ended is no longer retained', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-uploads-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-uploads-'));
   try {
     const uploadsRoot = seedUploads(root, ['ending-session']);
     let liveSessionIdsCalls = 0;

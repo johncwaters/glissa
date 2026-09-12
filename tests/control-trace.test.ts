@@ -59,10 +59,10 @@ function tracePageRequest(now = 7, vendorSessionId = 'vendor-session') {
   };
 }
 
-type TracePageReader = (glissaSessionId: string, request: TracePageRequest) => Promise<TracePage>;
+type TracePageReader = (glimmervoidSessionId: string, request: TracePageRequest) => Promise<TracePage>;
 
 function traceWorkspace(name: string): { traceDirectory: string; readTracePage: TracePageReader } {
-  const configDirectory = fs.mkdtempSync(path.join(os.tmpdir(), `glissa-control-trace-${name}-`));
+  const configDirectory = fs.mkdtempSync(path.join(os.tmpdir(), `glimmervoid-control-trace-${name}-`));
   temporaryDirectories.push(configDirectory);
   const traceDirectory = path.join(configDirectory, 'traces');
   fs.mkdirSync(traceDirectory, { recursive: true });

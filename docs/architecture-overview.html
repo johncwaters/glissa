@@ -1,4 +1,4 @@
-<title>Glissa Architecture</title>
+<title>Glimmervoid Architecture</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spline+Sans+Mono:wght@400;500;600&family=Instrument+Sans:wght@400;500;600&display=swap">
 <style>
   :root {
@@ -115,15 +115,15 @@
 
 <div class="wrap">
   <p class="eyebrow">architecture map</p>
-  <h1>Glissa Architecture</h1>
-  <p class="lede">Glissa is a lightweight Node.js background process that spawns and manages Claude Code sessions in real pseudo-terminals, streams their output to a browser dashboard over WebSockets, derives each session's status from structural signals (Claude Code hooks plus an OSC-0 title fallback, never screen scraping), and notifies the operator when a session needs attention. It binds to localhost only and runs as a single-user dev tool on the operator's machine.</p>
+  <h1>Glimmervoid Architecture</h1>
+  <p class="lede">Glimmervoid is a lightweight Node.js background process that spawns and manages Claude Code sessions in real pseudo-terminals, streams their output to a browser dashboard over WebSockets, derives each session's status from structural signals (Claude Code hooks plus an OSC-0 title fallback, never screen scraping), and notifies the operator when a session needs attention. It binds to localhost only and runs as a single-user dev tool on the operator's machine.</p>
 
   <h2>The big picture</h2>
-  <p class="lede">Three tiers: the browser dashboard, the Glissa server, and the Claude Code processes it manages. The server is a dumb pipe for terminal bytes and a smart broker for everything else.</p>
+  <p class="lede">Three tiers: the browser dashboard, the Glimmervoid server, and the Claude Code processes it manages. The server is a dumb pipe for terminal bytes and a smart broker for everything else.</p>
 
   <figure>
     <div class="fig-scroll">
-      <svg viewBox="0 0 920 470" role="img" aria-label="System overview: browser dashboard connects to the Glissa server over two WebSockets; the server spawns Claude Code sessions via node-pty; Claude Code reports back over HTTP hooks; background lanes run their own headless sessions.">
+      <svg viewBox="0 0 920 470" role="img" aria-label="System overview: browser dashboard connects to the Glimmervoid server over two WebSockets; the server spawns Claude Code sessions via node-pty; Claude Code reports back over HTTP hooks; background lanes run their own headless sessions.">
         <defs>
           <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M0 0 L10 5 L0 10 z" fill="var(--ink)"/>
@@ -151,7 +151,7 @@
           <text x="120" y="316" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">native Web Notifications</text>
 
           <rect x="330" y="20" width="300" height="420" rx="10" stroke="var(--accent)" fill="var(--surface)"/>
-          <text x="480" y="48" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="13" font-weight="600">Glissa server (Node, localhost)</text>
+          <text x="480" y="48" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="13" font-weight="600">Glimmervoid server (Node, localhost)</text>
           <rect x="350" y="66" width="260" height="36" rx="6" stroke="var(--line)" fill="var(--surface-2)"/>
           <text x="480" y="88" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="12" font-family="Instrument Sans, sans-serif">Express + WebSocket server</text>
           <rect x="350" y="112" width="260" height="46" rx="6" stroke="var(--line)" fill="var(--surface-2)"/>
@@ -167,7 +167,7 @@
           <text x="480" y="305" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">PR review, Radar, usage, packs, visions</text>
           <rect x="350" y="326" width="260" height="36" rx="6" stroke="var(--line)" fill="var(--surface-2)"/>
           <text x="480" y="348" text-anchor="middle" fill="var(--ink)" stroke="none" font-size="12" font-family="Instrument Sans, sans-serif">Config store + pure cores</text>
-          <text x="480" y="386" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">state in ~/.glissa</text>
+          <text x="480" y="386" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">state in ~/.glimmervoid</text>
           <text x="480" y="402" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">config, recordings, packs, ledgers</text>
 
           <rect x="720" y="60" width="180" height="270" rx="10" stroke="var(--line)" fill="var(--surface-2)"/>
@@ -257,8 +257,8 @@
 
   <ul>
     <li><strong>Spawn.</strong> <code>pty.spawn</code> launches <code>claude</code> (resolved once at module load; <code>.exe</code> direct, shim installs via <code>cmd.exe /c</code>), through a process-wide spawn gate that serializes ConPTY creation. A per-session managed <code>--settings</code> file injects HTTP hooks, an optional statusLine relay, optional rtk compression, and context packs via <code>--add-dir</code>. The env is scrubbed before spawn.</li>
-    <li><strong>Crash safety.</strong> Every hook payload carries Claude's session id; Glissa persists it immediately, so after a crash or restart, boot auto-resume respawns previously active sessions with <code>--resume</code>. There is deliberately no shutdown flush.</li>
-    <li><strong>Forensics.</strong> An always-on JSONL recorder writes every hook payload, transition, and gate decision to <code>~/.glissa/recordings</code>; raw PTY bytes are opt-in.</li>
+    <li><strong>Crash safety.</strong> Every hook payload carries Claude's session id; Glimmervoid persists it immediately, so after a crash or restart, boot auto-resume respawns previously active sessions with <code>--resume</code>. There is deliberately no shutdown flush.</li>
+    <li><strong>Forensics.</strong> An always-on JSONL recorder writes every hook payload, transition, and gate decision to <code>~/.glimmervoid/recordings</code>; raw PTY bytes are opt-in.</li>
     <li><strong>Pure cores.</strong> Every decision that matters (state transitions, gate releases, merge demotions, notification categories) is a pure function in <code>session/core/</code> with unit tests; <code>sessions.js</code> is the IO shell around them.</li>
   </ul>
 
@@ -317,7 +317,7 @@
   </figure>
 
   <ul>
-    <li><strong>Hooks</strong> POST to <code>POST /hook/:glissaId/:event</code> on the local server, authenticated by a per-session bearer token written into the managed settings file. The hook response is itself a channel: a <code>UserPromptSubmit</code> reply can inject a Glissa-authored pack-staleness notice into the turn.</li>
+    <li><strong>Hooks</strong> POST to <code>POST /hook/:glimmervoidId/:event</code> on the local server, authenticated by a per-session bearer token written into the managed settings file. The hook response is itself a channel: a <code>UserPromptSubmit</code> reply can inject a Glimmervoid-authored pack-staleness notice into the turn.</li>
     <li><strong>/clear and /compact are quiet:</strong> the TUI redraw flashes a fake spinner, so title signals are latched off until the next real prompt.</li>
     <li><strong>The PTY data path parses nothing</strong> beyond scanning for OSC-0 title sequences.</li>
   </ul>
@@ -404,7 +404,7 @@
 
           <rect x="620" y="30" width="220" height="56" rx="8" stroke="var(--accent)" fill="var(--surface)"/>
           <text x="730" y="53" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12.5" font-weight="600">session worktree</text>
-          <text x="730" y="72" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">glissa/session/&lt;id&gt;</text>
+          <text x="730" y="72" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">glimmervoid/session/&lt;id&gt;</text>
 
           <line x1="230" y1="46" x2="615" y2="46" marker-end="url(#w1)"/>
           <text x="422" y="38" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Spline Sans Mono, monospace">fork at create</text>
@@ -661,7 +661,7 @@
         </g>
       </svg>
     </div>
-    <figcaption>Live scan wins inside its coverage; the warehouse fills in days the deleted transcripts can no longer show, labelled as history. Lane attribution is exact (only sessions Glissa recorded spawning), so "the PR review lane cost $4.20 this week" is answerable. Costs are estimates, never bills.</figcaption>
+    <figcaption>Live scan wins inside its coverage; the warehouse fills in days the deleted transcripts can no longer show, labelled as history. Lane attribution is exact (only sessions Glimmervoid recorded spawning), so "the PR review lane cost $4.20 this week" is answerable. Costs are estimates, never bills.</figcaption>
   </figure>
 
   <h2>Context packs: the context mill <span class="when core">fs.watch + 15 min sweep</span></h2>
@@ -691,7 +691,7 @@
 
           <rect x="520" y="30" width="200" height="64" rx="8" stroke="var(--line)" fill="var(--surface)"/>
           <text x="620" y="54" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">built packs</text>
-          <text x="620" y="73" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">~/.glissa/packs/built/name/</text>
+          <text x="620" y="73" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">~/.glimmervoid/packs/built/name/</text>
           <text x="620" y="86" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">current/, hash-versioned</text>
 
           <rect x="770" y="30" width="150" height="64" rx="8" stroke="var(--line)" fill="var(--surface)"/>
@@ -706,7 +706,7 @@
           <rect x="520" y="160" width="200" height="76" rx="8" stroke="var(--signal)" fill="var(--surface)"/>
           <text x="620" y="184" text-anchor="middle" fill="var(--ink)" stroke="none" font-family="Spline Sans Mono, monospace" font-size="12" font-weight="600">staleness channel</text>
           <text x="620" y="203" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">pack-updated broadcast (chip);</text>
-          <text x="620" y="217" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">Glissa-authored notice in the next</text>
+          <text x="620" y="217" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">Glimmervoid-authored notice in the next</text>
           <text x="620" y="231" text-anchor="middle" fill="var(--ink-soft)" stroke="none" font-size="10.5" font-family="Instrument Sans, sans-serif">UserPromptSubmit hook reply</text>
 
           <rect x="770" y="160" width="150" height="60" rx="8" stroke="var(--line)" fill="var(--surface)"/>
@@ -725,11 +725,11 @@
         </g>
       </svg>
     </div>
-    <figcaption>A rebuild that would republish the same version writes nothing. Skills in a delivered pack hot-reload mid-session; CLAUDE.md and rules reach only the next spawn, which is exactly the gap the staleness chip and the notice channel close. The notice is Glissa-authored text only, never pack content, so the live channel cannot become an injection relay. An opt-in distiller lane regenerates derived source files with headless sessions.</figcaption>
+    <figcaption>A rebuild that would republish the same version writes nothing. Skills in a delivered pack hot-reload mid-session; CLAUDE.md and rules reach only the next spawn, which is exactly the gap the staleness chip and the notice channel close. The notice is Glimmervoid-authored text only, never pack content, so the live channel cannot become an injection relay. An opt-in distiller lane regenerates derived source files with headless sessions.</figcaption>
   </figure>
 
   <h2>Visions: live markdown co-editor <span class="when">opt-in, per keystroke</span></h2>
-  <p class="lede">An editor relay speaks LSP over stdio and connects to a dedicated <code>/visions</code> WebSocket. Glissa mirrors the open documents and answers in tiers, from instant lint rules to a gated headless model dispatch.</p>
+  <p class="lede">An editor relay speaks LSP over stdio and connects to a dedicated <code>/visions</code> WebSocket. Glimmervoid mirrors the open documents and answers in tiers, from instant lint rules to a gated headless model dispatch.</p>
 
   <figure>
     <div class="fig-scroll">
@@ -815,7 +815,7 @@
         </g>
       </svg>
     </div>
-    <figcaption>Pairing: glissa pair mints a single-use URL with a 10 minute TTL; redemption sets an HttpOnly cookie; only hashes ever touch disk, and revocation propagates without a restart. Remote config is unreachable from the control WebSocket by design: config file or CLI only. Server-machine side effects refuse remote callers.</figcaption>
+    <figcaption>Pairing: glimmervoid pair mints a single-use URL with a 10 minute TTL; redemption sets an HttpOnly cookie; only hashes ever touch disk, and revocation propagates without a restart. Remote config is unreachable from the control WebSocket by design: config file or CLI only. Server-machine side effects refuse remote callers.</figcaption>
   </figure>
 
   <h2>When things happen</h2>
@@ -836,11 +836,11 @@
   <table>
     <tr><th>Location</th><th>Contents</th></tr>
     <tr><td>repo install</td><td>Server code (CommonJS), frontend (ES modules bundled by Vite), pack specs and sources. Distributed as a GitHub install, never a registry package.</td></tr>
-    <tr><td>~/.glissa/</td><td>Runtime state: <code>config.json</code>, session recordings, built packs, usage warehouse and lane ledger, PR review state, pairing hashes, uploads, pricing cache.</td></tr>
+    <tr><td>~/.glimmervoid/</td><td>Runtime state: <code>config.json</code>, session recordings, built packs, usage warehouse and lane ledger, PR review state, pairing hashes, uploads, pricing cache.</td></tr>
     <tr><td>pure cores</td><td><code>session/core/</code>, <code>server/core/</code>, and <code>*-core.mjs</code> in the frontend: every decision that matters is a pure function with unit tests; IO shells stay thin.</td></tr>
     <tr><td>trust boundary</td><td>Localhost only. Both WebSockets are unauthenticated by design (single-user machine); the two HTTP write ingresses (hooks, image upload) carry per-session tokens or pairing cookies. Never bind 0.0.0.0.</td></tr>
   </table>
   </div>
 
-  <p class="footline">glissa / architecture overview / generated 2026-08-22 / fonts load from Google Fonts when online, system fallbacks apply offline</p>
+  <p class="footline">glimmervoid / architecture overview / generated 2026-08-22 / fonts load from Google Fonts when online, system fallbacks apply offline</p>
 </div>

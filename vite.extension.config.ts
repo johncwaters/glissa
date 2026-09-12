@@ -17,7 +17,7 @@ function isExternal(id: string): boolean {
 
 function copyExtensionManifest(): Plugin {
   return {
-    name: 'glissa-copy-extension-manifest',
+    name: 'glimmervoid-copy-extension-manifest',
     generateBundle() {
       this.emitFile({
         type: 'asset',

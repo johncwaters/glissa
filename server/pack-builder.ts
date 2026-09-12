@@ -15,10 +15,10 @@ import {
   parsePackPointer,
   renderPackPointer,
 } from '../session/core/pack-pointer-core.ts';
-import { glissaHomeDir, resolveConfigPath } from './config-store.ts';
+import { glimmervoidHomeDir, resolveConfigPath } from './config-store.ts';
 import {
   DATA_DIR,
-  GLISSA_HOME_PLACEHOLDER,
+  GLIMMERVOID_HOME_PLACEHOLDER,
   PACK_NAME_RE,
   PROJECT_SLUG_PLACEHOLDER,
   isDataSource,
@@ -129,18 +129,18 @@ function defaultSpecsDir(): string {
 }
 
 function defaultBuiltRoot(): string {
-  return path.join(glissaHomeDir(), 'packs', 'built');
+  return path.join(glimmervoidHomeDir(), 'packs', 'built');
 }
 
-function defaultGlissaHome(): string {
+function defaultGlimmervoidHome(): string {
   return path.dirname(resolveConfigPath());
 }
 
-function expandPlaceholders(pattern: string, glissaHome: string | null, projectSlug: string | null = null): string {
+function expandPlaceholders(pattern: string, glimmervoidHome: string | null, projectSlug: string | null = null): string {
   let expanded = pattern;
-  if (expanded.includes(GLISSA_HOME_PLACEHOLDER)) {
-    const home = toPosix(path.resolve(glissaHome || defaultGlissaHome()));
-    expanded = expanded.split(GLISSA_HOME_PLACEHOLDER).join(home);
+  if (expanded.includes(GLIMMERVOID_HOME_PLACEHOLDER)) {
+    const home = toPosix(path.resolve(glimmervoidHome || defaultGlimmervoidHome()));
+    expanded = expanded.split(GLIMMERVOID_HOME_PLACEHOLDER).join(home);
   }
   if (projectSlug) expanded = expanded.split(PROJECT_SLUG_PLACEHOLDER).join(projectSlug);
   return expanded;
@@ -149,20 +149,20 @@ function expandPlaceholders(pattern: string, glissaHome: string | null, projectS
 function resolvePattern(
   rawPattern: string,
   baseDir: string,
-  glissaHome: string | null = null,
+  glimmervoidHome: string | null = null,
   projectSlug: string | null = null,
 ): string {
-  const pattern = expandPlaceholders(rawPattern, glissaHome, projectSlug);
+  const pattern = expandPlaceholders(rawPattern, glimmervoidHome, projectSlug);
   if (path.isAbsolute(pattern)) return toPosix(path.resolve(pattern));
   return toPosix(path.resolve(baseDir, pattern));
 }
 
-function assertInsideGlissaHome(rawPattern: string, resolved: string, glissaHome: string | null): void {
-  if (!rawPattern.includes(GLISSA_HOME_PLACEHOLDER)) return;
-  const home = path.resolve(glissaHome || defaultGlissaHome());
+function assertInsideGlimmervoidHome(rawPattern: string, resolved: string, glimmervoidHome: string | null): void {
+  if (!rawPattern.includes(GLIMMERVOID_HOME_PLACEHOLDER)) return;
+  const home = path.resolve(glimmervoidHome || defaultGlimmervoidHome());
   const relative = path.relative(home, resolved.replace(/\/+$/, ''));
   if (!relative.startsWith('..') && !path.isAbsolute(relative)) return;
-  throw new Error(`source pattern "${rawPattern}" resolves outside the Glissa config directory`);
+  throw new Error(`source pattern "${rawPattern}" resolves outside the Glimmervoid config directory`);
 }
 
 function literalRoot(resolvedPattern: string): { root: string; isLiteral: boolean } {
@@ -243,11 +243,11 @@ function specRootPatterns(spec: unknown, { includeDistill = false } = {}): strin
 
 async function packWatchRoots(
   spec: unknown,
-  { baseDir = DEFAULT_PACKS_DIR, glissaHome = null }: { baseDir?: string; glissaHome?: string | null } = {},
+  { baseDir = DEFAULT_PACKS_DIR, glimmervoidHome = null }: { baseDir?: string; glimmervoidHome?: string | null } = {},
 ): Promise<string[]> {
   const roots = new Set<string>();
   for (const pattern of specRootPatterns(spec)) {
-    const { root } = literalRoot(resolvePattern(pattern, baseDir, glissaHome, '*'));
+    const { root } = literalRoot(resolvePattern(pattern, baseDir, glimmervoidHome, '*'));
     if (!root) continue;
     const stats = await statOrNull(root);
     if (!stats) continue;
@@ -259,11 +259,11 @@ async function packWatchRoots(
 
 function packSourceRoots(
   spec: unknown,
-  { baseDir = DEFAULT_PACKS_DIR, glissaHome = null }: { baseDir?: string; glissaHome?: string | null } = {},
+  { baseDir = DEFAULT_PACKS_DIR, glimmervoidHome = null }: { baseDir?: string; glimmervoidHome?: string | null } = {},
 ): string[] {
   const roots = new Set<string>();
   for (const pattern of specRootPatterns(spec, { includeDistill: true })) {
-    const { root } = literalRoot(resolvePattern(pattern, baseDir, glissaHome));
+    const { root } = literalRoot(resolvePattern(pattern, baseDir, glimmervoidHome));
     if (root) roots.add(toPosix(path.resolve(root)));
   }
   return [...roots].sort();
@@ -271,11 +271,11 @@ function packSourceRoots(
 
 function manifestSourceRoots(
   spec: unknown,
-  { baseDir = DEFAULT_PACKS_DIR, glissaHome = null }: { baseDir?: string; glissaHome?: string | null } = {},
+  { baseDir = DEFAULT_PACKS_DIR, glimmervoidHome = null }: { baseDir?: string; glimmervoidHome?: string | null } = {},
 ): string[] {
-  const home = toPosix(path.resolve(glissaHome || defaultGlissaHome()));
+  const home = toPosix(path.resolve(glimmervoidHome || defaultGlimmervoidHome()));
   const recorded = new Set<string>();
-  for (const root of packSourceRoots(spec, { baseDir, glissaHome })) {
+  for (const root of packSourceRoots(spec, { baseDir, glimmervoidHome })) {
     if (root === home || root.startsWith(`${home}/`)) continue;
     const relative = toPosix(path.relative(baseDir, root));
     recorded.add(relative && !path.isAbsolute(relative) ? relative : root);
@@ -302,13 +302,13 @@ async function readFilesForSource(
   source: PackSource,
   sourceIndex: number,
   baseDir: string,
-  { keepFullPath = false, glissaHome = null }: { keepFullPath?: boolean; glissaHome?: string | null } = {},
+  { keepFullPath = false, glimmervoidHome = null }: { keepFullPath?: boolean; glimmervoidHome?: string | null } = {},
 ): Promise<ReadFile[]> {
   const pattern = sourcePattern(source);
-  const resolved = resolvePattern(pattern, baseDir, glissaHome);
-  assertInsideGlissaHome(pattern, resolved, glissaHome);
+  const resolved = resolvePattern(pattern, baseDir, glimmervoidHome);
+  assertInsideGlimmervoidHome(pattern, resolved, glimmervoidHome);
   const sourceRoot = literalRoot(resolved).root;
-  const excludes = (source.exclude || []).map((entry) => resolvePattern(entry, sourceRoot, glissaHome));
+  const excludes = (source.exclude || []).map((entry) => resolvePattern(entry, sourceRoot, glimmervoidHome));
   const { candidates, isLiteral } = await candidatesFor(resolved);
 
   const matched = candidates.filter((full) => {
@@ -335,9 +335,9 @@ async function readFilesForSkill(
   skill: PackSkill,
   skillIndex: number,
   baseDir: string,
-  { glissaHome = null }: { glissaHome?: string | null } = {},
+  { glimmervoidHome = null }: { glimmervoidHome?: string | null } = {},
 ): Promise<ReadFile[]> {
-  const root = resolvePattern(skill.dir, baseDir, glissaHome);
+  const root = resolvePattern(skill.dir, baseDir, glimmervoidHome);
   const files: ReadFile[] = [];
   for (const full of await walkFiles(root)) {
     files.push({
@@ -812,11 +812,11 @@ function memoryProjectionTexts(
 
 async function buildOnePack(
   entry: { name: string; spec: PackSpec; variant: PackVariant | null },
-  { specPath, baseDir, builtRoot, glissaHome, now, noteDelivered }: {
+  { specPath, baseDir, builtRoot, glimmervoidHome, now, noteDelivered }: {
     specPath: string;
     baseDir: string;
     builtRoot: string;
-    glissaHome: string | null;
+    glimmervoidHome: string | null;
     now: () => number;
     noteDelivered: NoteDelivered | null;
   },
@@ -826,10 +826,10 @@ async function buildOnePack(
   const files: ReadFile[] = [];
   try {
     for (const [index, source] of spec.sources.entries()) {
-      files.push(...(await readFilesForSource(source, index, baseDir, { glissaHome })));
+      files.push(...(await readFilesForSource(source, index, baseDir, { glimmervoidHome })));
     }
     for (const [index, skill] of (spec.skills || []).entries()) {
-      files.push(...(await readFilesForSkill(skill, index, baseDir, { glissaHome })));
+      files.push(...(await readFilesForSkill(skill, index, baseDir, { glimmervoidHome })));
     }
   } catch (err) {
     return failure(entry.name, specPath, [`could not read sources: ${errorMessage(err)}`]);
@@ -838,7 +838,7 @@ async function buildOnePack(
   const built = planPackBuild(spec, files, {
     builtAt: new Date(now()).toISOString(),
     variant: entry.variant,
-    sourceRoots: manifestSourceRoots(spec, { baseDir, glissaHome }),
+    sourceRoots: manifestSourceRoots(spec, { baseDir, glimmervoidHome }),
   });
   if (!built.ok) return failure(entry.name, specPath, built.errors);
   if (!built.manifest) return failure(entry.name, specPath, ['pack build returned no manifest']);
@@ -879,7 +879,7 @@ async function buildPack({
   specPath,
   baseDir = DEFAULT_PACKS_DIR,
   builtRoot = defaultBuiltRoot(),
-  glissaHome = null,
+  glimmervoidHome = null,
   projects = [],
   now = Date.now,
   noteDelivered = null,
@@ -887,7 +887,7 @@ async function buildPack({
   specPath?: string;
   baseDir?: string;
   builtRoot?: string;
-  glissaHome?: string | null;
+  glimmervoidHome?: string | null;
   projects?: Record<string, unknown>[];
   now?: () => number;
   noteDelivered?: NoteDelivered | null;
@@ -912,7 +912,7 @@ async function buildPack({
   const plan = planPackVariants(validSpec, projects);
   const reports: BuildReport[] = [];
   for (const entry of plan.builds) {
-    reports.push(await buildOnePack(entry, { specPath, baseDir, builtRoot, glissaHome, now, noteDelivered }));
+    reports.push(await buildOnePack(entry, { specPath, baseDir, builtRoot, glimmervoidHome, now, noteDelivered }));
   }
   if (validSpec.perProjectVariants === true) {
     try {
@@ -931,7 +931,7 @@ async function buildPacks({
   specsDir = defaultSpecsDir(),
   baseDir = DEFAULT_PACKS_DIR,
   builtRoot = defaultBuiltRoot(),
-  glissaHome = null,
+  glimmervoidHome = null,
   projects = [],
   now = Date.now,
   noteDelivered = null,
@@ -940,7 +940,7 @@ async function buildPacks({
   specsDir?: string;
   baseDir?: string;
   builtRoot?: string;
-  glissaHome?: string | null;
+  glimmervoidHome?: string | null;
   projects?: Record<string, unknown>[];
   now?: () => number;
   noteDelivered?: NoteDelivered | null;
@@ -953,7 +953,7 @@ async function buildPacks({
   const reports: BuildReport[] = [];
   for (const spec of wanted) {
     try {
-      const report = await buildPack({ specPath: spec.specPath, baseDir, builtRoot, glissaHome, projects, now, noteDelivered });
+      const report = await buildPack({ specPath: spec.specPath, baseDir, builtRoot, glimmervoidHome, projects, now, noteDelivered });
       reports.push(report, ...report.variants);
     } catch (err) {
       reports.push(failure(spec.name, spec.specPath, [`build crashed: ${errorMessage(err)}`]));
@@ -981,12 +981,12 @@ async function describePackSpec(specPath: string): Promise<{
 
 export {
   DEFAULT_PACKS_DIR,
-  GLISSA_HOME_PLACEHOLDER,
+  GLIMMERVOID_HOME_PLACEHOLDER,
   SPEC_SUFFIX,
   buildPack,
   buildPacks,
   defaultBuiltRoot,
-  defaultGlissaHome,
+  defaultGlimmervoidHome,
   defaultSpecsDir,
   describePackSpec,
   distillOutputPath,

@@ -67,10 +67,10 @@ test('verifyDigest compares exactly and refuses non-strings or length mismatches
   assert.equal(verifyDigest(undefined, digest), false);
 });
 
-test('installTargetPath lands under the given Glissa home bin and takes .exe only on Windows', () => {
-  assert.equal(installTargetPath('/home/x/.glissa', 'linux'), path.join('/home/x/.glissa', 'bin', 'rtk'));
-  assert.equal(installTargetPath('/relocated/glissa', 'darwin'), path.join('/relocated/glissa', 'bin', 'rtk'));
-  assert.equal(installTargetPath('C:\\Users\\x\\.glissa', 'win32'), path.join('C:\\Users\\x\\.glissa', 'bin', 'rtk.exe'));
+test('installTargetPath lands under the given Glimmervoid home bin and takes .exe only on Windows', () => {
+  assert.equal(installTargetPath('/home/x/.glimmervoid', 'linux'), path.join('/home/x/.glimmervoid', 'bin', 'rtk'));
+  assert.equal(installTargetPath('/relocated/glimmervoid', 'darwin'), path.join('/relocated/glimmervoid', 'bin', 'rtk'));
+  assert.equal(installTargetPath('C:\\Users\\x\\.glimmervoid', 'win32'), path.join('C:\\Users\\x\\.glimmervoid', 'bin', 'rtk.exe'));
 });
 
 test('isRtkBinaryName matches the platform binary and nothing beside it', () => {

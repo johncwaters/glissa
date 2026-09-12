@@ -1,4 +1,4 @@
-const SESSION_BRANCH_PREFIX = 'glissa/session/';
+const SESSION_BRANCH_PREFIX = 'glimmervoid/session/';
 const DEFAULT_BRANCH_GC_PREFIXES = [SESSION_BRANCH_PREFIX, 'worktree-agent-'];
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MERGED_DELETION_REASON = 'merged-into-integration';

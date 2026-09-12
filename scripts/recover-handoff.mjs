@@ -38,7 +38,7 @@ function restoreOverBrokenTarget(updatePath, root, fromName, toName) {
 }
 
 function restoreEverythingHandedOff(root) {
-  const updatePath = path.join(root, '.glissa', 'update');
+  const updatePath = path.join(root, '.glimmervoid', 'update');
   restore(updatePath, root, PREVIOUS_DEPENDENCIES_BACKUP_NAME, 'node_modules');
   restore(updatePath, root, PREVIOUS_DIST_BACKUP_NAME, 'dist');
 

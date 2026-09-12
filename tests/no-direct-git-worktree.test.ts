@@ -18,9 +18,9 @@ const SKIP_DIRS = new Set([
   "scripts",
   ".git",
   ".omc",
-  ".glissa",
+  ".glimmervoid",
   ".claude",
-  ".glissa-worktrees",
+  ".glimmervoid-worktrees",
 ]);
 
 const ALLOWED = new Set([

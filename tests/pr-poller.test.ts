@@ -107,7 +107,7 @@ function makeGh(over: Partial<Gh> = {}): Gh {
 function makeWorkspace(over: Partial<PrGitWorkspace> = {}): PrGitWorkspace {
   return {
     listWorktreeBranches: async () => [],
-    create: async () => ({ isGit: true, cwd: '/wt', branch: 'glissa/pr-review/pr-7', base: 'main' }),
+    create: async () => ({ isGit: true, cwd: '/wt', branch: 'glimmervoid/pr-review/pr-7', base: 'main' }),
     discard: async () => {},
     removeWorktreeByPath: async () => {},
     ...over,
@@ -305,7 +305,7 @@ test('conflict lane: resolved in worktree -> discard + leaked branch delete + re
       listWorktreeBranches: async () => [],
       create: async (options: { forkFromHead?: boolean }) => {
         createOptions.push(options);
-        return { isGit: true, cwd: '/wt', branch: 'glissa/pr-review/pr-7', base: 'HEAD' };
+        return { isGit: true, cwd: '/wt', branch: 'glimmervoid/pr-review/pr-7', base: 'HEAD' };
       },
       discard: async () => { discarded += 1; },
     },

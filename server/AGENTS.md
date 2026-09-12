@@ -37,7 +37,7 @@ Backend runtime: the Express + WebSocket server factory and its control plane, p
 | `core/upgrade-route.ts` | Pure WS-upgrade target classification by PATHNAME |
 
 ## For AI Agents
-- These modules live one level below the repo root: filesystem assets (`dist/`, `public/`, `config.json`, `node_modules/`) resolve via `path.join(__dirname, '..', ...)`. Keep that offset when adding paths.
+- These modules live one level below the repo root: filesystem assets (`dist/`, `public/`, `node_modules/`) resolve via `path.join(__dirname, '..', ...)`. Keep that offset when adding paths.
 - CommonJS for `.js`; Mill measurement `.ts` keeps the same runtime module shape through native type stripping. No new dependencies without explicit instruction; avoid `else` (guard clauses).
 - See root `AGENTS.md` for architecture and conventions.
 
@@ -79,9 +79,9 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 ### Usage Tracking
 
 - Costs are estimates against list price, not bills, over local transcripts only. Budgets evaluate on a COMPLETE scan pass, or after three consecutive io-failed passes since an undercount can only delay an alert, and only a complete or an incremental io-failed pass writes the warehouse: a byte-limited pass, or an io-failed pass that already reset the store, would store an undercount as durable truth and burn a once-per-period alert. State files are quarantined beside the original when corrupt and never rewritten while unreadable, and a budget alert is stamped fired only after it delivered (`server/json-file.ts`, `tests/usage-budget-wiring.test.ts`).
-- The warehouse exists because Claude Code deletes transcripts after about 30 days; it extends the DAILY series only. Live wins inside live coverage, history fills in only behind it and is labelled: a day Glissa remembers is a different claim from one it can still see.
-- Lane attribution is EXACT, never inferred: a session counts only because Glissa recorded spawning it, everything else is `other`. Guessing from a cwd would mis-bill a lane.
-- The ledger (`usage-lanes.json`) is keyed by a VENDOR-NAMESPACED composite `<vendor>:<sessionId>`, the same shape the scanner's dedup uses, so a codex id cannot collide with a claude one now that Glissa supervises both; a pre-M5 file keyed `claudeSessionId` round-trips as vendor `claude`. It is written from the `claude-session-id` event (name kept for wire/back-compat; payload now carries `{ vendor, sessionId }`, `vendor` from the session's adapter `usageVendor`).
+- The warehouse exists because Claude Code deletes transcripts after about 30 days; it extends the DAILY series only. Live wins inside live coverage, history fills in only behind it and is labelled: a day Glimmervoid remembers is a different claim from one it can still see.
+- Lane attribution is EXACT, never inferred: a session counts only because Glimmervoid recorded spawning it, everything else is `other`. Guessing from a cwd would mis-bill a lane.
+- The ledger (`usage-lanes.json`) is keyed by a VENDOR-NAMESPACED composite `<vendor>:<sessionId>`, the same shape the scanner's dedup uses, so a codex id cannot collide with a claude one now that Glimmervoid supervises both; a pre-M5 file keyed `claudeSessionId` round-trips as vendor `claude`. It is written from the `claude-session-id` event (name kept for wire/back-compat; payload now carries `{ vendor, sessionId }`, `vendor` from the session's adapter `usageVendor`).
 - Wire-unit traps, normalized once in `public/usage-view-core.ts`: `tokenLimit.pct` is a RATIO, not a percentage, and `scan.dirs` an ARRAY, not a count; face-value reads fail silently. Today is the SERVER's day, or a viewer in another zone reads the wrong bucket.
 - The statusLine relay MUST chain the operator's own, since a per-session settings file REPLACES the global one and would delete their HUD; its POST is abandoned quickly to add no latency. The reply stays plain `{ ok, reason }`: `additionalContext` is confined to the adapter-declared pack-notice hook, and telemetry must never become a second injection point.
 
@@ -97,7 +97,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 - Memory alone never widens what leaves the machine: with the ingest lane off it builds its own source, and no ring, frame or digest sees those events.
 - Expunging is THREE writes, all needed: `secure_delete` (a DELETE leaves plaintext greppable), an FTS5 rebuild (a delete only tombstones terms), and a WAL truncate checkpoint. Canary in `tests/memory-store.test.ts`.
 - A transcript-supplied timestamp is untrusted and clamped: a future-dated record lands in a segment retention can never prune and heads every recency ranking forever.
-- A verdict is never trusted alone: the session answers with structured CLAIMS and Glissa renders the bytes, so no remembered byte reaches a file except through the renderer; a bad result is refused as ONE.
+- A verdict is never trusted alone: the session answers with structured CLAIMS and Glimmervoid renders the bytes, so no remembered byte reaches a file except through the renderer; a bad result is refused as ONE.
 - Implied-rank rule: a rank may never exceed the highest among its cited records, and anything above `model` must cite one record and copy it verbatim, which makes verbatim locked facts mechanical.
 - Net-new claims are capped, a run inventing thirty facts at once being what that gate exists for. A run reads only the delta above a durable `seq` cursor and MERGES into the standing claims: replacing them made the canon one prompt, refusing every run. Age SKIPS work and never causes it: past `staleHorizonDays` the delta steps over a record AND the cursor moves with it, or that tail replays forever. A LOCKED diff still diverts to `dist-pending/`.
 - Echo suppression closes the loop: delivered line hashes are registered and matching transcript lines dropped, so a session quoting its memory back is not re-ingested as fresh fact.
@@ -129,15 +129,15 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 ### Security: Trust Boundary
 
-- Glissa binds localhost only. Any local PROCESS is trusted; it is deliberately NOT "any local web page", and three layers keep a page on another local port out of the control WS.
+- Glimmervoid binds localhost only. Any local PROCESS is trusted; it is deliberately NOT "any local web page", and three layers keep a page on another local port out of the control WS.
 - Host allow-list first (`server/core/host-policy.ts`). An ABSENT Host passes, since rebinding always carries a name and refusing it would only break HTTP/1.0 clients.
 - Port-exact Origin, the port read from the socket so nothing a client sends decides it; a mismatch falls THROUGH to the allow-list. Browser channels demand an Origin, non-browser ingresses do not.
 - A per-process page token guards local control and data upgrades, riding the query string since a browser cannot set a WS handshake header. `GET /control-token` refuses a disallowed Origin outright.
 - Trust is the LISTENER PORT, never a header or IP: a reverse proxy makes remote traffic look loopback, so an IP or `X-Forwarded-For` rule would hand every visitor local trust (`tests/request-trust.test.ts`).
 - A pairing cookie is RCE as the server account, the control WS accepting any project path plus `dangerouslySkipPermissions`. Pairing URLs are single-use, short-TTL, never logged or stored in plaintext; the store fails CLOSED on corruption.
 - The `/pair/*` exemption is judged on the DECODED pathname: `express.static` resolves dot segments, so an un-normalized check served the dashboard bundle under `/pair/%2e%2e/`.
-- Remote config is unreachable from the control WS, and remote-off is fully inert: no route, no middleware, no file (`tests/backend-remote-disabled.test.ts`). Binding wider needs `GLISSA_INSECURE_BIND=1`.
-- Two HTTP write ingresses. `POST /hook/:glissaId/:event` keeps its per-session bearer token, and its RESPONSE is also an ingress, so only Glissa-authored text may be injected. `POST /upload/:sessionId` sits behind remote-auth with a size cap; a non-image upload keeps only a sanitized extension from the client name, never the name itself.
+- Remote config is unreachable from the control WS, and remote-off is fully inert: no route, no middleware, no file (`tests/backend-remote-disabled.test.ts`). Binding wider needs `GLIMMERVOID_INSECURE_BIND=1`.
+- Two HTTP write ingresses. `POST /hook/:glimmervoidId/:event` keeps its per-session bearer token, and its RESPONSE is also an ingress, so only Glimmervoid-authored text may be injected. `POST /upload/:sessionId` sits behind remote-auth with a size cap; a non-image upload keeps only a sanitized extension from the client name, never the name itself.
 
 ### Transport and Session Identity
 

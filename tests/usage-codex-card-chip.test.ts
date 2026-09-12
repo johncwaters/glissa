@@ -35,7 +35,7 @@ function writeCodexFixture(codexHome: string, { input, output }: { input: number
 }
 
 test('a supervised codex card shows its own token/cost chip from the Codex transcript', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-codex-chip-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-codex-chip-'));
   const restoreEnv = isolateTranscriptHomes(root);
   try {
     const homes = path.join(root, 'vendor-homes');

@@ -24,7 +24,7 @@ interface BackendTrust {
 }
 
 function bootError(message: string): Error {
-  return Object.assign(new Error(message), { glissaBoot: true });
+  return Object.assign(new Error(message), { glimmervoidBoot: true });
 }
 
 function createBackendTrust(dependencies: BackendTrustDependencies): BackendTrust {
@@ -32,8 +32,8 @@ function createBackendTrust(dependencies: BackendTrustDependencies): BackendTrus
   const remoteCheck = validateRemoteConfig(remote, dependencies.localPort);
   if (!remoteCheck.ok) throw bootError(`[remote] invalid configuration: ${remoteCheck.error}`);
   const bindDecision = decideBindHost({
-    envHost: dependencies.env.GLISSA_HOST,
-    insecureBind: dependencies.env.GLISSA_INSECURE_BIND === '1',
+    envHost: dependencies.env.GLIMMERVOID_HOST,
+    insecureBind: dependencies.env.GLIMMERVOID_INSECURE_BIND === '1',
   });
   const remoteListenerPort = remote.enabled ? remote.port : null;
   const pageToken = crypto.randomBytes(32).toString('hex');

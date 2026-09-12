@@ -223,7 +223,7 @@ test('the daemon\'s own state writes are refused, and the watcher is told to ign
   const ignore = subscribeIgnores(watcher.subscribed[0]);
   assert.ok(ignore.includes('**/node_modules/**'));
   assert.ok(ignore.includes('**/.git/**'));
-  assert.ok(ignore.includes('**/.glissa/**'), 'the daemon home is refused at registration time');
+  assert.ok(ignore.includes('**/.glimmervoid/**'), 'the daemon home is refused at registration time');
 
   watcher.emit(PROJECT, [
     change(PROJECT, 'config.json', 'update'),
@@ -234,7 +234,7 @@ test('the daemon\'s own state writes are refused, and the watcher is told to ign
     change(PROJECT, 'usage-lanes.json', 'update'),
     change(PROJECT, 'recordings/session.jsonl', 'create'),
   ]);
-  assert.equal(timers.timeoutCount, 0, 'glissa writing its own bookkeeping is not project activity');
+  assert.equal(timers.timeoutCount, 0, 'glimmervoid writing its own bookkeeping is not project activity');
 
   watcher.emit(PROJECT, [
     change(PROJECT, 'src/app.js', 'update'),
@@ -323,7 +323,7 @@ test('a worktree session widens its own hold to both halves of its checkout', as
   const watcher = fakeWatcher();
   const timers = fakeTimers();
   const published: FsIngestEvent[] = [];
-  const worktree = path.resolve('/work/.glissa-worktrees/project-abc');
+  const worktree = path.resolve('/work/.glimmervoid-worktrees/project-abc');
   const source = injectedSource({ watcher, timers, published });
   t.after(() => source.stop());
   await source.start();
@@ -637,7 +637,7 @@ test('an fs event surfaces in the digest as one line', async (t) => {
 
 
 test('a real @parcel/watcher subscription reports a real write and refuses an ignored tree', { skip: !PARCEL }, async (t) => {
-  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-ingest-fs-')));
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-ingest-fs-')));
   t.after(() => {
     try {
       fs.rmSync(dir, { recursive: true, force: true });

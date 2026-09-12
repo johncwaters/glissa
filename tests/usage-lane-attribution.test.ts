@@ -69,7 +69,7 @@ function fakeSession(): EventEmitter & { destroy: () => void } {
 }
 
 async function makeTempRoot(): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), 'glissa-usage-lanes-'));
+  return fs.mkdtemp(path.join(os.tmpdir(), 'glimmervoid-usage-lanes-'));
 }
 
 
@@ -160,7 +160,7 @@ test('pruneLedger drops entries past retention but keeps unstamped ones', () => 
 
 test('the ledger records a lane and persists it atomically', async () => {
   const root = await makeTempRoot();
-  const ledgerPath = path.join(root, '.glissa', 'usage-lanes.json');
+  const ledgerPath = path.join(root, '.glimmervoid', 'usage-lanes.json');
   const ledger = createLaneLedger({ ledgerPath, nowFn: () => NOW });
   ledger.record('claude-1', 'pr-review');
   ledger.record('claude-2', INTERACTIVE_LANE);
@@ -170,12 +170,12 @@ test('the ledger records a lane and persists it atomically', async () => {
   assert.equal(stored.version, 1);
   assert.deepEqual(stored.entries.map((row) => [row.vendor, row.sessionId, row.lane]), [['claude', 'claude-1', 'pr-review'], ['claude', 'claude-2', INTERACTIVE_LANE]]);
   assert.equal(ledger.laneMap().get('claude:claude-1'), 'pr-review');
-  assert.deepEqual(await fs.readdir(path.join(root, '.glissa')), ['usage-lanes.json']);
+  assert.deepEqual(await fs.readdir(path.join(root, '.glimmervoid')), ['usage-lanes.json']);
 });
 
 test('a fresh ledger reads what a previous process wrote', async () => {
   const root = await makeTempRoot();
-  const ledgerPath = path.join(root, '.glissa', 'usage-lanes.json');
+  const ledgerPath = path.join(root, '.glimmervoid', 'usage-lanes.json');
   const first = createLaneLedger({ ledgerPath, nowFn: () => NOW });
   first.record('claude-1', 'pack-distill');
   await first.whenIdle();
@@ -187,7 +187,7 @@ test('a fresh ledger reads what a previous process wrote', async () => {
 
 test('re-recording the same id and lane does not rewrite the file', async () => {
   const root = await makeTempRoot();
-  const ledgerPath = path.join(root, '.glissa', 'usage-lanes.json');
+  const ledgerPath = path.join(root, '.glimmervoid', 'usage-lanes.json');
   const ledger = createLaneLedger({ ledgerPath, nowFn: () => NOW });
   ledger.record('claude-1', 'pr-review');
   await ledger.whenIdle();
@@ -199,7 +199,7 @@ test('re-recording the same id and lane does not rewrite the file', async () => 
 
 test('retention is applied on write, not just on read', async () => {
   const root = await makeTempRoot();
-  const ledgerPath = path.join(root, '.glissa', 'usage-lanes.json');
+  const ledgerPath = path.join(root, '.glimmervoid', 'usage-lanes.json');
   await fs.mkdir(path.dirname(ledgerPath), { recursive: true });
   await fs.writeFile(ledgerPath, JSON.stringify({
     version: 1,
@@ -217,7 +217,7 @@ test('retention is applied on write, not just on read', async () => {
 
 test('an old-format ledger file round-trips as vendor claude', async () => {
   const root = await makeTempRoot();
-  const ledgerPath = path.join(root, '.glissa', 'usage-lanes.json');
+  const ledgerPath = path.join(root, '.glimmervoid', 'usage-lanes.json');
   await fs.mkdir(path.dirname(ledgerPath), { recursive: true });
   await fs.writeFile(ledgerPath, JSON.stringify({
     version: 1,
@@ -244,7 +244,7 @@ test('an old-format ledger file round-trips as vendor claude', async () => {
 
 test('a corrupt ledger starts empty, warns, and still records', async () => {
   const root = await makeTempRoot();
-  const ledgerPath = path.join(root, '.glissa', 'usage-lanes.json');
+  const ledgerPath = path.join(root, '.glimmervoid', 'usage-lanes.json');
   await fs.mkdir(path.dirname(ledgerPath), { recursive: true });
   await fs.writeFile(ledgerPath, '{ not json');
   const warnings: string[] = [];
@@ -261,7 +261,7 @@ test('a corrupt ledger starts empty, warns, and still records', async () => {
 
 test('an unreadable ledger warns, keeps its bytes, and never rewrites them', async () => {
   const root = await makeTempRoot();
-  const ledgerPath = path.join(root, '.glissa', 'usage-lanes.json');
+  const ledgerPath = path.join(root, '.glimmervoid', 'usage-lanes.json');
   const original = '{ recoverable later';
   await fs.mkdir(path.dirname(ledgerPath), { recursive: true });
   await fs.writeFile(ledgerPath, original);
@@ -284,7 +284,7 @@ test('an unwritable ledger degrades to a warning and keeps working in memory', a
   const root = await makeTempRoot();
   const warnings: string[] = [];
   const ledger = createLaneLedger({
-    ledgerPath: path.join(root, '.glissa', 'usage-lanes.json'),
+    ledgerPath: path.join(root, '.glimmervoid', 'usage-lanes.json'),
     nowFn: () => NOW,
     logger: { warn: (message) => warnings.push(String(message)) },
     fsPromises: { ...fs, writeFile: async () => { throw new Error('EACCES simulated'); } },

@@ -103,10 +103,10 @@ test('buildUploadFilename is Windows-safe, sorts by time, and carries no client 
 });
 
 test('framePathPaste wraps the path in bracketed paste with a trailing space and no submit', () => {
-  const framed = framePathPaste('/home/op/.glissa/uploads/s1/2026-08-09T12-30-15-123Z-ab.png');
+  const framed = framePathPaste('/home/op/.glimmervoid/uploads/s1/2026-08-09T12-30-15-123Z-ab.png');
   assert.equal(
     framed,
-    '\x1b[200~/home/op/.glissa/uploads/s1/2026-08-09T12-30-15-123Z-ab.png \x1b[201~',
+    '\x1b[200~/home/op/.glimmervoid/uploads/s1/2026-08-09T12-30-15-123Z-ab.png \x1b[201~',
   );
   assert.equal(framed.includes('\r'), false, 'never submits the prompt for the operator');
   assert.equal(framed.includes('\n'), false);

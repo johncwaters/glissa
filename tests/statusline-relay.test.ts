@@ -78,7 +78,7 @@ test('a chained command that fails does not take the relay down', async () => {
 
 test('a chain command that does not exist is survived', async () => {
   const stdout = fakeStdout();
-  const chain = Buffer.from('glissa-no-such-binary-xyz', 'utf8').toString('base64');
+  const chain = Buffer.from('glimmervoid-no-such-binary-xyz', 'utf8').toString('base64');
   const code = await main(['http://127.0.0.1:1/hook/x/statusline?t=t', chain], fakeStdin('{}'), stdout);
   assert.equal(typeof code, 'number');
 });

@@ -11,7 +11,7 @@ type AsyncFileSystem = NonNullable<AsyncWriteOptions['fsPromises']>;
 type SyncFileSystem = NonNullable<SyncWriteOptions['fsSync']>;
 
 function tempDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-atomic-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-atomic-'));
 }
 
 function renameError(code: string): NodeJS.ErrnoException {

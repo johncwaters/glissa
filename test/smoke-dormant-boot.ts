@@ -19,7 +19,7 @@ interface ControlEvent {
 }
 
 const PORT = 3098;
-process.env.GLISSA_PORT = String(PORT);
+process.env.GLIMMERVOID_PORT = String(PORT);
 
 const logLines: string[] = [];
 const origConsoleLog = console.log.bind(console);

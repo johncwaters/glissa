@@ -30,7 +30,7 @@ Each entry is a rule, its why, and where it is pinned. Mechanism lives in the co
 
 - Claude CLI produces zero output with piped stdio, so a real PTY is required.
 - Resolve-then-branch: a PE image spawns directly, a shim falls back to `cmd.exe /c`, avoiding cmd's double command-line parse and console-title write (`session/core/spawn-command.ts`).
-- The env scrub removes the Glissa marker vars, or Claude believes it runs inside itself.
+- The env scrub removes the Glimmervoid marker vars, or Claude believes it runs inside itself.
 
 ### Auto-Resume and Shutdown
 

@@ -1,7 +1,7 @@
 import nodeFsPromises from 'node:fs/promises';
 import path from 'node:path';
 
-import { glissaHomeDir } from './config-store.ts';
+import { glimmervoidHomeDir } from './config-store.ts';
 import { normalizePricingTable } from './core/usage-pricing-core.ts';
 import type { ModelPrice } from './core/usage-pricing-core.ts';
 import pricingSnapshot from './data/claude-pricing.json' with { type: 'json' };
@@ -154,7 +154,7 @@ async function loadPricing({
   fetchEnabled,
   fsPromises = nodeFsPromises,
   fetchFn = globalThis.fetch,
-  cachePath = path.join(glissaHomeDir(), 'litellm-pricing.json'),
+  cachePath = path.join(glimmervoidHomeDir(), 'litellm-pricing.json'),
   nowFn = Date.now,
   timeoutMs = 15000,
   logger = null,

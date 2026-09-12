@@ -8,11 +8,11 @@ import { createParserState, feedFrameBytes, serializeFrame } from '../server/cor
 import type { AddressInfo } from 'node:net';
 
 type LspRecord = Record<string, unknown>;
-const CLI_PATH = path.join(import.meta.dirname, '..', 'bin', 'glissa.ts');
+const CLI_PATH = path.join(import.meta.dirname, '..', 'bin', 'glimmervoid.ts');
 const WAIT_MS = 8000;
 const URI = 'file:///tmp/cli-plan.md';
 
-test('glissa visions relay speaks LSP on stdio and mirrors to the daemon', async (t) => {
+test('glimmervoid visions relay speaks LSP on stdio and mirrors to the daemon', async (t) => {
   const server = new WebSocketServer({ port: 0, path: '/visions' });
   await once(server, 'listening');
 
@@ -51,7 +51,7 @@ test('glissa visions relay speaks LSP on stdio and mirrors to the daemon', async
   child.stdin?.write(serializeFrame({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { processId: process.pid, rootUri: null, capabilities: {} } }));
   const answer = await initialized;
   const result = answer.result as { serverInfo: LspRecord; capabilities: LspRecord };
-  assert.equal(result.serverInfo.name, 'glissa-visions');
+  assert.equal(result.serverInfo.name, 'glimmervoid-visions');
   assert.equal(result.capabilities.codeActionProvider, true);
 
   child.stdin?.write(serializeFrame({

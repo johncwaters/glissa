@@ -261,7 +261,7 @@ test('pricing and scan lines: source, staleness, missing models and a partial pa
   assert.equal(pricingSourceLine({ source: 'fetched' }), 'Prices fetched from the public model price table.');
   assert.equal(pricingSourceLine({ source: 'cache' }, '1h ago'), 'Prices from the cached public model price table, 1h ago.');
   assert.equal(pricingSourceLine({ source: 'cache' }), 'Prices from the cached public model price table.');
-  assert.equal(pricingSourceLine({ source: 'snapshot' }), 'Prices from the price table bundled with this Glissa build.');
+  assert.equal(pricingSourceLine({ source: 'snapshot' }), 'Prices from the price table bundled with this Glimmervoid build.');
 
   assert.equal(pricingFetchedAtMs(1766592000000), 1766592000000);
   assert.equal(pricingFetchedAtMs('2026-08-19T12:00:00.000Z'), Date.parse('2026-08-19T12:00:00.000Z'));
@@ -304,7 +304,7 @@ test('unavailable reports: the reason is surfaced instead of a page of zeros', a
   assert.equal(usageErrorLine(null), '');
   assert.equal(
     usageWarningLine({ warning: 'CLAUDE_CONFIG_DIR is set but empty' }),
-    'Glissa could not read every transcript location: CLAUDE_CONFIG_DIR is set but empty',
+    'Glimmervoid could not read every transcript location: CLAUDE_CONFIG_DIR is set but empty',
   );
   assert.equal(usageWarningLine({ warning: null }), '');
   assert.equal(usageWarningLine(null), '');
@@ -321,14 +321,14 @@ test('shouldApplyUsageReport: an unsolicited report always lands, a superseded r
 });
 
 test('sessionRowLabel: a managed session wears its name, anything else its project basename', async () => {
-  const { sessionRowLabel, isGlissaSessionRow } = await importCore();
-  assert.equal(sessionRowLabel({ id: 'abc', label: 'glissa-1', project: 'C:\\repos\\glissa' }), 'glissa-1');
+  const { sessionRowLabel, isGlimmervoidSessionRow } = await importCore();
+  assert.equal(sessionRowLabel({ id: 'abc', label: 'glimmervoid-1', project: 'C:\\repos\\glimmervoid' }), 'glimmervoid-1');
   assert.equal(sessionRowLabel({ id: null, label: 'ignored', project: 'C:\\repos\\other-thing' }), 'other-thing');
   assert.equal(sessionRowLabel({ id: null, label: '', project: '/home/x/projects/api/' }), 'api');
   assert.equal(sessionRowLabel({ id: null, label: 'only-label' }), 'only-label');
   assert.equal(sessionRowLabel({}), 'unknown project');
-  assert.equal(isGlissaSessionRow({ id: 'abc' }), true);
-  assert.equal(isGlissaSessionRow({ id: null }), false);
+  assert.equal(isGlimmervoidSessionRow({ id: 'abc' }), true);
+  assert.equal(isGlimmervoidSessionRow({ id: null }), false);
 });
 
 test('sortSessionRows: last activity first, then tokens, then label; input is not mutated', async () => {

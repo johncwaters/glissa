@@ -454,10 +454,10 @@ test('a Grok turn that completed with nothing held still says the turn ended', (
 });
 
 test('a dispatch workdir is recognized as a raw cwd, an encoded dir name, and a percent-encoded one', () => {
-  const workDir = 'C:\\Users\\johnw\\AppData\\Local\\Temp\\glissa-visions-AbC123';
+  const workDir = 'C:\\Users\\johnw\\AppData\\Local\\Temp\\glimmervoid-visions-AbC123';
   assert.equal(isDispatchWorkdir(workDir), true, 'the raw cwd a line carries');
   assert.equal(
-    isDispatchWorkdir('C--Users-johnw-AppData-Local-Temp-glissa-visions-AbC123'),
+    isDispatchWorkdir('C--Users-johnw-AppData-Local-Temp-glimmervoid-visions-AbC123'),
     true,
     'the Claude project directory name, every separator collapsed to one dash',
   );
@@ -465,23 +465,23 @@ test('a dispatch workdir is recognized as a raw cwd, an encoded dir name, and a 
 });
 
 test('the memory-distill scratch dir is a dispatch workdir, so the lane cannot re-ingest its own canon', () => {
-  const workDir = '/tmp/glissa-memory-distill-work-Ab12/session.jsonl';
+  const workDir = '/tmp/glimmervoid-memory-distill-work-Ab12/session.jsonl';
   assert.equal(isDispatchWorkdir(workDir), true, 'the raw cwd a transcript line carries');
   assert.equal(
-    isDispatchWorkdir('-tmp-glissa-memory-distill-work-Ab12'),
+    isDispatchWorkdir('-tmp-glimmervoid-memory-distill-work-Ab12'),
     true,
     'the Claude project directory name, every separator collapsed to one dash',
   );
-  assert.equal(isDispatchWorkdir(encodeURIComponent('C:\\Temp\\glissa-memory-distill-Ab12')), true);
+  assert.equal(isDispatchWorkdir(encodeURIComponent('C:\\Temp\\glimmervoid-memory-distill-Ab12')), true);
 });
 
-test('the shape rule is a segment match, so ordinary glissa paths are untouched', () => {
+test('the shape rule is a segment match, so ordinary glimmervoid paths are untouched', () => {
   for (const candidate of [
-    'C:\\Users\\johnw\\Projects\\glissa',
-    'C--Users-johnw-Projects-glissa',
-    'C--Users-johnw-Projects--glissa-worktrees-glissa-nC0h6B',
-    '/home/dev/glissa-visions',
-    'glissavisions-x',
+    'C:\\Users\\johnw\\Projects\\glimmervoid',
+    'C--Users-johnw-Projects-glimmervoid',
+    'C--Users-johnw-Projects--glimmervoid-worktrees-glimmervoid-nC0h6B',
+    '/home/dev/glimmervoid-visions',
+    'glimmervoidvisions-x',
     null,
     '',
   ]) {

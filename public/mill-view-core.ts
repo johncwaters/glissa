@@ -384,7 +384,7 @@ function nothingIsConsumed(report: MillReport | null | undefined) {
 
 export function distillerLine(report: MillReport | null | undefined) {
   if (report?.distillerEnabled === true) return 'distiller on';
-  return 'distiller off, glissa pack distill regenerates';
+  return 'distiller off, glimmervoid pack distill regenerates';
 }
 
 export function isMillUnavailable(report: MillReport | null | undefined) {

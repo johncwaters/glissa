@@ -28,7 +28,7 @@ interface HomesContext extends Homes {
 }
 
 function makeHomes(): Homes {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-agentlogs-'));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-agentlogs-'));
   const claudeHome = path.join(tmpDir, 'claude');
   const codexHome = path.join(tmpDir, 'codex');
   const grokHome = path.join(tmpDir, 'grok');
@@ -387,7 +387,7 @@ test('layer 1, the ledger: a record landing AFTER the sweep still stops the lane
 }));
 
 test('layer 2, the workdir shape: a dispatch transcript is excluded with NO ledger at all', withHomes(async ({ projects, events, build }) => {
-  const workDir = path.join(os.tmpdir(), 'glissa-visions-abc123');
+  const workDir = path.join(os.tmpdir(), 'glimmervoid-visions-abc123');
   const filePath = seedClaudeTranscript(projects, {
     dirName: encodeProjectDir(workDir),
     sessionId: 'unrecorded-visions',
@@ -406,7 +406,7 @@ test('layer 2, the workdir shape: a dispatch transcript is excluded with NO ledg
 }));
 
 test('layer 2, the workdir shape: a cwd revealed by a LINE is caught even from an ordinary dir', withHomes(async ({ projects, events, build }) => {
-  const workDir = path.join(os.tmpdir(), 'glissa-visions-xyz789');
+  const workDir = path.join(os.tmpdir(), 'glimmervoid-visions-xyz789');
   const filePath = seedClaudeTranscript(projects, { dirName: 'C--repo', sessionId: 'moved-visions' });
   const adapter = build();
   await adapter.start();
@@ -417,17 +417,17 @@ test('layer 2, the workdir shape: a cwd revealed by a LINE is caught even from a
   assert.equal(events.length, 0, 'the cwd on the line is the second place the shape can show up');
 }));
 
-test('the shape rule is a segment match, so an ordinary project named after glissa still publishes', withHomes(async ({ projects, events, build }) => {
-  const filePath = seedClaudeTranscript(projects, { dirName: 'C--Users-johnw-Projects-glissa', sessionId: 'glissa-repo-session' });
+test('the shape rule is a segment match, so an ordinary project named after glimmervoid still publishes', withHomes(async ({ projects, events, build }) => {
+  const filePath = seedClaudeTranscript(projects, { dirName: 'C--Users-johnw-Projects-glimmervoid', sessionId: 'glimmervoid-repo-session' });
   const adapter = build();
   await adapter.start();
   append(filePath, claudeAssistant({
-    text: 'working in the glissa repo itself',
-    sessionId: 'glissa-repo-session',
-    cwd: 'C:\\Users\\johnw\\Projects\\glissa',
+    text: 'working in the glimmervoid repo itself',
+    sessionId: 'glimmervoid-repo-session',
+    cwd: 'C:\\Users\\johnw\\Projects\\glimmervoid',
   }));
   await adapter.poll();
-  assert.deepEqual(events.map((event) => event.summary), ['claude: working in the glissa repo itself']);
+  assert.deepEqual(events.map((event) => event.summary), ['claude: working in the glimmervoid repo itself']);
 }));
 
 test('a session the ledger calls interactive is the operator working, and publishes normally', withHomes(async ({ projects, events, build }) => {

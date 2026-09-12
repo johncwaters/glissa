@@ -251,7 +251,7 @@ function hasWorkFrom(dirty: GitResult, ahead: GitResult | null): boolean {
 }
 
 const markerFrom = (result: GitResult) => (result.ok && result.out ? result.out : null);
-const markerKey = (branch: string) => `branch.${branch}.glissa-integration`;
+const markerKey = (branch: string) => `branch.${branch}.glimmervoid-integration`;
 
 const UNPROBED_MARKER: MarkerProbes = { detectedDefaultBranch: null, resolvedMarkerRef: null, isMarkerRefResolvable: null, isMarkerAbsorbedByDefault: null };
 
@@ -467,7 +467,7 @@ function createGitWorkspace(opts: {
       const configured = await run(['config', '--get', 'rerere.enabled'], projectPath);
       if (!configured.ok || configured.out === '') await run(['config', 'rerere.enabled', 'true'], projectPath);
     }
-    const branch = `glissa/${sanitize(teamId)}/${sanitize(label)}`;
+    const branch = `glimmervoid/${sanitize(teamId)}/${sanitize(label)}`;
     await run(['worktree', 'prune'], projectPath);
     const listed = await run(['worktree', 'list', '--porcelain'], projectPath);
     if (listed.ok) {
@@ -495,7 +495,7 @@ function createGitWorkspace(opts: {
     await run(['branch', '-D', branch], projectPath);
 
     let wtParent = os.tmpdir();
-    let prefix = `glissa-wt-${sanitize(teamId)}-`;
+    let prefix = `glimmervoid-wt-${sanitize(teamId)}-`;
     if (worktreeBase) {
       try { fs.mkdirSync(worktreeBase, { recursive: true }); } catch {}
       wtParent = worktreeBase;
@@ -615,7 +615,7 @@ function createGitWorkspace(opts: {
     }
 
     const dirty = (await run(['status', '--porcelain'], wt)).out !== '';
-    const stashed = dirty && (await run(['stash', 'push', '--include-untracked', '-m', 'glissa-merge'], wt)).ok;
+    const stashed = dirty && (await run(['stash', 'push', '--include-untracked', '-m', 'glimmervoid-merge'], wt)).ok;
 
     let rerereReplayed = false;
     if (!(await run(withAutoUpdate(['rebase', target]), wt)).ok) {

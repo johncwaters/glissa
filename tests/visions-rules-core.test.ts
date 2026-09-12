@@ -17,7 +17,7 @@ test('sweepMarkdown reports repeated second word with an exact range', () => {
     end: { line: 0, character: 15 },
   });
   assert.equal(repeated[0].severity, 2);
-  assert.equal(repeated[0].source, 'glissa-visions');
+  assert.equal(repeated[0].source, 'glimmervoid-visions');
 });
 
 test('a word inside a token that starts with a digit is not a word', () => {

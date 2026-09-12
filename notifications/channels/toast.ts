@@ -76,7 +76,7 @@ function createToastChannel(
       burntToastModulePath = resolveBurntToastModulePath();
     }
 
-    const title = 'Glissa';
+    const title = 'Glimmervoid';
     if (!burntToastModulePath) {
       const text = `${title}: ${message}`;
       execFile('msg', ['*', text], (err: Error | null) => {

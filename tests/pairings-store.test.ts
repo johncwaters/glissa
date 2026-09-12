@@ -59,7 +59,7 @@ function readSeen(filePath: string): Record<string, number> {
 }
 
 function withTempStore<T>(run: (scope: StoreScope) => T, { clock }: { clock?: () => number } = {}): T {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pairings-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-pairings-'));
   const filePath = path.join(dir, 'pairings.json');
   const warnings: string[] = [];
   try {
@@ -190,7 +190,7 @@ test('prunePending drops expired and used records, keeping live ones', () => {
 });
 
 test('a corrupt file fails CLOSED: no devices, and writes are refused rather than clobbering it', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pairings-bad-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-pairings-bad-'));
   const filePath = path.join(dir, 'pairings.json');
   fs.writeFileSync(filePath, '{ this is not json', 'utf8');
   const warnings: string[] = [];
@@ -208,7 +208,7 @@ test('a corrupt file fails CLOSED: no devices, and writes are refused rather tha
 });
 
 test('a structurally wrong file (arrays missing) degrades to empty instead of throwing', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pairings-shape-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-pairings-shape-'));
   const filePath = path.join(dir, 'pairings.json');
   fs.writeFileSync(filePath, JSON.stringify({ version: 1, devices: 'nope' }), 'utf8');
   try {
@@ -237,7 +237,7 @@ test('save re-reads before writing, so a concurrent revocation is not clobbered 
 });
 
 test('watch refreshes the snapshot after an external write and the closer stops it', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pairings-watch-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-pairings-watch-'));
   const filePath = path.join(dir, 'pairings.json');
   try {
     const writer = createPairingsStore({ filePath });
@@ -258,7 +258,7 @@ test('watch refreshes the snapshot after an external write and the closer stops 
 });
 
 test('a periodic reload bounds revocation propagation even with no working watcher', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pairings-interval-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-pairings-interval-'));
   const filePath = path.join(dir, 'pairings.json');
   try {
     const writer = createPairingsStore({ filePath });
@@ -279,7 +279,7 @@ test('a periodic reload bounds revocation propagation even with no working watch
 });
 
 test('watch installs one reload interval at SNAPSHOT_RELOAD_MS, unref-ed and cleared by the closer', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pairings-timers-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-pairings-timers-'));
   const filePath = path.join(dir, 'pairings.json');
   const intervals: InstalledInterval[] = [];
   const setIntervalFn = (callback: () => void, ms: number): NodeJS.Timeout => {
@@ -339,7 +339,7 @@ test('pairingsSignature ignores formatting and key order, tracks auth-relevant f
 });
 
 test('an unchanged reload refreshes the snapshot but does NOT report a change', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pairings-quiet-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-pairings-quiet-'));
   const filePath = path.join(dir, 'pairings.json');
   try {
     const writer = createPairingsStore({ filePath });
@@ -367,7 +367,7 @@ test('an unchanged reload refreshes the snapshot but does NOT report a change', 
 });
 
 test('a write to a sibling file in the watched directory reports no change', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pairings-sibling-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-pairings-sibling-'));
   const filePath = path.join(dir, 'pairings.json');
   try {
     const writer = createPairingsStore({ filePath });
@@ -441,13 +441,13 @@ test('pairing files are created 0600 on posix', { skip: process.platform === 'wi
 });
 
 test('default paths sit beside the config file', () => {
-  const configPath = path.join(os.tmpdir(), 'glissa-cfg', 'config.json');
-  assert.equal(defaultPairingsPath(configPath), path.join(os.tmpdir(), 'glissa-cfg', 'pairings.json'));
-  assert.equal(defaultSeenPath(configPath), path.join(os.tmpdir(), 'glissa-cfg', 'pairings-seen.json'));
+  const configPath = path.join(os.tmpdir(), 'glimmervoid-cfg', 'config.json');
+  assert.equal(defaultPairingsPath(configPath), path.join(os.tmpdir(), 'glimmervoid-cfg', 'pairings.json'));
+  assert.equal(defaultSeenPath(configPath), path.join(os.tmpdir(), 'glimmervoid-cfg', 'pairings-seen.json'));
 });
 
 test('the seen store is throttled, separate, and never consulted for auth', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-seen-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-seen-'));
   const filePath = path.join(dir, 'pairings-seen.json');
   let clockValue = 1000;
   try {

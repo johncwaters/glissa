@@ -34,7 +34,7 @@ function record(overrides: Partial<MillMetricSession> = {}): MillMetricSession {
 }
 
 async function fixture(t: TestContext) {
-  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'glissa-mill-metrics-store-'));
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'glimmervoid-mill-metrics-store-'));
   t.after(() => fsp.rm(root, { recursive: true, force: true }));
   return {
     root,

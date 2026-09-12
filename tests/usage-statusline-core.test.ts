@@ -14,7 +14,7 @@ function fullPayload(overrides: Record<string, unknown> = {}): Record<string, un
   return {
     session_id: 'c1c1c1c1-2222-4333-8444-555555555555',
     transcript_path: 'C:/Users/x/.claude/projects/repo/abc.jsonl',
-    cwd: 'C:/repos/glissa',
+    cwd: 'C:/repos/glimmervoid',
     prompt_id: 'p-1',
     model: { id: 'claude-opus-4-5', display_name: 'Opus 4.5' },
     version: '2.1.235',
@@ -212,6 +212,6 @@ test('normalize: the snapshot carries no transcript path, cwd or prompt id', () 
   assert.deepEqual(Object.keys(snap).sort(), ['claudeSessionId', 'contextPct', 'rateLimits', 'sessionCostUSD', 'ts']);
   const serialized = JSON.stringify(snap);
   assert.equal(serialized.includes('transcript'), false);
-  assert.equal(serialized.includes('C:/repos/glissa'), false);
+  assert.equal(serialized.includes('C:/repos/glimmervoid'), false);
   assert.equal(serialized.includes('p-1'), false);
 });

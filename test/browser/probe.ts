@@ -129,33 +129,33 @@ export interface EngagementRequest {
 }
 
 type EngagementWindow = Window & {
-  __glissaHarnessOverridden?: boolean;
-  __glissaHarnessFocused?: boolean;
-  __glissaHarnessVisible?: boolean;
+  __glimmervoidHarnessOverridden?: boolean;
+  __glimmervoidHarnessFocused?: boolean;
+  __glimmervoidHarnessVisible?: boolean;
 };
 
 export function setDocumentEngagement({ engaged, quiet }: EngagementRequest): void {
   const host: EngagementWindow = window;
-  if (!host.__glissaHarnessOverridden) {
-    host.__glissaHarnessOverridden = true;
-    host.__glissaHarnessFocused = true;
-    host.__glissaHarnessVisible = true;
+  if (!host.__glimmervoidHarnessOverridden) {
+    host.__glimmervoidHarnessOverridden = true;
+    host.__glimmervoidHarnessFocused = true;
+    host.__glimmervoidHarnessVisible = true;
     Object.defineProperty(document, 'hasFocus', {
       configurable: true,
-      value: () => host.__glissaHarnessFocused !== false && host.__glissaHarnessVisible !== false,
+      value: () => host.__glimmervoidHarnessFocused !== false && host.__glimmervoidHarnessVisible !== false,
     });
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
-      get: () => (host.__glissaHarnessVisible === false ? 'hidden' : 'visible'),
+      get: () => (host.__glimmervoidHarnessVisible === false ? 'hidden' : 'visible'),
     });
     Object.defineProperty(document, 'hidden', {
       configurable: true,
-      get: () => host.__glissaHarnessVisible === false,
+      get: () => host.__glimmervoidHarnessVisible === false,
     });
   }
-  host.__glissaHarnessFocused = engaged;
+  host.__glimmervoidHarnessFocused = engaged;
   if (quiet) return;
-  host.__glissaHarnessVisible = engaged;
+  host.__glimmervoidHarnessVisible = engaged;
   if (engaged) {
     document.dispatchEvent(new Event('visibilitychange'));
     window.dispatchEvent(new Event('focus'));

@@ -134,7 +134,7 @@ function createUpdateApplyLane(dependencies: UpdateApplyDependencies): UpdateApp
   const runCommand = dependencies.runCommand || execFileAsync;
   const fsPromises = dependencies.fsPromises || fs.promises;
   const clock = dependencies.clock || (() => Date.now());
-  const updatePath = path.join(dependencies.packageRoot, '.glissa', 'update');
+  const updatePath = path.join(dependencies.packageRoot, '.glimmervoid', 'update');
   const stagingPath = path.join(updatePath, 'next');
   let journal = idleJournal(dependencies.getUpdateChannel());
   let stagedDescriptor: StagedDescriptor | null = null;

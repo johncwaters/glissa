@@ -21,14 +21,14 @@ const SHA_B = 'fedcba9876543210fedcba9876543210fedcba98';
 const SHA_C = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
 test('parseResolvedSha reads the commit fragment of an npm git spec', () => {
-  assert.equal(parseResolvedSha(`git+https://github.com/johncwaters/glissa.git#${SHA_A}`), SHA_A);
-  assert.equal(parseResolvedSha(`github:johncwaters/glissa#${SHA_A.toUpperCase()}`), SHA_A);
+  assert.equal(parseResolvedSha(`git+https://github.com/johncwaters/glimmervoid.git#${SHA_A}`), SHA_A);
+  assert.equal(parseResolvedSha(`github:johncwaters/glimmervoid#${SHA_A.toUpperCase()}`), SHA_A);
 });
 
 test('parseResolvedSha returns null without a usable commit fragment', () => {
-  assert.equal(parseResolvedSha('git+https://github.com/johncwaters/glissa.git'), null);
-  assert.equal(parseResolvedSha('git+https://github.com/johncwaters/glissa.git#main'), null);
-  assert.equal(parseResolvedSha(`https://registry.npmjs.org/glissa/-/glissa-0.1.0.tgz#${SHA_A.slice(0, 8)}`), null);
+  assert.equal(parseResolvedSha('git+https://github.com/johncwaters/glimmervoid.git'), null);
+  assert.equal(parseResolvedSha('git+https://github.com/johncwaters/glimmervoid.git#main'), null);
+  assert.equal(parseResolvedSha(`https://registry.npmjs.org/glimmervoid/-/glimmervoid-0.1.0.tgz#${SHA_A.slice(0, 8)}`), null);
   assert.equal(parseResolvedSha('#'), null);
   assert.equal(parseResolvedSha(null), null);
   assert.equal(parseResolvedSha(42), null);
@@ -121,15 +121,15 @@ test('decideInstallFlavor ignores a truncated or non-hex commit', () => {
 });
 
 test('buildUpdateCommand pins npm-global to the latest tag and keeps clone commands unchanged', () => {
-  assert.equal(buildUpdateCommand('npm-global', '0.21.0'), 'npm install -g github:johncwaters/glissa#v0.21.0 --allow-git=root');
-  assert.equal(buildUpdateCommand('npm-global', null), 'npm install -g github:johncwaters/glissa --allow-git=root');
-  assert.equal(buildUpdateCommand('npm-global', ''), 'npm install -g github:johncwaters/glissa --allow-git=root');
+  assert.equal(buildUpdateCommand('npm-global', '0.21.0'), 'npm install -g github:johncwaters/glimmervoid#v0.21.0 --allow-git=root');
+  assert.equal(buildUpdateCommand('npm-global', null), 'npm install -g github:johncwaters/glimmervoid --allow-git=root');
+  assert.equal(buildUpdateCommand('npm-global', ''), 'npm install -g github:johncwaters/glimmervoid --allow-git=root');
   assert.equal(buildUpdateCommand('clone', '0.21.0'), CLONE_COMMAND);
   assert.equal(buildUpdateCommand('unknown', '0.21.0'), CLONE_COMMAND);
 });
 
 test('buildReleaseUrl points at the release tag page', () => {
-  assert.equal(buildReleaseUrl('0.21.0'), 'https://github.com/johncwaters/glissa/releases/tag/v0.21.0');
+  assert.equal(buildReleaseUrl('0.21.0'), 'https://github.com/johncwaters/glimmervoid/releases/tag/v0.21.0');
   assert.equal(buildReleaseUrl(null), null);
 });
 
@@ -177,8 +177,8 @@ test('decideUpdateStatus reports updates by version only', () => {
     latest: '0.21.0',
     currentSha: SHA_A,
     latestSha: SHA_A,
-    releaseUrl: 'https://github.com/johncwaters/glissa/releases/tag/v0.21.0',
-    command: 'npm install -g github:johncwaters/glissa#v0.21.0 --allow-git=root',
+    releaseUrl: 'https://github.com/johncwaters/glimmervoid/releases/tag/v0.21.0',
+    command: 'npm install -g github:johncwaters/glimmervoid#v0.21.0 --allow-git=root',
     flavor: 'npm-global',
     channel: 'release',
     behindCount: null,
@@ -291,11 +291,11 @@ test('decideUpdateStatus ignores a stale main-channel count once the installed s
 test('decideUpdateStatus reports no update when current is equal, newer or latest is missing', () => {
   const equal = decideUpdateStatus({ currentVersion: '0.21.0', latestVersion: '0.21.0', flavor: 'npm-global' });
   assert.equal(equal.updateAvailable, false);
-  assert.equal(equal.releaseUrl, 'https://github.com/johncwaters/glissa/releases/tag/v0.21.0');
+  assert.equal(equal.releaseUrl, 'https://github.com/johncwaters/glimmervoid/releases/tag/v0.21.0');
 
   const currentAhead = decideUpdateStatus({ currentVersion: '0.22.0', latestVersion: '0.21.0', flavor: 'clone' });
   assert.equal(currentAhead.updateAvailable, false);
-  assert.equal(currentAhead.releaseUrl, 'https://github.com/johncwaters/glissa/releases/tag/v0.21.0');
+  assert.equal(currentAhead.releaseUrl, 'https://github.com/johncwaters/glimmervoid/releases/tag/v0.21.0');
 
   const missingLatest = decideUpdateStatus({ currentVersion: '0.22.0', latestVersion: null, flavor: 'unknown' });
   assert.equal(missingLatest.updateAvailable, false);

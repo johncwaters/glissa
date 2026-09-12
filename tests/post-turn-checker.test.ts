@@ -92,8 +92,8 @@ test('fixes changed files, skips excluded ones, returns a report', async () => {
   assert.equal(writes['docs/note.md']?.endsWith(NL), true);
 });
 
-test('a glissa-no-fix file is left byte-identical', async () => {
-  const files = { 'keep.md': `glissa-no-fix${NL}a b   ` };
+test('a glimmervoid-no-fix file is left byte-identical', async () => {
+  const files = { 'keep.md': `glimmervoid-no-fix${NL}a b   ` };
   const { deps, writes } = makeDeps(files);
   const report = await runPostTurnChecks({ cwd: '/x', config: fixCfg, deps });
   assert.equal(report.filesFixed, 0);

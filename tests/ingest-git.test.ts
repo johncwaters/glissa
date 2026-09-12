@@ -137,7 +137,7 @@ function porcelain({ branch = 'main', oid = SHA, entries = [] }: { branch?: stri
 }
 
 function logLine(sha: string, subject: string): string {
-  return `${[sha, 'Glissa Test', '1699999999', subject].join(LOG_FIELD_SEPARATOR)}\n`;
+  return `${[sha, 'Glimmervoid Test', '1699999999', subject].join(LOG_FIELD_SEPARATOR)}\n`;
 }
 
 function fakeGit({ status, log = () => logLine(SHA, 'init'), layoutFor = null }: {
@@ -212,7 +212,7 @@ function initRepo(prefix: string): string {
     git(['init'], dir);
   }
   git(['config', 'user.email', 'test@example.com'], dir);
-  git(['config', 'user.name', 'Glissa Test'], dir);
+  git(['config', 'user.name', 'Glimmervoid Test'], dir);
   git(['config', 'commit.gpgsign', 'false'], dir);
   return dir;
 }
@@ -265,7 +265,7 @@ async function settleThroughDebounce(source: ReturnType<typeof createGitIngest>,
 
 
 test('a commit publishes one commit event with its branch and subject', { skip: !GIT }, async (t) => {
-  const dir = initRepoWithCommit('glissa-ingest-git-commit-');
+  const dir = initRepoWithCommit('glimmervoid-ingest-git-commit-');
   t.after(() => cleanup(dir));
   const published: GitIngestEvent[] = [];
   const timers = fakeTimers();
@@ -292,7 +292,7 @@ test('a commit publishes one commit event with its branch and subject', { skip: 
 });
 
 test('touching gitdir files without changing anything publishes nothing', { skip: !GIT }, async (t) => {
-  const dir = initRepoWithCommit('glissa-ingest-git-noop-');
+  const dir = initRepoWithCommit('glimmervoid-ingest-git-noop-');
   t.after(() => cleanup(dir));
   const published: GitIngestEvent[] = [];
   const timers = fakeTimers();
@@ -316,7 +316,7 @@ test('touching gitdir files without changing anything publishes nothing', { skip
 });
 
 test('a working-tree change publishes one status-change, and repeating it publishes nothing', { skip: !GIT }, async (t) => {
-  const dir = initRepoWithCommit('glissa-ingest-git-status-');
+  const dir = initRepoWithCommit('glimmervoid-ingest-git-status-');
   t.after(() => cleanup(dir));
   const published: GitIngestEvent[] = [];
   const timers = fakeTimers();
@@ -343,7 +343,7 @@ test('a working-tree change publishes one status-change, and repeating it publis
 });
 
 test('a branch switch publishes branch-change, and an unborn repo lives through its first commit', { skip: !GIT }, async (t) => {
-  const dir = initRepoWithCommit('glissa-ingest-git-branch-');
+  const dir = initRepoWithCommit('glimmervoid-ingest-git-branch-');
   t.after(() => cleanup(dir));
   const published: GitIngestEvent[] = [];
   const timers = fakeTimers();
@@ -365,7 +365,7 @@ test('a branch switch publishes branch-change, and an unborn repo lives through 
 });
 
 test('a repo with no commits baselines, reports its tree, and publishes its first commit', { skip: !GIT }, async (t) => {
-  const dir = initRepo('glissa-ingest-git-unborn-');
+  const dir = initRepo('glimmervoid-ingest-git-unborn-');
   t.after(() => cleanup(dir));
   const published: GitIngestEvent[] = [];
   const timers = fakeTimers();
@@ -390,7 +390,7 @@ test('a repo with no commits baselines, reports its tree, and publishes its firs
 });
 
 test('two candidate directories inside one checkout are one repo, and a subdirectory resolves to it', { skip: !GIT }, async (t) => {
-  const dir = initRepoWithCommit('glissa-ingest-git-dedupe-');
+  const dir = initRepoWithCommit('glimmervoid-ingest-git-dedupe-');
   t.after(() => cleanup(dir));
   const nested = path.join(dir, 'src');
   fs.mkdirSync(nested, { recursive: true });
@@ -407,11 +407,11 @@ test('two candidate directories inside one checkout are one repo, and a subdirec
 });
 
 test('a linked worktree is its own checkout, and an unnamed one is invisible', { skip: !GIT }, async (t) => {
-  const dir = initRepoWithCommit('glissa-ingest-git-worktree-');
+  const dir = initRepoWithCommit('glimmervoid-ingest-git-worktree-');
   const worktreeDir = path.join(path.dirname(dir), `${path.basename(dir)}-wt`);
   t.after(() => cleanup(dir));
   t.after(() => cleanup(worktreeDir));
-  git(['worktree', 'add', worktreeDir, '-b', 'glissa/session'], dir);
+  git(['worktree', 'add', worktreeDir, '-b', 'glimmervoid/session'], dir);
 
   const unnamed: GitIngestEvent[] = [];
   const unnamedTimers = fakeTimers();
@@ -436,11 +436,11 @@ test('a linked worktree is its own checkout, and an unnamed one is invisible', {
   assert.equal(named.length, 1, `expected one event, got ${JSON.stringify(named)}`);
   assert.equal(named[0].kind, 'commit');
   assert.equal(named[0].scope.root, worktreeDir, 'the scope is the worktree, not the repo it forked from');
-  assert.match(named[0].summary, /^commit [0-9a-f]{7} on glissa\/session: commit inside the worktree$/);
+  assert.match(named[0].summary, /^commit [0-9a-f]{7} on glimmervoid\/session: commit inside the worktree$/);
 });
 
 test('the lane publishes git events through the normalizer, and builds them into the digest', { skip: !GIT }, async (t) => {
-  const dir = initRepoWithCommit('glissa-ingest-git-lane-');
+  const dir = initRepoWithCommit('glimmervoid-ingest-git-lane-');
   t.after(() => cleanup(dir));
   const timers = fakeTimers();
   const lane = createIngestLane({

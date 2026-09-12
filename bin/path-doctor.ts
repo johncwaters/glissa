@@ -65,25 +65,25 @@ function formatPathNotice({ installedBinDir, onPathFlag, platform }: PathNoticeS
   const dir = installedBinDir || '(unknown)';
   if (onPathFlag) {
     return [
-      'glissa installed. Its command directory is on your PATH:',
+      'glimmervoid installed. Its command directory is on your PATH:',
       `  ${dir}`,
-      'Run "glissa" to start, or "glissa doctor" to check your setup.',
+      'Run "glimmervoid" to start, or "glimmervoid doctor" to check your setup.',
     ].join('\n');
   }
   const lines = [
-    'glissa was installed, but its command directory is NOT on your PATH:',
+    'glimmervoid was installed, but its command directory is NOT on your PATH:',
     `  ${dir}`,
-    'That is why typing "glissa" is not recognized yet. To fix it:',
+    'That is why typing "glimmervoid" is not recognized yet. To fix it:',
   ];
   if (isWin(platform)) {
     lines.push('  In PowerShell (adds it to your user PATH, permanent):');
     lines.push(`    [Environment]::SetEnvironmentVariable("PATH", [Environment]::GetEnvironmentVariable("PATH","User") + ";${dir}", "User")`);
-    lines.push('  Then open a NEW terminal and run "glissa".');
+    lines.push('  Then open a NEW terminal and run "glimmervoid".');
     lines.push('  (Reinstalling Node.js from the official installer also adds this directory for you.)');
   }
   if (!isWin(platform)) {
     lines.push(`  Add to your shell profile:  export PATH="$PATH:${dir}"`);
-    lines.push('  Then open a new terminal and run "glissa".');
+    lines.push('  Then open a new terminal and run "glimmervoid".');
   }
   lines.push('See the README "Troubleshooting" section for more, including pnpm setups.');
   return lines.join('\n');

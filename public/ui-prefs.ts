@@ -1,7 +1,7 @@
 import { getJSON, setJSON } from './local-store.ts';
 
-const STORAGE_KEY = 'glissa-ui-prefs';
-const SIDEBAR_WIDTH_KEY = 'glissa:sidebar-width';
+const STORAGE_KEY = 'glimmervoid-ui-prefs';
+const SIDEBAR_WIDTH_KEY = 'glimmervoid:sidebar-width';
 
 export interface UiPrefs {
   soundEnabled: boolean;

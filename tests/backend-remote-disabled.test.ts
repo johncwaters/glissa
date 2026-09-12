@@ -30,11 +30,11 @@ function ctx(): RemoteOffContext {
 }
 
 test.before(async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-remote-off-'));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-remote-off-'));
   const cfgPath = path.join(tmpDir, 'config.json');
   fs.writeFileSync(cfgPath, JSON.stringify({ projects: [], teams: [], repoRoots: [] }, null, 2), 'utf8');
-  const prevEnv = process.env.GLISSA_CONFIG;
-  process.env.GLISSA_CONFIG = cfgPath;
+  const prevEnv = process.env.GLIMMERVOID_CONFIG;
+  process.env.GLIMMERVOID_CONFIG = cfgPath;
 
   const server = http.createServer();
   const backend = createBackend(server, { staticDir: null });
@@ -51,8 +51,8 @@ test.after(async () => {
   backend.shutdown();
   server.closeAllConnections();
   await closeServer(server);
-  if (prevEnv == null) delete process.env.GLISSA_CONFIG;
-  if (prevEnv != null) process.env.GLISSA_CONFIG = prevEnv;
+  if (prevEnv == null) delete process.env.GLIMMERVOID_CONFIG;
+  if (prevEnv != null) process.env.GLIMMERVOID_CONFIG = prevEnv;
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -138,14 +138,14 @@ test('a foreign Origin is refused by a bare socket destroy, with no HTTP status 
 });
 
 test('a disabled remote block with a publicHost grants no extra origin', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-remote-off-host-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-remote-off-host-'));
   const cfgPath = path.join(dir, 'config.json');
   fs.writeFileSync(cfgPath, JSON.stringify({
     projects: [], teams: [], repoRoots: [],
-    remote: { enabled: false, port: null, publicHost: 'glissa.test', allowedOrigins: ['https://glissa.test'] },
+    remote: { enabled: false, port: null, publicHost: 'glimmervoid.test', allowedOrigins: ['https://glimmervoid.test'] },
   }, null, 2), 'utf8');
-  const outerConfig = process.env.GLISSA_CONFIG;
-  process.env.GLISSA_CONFIG = cfgPath;
+  const outerConfig = process.env.GLIMMERVOID_CONFIG;
+  process.env.GLIMMERVOID_CONFIG = cfgPath;
 
   const otherServer = http.createServer();
   const otherBackend = createBackend(otherServer, { staticDir: null });
@@ -154,7 +154,7 @@ test('a disabled remote block with a publicHost grants no extra origin', async (
 
   try {
     assert.equal(otherBackend.remote.enabled, false);
-    const ws = new WebSocket(`ws://127.0.0.1:${otherPort}/control`, { origin: 'https://glissa.test' });
+    const ws = new WebSocket(`ws://127.0.0.1:${otherPort}/control`, { origin: 'https://glimmervoid.test' });
     const outcome = await new Promise<string>((resolve) => {
       ws.on('open', () => resolve('open'));
       ws.on('error', () => resolve('refused'));
@@ -165,8 +165,8 @@ test('a disabled remote block with a publicHost grants no extra origin', async (
     otherBackend.shutdown();
     otherServer.closeAllConnections();
     await closeServer(otherServer);
-    if (outerConfig == null) delete process.env.GLISSA_CONFIG;
-    if (outerConfig != null) process.env.GLISSA_CONFIG = outerConfig;
+    if (outerConfig == null) delete process.env.GLIMMERVOID_CONFIG;
+    if (outerConfig != null) process.env.GLIMMERVOID_CONFIG = outerConfig;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

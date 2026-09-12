@@ -148,15 +148,15 @@ test('applyRules report mode records findings without mutating', () => {
   assert.equal(findings.length, 1);
 });
 
-test('applyRules honors the bare glissa-no-fix marker (skips everything)', () => {
-  const input = `glissa-no-fix${NL}a   `;
+test('applyRules honors the bare glimmervoid-no-fix marker (skips everything)', () => {
+  const input = `glimmervoid-no-fix${NL}a   `;
   const { content, changed } = applyRules(input, allRules);
   assert.equal(content, input);
   assert.equal(changed, false);
 });
 
-test('applyRules honors a per-rule glissa-no-fix:trailingWs marker', () => {
-  const input = `${BOM}glissa-no-fix:trailingWs${NL}a   `;
+test('applyRules honors a per-rule glimmervoid-no-fix:trailingWs marker', () => {
+  const input = `${BOM}glimmervoid-no-fix:trailingWs${NL}a   `;
   const rules = { bom: { enabled: true, mode: 'fix' }, trailingWs: { enabled: true, mode: 'fix' } };
   const { content } = applyRules(input, rules);
 
@@ -166,8 +166,8 @@ test('applyRules honors a per-rule glissa-no-fix:trailingWs marker', () => {
 
 test('exemptions distinguishes bare marker from per-rule marker', () => {
   assert.deepEqual(exemptions('nothing here'), { all: false, rules: new Set() });
-  assert.equal(exemptions('glissa-no-fix').all, true);
-  const perRule = exemptions('glissa-no-fix:slop');
+  assert.equal(exemptions('glimmervoid-no-fix').all, true);
+  const perRule = exemptions('glimmervoid-no-fix:slop');
   assert.equal(perRule.all, false);
   assert.equal(perRule.rules.has('slop'), true);
 });
@@ -181,8 +181,8 @@ test('applyRules threads ctx to the slop rule and never mutates for it (even in 
   assert.ok(findings.some((f) => f.rule === 'slop' && f.subrule === 'debug-leftover'));
 });
 
-test('applyRules honors a per-rule glissa-no-fix:slop marker', () => {
-  const input = `glissa-no-fix:slop${NL}console.log(1)`;
+test('applyRules honors a per-rule glimmervoid-no-fix:slop marker', () => {
+  const input = `glimmervoid-no-fix:slop${NL}console.log(1)`;
   const rules = { slop: { enabled: true, mode: 'report' } };
   const { findings } = applyRules(input, rules, { relPath: 'a.js' });
   assert.equal(findings.some((f) => f.rule === 'slop'), false);

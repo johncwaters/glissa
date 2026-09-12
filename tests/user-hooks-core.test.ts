@@ -135,14 +135,14 @@ test('hooksForProject carries enabled global hooks and enabled hooks naming the 
 });
 
 test('appendUserHooks lands after existing entries and writes a timeout only when the record has one', () => {
-  const block: HooksBlock = { Stop: [{ hooks: [{ type: 'http', url: 'glissa' }] }] };
+  const block: HooksBlock = { Stop: [{ hooks: [{ type: 'http', url: 'glimmervoid' }] }] };
   const hooks: UserHook[] = [
     { id: 'a', name: 'a', event: 'Stop', type: 'command', command: 'say done', enabled: true },
     { id: 'b', name: 'b', event: 'PreToolUse', matcher: 'Bash', type: 'http', url: 'http://x', timeout: 30, enabled: true },
   ];
   core.appendUserHooks(block, hooks);
   assert.deepEqual(block.Stop, [
-    { hooks: [{ type: 'http', url: 'glissa' }] },
+    { hooks: [{ type: 'http', url: 'glimmervoid' }] },
     { hooks: [{ type: 'command', command: 'say done' }] },
   ]);
   assert.deepEqual(block.PreToolUse, [{ matcher: 'Bash', hooks: [{ type: 'http', url: 'http://x', timeout: 30 }] }]);

@@ -53,10 +53,10 @@ export function showDesktopNotification({
   try {
     const options = {
       body: String(message || 'Session needs attention'),
-      tag: `glissa-${session || ''}-${category || ''}`,
+      tag: `glimmervoid-${session || ''}-${category || ''}`,
       renotify: true,
     } as NotificationOptions;
-    const n = new notificationApi('Glissa', options);
+    const n = new notificationApi('Glimmervoid', options);
     n.onclick = () => {
       window.focus();
       if (kind === 'plan' && typeof session === 'string') {

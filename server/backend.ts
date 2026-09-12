@@ -5,8 +5,8 @@ import path from 'node:path';
 import packageJson from '../package.json' with { type: 'json' };
 import { resolveAdapter } from '../session/adapters/index.ts';
 import type { Session } from '../session/sessions.ts';
-import { createConfigStore, generateProjectId, ensureProjectIds, glissaHomeDir } from './config-store.ts';
-import type { GlissaConfig } from './config-store.ts';
+import { createConfigStore, generateProjectId, ensureProjectIds, glimmervoidHomeDir } from './config-store.ts';
+import type { GlimmervoidConfig } from './config-store.ts';
 import { createLifecycle } from './server-lifecycle.ts';
 import { execFileAsync, spawn } from './child-process-safe.ts';
 import { createBackendHttpApp } from './backend-http.ts';
@@ -46,8 +46,8 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
 
   const configStore = createConfigStore({ settingsDefaults });
   const { config } = configStore;
-  const port = process.env.GLISSA_PORT
-    ? Number.parseInt(process.env.GLISSA_PORT, 10)
+  const port = process.env.GLIMMERVOID_PORT
+    ? Number.parseInt(process.env.GLIMMERVOID_PORT, 10)
     : (config.port || 3000);
 
   const trust = createBackendTrust({
@@ -248,7 +248,7 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
   void rtkInstall.maybeInstall();
   laneAssembly.startRuntimeLanes();
 
-  function applySettingsReload(newConfig: GlissaConfig): void {
+  function applySettingsReload(newConfig: GlimmervoidConfig): void {
     configStore.applySettings(newConfig);
     updateCheck.applySettings();
     for (const [, sess] of sessions) {
@@ -263,7 +263,6 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
 
   const updateCheck = createBackendUpdateCheck({
     config,
-    isLocalConfig: configStore.isLocalConfig,
     currentVersion: packageJson.version,
     platform: process.platform,
     checkForUpdate: options.checkForUpdate || undefined,
@@ -279,7 +278,7 @@ function createBackend(httpServer: Server, options: CreateBackendOptions = {}) {
     runCommand: execFileAsync,
     fsPromises: fs.promises,
     packageRoot,
-    journalPath: path.join(glissaHomeDir(), 'update-journal.json'),
+    journalPath: path.join(glimmervoidHomeDir(), 'update-journal.json'),
     getUpdateStatus: updateCheck.getStatus,
     getUpdateChannel: () => normalizeUpdateChannel(config.updateChannel),
     broadcastControl: (message) => {

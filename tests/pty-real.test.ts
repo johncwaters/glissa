@@ -91,7 +91,7 @@ test('Session guards a real unix pty socket past the rethrow threshold', { skip:
 });
 
 test('Session carries real pty output and a real exit code through its events', async () => {
-  const { session } = makeRealSession({ script: 'echo glissa-pty-marker; exit 7', id: 'pty-real-exit' });
+  const { session } = makeRealSession({ script: 'echo glimmervoid-pty-marker; exit 7', id: 'pty-real-exit' });
   let output = '';
   const exits: Record<string, unknown>[] = [];
   session.on('data', (chunk) => { output += chunk; });
@@ -99,7 +99,7 @@ test('Session carries real pty output and a real exit code through its events', 
   try {
     await session.start();
     assert.ok(await waitFor(() => exits.length > 0), 'real pty never reported exit');
-    assert.match(output, /glissa-pty-marker/);
+    assert.match(output, /glimmervoid-pty-marker/);
     assert.equal(exits[0].exitCode, 7);
     assert.equal(session.state, STATES.FAILED);
   } finally {

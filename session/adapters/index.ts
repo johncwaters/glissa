@@ -144,7 +144,7 @@ function resolveAdapter(
 ): Adapter | null {
   const adapter = getAdapter(agentId);
   if (adapter) return adapter;
-  warn(`[glissa]${label ? ` ${label}:` : ""} unknown agent "${agentId}", falling back to ${DEFAULT_AGENT_ID}`);
+  warn(`[glimmervoid]${label ? ` ${label}:` : ""} unknown agent "${agentId}", falling back to ${DEFAULT_AGENT_ID}`);
   return ADAPTERS.get(DEFAULT_AGENT_ID) ?? null;
 }
 

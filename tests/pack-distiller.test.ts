@@ -294,7 +294,7 @@ test('the prompt file names the target as read-only context and the spawn runs f
   assert.match(promptWrite.content, /C:\/repo\/AGENTS\.md/);
   assert.ok(promptWrite.content.includes('Write a one page architecture brief.'));
   assert.equal(promptWrite.content.includes(buildStampLine(HASHES)), false);
-  assert.match(promptWrite.content, /Glissa alone writes that output file/);
+  assert.match(promptWrite.content, /Glimmervoid alone writes that output file/);
   assert.match(promptWrite.content, /\/tmp\/house-rules-0\.json/);
   assert.equal(spawn.cwd, '/tmp');
   assert.equal(spawn.id, 'pack-distill:house-rules#0');
@@ -305,7 +305,7 @@ test('hostile instructions stay byte-identical in the prompt file and never reac
   const hostileInstructions = 'Quote "this" and preserve %PATH% ^ & | < > plus \'single quotes\'.';
   const spec = specWithDistill();
   entryOf(spec).instructions = hostileInstructions;
-  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-distiller-hostile-'));
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-pack-distiller-hostile-'));
   const resultPath = path.join(workDir, 'result.json');
   try {
     const h = harness({
@@ -402,7 +402,7 @@ test('an ELOOP writer refusal is reported as an unsafe output path', async () =>
 });
 
 test('a final symlink planted after output resolution is refused without changing its target', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-distiller-symlink-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-pack-distiller-symlink-'));
   const packsDirectory = path.join(root, 'packs');
   const outputDirectory = path.join(packsDirectory, 'sources', 'demo');
   const externalTarget = path.join(root, 'external.md');
@@ -425,7 +425,7 @@ test('a final symlink planted after output resolution is refused without changin
 });
 
 test('the output writer creates missing parent directories', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-distiller-parent-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-pack-distiller-parent-'));
   const outputPath = path.join(root, 'new', 'nested', 'brief.md');
   try {
     await writeOutputNoFollow(outputPath, 'derived\n');
@@ -436,7 +436,7 @@ test('the output writer creates missing parent directories', async () => {
 });
 
 test('a failed output rename leaves the old derived source byte-identical', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-distiller-rename-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-pack-distiller-rename-'));
   const outputPath = path.join(root, 'brief.md');
   fs.writeFileSync(outputPath, 'old bytes\n', 'utf8');
   const originalRename = fs.promises.rename;
@@ -454,7 +454,7 @@ test('a failed output rename leaves the old derived source byte-identical', asyn
   }
 });
 
-test('the post-write check rejects storage that changes Glissa rendered bytes', async () => {
+test('the post-write check rejects storage that changes Glimmervoid rendered bytes', async () => {
   const h = harness({
     onWrite: (files, fullPath) => {
       files[fullPath] = stampedFile([{ path: 'AGENTS.md', fullPath: 'C:/repo/AGENTS.md', sha256: 'c'.repeat(64) }]);
@@ -466,7 +466,7 @@ test('the post-write check rejects storage that changes Glissa rendered bytes', 
   assert.match(String(report.reason), /sources changed/);
 });
 
-test('the post-write check rejects storage that drops Glissa stamp', async () => {
+test('the post-write check rejects storage that drops Glimmervoid stamp', async () => {
   const h = harness({
     onWrite: (files, fullPath) => { files[fullPath] = '# Brief\n\nno stamp\n'; },
   });
@@ -484,7 +484,7 @@ test('a NO_CHANGE verdict is accepted once the stamp on disk is current', async 
   assert.equal(report.verdict, 'NO_CHANGE');
 });
 
-test('Glissa renders the sole output from validated structured content', async () => {
+test('Glimmervoid renders the sole output from validated structured content', async () => {
   const content = '# Agent body\r\n\r\nGenerated text.\r\n';
   const h = harness({
     verdicts: [{ ok: true, verdict: 'DISTILLED', summary: 'rendered', content }],
@@ -501,7 +501,7 @@ test('Glissa renders the sole output from validated structured content', async (
 });
 
 test('a malformed structured result fails the distill and writes nothing', async () => {
-  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-distiller-malformed-'));
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-pack-distiller-malformed-'));
   const resultPath = path.join(workDir, 'result.json');
   try {
     fs.writeFileSync(resultPath, JSON.stringify({ verdict: 'DISTILLED', content: 42 }), 'utf8');
@@ -709,7 +709,7 @@ test('enabled: start() runs one pass immediately and arms an unref-ed interval',
   });
   await h.distiller.start();
 
-  assert.equal(h.spawns.length, 1, 'a source edited while Glissa was down is caught at boot');
+  assert.equal(h.spawns.length, 1, 'a source edited while Glimmervoid was down is caught at boot');
   assert.equal(h.intervals.length, 1);
   assert.equal(h.intervals[0].ms, 6 * 3600000);
   await h.distiller.stop();
@@ -752,11 +752,11 @@ test('stop() drains a distill that is already running', async () => {
 
 
 test('readDistillResult distinguishes unreadable files from invalid JSON', async () => {
-  const missing = await readDistillResult('/no/such/glissa-distill-result.json');
+  const missing = await readDistillResult('/no/such/glimmervoid-distill-result.json');
   assert.equal(missing.verdict, 'ERROR');
   assert.match(String(missing.summary), /no readable result file/);
 
-  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-distiller-test-'));
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-pack-distiller-test-'));
   const resultPath = path.join(workDir, 'result.json');
   try {
     fs.writeFileSync(resultPath, '{not json', 'utf8');
@@ -769,7 +769,7 @@ test('readDistillResult distinguishes unreadable files from invalid JSON', async
 });
 
 test('an oversized result file fails before parsing and writes no pack output', async () => {
-  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-pack-distiller-large-result-'));
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-pack-distiller-large-result-'));
   const resultPath = path.join(workDir, 'result.json');
   try {
     fs.writeFileSync(resultPath, 'x'.repeat(MAX_DISTILL_RESULT_BYTES + 1), 'utf8');
@@ -818,7 +818,7 @@ test('the pure result contract validates content before the renderer owns the st
   );
 });
 
-test('the prompt permits one structured result file and reserves target rendering for Glissa', () => {
+test('the prompt permits one structured result file and reserves target rendering for Glimmervoid', () => {
   const prompt = buildPackDistillPrompt({
     outputPath: '/packs/derived.md',
     sources: HASHES,

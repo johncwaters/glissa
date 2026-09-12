@@ -59,28 +59,28 @@ test('hosts that only look like loopback are refused whatever the port', () => {
 });
 
 test('a missing Origin is allowed by default and refused where the caller demands one', () => {
-  assert.equal(decideOriginAllowed(undefined, ['https://glissa.test']), true);
-  assert.equal(decideOriginAllowed('', ['https://glissa.test']), true);
-  assert.equal(decideOriginAllowed(undefined, ['https://glissa.test'], { requireOrigin: true }), false);
-  assert.equal(decideOriginAllowed('', ['https://glissa.test'], { requireOrigin: true }), false);
+  assert.equal(decideOriginAllowed(undefined, ['https://glimmervoid.test']), true);
+  assert.equal(decideOriginAllowed('', ['https://glimmervoid.test']), true);
+  assert.equal(decideOriginAllowed(undefined, ['https://glimmervoid.test'], { requireOrigin: true }), false);
+  assert.equal(decideOriginAllowed('', ['https://glimmervoid.test'], { requireOrigin: true }), false);
 });
 
 test('hostOfOrigin reads the host an allow-list entry names, wildcard included', () => {
-  assert.equal(hostOfOrigin('https://glissa.test'), 'glissa.test');
+  assert.equal(hostOfOrigin('https://glimmervoid.test'), 'glimmervoid.test');
   assert.equal(hostOfOrigin('https://Box.TS.net:8443'), 'box.ts.net');
   assert.equal(hostOfOrigin('https://*.ts.net'), '*.ts.net');
   assert.equal(hostOfOrigin('nonsense'), '');
 });
 
 test('a configured origin is allowed by exact normalized match', () => {
-  assert.equal(decideOriginAllowed('https://glissa.test', ['https://glissa.test']), true);
-  assert.equal(decideOriginAllowed('HTTPS://Glissa.Test/', ['https://glissa.test']), true);
-  assert.equal(decideOriginAllowed('https://glissa.test:443', ['https://glissa.test']), true);
+  assert.equal(decideOriginAllowed('https://glimmervoid.test', ['https://glimmervoid.test']), true);
+  assert.equal(decideOriginAllowed('HTTPS://Glimmervoid.Test/', ['https://glimmervoid.test']), true);
+  assert.equal(decideOriginAllowed('https://glimmervoid.test:443', ['https://glimmervoid.test']), true);
 });
 
 test('a scheme or port mismatch is refused even when the host matches', () => {
-  assert.equal(decideOriginAllowed('http://glissa.test', ['https://glissa.test']), false);
-  assert.equal(decideOriginAllowed('https://glissa.test:8443', ['https://glissa.test']), false);
+  assert.equal(decideOriginAllowed('http://glimmervoid.test', ['https://glimmervoid.test']), false);
+  assert.equal(decideOriginAllowed('https://glimmervoid.test:8443', ['https://glimmervoid.test']), false);
 });
 
 test('a host wildcard matches one or more labels below it, never the apex', () => {
@@ -94,8 +94,8 @@ test('a host wildcard matches one or more labels below it, never the apex', () =
 });
 
 test('an unparseable Origin is refused regardless of the list', () => {
-  assert.equal(decideOriginAllowed('null', ['https://glissa.test']), false);
-  assert.equal(decideOriginAllowed('https://glissa.test/path', ['https://glissa.test']), false);
+  assert.equal(decideOriginAllowed('null', ['https://glimmervoid.test']), false);
+  assert.equal(decideOriginAllowed('https://glimmervoid.test/path', ['https://glimmervoid.test']), false);
 });
 
 test('a garbage allow-list entry is skipped, not treated as a wildcard', () => {

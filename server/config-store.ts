@@ -5,7 +5,7 @@ import os from 'node:os';
 
 import { canonicalizePath, equalsIgnoringCaseOnWindows } from '../shared/paths.ts';
 import { DEFAULT_BRANCH_GC_PREFIXES } from './core/branch-gc-core.ts';
-import { decideConfigPath, glissaHomeDir as resolveGlissaHomeDir } from './core/config-path-core.ts';
+import { decideConfigPath, glimmervoidHomeDir as resolveGlimmervoidHomeDir } from './core/config-path-core.ts';
 import { readEnvSecrets, withEnvSecrets, withoutEnvSecrets } from './core/config-secrets-core.ts';
 import { BranchGcFileSettings, Config, configIssueMessage, RUNTIME_CONFIG_SCALAR_KEYS } from '../shared/contracts/index.ts';
 import { isPlainObject } from './core/usage-number-core.ts';
@@ -13,10 +13,9 @@ import {
   INGEST_SPEC, MEMORY_SPEC, MILL_METRICS_SPEC, PACK_DISTILLER_SPEC, pickMillBlock,
 } from './core/settings-mill-core.ts';
 import { writeJsonAtomicSync, writeTextAtomicSync } from './json-file.ts';
-import { packageRoot } from './runtime-paths.ts';
 
 type ProjectEntry = Config['projects'][number] & { id: string; name: string };
-interface GlissaConfig extends Config {
+interface GlimmervoidConfig extends Config {
   projects: ProjectEntry[];
 }
 type ConfigValidation = { ok: true } | { ok: false; errors: string[] };
@@ -107,7 +106,7 @@ const DEFAULT_CONFIG = {
 
 type DefaultConfig = typeof DEFAULT_CONFIG;
 
-const DEFAULT_CONFIG_BY_KEY: GlissaConfig = DEFAULT_CONFIG;
+const DEFAULT_CONFIG_BY_KEY: GlimmervoidConfig = DEFAULT_CONFIG;
 
 const CONFIG_DIR_MODE = 0o700;
 const CONFIG_FILE_MODE = 0o600;
@@ -122,8 +121,8 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function glissaHomeDir(): string {
-  return resolveGlissaHomeDir(os.homedir(), process.env);
+function glimmervoidHomeDir(): string {
+  return resolveGlimmervoidHomeDir(os.homedir(), process.env);
 }
 
 function restrictMode(target: string, mode: number): void {
@@ -135,10 +134,10 @@ function restrictMode(target: string, mode: number): void {
 }
 
 function resolveConfigPath(): string {
+  const homeDir = glimmervoidHomeDir();
   const decided = decideConfigPath({
     env: process.env,
-    homeDir: glissaHomeDir(),
-    packageRoot,
+    homeDir,
   }, (candidate: string) => fs.existsSync(candidate));
   if (decided.path) return decided.path;
   if (decided.source === 'env') {
@@ -147,7 +146,6 @@ function resolveConfigPath(): string {
   }
 
   const homeConfig = decided.homePath;
-  const homeDir = glissaHomeDir();
   fs.mkdirSync(homeDir, { recursive: true, mode: CONFIG_DIR_MODE });
   restrictMode(homeDir, CONFIG_DIR_MODE);
   fs.writeFileSync(homeConfig, JSON.stringify(DEFAULT_CONFIG, null, 2), { encoding: 'utf8', mode: CONFIG_FILE_MODE });
@@ -184,7 +182,7 @@ function validateConfig(candidate: unknown): ConfigValidation {
   return { ok: true };
 }
 
-function normalizeConfigFile(candidate: unknown): GlissaConfig {
+function normalizeConfigFile(candidate: unknown): GlimmervoidConfig {
   if (!isPlainObject(candidate)) throw new Error('config must be a plain object');
   const draft: Record<string, unknown> = candidate;
   if (draft.millEnabled === undefined && draft.packsAutoRebuild === false) draft.millEnabled = false;
@@ -198,7 +196,7 @@ function normalizeConfigFile(candidate: unknown): GlissaConfig {
   }
   const validation = validateConfig(draft);
   if ('errors' in validation) throw new Error(`validation failed: ${validation.errors.join('; ')}`);
-  return draft as GlissaConfig;
+  return draft as GlimmervoidConfig;
 }
 
 function writeBackupContent(backupPath: string, content: string): void {
@@ -211,7 +209,7 @@ function writeBackupContent(backupPath: string, content: string): void {
 }
 
 interface LoadedConfig {
-  config: GlissaConfig;
+  config: GlimmervoidConfig;
   loadedContent: string;
 }
 
@@ -238,7 +236,7 @@ function loadConfigFile(configPath: string, { exitOnError = true }: { exitOnErro
     } catch (backupErr) {
       console.warn(`[config] Failed to save invalid config copy ${invalidBackupPath}:`, errorCode(backupErr));
     }
-    const message = `[config] Could not load ${configPath}: ${errorMessage(err)}. The broken file was copied to ${invalidBackupPath} when possible. Restore from ${configPath}.boot.bak or ${configPath}.bak, then restart Glissa.`;
+    const message = `[config] Could not load ${configPath}: ${errorMessage(err)}. The broken file was copied to ${invalidBackupPath} when possible. Restore from ${configPath}.boot.bak or ${configPath}.bak, then restart Glimmervoid.`;
     if (!exitOnError) return { error: err, message, invalidBackupPath };
     console.error(message);
     process.exit(1);
@@ -250,7 +248,7 @@ function topLevelKeyCount(candidate: unknown): number {
   return Object.keys(candidate).length;
 }
 
-function isSuspectedExternalWipe(candidate: GlissaConfig, currentConfig: GlissaConfig): boolean {
+function isSuspectedExternalWipe(candidate: GlimmervoidConfig, currentConfig: GlimmervoidConfig): boolean {
   const currentKeyCount = topLevelKeyCount(currentConfig);
   if (currentKeyCount === 0) return false;
   const resolvedCandidate = { ...candidate, branchGc: resolveBranchGc(candidate.branchGc) };
@@ -343,7 +341,6 @@ function createConfigStore({ settingsDefaults }: { settingsDefaults?: Partial<De
 
   const launchDefaultKeys = new Set(Object.keys(settingsDefaults || {}));
 
-  const isLocalConfig = configPath === path.join(packageRoot, 'config.json');
   const envSecrets = readEnvSecrets(process.env);
   const loadedConfig = loadConfigFile(configPath);
   const config = loadedConfig.config;
@@ -363,7 +360,7 @@ function createConfigStore({ settingsDefaults }: { settingsDefaults?: Partial<De
   let _lastWrittenContent: string | null = null;
   let _lastAppliedContent: string | null = null;
 
-  function save(mutatorFn: (config: GlissaConfig) => void): GlissaConfig | null {
+  function save(mutatorFn: (config: GlimmervoidConfig) => void): GlimmervoidConfig | null {
     let loaded: LoadedConfig | FailedConfigLoad;
     try {
       loaded = loadConfigFile(configPath, { exitOnError: false });
@@ -411,7 +408,6 @@ function createConfigStore({ settingsDefaults }: { settingsDefaults?: Partial<De
 
   function getSettings() {
     return {
-      isLocalConfig,
       port: config.port,
       autoRecoverSeconds: config.autoRecoverSeconds,
       inputGraceSeconds: config.inputGraceSeconds,
@@ -460,7 +456,7 @@ function createConfigStore({ settingsDefaults }: { settingsDefaults?: Partial<De
     return value === effectiveDefaults[key];
   }
 
-  function applySettings(newConfig: Partial<GlissaConfig>): void {
+  function applySettings(newConfig: Partial<GlimmervoidConfig>): void {
     for (const key of RUNTIME_CONFIG_SCALAR_KEYS) {
       if (key === 'integrationBranch') {
         if (newConfig[key] === undefined) continue;
@@ -495,7 +491,7 @@ function createConfigStore({ settingsDefaults }: { settingsDefaults?: Partial<De
     }
   }
 
-  function watchForChanges(callback: (config: GlissaConfig) => void): () => void {
+  function watchForChanges(callback: (config: GlimmervoidConfig) => void): () => void {
     let reloadTimer: NodeJS.Timeout | null = null;
     let watcher: fs.FSWatcher | null = null;
 
@@ -507,7 +503,7 @@ function createConfigStore({ settingsDefaults }: { settingsDefaults?: Partial<De
 
       if (_lastWrittenContent !== null && data === _lastWrittenContent) return;
       if (_lastAppliedContent !== null && data === _lastAppliedContent) return;
-      let newConfig: GlissaConfig;
+      let newConfig: GlimmervoidConfig;
       try {
         newConfig = withEnvSecrets(normalizeConfigFile(JSON.parse(data)), envSecrets);
       } catch (parseErr) {
@@ -554,7 +550,6 @@ function createConfigStore({ settingsDefaults }: { settingsDefaults?: Partial<De
   return {
     config,
     configPath,
-    isLocalConfig,
     save,
     getSettings,
     applySettings,
@@ -567,7 +562,7 @@ function createConfigStore({ settingsDefaults }: { settingsDefaults?: Partial<De
 type ConfigStore = ReturnType<typeof createConfigStore>;
 
 export {
-  createConfigStore, resolveConfigPath, glissaHomeDir, generateProjectId, ensureProjectIds, validateConfig, loadConfigFile,
+  createConfigStore, resolveConfigPath, glimmervoidHomeDir, generateProjectId, ensureProjectIds, validateConfig, loadConfigFile,
   DEFAULT_CONFIG, CONFIG_DIR_MODE, CONFIG_FILE_MODE, SECRET_PRESENCE_SUFFIX,
 };
-export type { BranchGcBlock, ConfigStore, DefaultConfig, GlissaConfig, LoadedConfig, ProjectEntry };
+export type { BranchGcBlock, ConfigStore, DefaultConfig, GlimmervoidConfig, LoadedConfig, ProjectEntry };

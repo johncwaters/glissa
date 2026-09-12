@@ -5,18 +5,18 @@ import os from 'node:os';
 
 import pkg from '../package.json' with { type: 'json' };
 import { execSync } from '../server/child-process-safe.ts';
-import { decideConfigPath, glissaHomeDir } from '../server/core/config-path-core.ts';
+import { decideConfigPath, glimmervoidHomeDir } from '../server/core/config-path-core.ts';
 import { packageRoot } from '../server/runtime-paths.ts';
 import { formatPathNotice, npmGlobalBinDir, onPath, pnpmGlobalBinDir } from './path-doctor.ts';
 
 const args = process.argv.slice(2);
 
 if (args.includes('--help') || args.includes('-h')) {
-  console.log(`Usage: glissa [command] [options]
+  console.log(`Usage: glimmervoid [command] [options]
 
 Commands:
   doctor            Diagnose install / PATH issues and exit
-  agent setup grok  Install Glissa's env-inert Grok hook relay
+  agent setup grok  Install Glimmervoid's env-inert Grok hook relay
   pair              Mint a single-use pairing link for a remote device
   pair --list       List paired devices
   pair --revoke <id>  Revoke a paired device
@@ -33,7 +33,7 @@ Commands:
 Options:
   --name <label>    Label for the device being paired (with: pair)
   --port <number>   Override the server port (default: 3000)
-  --config <path>   Path to config file (default: ~/.glissa/config.json)
+  --config <path>   Path to config file (default: ~/.glimmervoid/config.json)
   --version         Show version number
   --help, -h        Show this help message`);
   process.exit(0);
@@ -59,12 +59,12 @@ function getArgValue(flag: string): string | null {
 
 const configArg = getArgValue('--config');
 if (configArg) {
-  process.env.GLISSA_CONFIG = configArg;
+  process.env.GLIMMERVOID_CONFIG = configArg;
 }
 
 const portArg = getArgValue('--port');
 if (portArg) {
-  process.env.GLISSA_PORT = portArg;
+  process.env.GLIMMERVOID_PORT = portArg;
 }
 
 if (args[0] === 'pair') {
@@ -122,11 +122,10 @@ function firstLineOf(error: unknown): string {
 function resolveConfigPathReadOnly(): string {
   const decided = decideConfigPath({
     env: process.env,
-    homeDir: glissaHomeDir(os.homedir(), process.env),
-    packageRoot,
+    homeDir: glimmervoidHomeDir(os.homedir(), process.env),
   }, (candidate) => fs.existsSync(candidate));
   if (decided.path) return decided.path;
-  if (decided.source === 'env') return `${decided.envPath} (set via GLISSA_CONFIG, but NOT found)`;
+  if (decided.source === 'env') return `${decided.envPath} (set via GLIMMERVOID_CONFIG, but NOT found)`;
   return `${decided.homePath} (created on first run)`;
 }
 
@@ -136,10 +135,10 @@ async function runDoctor(): Promise<void> {
   const pathEnv = process.env.PATH || process.env.Path || '';
   const line = (label: string, value: string) => console.log(`  ${label.padEnd(18)} ${value}`);
 
-  console.log('glissa doctor\n');
+  console.log('glimmervoid doctor\n');
 
   console.log('Versions');
-  line('glissa', pkg.version);
+  line('glimmervoid', pkg.version);
   line('node', process.version);
   line('platform', `${platform} ${process.arch}`);
 
@@ -185,7 +184,7 @@ async function runDoctor(): Promise<void> {
   try {
     const { getRtkPath } = await import('../server/rtk-resolver.ts');
     const rtkPath = getRtkPath();
-    line('rtk', rtkPath || 'not installed (Glissa installs it when the rtk setting is on)');
+    line('rtk', rtkPath || 'not installed (Glimmervoid installs it when the rtk setting is on)');
   } catch (err) {
     line('rtk', `probe failed: ${firstLineOf(err)}`);
   }

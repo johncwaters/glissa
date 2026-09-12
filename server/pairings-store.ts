@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { canonicalizePath, equalsIgnoringCaseOnWindows } from '../shared/paths.ts';
-import { glissaHomeDir } from './config-store.ts';
+import { glimmervoidHomeDir } from './config-store.ts';
 import {
   decideRedemption, hashSecret, mintDeviceCredential, mintPairingToken,
 } from './core/pairing-token.ts';
@@ -86,7 +86,7 @@ function emptyDoc(): PairingsDocument {
 
 function configSiblingPath(configPath: string | null | undefined, name: string): string {
   if (configPath) return path.join(path.dirname(configPath), name);
-  return path.join(glissaHomeDir(), name);
+  return path.join(glimmervoidHomeDir(), name);
 }
 
 function defaultPairingsPath(configPath?: string | null): string {

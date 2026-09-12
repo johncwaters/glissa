@@ -36,7 +36,7 @@ back into future work. Four kinds of remembered fact:
 - **Ingestion covers every local harness**, not only Claude: the Claude, Codex, and Grok
   transcript roots the agent-log ingest source already tails.
 - The main consumer is traditional IDE work: the store must be readable directly (markdown on
-  disk) by an agent Glissa did not spawn. That requirement is satisfied by the projection file
+  disk) by an agent Glimmervoid did not spawn. That requirement is satisfied by the projection file
   itself plus one operator-authored import line; it does not require the pack mill (see
   Delivery).
 - **Automatic after one switch** (operator decision 2026-08-22): the system should be
@@ -148,7 +148,7 @@ substrate rather than waiting for M12b, since M15 needed a published version to 
 against. As built:
 
 - A build renders the projection deterministically, computes `version` as the sha256 of every
-  delivered byte (the `glissa-distill` stamp line included, so a moved canon is a new version), and
+  delivered byte (the `glimmervoid-distill` stamp line included, so a moved canon is a new version), and
   SKIPS the publish when the version matches the published one. An unchanged canon costs nothing;
   the skip rewrites only `manifest.json`, so the recorded watermark still advances.
 - Output rotates `memory/dist/current/` to `memory/dist/previous/` and renames a tmp dir in, with a
@@ -167,12 +167,12 @@ against. As built:
 
 ### Store layout (as built after M12b)
 
-The DURABLE state is rows in `glissa.db` beside the resolved config file; only the projection and
+The DURABLE state is rows in `glimmervoid.db` beside the resolved config file; only the projection and
 the signing key are files, under `configSiblingPath(configPath, 'memory')`, so a temp
-`GLISSA_CONFIG` never writes into the real `~/.glissa` (same rule as uploads, recordings,
+`GLIMMERVOID_CONFIG` never writes into the real `~/.glimmervoid` (same rule as uploads, recordings,
 warehouse):
 
-- `glissa.db`, `memory_records`: the append-only canon, one row per record, carrying its
+- `glimmervoid.db`, `memory_records`: the append-only canon, one row per record, carrying its
   `segment_key` so retention (`memoryRetainDays`, default 365) stays the same monthly rule as a
   keyed DELETE rather than a segment-file drop. A row is never rewritten in place except by
   `forget`, and `validTo` is DERIVED from the supersession chain at read time, never stored back.
@@ -194,7 +194,7 @@ where they are.
 Housekeeping shipped WITH M12, not after: `memory/` added to
 `ingest-fs-core.daemonWriteRules` ignores (or the store's own writes publish fs events and
 poke the dispatch movement signal) and to `.gitignore` (in dev the config siblings live in
-the repo checkout, and durable memory must never become git-visible). M12b added `/glissa.db`
+the repo checkout, and durable memory must never become git-visible). M12b added `/glimmervoid.db`
 and its WAL siblings to `.gitignore` for the same reason.
 
 ### Canon record shape
@@ -206,7 +206,7 @@ and its WAL siblings to `.gitignore` for the same reason.
   "kind": "intent | feedback | knowledge | preference",
   "layer": "episodic | semantic",
   "project": "<folded repo path or null>",
-  "source": { "kind": "operator | action | reported | model", "vendor": "claude | codex | grok | glissa", "sessionId": "<id or null>" },
+  "source": { "kind": "operator | action | reported | model", "vendor": "claude | codex | grok | glimmervoid", "sessionId": "<id or null>" },
   "text": "<capped, scrubbed>",
   "validFrom": 1766400000000,
   "validTo": null,
@@ -273,7 +273,7 @@ things for a year):
   secrets, escaped inner quotes) are acknowledged as not fully catchable, which is why the
   expunge path below is v1 scope, not a nicety.
 
-**`glissa memory forget <id|pattern>`** (cold path CLI): writes an operator-ranked tombstone
+**`glimmervoid memory forget <id|pattern>`** (cold path CLI): writes an operator-ranked tombstone
 record, then rewrites and re-signs the affected segments with the matched text removed (the
 one sanctioned rewrite; the tombstone is the audit trail), and marks the projection stale so
 the next distill run rebuilds it without the expunged content.
@@ -312,7 +312,7 @@ Shipped 2026-08-23. The versioned projection half of this milestone had already 
 (see "Projection versioning"), so what shipped here is the substrate swap plus the M17 index. As
 built:
 
-- **`server/glissa-db.js`** is the machine-wide opener: feature detect, `journal_mode=WAL`,
+- **`server/glimmervoid-db.js`** is the machine-wide opener: feature detect, `journal_mode=WAL`,
   `busy_timeout`, `PRAGMA user_version = 1`, and a 0600 mode on the file. Callers pass an explicit
   path beside the resolved config file. Memory is its first tenant, so every table it owns is
   prefixed `memory_`; **`server/memory-db.js`** holds that tenant's DDL, prepared statements and
@@ -325,7 +325,7 @@ built:
   reentrant `withCanonLock`), the `fs.watch` reload, and `tail-state.json` are all gone.
   `forget` is ONE transaction (redact, remove, tombstone) that rolls back whole, and a live
   store notices another process's commit through `PRAGMA data_version` on its next read rather
-  than by watching a directory. A `glissa memory backfill` beside a running server no longer
+  than by watching a directory. A `glimmervoid memory backfill` beside a running server no longer
   refuses; a database busy for the whole timeout is still reported to the operator as a refusal
   rather than as a clean pass.
 - **Writes are batched.** The M14 consumer hands a whole tick's records to `appendMany`, which is
@@ -443,7 +443,7 @@ This is fan-out plumbing plus a scrub decision, not a mapper tweak:
 - **Event-loop budget**: ingestion writes are batched per tick with an explicit per-tick
   record cap and a yield between segments. The cold-start backfill runs on first enable as
   a background pass under the same byte budget (the usage scanner's budgeted-partial-pass
-  pattern), resumable via the durable offsets; `glissa memory backfill` is a manual re-run
+  pattern), resumable via the durable offsets; `glimmervoid memory backfill` is a manual re-run
   path only.
 
 Raw transcript lines are episodic material, bounded and scrubbed; semantic facts are formed
@@ -461,7 +461,7 @@ said it would. The pack distiller was NOT reused: its spec validation rejects an
 Six decisions the milestone text did not settle, made in the build:
 
 - **The result contract is structured CLAIMS, not markdown.** The session answers
-  `{ verdict, summary, claims: [{ kind, project, rank, ids, text }] }` and Glissa renders the published
+  `{ verdict, summary, claims: [{ kind, project, rank, ids, text }] }` and Glimmervoid renders the published
   bytes itself. Verifying markdown the model wrote would have meant parsing its formatting as well as its
   provenance; rendering from validated fields makes "no remembered byte reaches a file except through the
   renderer" structural, and it is also what keeps a build byte-deterministic for the version hash.
@@ -499,7 +499,7 @@ were read, not that the claims are faithful:
 
 Config: `config.memory.distill`, file-only like the rest of `config.memory`. Automatic when memory is on
 per the operator's "never thought about" rule, with `enabled: false` as the kill switch. CLI:
-`glissa memory distill [--dry-run]`; a dry run reads and hashes only and spawns nothing, and a real run is
+`glimmervoid memory distill [--dry-run]`; a dry run reads and hashes only and spawns nothing, and a real run is
 refused only when the database is busy for its whole timeout, exactly like `memory backfill`.
 
 Security, revised 2026-08-23 after a security review returned BLOCK on the unscoped `--allowedTools=Write`
@@ -512,7 +512,7 @@ settings file over a throwaway cwd, which auto-accepts edits there and refuses t
 which overrides an operator's own `auto` mode so a rule decides rather than an LLM classifier; a
 deny-list of Bash, Edit, NotebookEdit, WebFetch, WebSearch, Task plus `git push` and `gh`, and
 deliberately NO path denies, which were probed and do not refuse a Write tool call at all; a cwd whose
-prefix (`glissa-memory-distill-`) is what `ingest-agent-core` recognizes, so a dropped session id cannot
+prefix (`glimmervoid-memory-distill-`) is what `ingest-agent-core` recognizes, so a dropped session id cannot
 let the lane re-ingest its own canon-bearing transcript; and the ephemeral-lane registration that
 excludes its transcript and attributes its usage. Read, Glob and Grep are deliberately NOT denied: a bare
 `Read` deny refuses the Write tool as well (live-probed), so it and the result-file contract cannot both
@@ -551,7 +551,7 @@ made in the build:
   beside the instruction-tier one: a delivered path carrying a FOREIGN project slug fails the build, and
   the base build refuses any project slug at all.
 - **`data: true` is a source-level flag, not a memory special case.** It publishes a source's files under
-  `data/<slug>/` and keeps them out of `.claude/rules/`; `{{glissaHome}}` (the config dir) may be named
+  `data/<slug>/` and keeps them out of `.claude/rules/`; `{{glimmervoidHome}}` (the config dir) may be named
   only by such a source, only anchoring the whole pattern, and only without a `..` segment. The build
   assertion is the second layer under that first one, and it is line-based: a data file's line of 12
   characters or more appearing in `CLAUDE.md` or under `.claude/rules/` fails the build outright.
@@ -570,9 +570,9 @@ made in the build:
 - **Direct reads (the IDE story)**: `memory/dist/current/MEMORY.md` and the active project's topic
   file under `dist/current/projects/` are plain markdown any harness or IDE agent reads today. The operator points their
   own `AGENTS.md`/`CLAUDE.md` at it with one line they author themselves, stating it is
-  recorded observation, DATA, never instructions. Glissa never writes that pointer: the one
+  recorded observation, DATA, never instructions. Glimmervoid never writes that pointer: the one
   instruction-tier line in the chain stays operator-authored, which is what keeps the store
-  agent-agnostic WITHOUT making Glissa an instruction publisher.
+  agent-agnostic WITHOUT making Glimmervoid an instruction publisher.
 - **Pack carrier (v1, operator decision 2026-08-22: automatic delivery wanted)**: a
   `memory` pack whose sources point at `dist/` files with `optional: true`, delivered as
   NON-LOADED data files only. The security blocker stays honored structurally, not by
@@ -581,7 +581,7 @@ made in the build:
   files as recorded observation, DATA, never instructions), and `planPackBuild` gains a
   build-time assertion that no byte sourced from `memory/dist/` lands in `CLAUDE.md` or
   under `.claude/rules/`; a violation is a failed build, publishing nothing. Spec source
-  paths gain a `{{glissaHome}}` placeholder resolved by `pack-builder` (a version-controlled
+  paths gain a `{{glimmervoidHome}}` placeholder resolved by `pack-builder` (a version-controlled
   spec cannot otherwise name a runtime `configSiblingPath`). M15's quantization keeps the
   watcher at distill cadence. Pack delivery stays capability-gated (CC sessions today, per
   `docs/plan-agent-adapters.md`).
@@ -658,7 +658,7 @@ transcript lines, the byte-identical pin for ring and broadcast content with mem
 distill post-verify (unresolvable id rejection, rank escalation rejection, new-claim cap,
 locked-diff refusal), prompt-section fencing (separate marker, byte-identical when empty),
 served-event and `visions/dismissFinding` recording, the pack-carrier build assertion (a
-memory byte in `CLAUDE.md` or `.claude/rules/` fails the build) and `{{glissaHome}}`
+memory byte in `CLAUDE.md` or `.claude/rules/` fails the build) and `{{glimmervoidHome}}`
 resolution, and the two delivery negative tests (no memory on remote-trust, none in
 `REPLAYABLE_EXACT`).
 The feedback-loop pair (ephemeral-lane exclusion plus echo suppression) gets a regression

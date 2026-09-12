@@ -60,7 +60,7 @@ function makeSession({ engine, sig = signature(), state = STATES.IDLE, autoRebas
   });
   s.worktreeLifecycle.adoptWorktree({
     worktreeDir: '/wt',
-    branch: 'glissa/session/ar-sess',
+    branch: 'glimmervoid/session/ar-sess',
     base: 'develop',
     hasUnmergedWork: false,
     watch: false,

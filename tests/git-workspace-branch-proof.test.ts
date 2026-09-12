@@ -12,10 +12,10 @@ import { hasGit, git } from './helpers/git-fixture.ts';
 const GIT = hasGit();
 
 function createRepository(): string {
-  const projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-branch-proof-'));
+  const projectPath = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-branch-proof-'));
   try { git(['init', '-b', 'main'], projectPath); } catch { git(['init'], projectPath); }
   git(['config', 'user.email', 'test@example.com'], projectPath);
-  git(['config', 'user.name', 'Glissa Test'], projectPath);
+  git(['config', 'user.name', 'Glimmervoid Test'], projectPath);
   git(['config', 'commit.gpgsign', 'false'], projectPath);
   fs.writeFileSync(path.join(projectPath, 'message.txt'), 'base\n', 'utf8');
   git(['add', '-A'], projectPath);

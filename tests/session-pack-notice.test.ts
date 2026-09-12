@@ -6,7 +6,7 @@ import path from 'node:path';
 import { Session } from '../session/sessions.ts';
 import { fakePty } from './helpers/fake-pty.ts';
 async function makeBuiltRoot(packs: Record<string, string>) {
-  const builtRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'glissa-packnotice-'));
+  const builtRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'glimmervoid-packnotice-'));
   for (const [name, version] of Object.entries(packs)) {
     const currentDir = path.join(builtRoot, name, 'current');
     await fsp.mkdir(currentDir, { recursive: true });
@@ -36,7 +36,7 @@ test('a rebuilt pack arms a notice that names the delivered and the new version'
     assert.equal(s.takePackNoticeContext(), null, 'nothing pending right after the spawn');
     assert.equal(s.notePackUpdate('alpha', 'v-new'), true);
     const notice = s.takePackNoticeContext();
-    assert.match(String(notice), /^\[glissa\] Context pack updated since this session started: "alpha" \(version v-old is now v-new\)\./);
+    assert.match(String(notice), /^\[glimmervoid\] Context pack updated since this session started: "alpha" \(version v-old is now v-new\)\./);
   } finally {
     s.destroy();
     await fsp.rm(builtRoot, { recursive: true, force: true });

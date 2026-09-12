@@ -18,7 +18,7 @@ test('parseCookieHeader splits on semicolons and trims', () => {
 });
 
 test('a duplicated cookie name keeps the first value, so a trailing forgery cannot override', () => {
-  assert.deepEqual(parseCookieHeader('glissa_device=real; glissa_device=forged'), { glissa_device: 'real' });
+  assert.deepEqual(parseCookieHeader('glimmervoid_device=real; glimmervoid_device=forged'), { glimmervoid_device: 'real' });
 });
 
 test('a value containing = keeps everything after the first separator', () => {
@@ -30,10 +30,10 @@ test('serializeSetCookie emits HttpOnly and Path by default', () => {
 });
 
 test('serializeSetCookie renders every flag it is given', () => {
-  const header = serializeSetCookie('glissa_device', 'id.secret', {
+  const header = serializeSetCookie('glimmervoid_device', 'id.secret', {
     maxAgeSeconds: 60, secure: true, sameSite: 'Lax', path: '/', httpOnly: true,
   });
-  assert.equal(header, 'glissa_device=id.secret; Path=/; Max-Age=60; HttpOnly; Secure; SameSite=Lax');
+  assert.equal(header, 'glimmervoid_device=id.secret; Path=/; Max-Age=60; HttpOnly; Secure; SameSite=Lax');
 });
 
 test('serializeSetCookie can omit HttpOnly and Secure', () => {

@@ -36,15 +36,15 @@ test('an unknown requested editor still installs under its own command name', ()
 
 test('the packed extension stamps the relay path it was built from', () => {
   const files = visionsExtensionFiles({
-    manifestJson: '{}', extensionJs: 'a', convertJs: 'b', lspCoreJs: 'c', relayPath: '/opt/glissa/session/visions-relay.js',
+    manifestJson: '{}', extensionJs: 'a', convertJs: 'b', lspCoreJs: 'c', relayPath: '/opt/glimmervoid/session/visions-relay.js',
   });
   assert.deepEqual(files.map((file) => file.path), ['package.json', 'extension.js', 'lsp-convert.js', 'visions-lsp-core.js', 'relay-path.json']);
-  assert.equal(JSON.parse(files[4].data).relayPath, '/opt/glissa/session/visions-relay.js');
+  assert.equal(JSON.parse(files[4].data).relayPath, '/opt/glimmervoid/session/visions-relay.js');
 });
 
 test('installed detection ignores case and blank lines', () => {
-  const stdout = '\nms-python.python\nJohnWaters.Glissa-Visions\n\n';
-  assert.deepEqual(parseInstalledExtensions(stdout), ['ms-python.python', 'JohnWaters.Glissa-Visions']);
-  assert.equal(isExtensionInstalled(stdout, 'johnwaters.glissa-visions'), true);
+  const stdout = '\nms-python.python\nJohnWaters.Glimmervoid-Visions\n\n';
+  assert.deepEqual(parseInstalledExtensions(stdout), ['ms-python.python', 'JohnWaters.Glimmervoid-Visions']);
+  assert.equal(isExtensionInstalled(stdout, 'johnwaters.glimmervoid-visions'), true);
   assert.equal(isExtensionInstalled(stdout, 'johnwaters.other'), false);
 });

@@ -16,7 +16,7 @@ import {
   awaitSessionExit, drainPending, firstLine, raceWithAbort, registerEphemeralSession,
 } from './ephemeral-session.ts';
 import type { RecordLane, SpawnGate } from './ephemeral-session.ts';
-import { isBusyError } from './glissa-db.ts';
+import { isBusyError } from './glimmervoid-db.ts';
 import { createLaneLog } from './lane-log.ts';
 import type { LaneLogger } from './lane-log.ts';
 import { createTickLoop } from './lane-runner.ts';
@@ -28,7 +28,7 @@ const PROMPT_FILE = 'memory-distill-prompt.txt';
 
 const BOOTSTRAP_PROMPT = 'Read memory-distill-prompt.txt and follow all instructions in that file';
 
-const WORK_DIR_PREFIX = 'glissa-memory-distill-';
+const WORK_DIR_PREFIX = 'glimmervoid-memory-distill-';
 
 const MIN_DELTA_CHARS = 4000;
 

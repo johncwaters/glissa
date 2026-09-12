@@ -5,7 +5,7 @@ import { hooksForProject } from '../session/core/user-hooks-core.ts';
 import type { SessionPlanReviewPort } from '../session/sessions.ts';
 import type { GitWorkspace } from '../session/session-worktree-lifecycle.ts';
 import type { ControlBroadcast } from './backend-websockets.ts';
-import type { ConfigStore, GlissaConfig } from './config-store.ts';
+import type { ConfigStore, GlimmervoidConfig } from './config-store.ts';
 import { createRtkInstallWiring } from './rtk-install-wiring.ts';
 import { getRtkPath } from './rtk-resolver.ts';
 import { listPackSpecNamesSync } from './pack-builder.ts';
@@ -14,7 +14,7 @@ import { buildSettingsPayload } from './settings-payload.ts';
 
 interface BackendSessionRuntimeDependencies {
   httpServer: Server;
-  config: GlissaConfig;
+  config: GlimmervoidConfig;
   configStore: ConfigStore;
   getGitWorkspace: () => GitWorkspace | null;
   getPlanReviewPort?: () => SessionPlanReviewPort | null;

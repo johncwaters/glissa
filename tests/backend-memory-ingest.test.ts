@@ -27,13 +27,13 @@ interface BootedBackend {
 }
 
 async function boot(extra: Record<string, unknown>): Promise<BootedBackend> {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memory-ingest-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-memory-ingest-'));
   const configPath = path.join(dir, 'config.json');
   fs.writeFileSync(configPath, JSON.stringify({
     projects: [], teams: [], repoRoots: [], ...extra,
   }, null, 2), 'utf8');
-  const previousConfig = process.env.GLISSA_CONFIG;
-  process.env.GLISSA_CONFIG = configPath;
+  const previousConfig = process.env.GLIMMERVOID_CONFIG;
+  process.env.GLIMMERVOID_CONFIG = configPath;
   const restoreHomes = isolateTranscriptHomes(dir);
   const server = http.createServer();
   const backend = createBackend(server, { staticDir: null });
@@ -51,8 +51,8 @@ async function boot(extra: Record<string, unknown>): Promise<BootedBackend> {
       server.closeAllConnections();
       await closeServer(server);
       restoreHomes();
-      if (previousConfig == null) delete process.env.GLISSA_CONFIG;
-      if (previousConfig != null) process.env.GLISSA_CONFIG = previousConfig;
+      if (previousConfig == null) delete process.env.GLIMMERVOID_CONFIG;
+      if (previousConfig != null) process.env.GLIMMERVOID_CONFIG = previousConfig;
       fs.rmSync(dir, { recursive: true, force: true });
     },
   };

@@ -41,7 +41,7 @@ const START = Date.UTC(2026, 7, 22, 12, 0, 0);
 const DAY = 86400000;
 
 function tempDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-memory-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-memory-'));
 }
 
 type PlantedRow = Omit<MemoryRow, 'seq'> & { seq?: number | null };
@@ -65,7 +65,7 @@ function recordById(store: MemoryStore, id: string): MemoryRecord {
 }
 
 function dbPathFor(dir: string): string {
-  return path.join(dir, 'glissa.db');
+  return path.join(dir, 'glimmervoid.db');
 }
 
 function openStore(dir: string, overrides: StoreOverrides = {}): MemoryStore {
@@ -93,11 +93,11 @@ test.afterEach(async () => {
 test('a canonical project lookup reuses its plan for fresh equal-content project lists', () => {
   const planLookup = createCanonicalProjectLookupPlanner();
   const first = planLookup({
-    project: '/repos/glissa', knownProjects: ['/repos/glissa'], hasCachedProject: false,
+    project: '/repos/glimmervoid', knownProjects: ['/repos/glimmervoid'], hasCachedProject: false,
     cachedProject: null, hasResolver: false,
   });
   const second = planLookup({
-    project: '/repos/glissa', knownProjects: ['/repos/glissa'], hasCachedProject: false,
+    project: '/repos/glimmervoid', knownProjects: ['/repos/glimmervoid'], hasCachedProject: false,
     cachedProject: null, hasResolver: false,
   });
   assert.strictEqual(second, first);
@@ -115,18 +115,18 @@ test('store load drops tail rows for paths that no longer exist', () => {
 
 test('a canonical project lookup invalidates a plan when a known project array is mutated', () => {
   const planLookup = createCanonicalProjectLookupPlanner();
-  const knownProjects = ['/repos/glissa'];
+  const knownProjects = ['/repos/glimmervoid'];
   const first = planLookup({
-    project: '/repos/.glissa-worktrees/glissa-abc123', knownProjects, hasCachedProject: false,
+    project: '/repos/.glimmervoid-worktrees/glimmervoid-abc123', knownProjects, hasCachedProject: false,
     cachedProject: null, hasResolver: false,
   });
   knownProjects[0] = '/repos/other';
   const second = planLookup({
-    project: '/repos/.glissa-worktrees/glissa-abc123', knownProjects, hasCachedProject: false,
+    project: '/repos/.glimmervoid-worktrees/glimmervoid-abc123', knownProjects, hasCachedProject: false,
     cachedProject: null, hasResolver: false,
   });
   assert.notStrictEqual(second, first);
-  assert.equal(second?.canonical, '/repos/glissa');
+  assert.equal(second?.canonical, '/repos/glimmervoid');
 });
 
 test('a canonical project lookup distinguishes colliding legacy plan signature values', () => {
@@ -146,7 +146,7 @@ function readdirStable(dirPath: string): string[] {
 }
 
 function readdirNoDb(dirPath: string): string[] {
-  return readdirStable(dirPath).filter((name) => !name.startsWith('glissa.db'));
+  return readdirStable(dirPath).filter((name) => !name.startsWith('glimmervoid.db'));
 }
 
 function fileHoldsCanary(file: string, canary: string): boolean {
@@ -208,7 +208,7 @@ function forgedRecord(text: string): MemoryRecord {
     kind: 'preference',
     layer: 'episodic',
     project: null,
-    source: { kind: 'operator', vendor: 'glissa', sessionId: null },
+    source: { kind: 'operator', vendor: 'glimmervoid', sessionId: null },
     text,
     validFrom: START + 10,
     validTo: null,
@@ -219,7 +219,7 @@ function forgedRecord(text: string): MemoryRecord {
   };
 }
 
-function knowledge(text: string, project: string | null = '/repos/glissa'): KnowledgeInput {
+function knowledge(text: string, project: string | null = '/repos/glimmervoid'): KnowledgeInput {
   return {
     kind: 'knowledge',
     layer: 'semantic',
@@ -233,8 +233,8 @@ function operatorKnowledge(text: string): KnowledgeInput {
   return {
     kind: 'knowledge',
     layer: 'semantic',
-    project: '/repos/glissa',
-    source: { kind: 'operator', vendor: 'glissa', sessionId: null },
+    project: '/repos/glimmervoid',
+    source: { kind: 'operator', vendor: 'glimmervoid', sessionId: null },
     text,
   };
 }
@@ -245,7 +245,7 @@ function durableRecord(overrides: Partial<MemoryRecord> = {}): MemoryRecord {
     ts: START,
     kind: 'knowledge',
     layer: 'semantic',
-    project: '/repos/glissa',
+    project: '/repos/glimmervoid',
     source: { kind: 'reported', vendor: 'claude', sessionId: 'sess-1' },
     text: 'worktree memory reaches its configured project',
     validFrom: START,
@@ -286,8 +286,8 @@ test('a first enable mints a 0600 signing key and signs every appended record', 
 
 test('store open remaps worktree project tags once and publishes the configured project variant', async () => {
   const dir = tempDir();
-  const projectPath = '/home/carbon/projects/glissa';
-  const worktreePath = '/home/carbon/projects/.glissa-worktrees/glissa-abc123';
+  const projectPath = '/home/carbon/projects/glimmervoid';
+  const worktreePath = '/home/carbon/projects/.glimmervoid-worktrees/glimmervoid-abc123';
   const signingKey = 'b'.repeat(64);
   const tagged = withSignature(durableRecord({ project: worktreePath }), signingKey);
   const tombstone = withSignature(durableRecord({
@@ -295,7 +295,7 @@ test('store open remaps worktree project tags once and publishes the configured 
     kind: 'tombstone',
     layer: 'episodic',
     project: null,
-    source: { kind: 'operator', vendor: 'glissa', sessionId: null },
+    source: { kind: 'operator', vendor: 'glimmervoid', sessionId: null },
     text: 'forgotten memory records: m-0000000000000000',
     lineage: 'operator',
   }), signingKey);
@@ -341,8 +341,8 @@ test('store open remaps worktree project tags once and publishes the configured 
 
 test('a corpus stamped by the previous tag migration is re-tagged onto the parent repository', async () => {
   const dir = tempDir();
-  const worktreePath = '/home/carbon/projects/.glissa-worktrees/glissa-abc123';
-  const projectPath = '/home/carbon/projects/glissa';
+  const worktreePath = '/home/carbon/projects/.glimmervoid-worktrees/glimmervoid-abc123';
+  const projectPath = '/home/carbon/projects/glimmervoid';
   try {
     fs.mkdirSync(dir, { recursive: true });
     const seededDb = createMemoryDb({ dbPath: dbPathFor(dir) });
@@ -390,10 +390,10 @@ test('a failed project resolver is logged and retried on the next append', async
   }
 });
 
-test('an append from a missing unconfigured Glissa worktree stores the parent repository path', async () => {
+test('an append from a missing unconfigured Glimmervoid worktree stores the parent repository path', async () => {
   const dir = tempDir();
-  const worktreePath = path.join(dir, 'projects', '.glissa-worktrees', 'glissa-dead123');
-  const projectPath = path.join(dir, 'projects', 'glissa').replace(/\\/g, '/');
+  const worktreePath = path.join(dir, 'projects', '.glimmervoid-worktrees', 'glimmervoid-dead123');
+  const projectPath = path.join(dir, 'projects', 'glimmervoid').replace(/\\/g, '/');
   let resolverCalls = 0;
   try {
     const store = openStore(dir, {
@@ -418,8 +418,8 @@ test('an append from a missing unconfigured Glissa worktree stores the parent re
 
 test('a memory pack build persists delivered hashes after a busy retry and an unchanged rebuild adds none', async () => {
   const root = tempDir();
-  const glissaHome = path.join(root, 'home');
-  const memoryDir = path.join(glissaHome, 'memory');
+  const glimmervoidHome = path.join(root, 'home');
+  const memoryDir = path.join(glimmervoidHome, 'memory');
   const packsDir = path.join(root, 'packs');
   const builtRoot = path.join(root, 'built');
   const logs: string[] = [];
@@ -429,7 +429,7 @@ test('a memory pack build persists delivered hashes after a busy retry and an un
     fs.writeFileSync(path.join(packsDir, 'specs', 'memory.pack.json'), `${JSON.stringify({
       name: 'memory',
       description: 'memory delivery test',
-      sources: [{ path: '{{glissaHome}}/memory/dist/current/MEMORY.md', data: true }],
+      sources: [{ path: '{{glimmervoidHome}}/memory/dist/current/MEMORY.md', data: true }],
       budgetTokens: 4000,
     })}\n`);
     const store = openStore(memoryDir, {
@@ -459,7 +459,7 @@ test('a memory pack build persists delivered hashes after a busy retry and an un
       specPath: path.join(packsDir, 'specs', 'memory.pack.json'),
       baseDir: packsDir,
       builtRoot,
-      glissaHome,
+      glimmervoidHome,
       noteDelivered: (text) => store.noteDelivered(text),
     });
 
@@ -474,7 +474,7 @@ test('a memory pack build persists delivered hashes after a busy retry and an un
       source: 'agentLogs',
       kind: 'agent-turn',
       detail: { vendor: 'claude' },
-      scope: { root: '/repos/glissa', sessionId: 'sess-echo' },
+      scope: { root: '/repos/glimmervoid', sessionId: 'sess-echo' },
       summary: deliveredLine,
       ts: START,
     }, { deliveredHashes: store.deliveredHashes() });
@@ -489,7 +489,7 @@ test('a memory pack build persists delivered hashes after a busy retry and an un
 
 test('a project data layer stays echo suppressed when the global layer alone fills the delivered bound', async () => {
   const root = tempDir();
-  const glissaHome = path.join(root, 'home');
+  const glimmervoidHome = path.join(root, 'home');
   const packsDir = path.join(root, 'packs');
   const builtRoot = path.join(root, 'built');
   const specPath = path.join(packsDir, 'specs', 'memory.pack.json');
@@ -499,8 +499,8 @@ test('a project data layer stays echo suppressed when the global layer alone fil
       name: 'memory',
       description: 'memory delivery test',
       sources: [
-        { path: '{{glissaHome}}/memory/dist/current/MEMORY.md', data: true },
-        { path: '{{glissaHome}}/memory/dist/current/projects/glissa.md', data: true },
+        { path: '{{glimmervoidHome}}/memory/dist/current/MEMORY.md', data: true },
+        { path: '{{glimmervoidHome}}/memory/dist/current/projects/glimmervoid.md', data: true },
       ],
       budgetTokens: 400000,
     })}\n`);
@@ -508,11 +508,11 @@ test('a project data layer stays echo suppressed when the global layer alone fil
       { length: MAX_DELIVERED_HASHES + 500 },
       (_, index) => `- [m-0123456789ab${String(index).padStart(4, '0')}] (reported) the global memory line ${index}`,
     );
-    const globalPath = path.join(glissaHome, 'memory', 'dist', 'current', 'MEMORY.md');
+    const globalPath = path.join(glimmervoidHome, 'memory', 'dist', 'current', 'MEMORY.md');
     fs.mkdirSync(path.dirname(globalPath), { recursive: true });
     fs.writeFileSync(globalPath, `${globalLines.join('\n')}\n`);
     const projectHeadLine = '- [m-abcdef0123456789] (model) the project layer head line';
-    const projectPath = path.join(glissaHome, 'memory', 'dist', 'current', 'projects', 'glissa.md');
+    const projectPath = path.join(glimmervoidHome, 'memory', 'dist', 'current', 'projects', 'glimmervoid.md');
     fs.mkdirSync(path.dirname(projectPath), { recursive: true });
     fs.writeFileSync(projectPath, `${projectHeadLine}\n- [m-abcdef0123456780] (model) the project layer tail line\n`);
     const store = openStore(path.join(root, 'store'));
@@ -521,7 +521,7 @@ test('a project data layer stays echo suppressed when the global layer alone fil
       specPath,
       baseDir: packsDir,
       builtRoot,
-      glissaHome,
+      glimmervoidHome,
       noteDelivered: (text) => store.noteDelivered(text),
     });
 
@@ -791,7 +791,7 @@ test('the projection is written to dist/ only, grouped by kind and partitioned b
     await store.append({
       kind: 'preference',
       project: null,
-      source: { kind: 'operator', vendor: 'glissa', sessionId: null },
+      source: { kind: 'operator', vendor: 'glimmervoid', sessionId: null },
       text: 'never write else statements',
       locked: true,
     });
@@ -1216,7 +1216,7 @@ test('retrieve ranks the matching record first and stays inside the project scop
   try {
     const store = await seedForSearch(dir);
     await store.append(knowledge('the rebase gate is documented elsewhere', '/repos/other'));
-    const picked = store.retrieve({ query: 'rebase gate worktree', project: '/repos/glissa', limit: 2 });
+    const picked = store.retrieve({ query: 'rebase gate worktree', project: '/repos/glimmervoid', limit: 2 });
     assert.equal(picked[0].text, CANDIDATES[0]);
     assert.equal(picked.some((record) => record.project === '/repos/other'), false, 'another project never rides in');
     await store.stop();
@@ -1232,7 +1232,7 @@ test('a dropped index falls back to the lexical path silently and a rebuild rest
     withRawDb(dir, (raw) => raw.exec('DROP TABLE memory_records_fts'));
 
     assert.equal(store.search('rebase gate'), null, 'an unavailable index answers with no candidates');
-    const picked = store.retrieve({ query: 'rebase gate', project: '/repos/glissa', limit: 1 });
+    const picked = store.retrieve({ query: 'rebase gate', project: '/repos/glimmervoid', limit: 1 });
     assert.equal(picked[0].text, CANDIDATES[0], 'the pure rules still gate and rank without it');
 
     withRawDb(dir, (raw) => raw.exec('CREATE VIRTUAL TABLE memory_records_fts USING fts5(id UNINDEXED, body)'));
@@ -1508,15 +1508,15 @@ test('the store resolves a supersession ancestry rather than letting a writer sk
     const claim = requireRecord(await store.append({
       kind: 'knowledge',
       layer: 'semantic',
-      project: '/repos/glissa',
-      source: { kind: 'model', vendor: 'glissa', sessionId: null },
+      project: '/repos/glimmervoid',
+      source: { kind: 'model', vendor: 'glimmervoid', sessionId: null },
       text: 'the distiller claims the merge gate is advisory',
     }), 'model claim');
     const correction = requireRecord(await store.append({
       kind: 'knowledge',
       layer: 'semantic',
-      project: '/repos/glissa',
-      source: { kind: 'operator', vendor: 'glissa', sessionId: null },
+      project: '/repos/glimmervoid',
+      source: { kind: 'operator', vendor: 'glimmervoid', sessionId: null },
       text: 'the merge gate is authoritative after all',
       supersedes: claim.id,
       locked: true,
@@ -1526,8 +1526,8 @@ test('the store resolves a supersession ancestry rather than letting a writer sk
 
     const orphan = await store.append({
       kind: 'knowledge',
-      project: '/repos/glissa',
-      source: { kind: 'operator', vendor: 'glissa', sessionId: null },
+      project: '/repos/glimmervoid',
+      source: { kind: 'operator', vendor: 'glimmervoid', sessionId: null },
       text: 'a derivation of a record nobody can name',
       supersedes: 'm-0000000000000000',
     });
@@ -1553,8 +1553,8 @@ test('the distill cursor and its failure counter survive a store reopen', async 
 
 test('a project tag migration stamped by an older schema version reruns on the next open', async () => {
   const dir = tempDir();
-  const projectPath = '/repos/glissa';
-  const worktreePath = '/repos/.glissa-worktrees/glissa-abc123';
+  const projectPath = '/repos/glimmervoid';
+  const worktreePath = '/repos/.glimmervoid-worktrees/glimmervoid-abc123';
   const signingKey = 'c'.repeat(64);
   const tagged = withSignature(durableRecord({ project: worktreePath }), signingKey);
   fs.mkdirSync(dir, { recursive: true });

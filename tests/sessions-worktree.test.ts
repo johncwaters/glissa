@@ -25,10 +25,10 @@ const drain = () => new Promise((r) => setImmediate(r));
 const GIT = hasGit();
 
 function initOneCommitRepo() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-diff-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-diff-'));
   try { git(['init', '-b', 'main'], dir); } catch { git(['init'], dir); }
   git(['config', 'user.email', 'test@example.com'], dir);
-  git(['config', 'user.name', 'Glissa Test'], dir);
+  git(['config', 'user.name', 'Glimmervoid Test'], dir);
   git(['config', 'commit.gpgsign', 'false'], dir);
   fs.writeFileSync(path.join(dir, 'README.md'), '# repo\n', 'utf8');
   git(['add', '-A'], dir);
@@ -48,7 +48,7 @@ function initRepoDevelopFeature() {
 }
 
 function realWorktreeDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-wt-fake-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-wt-fake-'));
 }
 
 interface FakeWorkspaceOptions {
@@ -108,7 +108,7 @@ function fakeGitWorkspace(opts: FakeWorkspaceOptions = {}) {
       calls.create.push(args);
       calls.sequence.push('create');
       if (opts.createResult) return opts.createResult;
-      return { cwd: String(opts.worktreeDir), isGit: true, branch: `glissa/session/${args.label}`, base: String(args.baseBranch), baseSha: 'basesha' };
+      return { cwd: String(opts.worktreeDir), isGit: true, branch: `glimmervoid/session/${args.label}`, base: String(args.baseBranch), baseSha: 'basesha' };
     },
     async rebaseOnly(args: CallArgs) {
       calls.rebaseOnly.push(args);
@@ -175,7 +175,7 @@ function setMergeStatus(session: Session, mergeStatus: MergeStatus) {
 }
 
 test('a vanished spawn cwd fails terminally and reaps the live PTY', async () => {
-  const missingWorktree = path.join(os.tmpdir(), `glissa-missing-${crypto.randomUUID()}`);
+  const missingWorktree = path.join(os.tmpdir(), `glimmervoid-missing-${crypto.randomUUID()}`);
   const gw = fakeGitWorkspace({ worktreeDir: missingWorktree });
   const signals: CallArgs[] = [];
   const exit: { handler: ((event: PtyExitEvent) => unknown) | null } = { handler: null };
@@ -243,7 +243,7 @@ test('start() provisions an auto-detected worktree when integrationBranch is nul
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({
     worktreeDir: wt,
-    createResult: { cwd: wt, isGit: true, branch: 'glissa/session/wt-sess', base: 'main', baseSha: 'basesha' },
+    createResult: { cwd: wt, isGit: true, branch: 'glimmervoid/session/wt-sess', base: 'main', baseSha: 'basesha' },
   });
   const s = makeSession({
     gitWorkspace: gw,
@@ -299,7 +299,7 @@ test('concurrent start() calls are single-flight: one worktree, one PTY, no bran
       if (gw.calls.create.length > 1) {
         return { cwd: process.cwd(), isGit: false, reason: 'branch-in-use', conflictPath: wt };
       }
-      return { cwd: wt, isGit: true, branch: `glissa/session/${args.label}`, base: String(args.baseBranch), baseSha: 'basesha' };
+      return { cwd: wt, isGit: true, branch: `glimmervoid/session/${args.label}`, base: String(args.baseBranch), baseSha: 'basesha' };
     },
     populate() {}, hasUnmergedWork() { return false; }, async rebaseOnly() { return { ok: true, upToDate: true }; },
     mergeBack() { return { merged: true }; }, mergeKeep() { return { merged: true }; }, discard() {},
@@ -345,7 +345,7 @@ test('start() BLOCKS when the integration branch is missing - stays DORMANT, no 
 test('start() ADOPTS its own surviving worktree on branch-in-use (failed boot removal / discard)', async () => {
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({
-    createResult: { cwd: process.cwd(), isGit: false, reason: 'branch-in-use', conflictPath: wt, branch: 'glissa/session/wt-sess' },
+    createResult: { cwd: process.cwd(), isGit: false, reason: 'branch-in-use', conflictPath: wt, branch: 'glimmervoid/session/wt-sess' },
   });
   const spawned: PtySpawnOptions[] = [];
   const events: { blocked: CallArgs | null; ready: CallArgs | null } = { blocked: null, ready: null };
@@ -377,9 +377,9 @@ test('start() ADOPTS its own surviving worktree on branch-in-use (failed boot re
 });
 
 test('start() runs in place with a notice when the branch-in-use conflict dir is gone (unadoptable)', async () => {
-  const conflictPath = path.join(os.tmpdir(), 'glissa-other-wt');
+  const conflictPath = path.join(os.tmpdir(), 'glimmervoid-other-wt');
   const gw = fakeGitWorkspace({
-    createResult: { cwd: process.cwd(), isGit: false, reason: 'branch-in-use', conflictPath, branch: 'glissa/session/wt-sess' },
+    createResult: { cwd: process.cwd(), isGit: false, reason: 'branch-in-use', conflictPath, branch: 'glimmervoid/session/wt-sess' },
   });
   const spawned: PtySpawnOptions[] = [];
   const events: { blocked: CallArgs | null } = { blocked: null };
@@ -404,7 +404,7 @@ test('start() runs in place with a notice when the branch-in-use conflict dir is
 test('start() never adopts the MAIN checkout when the operator checked the session branch out there', async () => {
 
   const gw = fakeGitWorkspace({
-    createResult: { cwd: process.cwd(), isGit: false, reason: 'branch-in-use', conflictPath: process.cwd(), branch: 'glissa/session/wt-sess' },
+    createResult: { cwd: process.cwd(), isGit: false, reason: 'branch-in-use', conflictPath: process.cwd(), branch: 'glimmervoid/session/wt-sess' },
   });
   const spawned: PtySpawnOptions[] = [];
   const s = makeSession({
@@ -887,7 +887,7 @@ test('mergeWorktree delegates to the engine and clears the worktree on success',
 
 test('mergeWorktree parks on a conflict (worktree preserved)', async () => {
   const wt = realWorktreeDir();
-  const gw = fakeGitWorkspace({ worktreeDir: wt, mergeResult: { merged: false, parked: true, reason: 'rebase-conflict', branch: 'glissa/session/wt-sess' } });
+  const gw = fakeGitWorkspace({ worktreeDir: wt, mergeResult: { merged: false, parked: true, reason: 'rebase-conflict', branch: 'glimmervoid/session/wt-sess' } });
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
   try {
     await s.start();
@@ -905,7 +905,7 @@ test('mergeAndContinue from COMPLETE merges into develop but KEEPS the worktree 
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({
     worktreeDir: wt,
-    mergeKeepResult: { merged: true, kept: true, branch: 'glissa/session/wt-sess', base: 'develop', baseSha: 'newbase' },
+    mergeKeepResult: { merged: true, kept: true, branch: 'glimmervoid/session/wt-sess', base: 'develop', baseSha: 'newbase' },
   });
   const statuses: CallArgs[] = [];
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
@@ -931,7 +931,7 @@ test('mergeAndContinue surfaces a stash-restore conflict as pending-review (not 
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({
     worktreeDir: wt,
-    mergeKeepResult: { merged: true, kept: true, branch: 'glissa/session/wt-sess', base: 'develop', baseSha: 'newbase', restoreConflict: true },
+    mergeKeepResult: { merged: true, kept: true, branch: 'glimmervoid/session/wt-sess', base: 'develop', baseSha: 'newbase', restoreConflict: true },
   });
   const statuses: CallArgs[] = [];
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
@@ -968,7 +968,7 @@ test('mergeAndContinue({ force: true }) overrides the RUNNING refusal (operator 
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({
     worktreeDir: wt,
-    mergeKeepResult: { merged: true, kept: true, branch: 'glissa/session/wt-sess', base: 'develop', baseSha: 'newbase' },
+    mergeKeepResult: { merged: true, kept: true, branch: 'glimmervoid/session/wt-sess', base: 'develop', baseSha: 'newbase' },
   });
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
   try {
@@ -1001,7 +1001,7 @@ test('mergeAndContinue from WAITING merges (paused awaiting the operator is quie
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({
     worktreeDir: wt,
-    mergeKeepResult: { merged: true, kept: true, branch: 'glissa/session/wt-sess', base: 'develop', baseSha: 'newbase' },
+    mergeKeepResult: { merged: true, kept: true, branch: 'glimmervoid/session/wt-sess', base: 'develop', baseSha: 'newbase' },
   });
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
   try {
@@ -1019,7 +1019,7 @@ test('mergeAndContinue parks on a rebase conflict (worktree preserved, session c
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({
     worktreeDir: wt,
-    mergeKeepResult: { merged: false, parked: true, reason: 'rebase-conflict', branch: 'glissa/session/wt-sess' },
+    mergeKeepResult: { merged: false, parked: true, reason: 'rebase-conflict', branch: 'glimmervoid/session/wt-sess' },
   });
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
   try {
@@ -1037,7 +1037,7 @@ test('pasteMergePrompt: a parked session pastes a context-rich merge prompt into
   const wt = realWorktreeDir();
   const gw = fakeGitWorkspace({
     worktreeDir: wt,
-    mergeKeepResult: { merged: false, parked: true, reason: 'rebase-conflict', branch: 'glissa/session/wt-sess', conflicts: ['src/a.js', 'src/b.js'] },
+    mergeKeepResult: { merged: false, parked: true, reason: 'rebase-conflict', branch: 'glimmervoid/session/wt-sess', conflicts: ['src/a.js', 'src/b.js'] },
   });
   const writes: string[] = [];
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => capturingPty(writes) });
@@ -1053,7 +1053,7 @@ test('pasteMergePrompt: a parked session pastes a context-rich merge prompt into
     assert.equal(writes.length, 1, 'one paste into the PTY');
     const out = writes[0];
     assert.ok(out.startsWith('\x1b[200~') && out.endsWith('\x1b[201~'), 'wrapped in bracketed paste (multi-line, not auto-submitted)');
-    assert.ok(out.includes('glissa/session/wt-sess'), 'names the session branch');
+    assert.ok(out.includes('glimmervoid/session/wt-sess'), 'names the session branch');
     assert.ok(out.includes('develop'), 'names the integration target');
     assert.ok(out.includes('src/a.js') && out.includes('src/b.js'), 'lists the conflicting files');
     assert.ok(out.includes('git rebase develop'), 'gives the rebase command');
@@ -1080,7 +1080,7 @@ test('adoptWorktree re-attaches an on-disk worktree as pending-review (restart r
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
   s.on('merge-status', (e) => statuses.push(e.mergeStatus));
   try {
-    s.adoptWorktree({ worktreeDir: wt, branch: 'glissa/session/wt-sess', base: 'develop' });
+    s.adoptWorktree({ worktreeDir: wt, branch: 'glimmervoid/session/wt-sess', base: 'develop' });
     assert.equal(s.worktreeDir, wt);
     assert.equal(s.isWorktree, true);
     assert.equal(s.mergeStatus, 'pending-review');
@@ -1155,7 +1155,7 @@ test('getDiff: a branch already on develop shows nothing to merge despite a stal
 });
 
 function initRepoWithRemote() {
-  const remoteDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-bsync-remote-'));
+  const remoteDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-bsync-remote-'));
   git(['init', '--bare'], remoteDir);
   const dir = initOneCommitRepo();
   git(['branch', '-M', 'develop'], dir);
@@ -1214,10 +1214,10 @@ test('H1 branch sync clears a base-diverged park after manual base recovery', { 
 });
 
 function pushRemoteOnlyCommit(remoteDir: string, branch: string, fileName: string) {
-  const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-bsync-clone-'));
+  const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-bsync-clone-'));
   git(['clone', '-q', '-b', branch, remoteDir, clone], os.tmpdir());
   git(['config', 'user.email', 'test@example.com'], clone);
-  git(['config', 'user.name', 'Glissa Test'], clone);
+  git(['config', 'user.name', 'Glimmervoid Test'], clone);
   git(['config', 'commit.gpgsign', 'false'], clone);
   fs.writeFileSync(path.join(clone, fileName), 'remote\n', 'utf8');
   git(['add', '-A'], clone);
@@ -1491,7 +1491,7 @@ test('checkWorktreeChange returns UNKNOWN (no broadcast, no demotion) when the w
   s.on('merge-status', (e) => statuses.push(e.mergeStatus));
   s.on('worktree-changed', (e) => changes.push(e));
   try {
-    attachWorktree(s, path.join(os.tmpdir(), `glissa-nonexistent-${Date.now()}`));
+    attachWorktree(s, path.join(os.tmpdir(), `glimmervoid-nonexistent-${Date.now()}`));
     setMergeStatus(s, 'pending-review');
     assert.equal(await s.worktreeLifecycle.computeWorktreeSignature(), null, 'a failed git read yields null, not a false-empty signature');
     await s.checkWorktreeChange();
@@ -1531,7 +1531,7 @@ test('checkWorktreeChange detects an out-of-band merge into the integration bran
 
 function initLinkedWorktree() {
   const repo = initRepoDevelopFeature();
-  const wt = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-lwt-')), 'wt');
+  const wt = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-lwt-')), 'wt');
   git(['worktree', 'add', wt, '-b', 'feat2', 'feat'], repo);
   return { repo, wt };
 }
@@ -1975,7 +1975,7 @@ test('start(): destroy() during the provision await -> no spawn', async () => {
     async create(args: CallArgs): Promise<Workspace> {
       gw.calls.create.push(args);
       await createHeld;
-      return { cwd: wt, isGit: true, branch: `glissa/session/${args.label}`, base: String(args.baseBranch), baseSha: 'b' };
+      return { cwd: wt, isGit: true, branch: `glimmervoid/session/${args.label}`, base: String(args.baseBranch), baseSha: 'b' };
     },
     populate() {}, hasUnmergedWork() { return false; }, async rebaseOnly() { return { ok: true, upToDate: true }; },
     mergeBack() { return { merged: true }; },
@@ -2000,7 +2000,7 @@ test('mergeWorktree re-entry: a second call while merging is refused, engine inv
   let mergeCalls = 0;
   const gw = {
     calls: { create: [] as CallArgs[] },
-    create(args: CallArgs): Workspace { gw.calls.create.push(args); return { cwd: wt, isGit: true, branch: `glissa/session/${args.label}`, base: String(args.baseBranch), baseSha: 'b' }; },
+    create(args: CallArgs): Workspace { gw.calls.create.push(args); return { cwd: wt, isGit: true, branch: `glimmervoid/session/${args.label}`, base: String(args.baseBranch), baseSha: 'b' }; },
     populate() {}, hasUnmergedWork() { return false; }, async rebaseOnly() { return { ok: true, upToDate: true }; },
     async mergeBack() { mergeCalls++; await mergeHeld; return { merged: true }; },
     mergeKeep() { return { merged: true, kept: true }; },
@@ -2145,7 +2145,7 @@ test('adoptWorktree({ hasUnmergedWork: false }) adopts a clean survivor with NO 
   const gw = fakeGitWorkspace({ worktreeDir: wt });
   const s = makeSession({ gitWorkspace: gw, integrationBranch: 'develop', ptySpawn: () => fakePty() });
   try {
-    s.adoptWorktree({ worktreeDir: wt, branch: 'glissa/session/wt-sess', base: 'develop', hasUnmergedWork: false });
+    s.adoptWorktree({ worktreeDir: wt, branch: 'glimmervoid/session/wt-sess', base: 'develop', hasUnmergedWork: false });
     assert.equal(s.worktreeDir, wt);
     assert.equal(s.isWorktree, true);
     assert.equal(s.mergeStatus, 'none', 'nothing to review, so no banner');
@@ -2164,7 +2164,7 @@ test('finishAndMerge settled-branch mutex: a double-click is refused, engine mer
   let mergeCalls = 0;
   const gw = {
     calls: { create: [] as CallArgs[] },
-    create(args: CallArgs): Workspace { gw.calls.create.push(args); return { cwd: wt, isGit: true, branch: `glissa/session/${args.label}`, base: String(args.baseBranch), baseSha: 'b' }; },
+    create(args: CallArgs): Workspace { gw.calls.create.push(args); return { cwd: wt, isGit: true, branch: `glimmervoid/session/${args.label}`, base: String(args.baseBranch), baseSha: 'b' }; },
     populate() {}, hasUnmergedWork() { return false; }, async rebaseOnly() { return { ok: true, upToDate: true }; },
     async mergeBack() { mergeCalls++; await mergeHeld; return { merged: true }; },
     mergeKeep() { return { merged: true, kept: true }; },

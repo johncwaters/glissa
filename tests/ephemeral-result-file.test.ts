@@ -9,12 +9,12 @@ import * as ephemeralSession from '../server/ephemeral-session.ts';
 const { createJobResultFile, JOB_RESULT_FILENAME, readResultFile } = ephemeralSession;
 
 test('a job result file lives in its own fresh directory, named after the job', async () => {
-  const file = await createJobResultFile('glissa-pr-owner-repo-42');
+  const file = await createJobResultFile('glimmervoid-pr-owner-repo-42');
   try {
     const dir = path.dirname(file.path);
     assert.equal(path.basename(file.path), JOB_RESULT_FILENAME);
     assert.equal(path.dirname(dir), path.resolve(os.tmpdir()), 'the DIRECTORY sits in temp, not the file');
-    assert.ok(path.basename(dir).startsWith('glissa-pr-owner-repo-42-'), 'the informative name rides the prefix');
+    assert.ok(path.basename(dir).startsWith('glimmervoid-pr-owner-repo-42-'), 'the informative name rides the prefix');
     assert.ok(fs.existsSync(dir), 'the directory exists before the agent is told the path');
     assert.ok(!fs.existsSync(file.path), 'and holds no result file yet');
   } finally {
@@ -23,8 +23,8 @@ test('a job result file lives in its own fresh directory, named after the job', 
 });
 
 test('two jobs with the same name never share a directory (nothing is guessable)', async () => {
-  const first = await createJobResultFile('glissa-posthog-fix-1-abc');
-  const second = await createJobResultFile('glissa-posthog-fix-1-abc');
+  const first = await createJobResultFile('glimmervoid-posthog-fix-1-abc');
+  const second = await createJobResultFile('glimmervoid-posthog-fix-1-abc');
   try {
     assert.notEqual(path.dirname(first.path), path.dirname(second.path));
   } finally {
@@ -34,7 +34,7 @@ test('two jobs with the same name never share a directory (nothing is guessable)
 });
 
 test('a prefix carrying repo/issue ids is reduced to a safe path segment', async () => {
-  const file = await createJobResultFile('glissa-pr-../../etc/pwn me');
+  const file = await createJobResultFile('glimmervoid-pr-../../etc/pwn me');
   try {
     const dir = path.dirname(file.path);
     assert.equal(path.dirname(dir), path.resolve(os.tmpdir()), 'no traversal out of temp');
@@ -45,7 +45,7 @@ test('a prefix carrying repo/issue ids is reduced to a safe path segment', async
 });
 
 test('cleanup removes the whole directory, result file and all, and is safe to repeat', async () => {
-  const file = await createJobResultFile('glissa-distill-glissa-0');
+  const file = await createJobResultFile('glimmervoid-distill-glimmervoid-0');
   const dir = path.dirname(file.path);
   fs.writeFileSync(file.path, '{"verdict":"CLEAN"}', 'utf8');
 
@@ -59,11 +59,11 @@ test('a caller-supplied directory is unreachable: the seam exposes no remove-by-
   assert.equal('removeJobResultFile' in ephemeralSession, false,
     'no path-based remover exists to be handed a foreign path');
 
-  const foreignDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-foreign-'));
+  const foreignDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-foreign-'));
   fs.writeFileSync(path.join(foreignDir, JOB_RESULT_FILENAME), '{}', 'utf8');
   fs.writeFileSync(path.join(foreignDir, 'keep.txt'), 'keep\n', 'utf8');
   try {
-    const file = await createJobResultFile('glissa-distill-owned');
+    const file = await createJobResultFile('glimmervoid-distill-owned');
     fs.writeFileSync(file.path, '{}', 'utf8');
     await file.cleanup();
 
@@ -76,7 +76,7 @@ test('a caller-supplied directory is unreachable: the seam exposes no remove-by-
 });
 
 test('the result directory is owner-only', { skip: process.platform === 'win32' }, async () => {
-  const file = await createJobResultFile('glissa-pr-modes');
+  const file = await createJobResultFile('glimmervoid-pr-modes');
   try {
     const mode = fs.statSync(path.dirname(file.path)).mode & 0o777;
     assert.equal(mode, 0o700, 'mkdtemp mints a 0700 directory, so no other account can read the verdict');
@@ -86,7 +86,7 @@ test('the result directory is owner-only', { skip: process.platform === 'win32' 
 });
 
 test('result reader returns typed failures and keeps validation separate from allowed verdicts', () => {
-  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-result-reader-'));
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-result-reader-'));
   const resultPath = path.join(workDir, 'result.json');
   try {
     const missing = readResultFile(resultPath, new Set(['CLEAN']));

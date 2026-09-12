@@ -1,6 +1,6 @@
-# Glissa CLI Testing Guide
+# Glimmervoid CLI Testing Guide
 
-Test scenarios for Glissa's CLI functionality. Run these before cutting a release, since the startup update check keys on the `vX.Y.Z` release tag. See `distribution.md` for the shipping model.
+Test scenarios for Glimmervoid's CLI functionality. Run these before cutting a release, since the startup update check keys on the `vX.Y.Z` release tag. See `distribution.md` for the shipping model.
 
 ## Prerequisites
 
@@ -12,22 +12,22 @@ Test scenarios for Glissa's CLI functionality. Run these before cutting a releas
 ## Configuration Resolution Order
 
 1. `--config <path>` flag (highest priority)
-2. `~/.glissa/config.json` (user home)
+2. `~/.glimmervoid/config.json` (user home)
 3. `./config.json` in the app directory (local dev fallback)
-4. If none exist, seeds `~/.glissa/config.json` with defaults
+4. If none exist, seeds `~/.glimmervoid/config.json` with defaults
 
 ---
 
 ## Test 1: `--help` Flag
 
 ```powershell
-node bin/glissa.ts --help
+node bin/glimmervoid.ts --help
 ```
 
 **Expected:**
 
 ```
-Usage: glissa [command] [options]
+Usage: glimmervoid [command] [options]
 
 Commands:
   doctor            Diagnose install / PATH issues and exit
@@ -38,7 +38,7 @@ Commands:
 Options:
   --name <label>    Label for the device being paired (with: pair)
   --port <number>   Override the server port (default: 3000)
-  --config <path>   Path to config file (default: ~/.glissa/config.json)
+  --config <path>   Path to config file (default: ~/.glimmervoid/config.json)
   --version         Show version number
   --help, -h        Show this help message
 ```
@@ -50,7 +50,7 @@ Options:
 ## Test 2: `-h` Short Flag
 
 ```powershell
-node bin/glissa.ts -h
+node bin/glimmervoid.ts -h
 ```
 
 **Expected:** Same output as `--help`.
@@ -60,7 +60,7 @@ node bin/glissa.ts -h
 ## Test 3: `--version` Flag
 
 ```powershell
-node bin/glissa.ts --version
+node bin/glimmervoid.ts --version
 ```
 
 **Expected:** matches the `version` field in `package.json`
@@ -72,13 +72,13 @@ node bin/glissa.ts --version
 Start the server on a custom port. Press `Ctrl+C` to stop after verifying.
 
 ```powershell
-node bin/glissa.ts --port 4567
+node bin/glimmervoid.ts --port 4567
 ```
 
 **Expected output includes:**
 
 ```
-Glissa server listening on http://localhost:4567
+Glimmervoid server listening on http://localhost:4567
 ```
 
 Open `http://localhost:4567` in a browser to verify the dashboard loads. Then `Ctrl+C` to stop.
@@ -90,7 +90,7 @@ Open `http://localhost:4567` in a browser to verify the dashboard loads. Then `C
 Use the repo's local config explicitly:
 
 ```powershell
-node bin/glissa.ts --config ./config.json --port 4568
+node bin/glimmervoid.ts --config ./config.json --port 4568
 ```
 
 **Expected:** Server starts using the specified config, listening on port 4568. `Ctrl+C` to stop.
@@ -100,7 +100,7 @@ node bin/glissa.ts --config ./config.json --port 4568
 ## Test 6: `--config` with Nonexistent Path
 
 ```powershell
-node bin/glissa.ts --config C:\nonexistent\config.json
+node bin/glimmervoid.ts --config C:\nonexistent\config.json
 ```
 
 **Expected:**
@@ -119,32 +119,31 @@ Remove the home config (back it up first if you have one):
 
 ```powershell
 # Backup if exists
-if (Test-Path "$env:USERPROFILE\.glissa\config.json") {
-    Copy-Item "$env:USERPROFILE\.glissa\config.json" "$env:USERPROFILE\.glissa\config.json.bak"
+if (Test-Path "$env:USERPROFILE\.glimmervoid\config.json") {
+    Copy-Item "$env:USERPROFILE\.glimmervoid\config.json" "$env:USERPROFILE\.glimmervoid\config.json.bak"
 }
 
 # Remove it
-Remove-Item "$env:USERPROFILE\.glissa\config.json" -ErrorAction SilentlyContinue
+Remove-Item "$env:USERPROFILE\.glimmervoid\config.json" -ErrorAction SilentlyContinue
 ```
 
-Run glissa (no flags). Since local `./config.json` exists in the repo, it will use the local fallback. To truly test seeding, temporarily rename the local config too:
+Run glimmervoid (no flags):
 
 ```powershell
-Rename-Item config.json config.json.bak
-node bin/glissa.ts --port 4569
+node bin/glimmervoid.ts --port 4569
 ```
 
 **Expected output includes:**
 
 ```
-Created default config at C:\Users\<you>\.glissa\config.json
-Glissa server listening on http://localhost:4569
+Created default config at C:\Users\<you>\.glimmervoid\config.json
+Glimmervoid server listening on http://localhost:4569
 ```
 
 **Verify the seeded config:**
 
 ```powershell
-Get-Content "$env:USERPROFILE\.glissa\config.json"
+Get-Content "$env:USERPROFILE\.glimmervoid\config.json"
 ```
 
 Should contain valid JSON with `port`, `projects`, `repoRoots`, and timeout fields.
@@ -152,12 +151,9 @@ Should contain valid JSON with `port`, `projects`, `repoRoots`, and timeout fiel
 **Restore:**
 
 ```powershell
-# Ctrl+C to stop the server first
-Rename-Item config.json.bak config.json
-
 # Restore backup if you had one
-if (Test-Path "$env:USERPROFILE\.glissa\config.json.bak") {
-    Move-Item "$env:USERPROFILE\.glissa\config.json.bak" "$env:USERPROFILE\.glissa\config.json" -Force
+if (Test-Path "$env:USERPROFILE\.glimmervoid\config.json.bak") {
+    Move-Item "$env:USERPROFILE\.glimmervoid\config.json.bak" "$env:USERPROFILE\.glimmervoid\config.json" -Force
 }
 ```
 
@@ -175,24 +171,24 @@ node server/main.ts
 
 ---
 
-## Test 9: `glissa doctor`
+## Test 9: `glimmervoid doctor`
 
 ```powershell
-node bin/glissa.ts doctor
+node bin/glimmervoid.ts doctor
 ```
 
-**Expected:** A read-only report, no server started and nothing written to disk: glissa/node/platform versions, where the CLI is running from, the npm (and pnpm, if present) global bin directory and whether each is on PATH, a `node-pty` load probe, and the resolved config path. When the npm global bin directory is not on PATH, it also prints the one-step fix.
+**Expected:** A read-only report, no server started and nothing written to disk: glimmervoid/node/platform versions, where the CLI is running from, the npm (and pnpm, if present) global bin directory and whether each is on PATH, a `node-pty` load probe, and the resolved config path. When the npm global bin directory is not on PATH, it also prints the one-step fix.
 
 **Exit code:** 0
 
 ---
 
-## Test 10: `glissa pair`
+## Test 10: `glimmervoid pair`
 
-Use a temporary config so the test does not modify your normal pairing store. Start Glissa in one PowerShell window:
+Use a temporary config so the test does not modify your normal pairing store. Start Glimmervoid in one PowerShell window:
 
 ```powershell
-$pairDir = Join-Path $env:TEMP "glissa-pair-cli-test"
+$pairDir = Join-Path $env:TEMP "glimmervoid-pair-cli-test"
 New-Item -ItemType Directory -Force $pairDir | Out-Null
 $pairConfig = Join-Path $pairDir "config.json"
 @'
@@ -206,14 +202,14 @@ $pairConfig = Join-Path $pairDir "config.json"
 }
 '@ | Set-Content -Encoding UTF8 $pairConfig
 
-node bin/glissa.ts --config $pairConfig --port 3455
+node bin/glimmervoid.ts --config $pairConfig --port 3455
 ```
 
 In a second PowerShell window, mint and redeem a pairing link:
 
 ```powershell
-$pairConfig = Join-Path (Join-Path $env:TEMP "glissa-pair-cli-test") "config.json"
-$mintOutput = node bin/glissa.ts --config $pairConfig pair --name Phone
+$pairConfig = Join-Path (Join-Path $env:TEMP "glimmervoid-pair-cli-test") "config.json"
+$mintOutput = node bin/glimmervoid.ts --config $pairConfig pair --name Phone
 $mintOutput
 $pairUrl = ($mintOutput | Select-String "http://127.0.0.1:3456/pair/").Matches.Value
 Invoke-WebRequest $pairUrl -SessionVariable pairedSession | Out-Null
@@ -224,7 +220,7 @@ Invoke-WebRequest $pairUrl -SessionVariable pairedSession | Out-Null
 List the paired device:
 
 ```powershell
-node bin/glissa.ts --config $pairConfig pair --list
+node bin/glimmervoid.ts --config $pairConfig pair --list
 ```
 
 **Expected output includes:** a table with `ID`, `NAME`, `PAIRED`, `LAST SEEN`, `STATUS`, and a row whose `NAME` is `Phone`.
@@ -232,11 +228,11 @@ node bin/glissa.ts --config $pairConfig pair --list
 Revoke it, replacing `<id>` with the `ID` from the list output:
 
 ```powershell
-node bin/glissa.ts --config $pairConfig pair --revoke <id>
-node bin/glissa.ts --config $pairConfig pair --list
+node bin/glimmervoid.ts --config $pairConfig pair --revoke <id>
+node bin/glimmervoid.ts --config $pairConfig pair --list
 ```
 
-**Expected output includes:** `Revoked <id>. A running Glissa applies this within 30 seconds, no restart needed.` and the same device row with `revoked` in the `STATUS` column.
+**Expected output includes:** `Revoked <id>. A running Glimmervoid applies this within 30 seconds, no restart needed.` and the same device row with `revoked` in the `STATUS` column.
 
 **Exit code:** 0 for mint, list, and revoke.
 
@@ -271,13 +267,13 @@ package.json
 node -e "const p=require('./package.json'); console.log(JSON.stringify({bin:p.bin,files:p.files,engines:p.engines},null,2))"
 ```
 
-**Expected:** `bin.glissa` points at `dist/bin/glissa.js`, `engines.node` is `>=22.18.0`, and `files` matches the array above (check `package.json` directly for the current list; it grows as new server-side modules ship).
+**Expected:** `bin.glimmervoid` points at `dist/bin/glimmervoid.js`, `engines.node` is `>=22.18.0`, and `files` matches the array above (check `package.json` directly for the current list; it grows as new server-side modules ship).
 
 ---
 
 ## Testing as Global Install (npm link)
 
-Simulate the `npm install -g github:johncwaters/glissa` result without a network round trip:
+Simulate the `npm install -g github:johncwaters/glimmervoid` result without a network round trip:
 
 ```powershell
 npm link
@@ -286,23 +282,23 @@ npm link
 Then test:
 
 ```powershell
-glissa --help
-glissa --version
-glissa --port 4570
+glimmervoid --help
+glimmervoid --version
+glimmervoid --port 4570
 # Ctrl+C to stop
 ```
 
 **Cleanup:**
 
 ```powershell
-npm unlink -g glissa
+npm unlink -g glimmervoid
 ```
 
 ---
 
 ## Environment Variable Isolation
 
-Verify `GLISSA_PORT` and `GLISSA_CONFIG` don't leak to child Claude processes.
+Verify `GLIMMERVOID_PORT` and `GLIMMERVOID_CONFIG` don't leak to child Claude processes.
 
 Check the pure scrub in `session/core/spawn-env.ts` (`buildAgentEnv`, applied with the Claude Code adapter's `envProfile`), which unsets, at minimum:
 
@@ -310,8 +306,8 @@ Check the pure scrub in `session/core/spawn-env.ts` (`buildAgentEnv`, applied wi
 CLAUDECODE
 CLAUDE_CODE_SSE_PORT
 CLAUDE_CODE_ENTRYPOINT
-GLISSA_PORT
-GLISSA_CONFIG
+GLIMMERVOID_PORT
+GLIMMERVOID_CONFIG
 ```
 
 This is a code-level verification: `buildAgentEnv` returns a scrubbed copy of the environment before `pty.spawn()`, so the same check works standalone (`session/core/spawn-env.ts` has no IO and no dependency on the rest of the session module).
@@ -328,14 +324,14 @@ This is a code-level verification: `buildAgentEnv` returns a scrubbed copy of th
 | 4 | `--port 4567` starts on custom port | |
 | 5 | `--config ./config.json` uses explicit config | |
 | 6 | `--config <nonexistent>` errors with exit 1 | |
-| 7 | Auto-seeds `~/.glissa/config.json` when none exist | |
+| 7 | Auto-seeds `~/.glimmervoid/config.json` when none exist | |
 | 8 | `node server/main.ts` still works (backward compat) | |
-| 9 | `glissa doctor` prints a read-only report, exits 0 | |
-| 10 | `glissa pair` can mint, list, and revoke a device | |
+| 9 | `glimmervoid doctor` prints a read-only report, exits 0 | |
+| 10 | `glimmervoid pair` can mint, list, and revoke a device | |
 | 11 | `npm pack --dry-run` includes correct files | |
 | 12 | `package.json` has bin, files, engines | |
-| 13 | `npm link` + `glissa --help` works globally | |
-| 14 | `npm unlink -g glissa` cleans up | |
+| 13 | `npm link` + `glimmervoid --help` works globally | |
+| 14 | `npm unlink -g glimmervoid` cleans up | |
 
 ---
 
@@ -354,6 +350,6 @@ taskkill /PID <pid> /F
 Delete and let it re-seed:
 
 ```powershell
-Remove-Item "$env:USERPROFILE\.glissa\config.json"
-node bin/glissa.ts --help
+Remove-Item "$env:USERPROFILE\.glimmervoid\config.json"
+node bin/glimmervoid.ts --help
 ```

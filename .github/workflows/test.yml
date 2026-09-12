@@ -37,7 +37,7 @@ jobs:
         run: |
           TARBALL=$(npm pack | tail -1)
           npx --yes npm@12 install -g "./$TARBALL" --dangerously-allow-all-scripts
-          glissa doctor > doctor.log
+          glimmervoid doctor > doctor.log
           cat doctor.log
           # doctor reports a broken native module and still exits 0, so this line is the real gate.
           grep -q "loads OK" doctor.log

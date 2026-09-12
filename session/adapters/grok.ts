@@ -170,7 +170,7 @@ function hooksFilePath(
   env: Record<string, string | undefined> = process.env,
   homedir: string = os.homedir(),
 ): string {
-  return path.join(grokHome(env, homedir), "hooks", "glissa.json");
+  return path.join(grokHome(env, homedir), "hooks", "glimmervoid.json");
 }
 
 function nativeBinaryPath({
@@ -206,10 +206,10 @@ function resolveCommand({
   try {
     if (existsSync(candidate)) return { path: realpathSync(candidate), kind: "exe" };
   } catch (error) {
-    warn(`[glissa] could not resolve the native 'grok' binary at ${candidate}: ${error instanceof Error ? error.message : String(error)}`);
+    warn(`[glimmervoid] could not resolve the native 'grok' binary at ${candidate}: ${error instanceof Error ? error.message : String(error)}`);
     return { path: null, kind: "unresolved" };
   }
-  warn(`[glissa] could not resolve the native 'grok' binary at ${candidate}`);
+  warn(`[glimmervoid] could not resolve the native 'grok' binary at ${candidate}`);
   return { path: null, kind: "unresolved" };
 }
 

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { createConfigStore } from '../server/config-store.ts';
-import type { ConfigStore, GlissaConfig } from '../server/config-store.ts';
+import type { ConfigStore, GlimmervoidConfig } from '../server/config-store.ts';
 import { ConfigUpdate, HIDDEN_CONFIG_KEYS } from '../shared/contracts/index.ts';
 import type { ControlConnection } from './helpers/control-harness.ts';
 import { connectControl, controlDeps, createControlServer } from './helpers/control-harness.ts';
@@ -15,7 +15,7 @@ interface SettingsFrame {
   message?: string;
 }
 
-function harness(config: GlissaConfig, store: ConfigStore): ControlConnection<SettingsFrame> {
+function harness(config: GlimmervoidConfig, store: ConfigStore): ControlConnection<SettingsFrame> {
   const server = createControlServer(controlDeps(config, {
     configStore: store,
     applySettingsReload: (fresh) => store.applySettings(fresh),
@@ -29,22 +29,22 @@ function withRealStore(
   seed: Record<string, unknown>,
   fn: (h: ControlConnection<SettingsFrame>, store: ConfigStore, readDisk: () => Record<string, unknown>) => void,
 ): void {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-remote-settings-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-remote-settings-'));
   const configPath = path.join(dir, 'config.json');
   fs.writeFileSync(configPath, JSON.stringify(seed, null, 2), 'utf8');
-  const previous = process.env.GLISSA_CONFIG;
-  process.env.GLISSA_CONFIG = configPath;
+  const previous = process.env.GLIMMERVOID_CONFIG;
+  process.env.GLIMMERVOID_CONFIG = configPath;
   try {
     const store = createConfigStore();
     fn(harness(store.config, store), store, () => JSON.parse(fs.readFileSync(configPath, 'utf8')));
   } finally {
-    if (previous == null) delete process.env.GLISSA_CONFIG;
-    if (previous != null) process.env.GLISSA_CONFIG = previous;
+    if (previous == null) delete process.env.GLIMMERVOID_CONFIG;
+    if (previous != null) process.env.GLIMMERVOID_CONFIG = previous;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
 
-const LIVE_REMOTE = { enabled: true, port: 3001, publicHost: 'glissa.test', allowedOrigins: ['https://glissa.test'] };
+const LIVE_REMOTE = { enabled: true, port: 3001, publicHost: 'glimmervoid.test', allowedOrigins: ['https://glimmervoid.test'] };
 
 test('remote appears in none of the settable key lists', () => {
   assert.equal(HIDDEN_CONFIG_KEYS.includes('remote'), true);

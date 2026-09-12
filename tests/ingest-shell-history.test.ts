@@ -26,7 +26,7 @@ interface HomeContext extends Home {
 }
 
 function makeHome(): Home {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-shellhist-'));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-shellhist-'));
   const appData = path.join(tmpDir, 'AppData', 'Roaming');
   const psDir = path.join(appData, 'Microsoft', 'Windows', 'PowerShell', 'PSReadLine');
   const dataHome = path.join(tmpDir, '.local', 'share');

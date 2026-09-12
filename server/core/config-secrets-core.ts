@@ -13,8 +13,8 @@ interface ResolvedEnvSecret extends EnvSecretBinding {
 type ConfigBlocks = Record<string, unknown>;
 
 const ENV_SECRET_BINDINGS: readonly EnvSecretBinding[] = Object.freeze([
-  { blockName: 'posthog', secretKey: 'apiKey', environmentVariable: 'GLISSA_POSTHOG_API_KEY' },
-  { blockName: 'telegram', secretKey: 'botToken', environmentVariable: 'GLISSA_TELEGRAM_BOT_TOKEN' },
+  { blockName: 'posthog', secretKey: 'apiKey', environmentVariable: 'GLIMMERVOID_POSTHOG_API_KEY' },
+  { blockName: 'telegram', secretKey: 'botToken', environmentVariable: 'GLIMMERVOID_TELEGRAM_BOT_TOKEN' },
 ]);
 
 function readEnvSecrets(env: Record<string, string | undefined>): ResolvedEnvSecret[] {

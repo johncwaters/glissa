@@ -1,10 +1,10 @@
-# glissa
+# glimmervoid
 
 This file is loaded into EVERY session, so it holds only what every session needs: cross-cutting conventions and a lean map. A rule about one subsystem belongs in that subsystem's own AGENTS.md, which loads when that code is open. Never restate what code shows. Size, placement and citation rot are gated by `tests/agents-md-size.test.ts`.
 
 ## Purpose
 
-Glissa is a lightweight Node.js background process that spawns and manages Claude Code sessions via node-pty, streams terminal output to a browser dashboard over WebSockets, derives session status from structural signals (Claude Code hooks plus an OSC-0 title fallback, never screen scraping), and notifies the operator through browser notifications.
+Glimmervoid is a lightweight Node.js background process that spawns and manages Claude Code sessions via node-pty, streams terminal output to a browser dashboard over WebSockets, derives session status from structural signals (Claude Code hooks plus an OSC-0 title fallback, never screen scraping), and notifies the operator through browser notifications.
 
 ## Architecture Map
 
@@ -13,7 +13,7 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 | `server/index.ts`, `server/main.ts`, `vite.config.ts` | Production entry (bootstrap: handoff recovery, then the server module); frontend build and dev wiring |
 | `vite.server.config.ts`, `vite.extension.config.ts`, `scripts/build.mjs` | The node and VS Code bundles, and the orchestrator that owns `dist/` |
 | `server/runtime-paths.ts` | The ONLY derivation of where a shipped asset lives (pure core in `server/core/runtime-paths.ts`); nothing else may guess from `import.meta` |
-| `config.json`, `package.json`, `biome.json`, `socket.yml` | Runtime/dev config; package, lint and scan policy |
+| `package.json`, `biome.json`, `socket.yml` | Runtime/dev config; package, lint and scan policy |
 | `DESIGN.md`, `DESIGN.json`, `PRODUCT.md` | Visual system and product definition |
 | `docs/`, `bin/` | Design records and npm CLI |
 | `server/` | Backend runtime and lanes (`server/AGENTS.md`) |
@@ -40,8 +40,8 @@ Glissa is a lightweight Node.js background process that spawns and manages Claud
 - Spawn sessions with `pty.spawn`, never `child_process.spawn`, and never `shell: true`. Scrub env via `session/core/spawn-env.ts`.
 - Session worktrees use the configured integration branch, or each repo's default branch when unset. Origin is the source of truth, as pinned by the git-workspace tests.
 - All sessions share one event loop: no sync git or fs on recurring paths (polls, turn-end, watchers). Use async `execFile` with yields. One-shot cold paths may stay sync.
-- Localhost-only trust boundary: never bind `0.0.0.0`, and keep the per-session bearer token check on `POST /hook/:glissaId/:event`.
-- Secrets resolve in the config loader from `GLISSA_POSTHOG_API_KEY` and `GLISSA_TELEGRAM_BOT_TOKEN`, and an environment-provided one is stripped from every write, so a dashboard save cannot re-persist it (`server/core/config-secrets-core.ts`).
+- Localhost-only trust boundary: never bind `0.0.0.0`, and keep the per-session bearer token check on `POST /hook/:glimmervoidId/:event`.
+- Secrets resolve in the config loader from `GLIMMERVOID_POSTHOG_API_KEY` and `GLIMMERVOID_TELEGRAM_BOT_TOKEN`, and an environment-provided one is stripped from every write, so a dashboard save cannot re-persist it (`server/core/config-secrets-core.ts`).
 - House character style: no literal em dash, en dash, ellipsis character, or emoji anywhere (source, tests, docs, commits). When code must emit one, build it via `String.fromCharCode`.
 - Avoid `else`: prefer early returns and guard clauses.
 - Prefer the seam pattern: pure logic in `session/core/` or a `*-core` module, thin IO shells around it. A pure core imports no Session and reads no clock.

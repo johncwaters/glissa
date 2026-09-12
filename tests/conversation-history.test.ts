@@ -18,13 +18,13 @@ interface TranscriptFields {
 }
 
 test('encodeProjectDir matches Claude\'s scheme (every non-alnum -> dash, case preserved)', () => {
-  assert.equal(encodeProjectDir('C:\\Users\\johnw\\Projects\\glissa'), 'C--Users-johnw-Projects-glissa');
+  assert.equal(encodeProjectDir('C:\\Users\\johnw\\Projects\\glimmervoid'), 'C--Users-johnw-Projects-glimmervoid');
   assert.equal(
-    encodeProjectDir('C:\\Users\\johnw\\Projects\\.glissa-worktrees\\glissa-hROPKt'),
-    'C--Users-johnw-Projects--glissa-worktrees-glissa-hROPKt',
+    encodeProjectDir('C:\\Users\\johnw\\Projects\\.glimmervoid-worktrees\\glimmervoid-hROPKt'),
+    'C--Users-johnw-Projects--glimmervoid-worktrees-glimmervoid-hROPKt',
   );
 
-  assert.equal(encodeProjectDir('C:/Users/johnw/Projects/glissa'), encodeProjectDir('C:\\Users\\johnw\\Projects\\glissa'));
+  assert.equal(encodeProjectDir('C:/Users/johnw/Projects/glimmervoid'), encodeProjectDir('C:\\Users\\johnw\\Projects\\glimmervoid'));
 
   assert.equal(encodeProjectDir('c:/x'), 'c--x');
 });
@@ -50,7 +50,7 @@ function writeTranscript(dir: string, id: string, { title, cwd, branch, mtimeMs 
 }
 
 test('listRepoConversations walks the repo worktree set, newest-first, with extracted titles', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-convtest-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-convtest-'));
   const projectsDir = path.join(root, 'projects');
 
   const wtMain = 'C:/fake/repo';
@@ -87,7 +87,7 @@ test('listRepoConversations walks the repo worktree set, newest-first, with extr
 });
 
 test('listRepoConversations de-dups a session id across worktrees, keeping the newest', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-convdedup-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-convdedup-'));
   const projectsDir = path.join(root, 'projects');
   const wtA = 'C:/repo';
   const wtB = 'C:/repo/.wt/b';
@@ -105,7 +105,7 @@ test('listRepoConversations de-dups a session id across worktrees, keeping the n
 });
 
 test('listRepoConversations returns [] when no project dirs exist for the repo', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-convnone-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-convnone-'));
   const projectsDir = path.join(root, 'projects');
   fs.mkdirSync(projectsDir, { recursive: true });
   const convs = await listRepoConversations({

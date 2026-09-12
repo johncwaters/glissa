@@ -7,7 +7,7 @@ import test from 'node:test';
 
 import { computeRuntimePaths } from '../server/core/runtime-paths.ts';
 
-const PACKAGE_ROOT = path.join(path.sep, 'opt', 'glissa');
+const PACKAGE_ROOT = path.join(path.sep, 'opt', 'glimmervoid');
 
 function onlyRootHasPackageJson(directory: string): boolean {
   return directory === PACKAGE_ROOT;
@@ -24,7 +24,7 @@ test('a source checkout resolves relays, packs and the CLI as .ts beside the pac
   assert.equal(paths.assetRoot, PACKAGE_ROOT);
   assert.equal(paths.packsDir, path.join(PACKAGE_ROOT, 'packs'));
   assert.equal(paths.extensionDir, path.join(PACKAGE_ROOT, 'tools', 'vscode-visions'));
-  assert.equal(paths.cliPath, path.join(PACKAGE_ROOT, 'bin', 'glissa.ts'));
+  assert.equal(paths.cliPath, path.join(PACKAGE_ROOT, 'bin', 'glimmervoid.ts'));
   assert.equal(paths.relayPath('hook-relay'), path.join(PACKAGE_ROOT, 'session', 'hook-relay.ts'));
 });
 
@@ -39,7 +39,7 @@ test('a bundled install resolves the same assets as .js under dist', () => {
   assert.equal(paths.assetRoot, path.join(PACKAGE_ROOT, 'dist'));
   assert.equal(paths.packsDir, path.join(PACKAGE_ROOT, 'dist', 'packs'));
   assert.equal(paths.extensionDir, path.join(PACKAGE_ROOT, 'dist', 'tools', 'vscode-visions'));
-  assert.equal(paths.cliPath, path.join(PACKAGE_ROOT, 'dist', 'bin', 'glissa.js'));
+  assert.equal(paths.cliPath, path.join(PACKAGE_ROOT, 'dist', 'bin', 'glimmervoid.js'));
   assert.equal(paths.relayPath('visions-relay'), path.join(PACKAGE_ROOT, 'dist', 'session', 'visions-relay.js'));
 });
 
@@ -99,7 +99,7 @@ test('the built server entry recovers a half-finished handoff before any depende
 });
 
 test('the shipped launcher starts the server through the recovering bootstrap', () => {
-  const launcherSource = fs.readFileSync(path.join(repoRoot, 'bin', 'glissa.ts'), 'utf8');
+  const launcherSource = fs.readFileSync(path.join(repoRoot, 'bin', 'glimmervoid.ts'), 'utf8');
   assert.match(launcherSource, /await import\('\.\.\/server\/index\.ts'\);/);
   assert.ok(!/['"]\.\.\/server\/main\.ts['"]/.test(launcherSource), 'the launcher never reaches main ahead of recovery');
 });

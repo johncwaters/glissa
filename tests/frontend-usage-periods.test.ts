@@ -372,7 +372,7 @@ test('laneSessionsText and the scope hint say what is and is not counted', async
   assert.equal(laneSessionsText(0), '');
   assert.equal(laneSessionsText(null), '');
 
-  assert.match(LANE_SCOPE_HINT, /spawned by Glissa/);
+  assert.match(LANE_SCOPE_HINT, /spawned by Glimmervoid/);
   assert.match(LANE_SCOPE_HINT, /other/);
   for (const glyph of [String.fromCharCode(0x2014), String.fromCharCode(0x2013), String.fromCharCode(0x2026)]) {
     assert.equal(LANE_SCOPE_HINT.includes(glyph), false);

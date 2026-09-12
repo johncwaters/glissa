@@ -151,7 +151,7 @@ this changes WHEN the gate is asked, never what it answers; cooldown and the hou
 blank-line-heavy typist from spending anything extra.
 
 The test-run boundary stays out: the lane sees editor buffers, and no signal for "a test run
-finished" reaches Glissa today. If the ingest lane ever carries one, it arrives through the
+finished" reaches Glimmervoid today. If the ingest lane ever carries one, it arrives through the
 existing `noteActivity` seam and gets its own plan line then. Named here so the omission is a
 decision, not a miss.
 

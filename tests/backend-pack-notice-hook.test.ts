@@ -51,7 +51,7 @@ function pretendSpawnedWith(deliveredPacks: DeliveredPack[]): void {
 }
 
 test.before(async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glissa-packnotice-hook-'));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-packnotice-hook-'));
   const projectDir = path.join(tmpDir, 'project');
   fs.mkdirSync(projectDir);
   const cfgPath = path.join(tmpDir, 'config.json');
@@ -61,8 +61,8 @@ test.before(async () => {
     millEnabled: false,
     autoResume: false,
   }, null, 2), 'utf8');
-  const prevEnv = process.env.GLISSA_CONFIG;
-  process.env.GLISSA_CONFIG = cfgPath;
+  const prevEnv = process.env.GLIMMERVOID_CONFIG;
+  process.env.GLIMMERVOID_CONFIG = cfgPath;
 
   const server = http.createServer();
   const backend = createBackend(server, { staticDir: null });
@@ -86,8 +86,8 @@ test.after(async () => {
   backend.shutdown();
   server.closeAllConnections();
   await closeServer(server);
-  if (prevEnv == null) delete process.env.GLISSA_CONFIG;
-  if (prevEnv != null) process.env.GLISSA_CONFIG = prevEnv;
+  if (prevEnv == null) delete process.env.GLIMMERVOID_CONFIG;
+  if (prevEnv != null) process.env.GLIMMERVOID_CONFIG = prevEnv;
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -115,7 +115,7 @@ test('a pending notice rides the next UserPromptSubmit in the exact injectable s
   assert.equal(body.reason, 'ok');
   assert.deepEqual(Object.keys(body.hookSpecificOutput), ['hookEventName', 'additionalContext']);
   assert.equal(body.hookSpecificOutput.hookEventName, 'UserPromptSubmit', 'the event name must match or Claude Code drops it');
-  assert.match(body.hookSpecificOutput.additionalContext, /^\[glissa\] Context pack updated since this session started: "alpha" \(version v1 is now v2\)\./);
+  assert.match(body.hookSpecificOutput.additionalContext, /^\[glimmervoid\] Context pack updated since this session started: "alpha" \(version v1 is now v2\)\./);
   assert.equal(body.additionalContext, undefined, 'a top-level additionalContext is silently ignored by Claude Code, so it is never sent');
 
   const next = await postHook('UserPromptSubmit');

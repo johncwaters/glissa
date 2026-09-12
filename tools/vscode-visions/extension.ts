@@ -104,7 +104,7 @@ function stampedRelayPath(): string {
 }
 
 function resolveRelayPath(settings: WorkspaceConfiguration, env: NodeJS.ProcessEnv): string {
-  const candidates = [settings.get('relayPath', ''), env.GLISSA_RELAY_PATH || '', stampedRelayPath()];
+  const candidates = [settings.get('relayPath', ''), env.GLIMMERVOID_RELAY_PATH || '', stampedRelayPath()];
   for (const candidate of candidates) {
     if (candidate && fs.existsSync(candidate)) return candidate;
   }
@@ -117,15 +117,15 @@ function relayArgs(relayPath: string, port: number): string[] {
 }
 
 function activate(context: ExtensionContext): void {
-  const output: OutputChannel = vscode.window.createOutputChannel('Glissa Visions');
-  const diagnostics: DiagnosticCollection = vscode.languages.createDiagnosticCollection('glissa-visions');
+  const output: OutputChannel = vscode.window.createOutputChannel('Glimmervoid Visions');
+  const diagnostics: DiagnosticCollection = vscode.languages.createDiagnosticCollection('glimmervoid-visions');
   context.subscriptions.push(output, diagnostics);
 
-  const settings: WorkspaceConfiguration = vscode.workspace.getConfiguration('glissaVisions');
+  const settings: WorkspaceConfiguration = vscode.workspace.getConfiguration('glimmervoidVisions');
   const relayPath = resolveRelayPath(settings, process.env);
   if (!relayPath) {
-    output.appendLine('no relay found: reinstall with `glissa visions install`, or set glissaVisions.relayPath');
-    vscode.window.showErrorMessage('Glissa Visions found no relay. Run `glissa visions install` again, or set glissaVisions.relayPath.');
+    output.appendLine('no relay found: reinstall with `glimmervoid visions install`, or set glimmervoidVisions.relayPath');
+    vscode.window.showErrorMessage('Glimmervoid Visions found no relay. Run `glimmervoid visions install` again, or set glimmervoidVisions.relayPath.');
     return;
   }
 
@@ -298,7 +298,7 @@ function createRelayClient({ relayPath, port, output, diagnostics }: RelayClient
       processId: process.pid,
       rootUri: null,
       capabilities: {},
-      clientInfo: { name: 'glissa-visions-extension' },
+      clientInfo: { name: 'glimmervoid-visions-extension' },
     }, CODE_ACTION_TIMEOUT_MS);
     notify('initialized', {});
     openMirroredDocuments();

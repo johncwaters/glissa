@@ -68,16 +68,16 @@ test('resolveVisionsScopeProjects means every configured project when no ids are
   const warn = (message: string) => { warnings.push(message); };
   const projects = [
     { id: 'superday', path: '/home/me/Projects/superday' },
-    { id: 'glissa', path: '/home/me/Projects/glissa/' },
+    { id: 'glimmervoid', path: '/home/me/Projects/glimmervoid/' },
     { id: 'superday-again', path: '/home/me/Projects/superday' },
     { id: 'pathless' },
   ];
   assert.deepEqual(resolveVisionsScopeProjects({ configuredIds: undefined, projects, warn }), [
     { id: 'superday', path: '/home/me/Projects/superday' },
-    { id: 'glissa', path: '/home/me/Projects/glissa' },
+    { id: 'glimmervoid', path: '/home/me/Projects/glimmervoid' },
   ]);
-  assert.deepEqual(resolveVisionsScopeProjects({ configuredIds: [], projects, warn }).map((project) => project.id), ['superday', 'glissa']);
-  assert.deepEqual(resolveVisionsScopeProjects({ configuredIds: ['glissa'], projects, warn }).map((project) => project.id), ['glissa']);
+  assert.deepEqual(resolveVisionsScopeProjects({ configuredIds: [], projects, warn }).map((project) => project.id), ['superday', 'glimmervoid']);
+  assert.deepEqual(resolveVisionsScopeProjects({ configuredIds: ['glimmervoid'], projects, warn }).map((project) => project.id), ['glimmervoid']);
   assert.deepEqual(warnings, []);
   assert.deepEqual(resolveVisionsScopeProjects({ configuredIds: ['missing', 'pathless'], projects, warn }), []);
   assert.deepEqual(warnings, [

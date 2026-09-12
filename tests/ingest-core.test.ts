@@ -197,7 +197,7 @@ const INNOCENT_CORPUS = [
   ['-u as a plain git flag', 'git log -p HEAD~3'],
   ['curl with no credentials', 'curl -s https://api.example.com/v1/users'],
   ['a git sha', 'git checkout 5f2a9c1b3d4e6f7a8b9c0d1e2f3a4b5c6d7e8f90'],
-  ['a uuid', 'glissa pair 3f2504e0-4f89-11d3-9a0c-0305e82c3301'],
+  ['a uuid', 'glimmervoid pair 3f2504e0-4f89-11d3-9a0c-0305e82c3301'],
   ['a bare eyJ with no triplet', 'echo eyJ | base64 -d'],
   ['a public key line', 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQabcdef user@host'],
   ['a public key pem header', 'openssl rsa -pubout -----BEGIN PUBLIC KEY-----'],
