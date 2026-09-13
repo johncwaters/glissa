@@ -58,5 +58,17 @@ function withoutEnvSecrets<T extends ConfigBlocks>(config: T, envSecrets: readon
   return stripped as T;
 }
 
-export { ENV_SECRET_BINDINGS, readEnvSecrets, withEnvSecrets, withoutEnvSecrets };
+function withSortedKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withSortedKeys);
+  if (!isPlainObject(value)) return value;
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(value).sort()) sorted[key] = withSortedKeys(value[key]);
+  return sorted;
+}
+
+function stableConfigKey(value: unknown): string {
+  return JSON.stringify(withSortedKeys(value));
+}
+
+export { ENV_SECRET_BINDINGS, readEnvSecrets, stableConfigKey, withEnvSecrets, withoutEnvSecrets };
 export type { EnvSecretBinding, ResolvedEnvSecret };

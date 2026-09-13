@@ -139,11 +139,9 @@ test('overflow reads as a count of what was not shown, never as loss', async () 
 });
 
 test('the count line agrees on singular and plural, and an empty feed says so in words', async () => {
-  const { INGEST_EMPTY_TEXT, activityCountText, hasActivity } = await importCore();
+  const { INGEST_EMPTY_TEXT, activityCountText } = await importCore();
   assert.equal(activityCountText(0), '0 events');
   assert.equal(activityCountText(1), '1 event');
   assert.equal(activityCountText(7), '7 events');
-  assert.ok(INGEST_EMPTY_TEXT.length > 0);
-  assert.equal(hasActivity({ events: [event(1)] }), true);
-  assert.equal(hasActivity({ events: [] }), false);
+  assert.equal(INGEST_EMPTY_TEXT, 'No activity yet. The ingest lane reports what your sessions and tools are doing.');
 });

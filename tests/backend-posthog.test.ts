@@ -24,6 +24,7 @@ import { createSpawnGate } from '../server/spawn-gate.ts';
 import { HookRouter } from '../detection/hook-source.ts';
 import { Session } from '../session/sessions.ts';
 import type { SessionOptions } from '../session/sessions.ts';
+import { readEnvSecrets, withEnvSecrets } from '../server/core/config-secrets-core.ts';
 import type { InvestigationTrail } from '../server/core/investigation-trail-core.ts';
 import { safePathSegment } from '../shared/paths.ts';
 import { fakePty } from './helpers/fake-pty.ts';
@@ -180,6 +181,22 @@ test('posthogCfgKey: absent posthog/telegram normalizes to null, distinct from a
 test('posthogCfgKey: a changed packs list counts as a lane config change', () => {
   const base = { posthog: { ...ENABLED, packs: ['crew-rules'] }, telegram: TELEGRAM };
   const changed = { posthog: { ...ENABLED, packs: ['house-rules'] }, telegram: TELEGRAM };
+  assert.notEqual(posthogCfgKey(base), posthogCfgKey(changed));
+});
+
+test('posthogCfgKey: a posthog block the env-secret overlay reordered is not a lane config change', () => {
+  const envSecrets = readEnvSecrets({ GLIMMERVOID_POSTHOG_API_KEY: 'env-api-key' });
+  const beforeSave = withEnvSecrets({ posthog: { apiKey: 'env-api-key', enabled: true }, telegram: TELEGRAM }, envSecrets);
+  const afterReload = withEnvSecrets({ posthog: { enabled: true }, telegram: TELEGRAM }, envSecrets);
+  assert.notDeepEqual(Object.keys(beforeSave.posthog), Object.keys(afterReload.posthog));
+  assert.equal(posthogCfgKey(beforeSave), posthogCfgKey(afterReload));
+});
+
+test('posthogCfgKey: a reordered posthog block with a changed host is still a lane config change', () => {
+  const envSecrets = readEnvSecrets({ GLIMMERVOID_POSTHOG_API_KEY: 'env-api-key' });
+  const base = withEnvSecrets({ posthog: { apiKey: 'env-api-key', enabled: true, host: 'https://eu.ph.test' }, telegram: TELEGRAM }, envSecrets);
+  const changed = withEnvSecrets({ posthog: { enabled: true, host: 'https://us.ph.test' }, telegram: TELEGRAM }, envSecrets);
+  assert.notDeepEqual(Object.keys(base.posthog), Object.keys(changed.posthog));
   assert.notEqual(posthogCfgKey(base), posthogCfgKey(changed));
 });
 

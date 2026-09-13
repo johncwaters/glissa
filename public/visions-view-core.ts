@@ -195,14 +195,6 @@ export function intentMetaText(intent: Partial<IntentThread> | null | undefined,
   return `${thread}${source}, ${age}`;
 }
 
-function intentSignature(state: IntentState | null | undefined) {
-  return intentRows(state, null, 0).map((row) => `${row.key}\u0000${row.text}\u0000${row.hasText}\u0000${row.active}`).join('\u0001');
-}
-
-export function hasIntentStateChanged(previous: IntentState | null | undefined, next: IntentState | null | undefined) {
-  return intentSignature(previous) !== intentSignature(next);
-}
-
 export function findingLineLabel(finding: VisionsFinding | null | undefined) {
   const line = Number(finding?.range?.start?.line);
   if (!Number.isFinite(line) || line < 0) return 'L?';
@@ -269,10 +261,6 @@ export function handOfMessage(msg: { hand?: unknown } | null | undefined) {
   return hand || null;
 }
 
-export function hasHand(msg: { hand?: unknown } | null | undefined) {
-  return handOfMessage(msg) !== null;
-}
-
 export function applyHandMessage(handsByUri: Map<string, string>, msg: { uri?: unknown; hand?: unknown } | null | undefined) {
   const next = new Map(handsByUri);
   const uri = typeof msg?.uri === 'string' ? msg.uri : '';
@@ -296,10 +284,6 @@ export function applyHandSnapshot(msg: { documents?: unknown } | null | undefine
     next.set(uri, hand);
   }
   return next;
-}
-
-export function totalHandCount(handsByUri: Map<string, string>) {
-  return handsByUri.size;
 }
 
 export const VISIONS_ATTENTION_HAND = 'hand';
@@ -392,10 +376,6 @@ export function diagnosticsOfMessage(msg: { diagnostics?: unknown } | null | und
   return Array.isArray(msg?.diagnostics) ? msg.diagnostics : [];
 }
 
-export function hasFindings(msg: { diagnostics?: unknown } | null | undefined) {
-  return diagnosticsOfMessage(msg).length > 0;
-}
-
 export function applyFindingsMessage(findingsByUri: Map<string, VisionsFinding[]>, msg: { uri?: unknown; diagnostics?: unknown } | null | undefined) {
   const next = new Map(findingsByUri);
   const uri = typeof msg?.uri === 'string' ? msg.uri : '';
@@ -411,10 +391,6 @@ export function applyFindingsMessage(findingsByUri: Map<string, VisionsFinding[]
 
 export function commentsOfMessage(msg: { comments?: unknown } | null | undefined): VisionsComment[] {
   return Array.isArray(msg?.comments) ? msg.comments : [];
-}
-
-export function hasComments(msg: { comments?: unknown } | null | undefined) {
-  return commentsOfMessage(msg).length > 0;
 }
 
 export function applyCommentsMessage(commentsByUri: Map<string, VisionsComment[]>, msg: { uri?: unknown; comments?: unknown } | null | undefined) {
@@ -452,18 +428,6 @@ export function applyCommentsSnapshot(msg: { documents?: unknown } | null | unde
     next.set(uri, comments);
   }
   return next;
-}
-
-export function totalFindingCount(findingsByUri: Map<string, VisionsFinding[]>) {
-  let total = 0;
-  for (const diagnostics of findingsByUri.values()) total += diagnostics.length;
-  return total;
-}
-
-export function totalCommentCount(commentsByUri: Map<string, VisionsComment[]>) {
-  let total = 0;
-  for (const comments of commentsByUri.values()) total += comments.length;
-  return total;
 }
 
 export function visionsSections(
@@ -538,10 +502,6 @@ export function fixEntryOfMessage(msg: { uri?: unknown; ts?: unknown; fix?: unkn
   const uri = typeof msg?.uri === 'string' ? msg.uri : '';
   const ts = Number(msg?.ts);
   return normalizeFixEntry(msg?.fix, { uri, ts: Number.isFinite(ts) ? ts : 0 });
-}
-
-export function hasFix(msg: { uri?: unknown; ts?: unknown; fix?: unknown } | null | undefined) {
-  return fixEntryOfMessage(msg) !== null;
 }
 
 export function applyFixMessage(
@@ -658,10 +618,6 @@ export function applyActivityMessage(
 
 export function applyActivitySnapshot(msg: { events?: unknown } | null | undefined, { max = MAX_RENDERED_ACTIVITY }: { max?: number } = {}) {
   return sortedAndCapped(eventsOfMessage(msg), max);
-}
-
-export function hasActivity(msg: { events?: unknown } | null | undefined) {
-  return eventsOfMessage(msg).length > 0;
 }
 
 export function activityCountText(count: unknown) {

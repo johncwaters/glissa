@@ -11,6 +11,7 @@ import { createBackend } from '../server/backend.ts';
 import {
   buildReviewPrompt, createPrReviewWiring, prPollerShouldStart, prReviewCfgKey, readReviewResult,
 } from '../server/pr-review-wiring.ts';
+import { readEnvSecrets, withEnvSecrets } from '../server/core/config-secrets-core.ts';
 import type { PrGitWorkspace } from '../server/pr-poller.ts';
 import { createSpawnGate } from '../server/spawn-gate.ts';
 import { closeSocket, dashboardClient, openSocket } from './helpers/dashboard-ws.ts';
@@ -160,6 +161,22 @@ test('prReviewCfgKey: a changed packs list counts as a lane config change', () =
   assert.notEqual(prReviewCfgKey(base), prReviewCfgKey(changed));
 });
 
+test('prReviewCfgKey: a telegram block the env-secret overlay reordered is not a lane config change', () => {
+  const envSecrets = readEnvSecrets({ GLIMMERVOID_TELEGRAM_BOT_TOKEN: 'env-bot-token' });
+  const beforeSave = withEnvSecrets({ prReview: { enabled: true }, telegram: { botToken: 'env-bot-token', chatId: 'c1' } }, envSecrets);
+  const afterReload = withEnvSecrets({ prReview: { enabled: true }, telegram: { chatId: 'c1' } }, envSecrets);
+  assert.notDeepEqual(Object.keys(beforeSave.telegram), Object.keys(afterReload.telegram));
+  assert.equal(prReviewCfgKey(beforeSave), prReviewCfgKey(afterReload));
+});
+
+test('prReviewCfgKey: a reordered telegram block with a changed chatId is still a lane config change', () => {
+  const envSecrets = readEnvSecrets({ GLIMMERVOID_TELEGRAM_BOT_TOKEN: 'env-bot-token' });
+  const base = withEnvSecrets({ prReview: { enabled: true }, telegram: { botToken: 'env-bot-token', chatId: 'c1' } }, envSecrets);
+  const changed = withEnvSecrets({ prReview: { enabled: true }, telegram: { chatId: 'c2' } }, envSecrets);
+  assert.notDeepEqual(Object.keys(base.telegram), Object.keys(changed.telegram));
+  assert.notEqual(prReviewCfgKey(base), prReviewCfgKey(changed));
+});
+
 test('PR review lane passes configured packs into Session options', () => {
   const { makeSession, constructed, created } = recordingSessionFactory();
   const wiring = createPrReviewWiring({
@@ -190,6 +207,8 @@ test('with the mill off the PR review lane spawns with no pack at all', () => {
   }
 });
 
+const OPEN_SOCKETS: WebSocket[] = [];
+
 function withBackend(fn: (t: TestContext, dash: DashboardClient) => Promise<void>) {
   return async (t: TestContext) => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'glimmervoid-prrestart-'));
@@ -207,6 +226,7 @@ function withBackend(fn: (t: TestContext, dash: DashboardClient) => Promise<void
     try {
       await fn(t, dash);
     } finally {
+      for (const socket of OPEN_SOCKETS.splice(0)) socket.terminate();
       backend.shutdown();
       server.closeAllConnections();
       await closeServer(server);
@@ -255,6 +275,7 @@ test('update-settings hot-applies the poller only when prReview/telegram actuall
     .map((call) => String(call.arguments[0]))
     .filter((line) => /pr-poller/i.test(line));
   const ws = await openSocket(dash, '/control');
+  OPEN_SOCKETS.push(ws);
 
   await sendAndWait(ws, { type: 'get-settings', requestId: '1' }, 'settings');
 

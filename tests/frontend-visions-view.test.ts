@@ -114,17 +114,8 @@ test('two files of the same name are ordered by their full uri, not left to inse
   assert.deepEqual(visionsSections(map).map((section) => section.uri), ['file:///a/notes.md', 'file:///z/notes.md']);
 });
 
-test('the totals and the arrival test read the same feed', async () => {
-  const { totalFindingCount, hasFindings, VISIONS_EMPTY_TEXT } = await importCore();
-  const map = new Map([
-    ['file:///a.md', [finding(0, 0, 'x', 'a'), finding(1, 0, 'x', 'b')]],
-    ['file:///b.md', [finding(0, 0, 'x', 'c')]],
-  ]);
-  assert.equal(totalFindingCount(map), 3);
-  assert.equal(totalFindingCount(new Map()), 0);
-  assert.equal(hasFindings({ diagnostics: [finding(0, 0, 'x', 'a')] }), true);
-  assert.equal(hasFindings({ diagnostics: [] }), false);
-  assert.equal(hasFindings({}), false);
+test('an empty panel says in words what it is waiting for', async () => {
+  const { VISIONS_EMPTY_TEXT } = await importCore();
   assert.equal(VISIONS_EMPTY_TEXT, 'No findings. Open a markdown file in a connected editor.');
 });
 
@@ -170,14 +161,12 @@ test('the snapshot carries both halves, and each half reads only its own field',
 });
 
 test('a hand push replaces that document, and a null one clears it', async () => {
-  const { applyHandMessage, hasHand, visionsHandText } = await importCore();
+  const { applyHandMessage, visionsHandText } = await importCore();
   const first = applyHandMessage(new Map(), wire({
     type: 'visions-hand', uri: 'file:///a.md', hand: '  the outline and conclusion argue different plans  ',
   }));
   assert.equal(first.get('file:///a.md'), 'the outline and conclusion argue different plans');
   assert.equal(visionsHandText(first.get('file:///a.md')), 'Raised hand: the outline and conclusion argue different plans');
-  assert.equal(hasHand(wire({ uri: 'file:///a.md', hand: 'a structural issue' })), true);
-  assert.equal(hasHand(wire({ uri: 'file:///a.md', hand: null })), false);
 
   const replaced = applyHandMessage(first, { uri: 'file:///a.md', hand: 'the document has two audiences' });
   assert.equal(replaced.get('file:///a.md'), 'the document has two audiences');
@@ -222,15 +211,11 @@ test('the section head names what it actually has, and never pads with a zero', 
 });
 
 test('comment lines are already 1-based, unlike the LSP ranges beside them', async () => {
-  const { commentLineLabel, totalCommentCount, hasComments } = await importCore();
+  const { commentLineLabel } = await importCore();
   assert.equal(commentLineLabel(comment(1, 'x')), 'L1');
   assert.equal(commentLineLabel(comment(12, 'x')), 'L12');
   assert.equal(commentLineLabel({}), 'L?');
   assert.equal(commentLineLabel(comment(0, 'x')), 'L?');
-
-  assert.equal(totalCommentCount(new Map([['a', [comment(1, 'x'), comment(2, 'y')]], ['b', [comment(1, 'z')]]])), 3);
-  assert.equal(hasComments({ comments: [comment(1, 'x')] }), true);
-  assert.equal(hasComments({}), false);
 });
 
 const NOW = 1700000000000;
@@ -375,21 +360,6 @@ test('the unowned row is the empty state, and steps aside once anything speaks',
   assert.deepEqual(scopedOnly.map((row) => row.key), [`${PROJECT}:t-11111111`]);
 });
 
-test('a repaint fires when a thread moves or the active one changes, and never on age alone', async () => {
-  const { emptyIntentState, hasIntentStateChanged } = await importCore();
-  const a = thread('t-11111111', 'story A');
-  const b = thread('t-22222222', 'story B');
-  const state = { byProject: { [PROJECT]: [a, b] }, unowned: [thread('t-33333333', 'unowned')] };
-  assert.equal(hasIntentStateChanged(state, {
-    byProject: { [PROJECT]: [{ ...a, ts: NOW + 90000 }, b] }, unowned: [{ ...state.unowned[0], ts: NOW + 90000 }],
-  }), false);
-  assert.equal(hasIntentStateChanged(state, { ...state, byProject: { [PROJECT]: [{ ...a, text: 'moved' }, b] } }), true);
-  assert.equal(hasIntentStateChanged(state, { ...state, byProject: { [PROJECT]: [b, a] } }), true, 'the active thread changed');
-  assert.equal(hasIntentStateChanged(state, { byProject: {}, unowned: state.unowned }), true);
-  assert.equal(hasIntentStateChanged(emptyIntentState(), state), true);
-  assert.equal(hasIntentStateChanged(null, emptyIntentState()), false);
-});
-
 const APPLIED_FIX = {
   type: 'visions-fix',
   uri: 'file:///tmp/plan.md',
@@ -413,8 +383,7 @@ test('a fix row reads as a one-based line and says plainly whether it landed', a
 });
 
 test('one broadcast becomes one row, taking the uri and the stamp off the frame around it', async () => {
-  const { applyFixMessage, fixEntryOfMessage, hasFix } = await importCore();
-  assert.equal(hasFix(APPLIED_FIX), true);
+  const { applyFixMessage, fixEntryOfMessage } = await importCore();
   assert.deepEqual(fixEntryOfMessage(APPLIED_FIX), {
     uri: 'file:///tmp/plan.md',
     code: 'repeated-word',
@@ -430,9 +399,8 @@ test('one broadcast becomes one row, taking the uri and the stamp off the frame 
 });
 
 test('a frame with nothing to say leaves the list exactly as it was', async () => {
-  const { applyFixMessage, hasFix } = await importCore();
+  const { applyFixMessage } = await importCore();
   const rows = applyFixMessage([], APPLIED_FIX);
-  assert.equal(hasFix(wire({ type: 'visions-fix', uri: 'file:///tmp/plan.md' })), false);
   assert.deepEqual(applyFixMessage(rows, wire({ type: 'visions-fix', fix: { message: '   ' } })), rows);
 });
 

@@ -6,6 +6,7 @@ import type { HookRouter } from '../detection/hook-source.ts';
 import { Session } from '../session/sessions.ts';
 import type { SessionOptions } from '../session/sessions.ts';
 import { glimmervoidHomeDir } from './config-store.ts';
+import { stableConfigKey } from './core/config-secrets-core.ts';
 import { millPackNames } from './core/pack-core.ts';
 import {
   awaitSessionExit, createJobResultFile, readResultFile, registerEphemeralSession,
@@ -132,7 +133,7 @@ function prPollerShouldStart(cfg: PrReviewWiringConfig): LaneRunnerGate {
 }
 
 function prReviewCfgKey(cfg: PrReviewWiringConfig): string {
-  return JSON.stringify({ prReview: cfg.prReview || null, telegram: cfg.telegram || null });
+  return stableConfigKey({ prReview: cfg.prReview || null, telegram: cfg.telegram || null });
 }
 
 function prReviewPackNames(cfg: PrReviewWiringConfig): string[] {

@@ -8,6 +8,7 @@ import { Session } from '../session/sessions.ts';
 import type { SessionOptions } from '../session/sessions.ts';
 import { execFileAsync } from './child-process-safe.ts';
 import { glimmervoidHomeDir } from './config-store.ts';
+import { stableConfigKey } from './core/config-secrets-core.ts';
 import { millPackNames } from './core/pack-core.ts';
 import { appendTrailStep, createInvestigationTrail, trailStepFromHook } from './core/investigation-trail-core.ts';
 import type { InvestigationTrail } from './core/investigation-trail-core.ts';
@@ -430,7 +431,7 @@ function posthogShouldStart(cfg: PosthogWiringConfig): LaneRunnerGate {
 }
 
 function posthogCfgKey(cfg: PosthogWiringConfig): string {
-  return JSON.stringify({ posthog: cfg.posthog || null, telegram: cfg.telegram || null });
+  return stableConfigKey({ posthog: cfg.posthog || null, telegram: cfg.telegram || null });
 }
 
 function posthogPackNames(cfg: PosthogWiringConfig): string[] {

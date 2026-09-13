@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { ENV_SECRET_BINDINGS } from '../../server/core/config-secrets-core.ts';
 
 function resolveIsolatedTestHome(): string {
   const sharedByParent = process.env.GLIMMERVOID_TEST_HOME;
@@ -13,5 +14,7 @@ function resolveIsolatedTestHome(): string {
   });
   return mintedHome;
 }
+
+for (const binding of ENV_SECRET_BINDINGS) delete process.env[binding.environmentVariable];
 
 process.env.GLIMMERVOID_HOME = resolveIsolatedTestHome();

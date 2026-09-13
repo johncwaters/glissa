@@ -586,7 +586,7 @@ function render() {
 
   if (projects.length === 0 && investigations.length === 0 && ops.length === 0 && prs.length === 0) {
     const empty = el('p', 'radar-unconfigured', radarPlaceholder(_latest));
-    const link = createSettingsLink('lanes-posthog', 'posthog-enabled', 'Enable PostHog');
+    const link = createSettingsLink('lanes-posthog', 'posthog-enabled', 'PostHog settings');
     empty.append(document.createTextNode(' '), link);
     _root.append(empty);
     return;
