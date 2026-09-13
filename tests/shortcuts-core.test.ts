@@ -31,7 +31,7 @@ test('SHORTCUT_GROUPS: every group, item and chord carries renderable text', () 
   }
 });
 
-test('SHORTCUT_GROUPS: documents the core bindings', () => {
+test('SHORTCUT_GROUPS: documents the surviving dashboard bindings', () => {
   const chords = new Set<string>();
   for (const group of SHORTCUT_GROUPS) {
     for (const item of group.items) {
@@ -40,9 +40,9 @@ test('SHORTCUT_GROUPS: documents the core bindings', () => {
   }
   const up = String.fromCharCode(0x2191);
   const down = String.fromCharCode(0x2193);
-  for (const expected of [`Alt+${up}`, `Alt+${down}`, 'Alt+1-9', 'Alt+W', 'Alt+M', 'Alt+R', 'Alt+0', '?', 'Esc']) {
-    assert.ok(chords.has(expected), `documents ${expected}`);
-  }
+  const left = String.fromCharCode(0x2190);
+  const right = String.fromCharCode(0x2192);
+  assert.deepEqual(chords, new Set([up, down, left, right, 'Ctrl+C', 'Ctrl+V', 'Ctrl+Backspace', 'Esc']));
 });
 
 test('SHORTCUT_GROUPS: no banned dash or ellipsis literals (no-dash repo)', () => {

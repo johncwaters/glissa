@@ -102,7 +102,7 @@ function render() {
   const projects = projectsOf<PrProject>(_latest);
   if (projects.length === 0) {
     const empty = el('p', 'pr-unconfigured', prStatusPlaceholder(_latest));
-    const link = createSettingsLink('lanes-unattended', 'pr-review-enabled', 'Enable PR review');
+    const link = createSettingsLink('lanes-unattended', 'pr-review-enabled', 'PR review settings');
     empty.append(document.createTextNode(' '), link);
     _root.append(empty);
     return;

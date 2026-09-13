@@ -17,6 +17,7 @@ export interface UiPrefs {
   prsAttentionAck: string;
   usageAttentionAck: string;
   millAttentionAck: string;
+  visionsAttentionAck: string;
 }
 
 const asBoolean = (fallback: boolean) => (value: unknown): boolean => (typeof value === 'boolean' ? value : fallback);
@@ -40,6 +41,7 @@ const PREFS: { [Key in keyof UiPrefs]: (value: unknown) => UiPrefs[Key] } = {
   prsAttentionAck: asString(''),
   usageAttentionAck: asString(''),
   millAttentionAck: asString(''),
+  visionsAttentionAck: asString(''),
 };
 
 function normalizeInto<Key extends keyof UiPrefs>(prefs: Partial<UiPrefs>, key: Key, raw: unknown) {
@@ -98,6 +100,9 @@ export const setUsageAttentionAck = (signature: string) => write('usageAttention
 
 export const getMillAttentionAck = () => read('millAttentionAck');
 export const setMillAttentionAck = (signature: string) => write('millAttentionAck', signature);
+
+export const getVisionsAttentionAck = () => read('visionsAttentionAck');
+export const setVisionsAttentionAck = (signature: string) => write('visionsAttentionAck', signature);
 
 export const getLastFocusedSessionId = () => read('lastFocusedSessionId');
 export const setLastFocusedSessionId = (id: string | null) => write('lastFocusedSessionId', id);

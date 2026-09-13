@@ -305,9 +305,80 @@ export function totalHandCount(handsByUri: Map<string, string>) {
 export const VISIONS_ATTENTION_HAND = 'hand';
 export const VISIONS_ATTENTION_UNSEEN = 'unseen';
 
-export function decideVisionsAttention({ unseen = false, handCount = 0 }: { unseen?: boolean; handCount?: number } = {}) {
-  if (handCount > 0) return VISIONS_ATTENTION_HAND;
-  if (unseen) return VISIONS_ATTENTION_UNSEEN;
+const ATTENTION_ENTRY_SEPARATOR = '\n';
+
+export interface VisionsAttentionState {
+  signature: string;
+  handEntries: string[];
+  contentEntries: string[];
+}
+
+function attentionDigest(text: string) {
+  let firstHash = 0x811c9dc5;
+  let secondHash = 0xc2b2ae35;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    firstHash = Math.imul(firstHash ^ code, 0x01000193) >>> 0;
+    secondHash = Math.imul(secondHash ^ code, 0x85ebca6b) >>> 0;
+  }
+  return `${firstHash.toString(36).padStart(7, '0')}${secondHash.toString(36).padStart(7, '0')}`;
+}
+
+function attentionEntry(kind: string, values: unknown[]) {
+  return attentionDigest(JSON.stringify([kind, ...values]));
+}
+
+function findingAttentionEntry(uri: string, finding: VisionsFinding) {
+  return attentionEntry('finding', [uri, findingLineLabel(finding), String(finding.code ?? ''), String(finding.message ?? '')]);
+}
+
+function commentAttentionEntry(uri: string, comment: VisionsComment) {
+  return attentionEntry('comment', [uri, commentLineLabel(comment), String(comment.message ?? '')]);
+}
+
+function fixAttentionEntry(entry: VisionsFixEntry) {
+  return attentionEntry('fix', [entry.uri, fixLineLabel(entry), entry.code, entry.message, fixOutcomeText(entry)]);
+}
+
+function intentAttentionEntry(row: IntentRow) {
+  return attentionEntry('intent', [row.key, row.text, row.active]);
+}
+
+export function visionsAttentionState(
+  findingsByUri: Map<string, VisionsFinding[]>,
+  commentsByUri: Map<string, VisionsComment[]>,
+  handsByUri: Map<string, string>,
+  fixEntries: VisionsFixEntry[] = [],
+  intent: IntentState | null = null
+): VisionsAttentionState {
+  const handEntries = [...handsByUri].map(([uri, hand]) => attentionEntry('hand', [uri, hand])).sort();
+  const contentEntries = new Set<string>();
+  for (const uri of [...findingsByUri.keys(), ...commentsByUri.keys(), ...handsByUri.keys()]) {
+    contentEntries.add(attentionEntry('document', [uri]));
+  }
+  for (const [uri, findings] of findingsByUri) {
+    for (const finding of findings) contentEntries.add(findingAttentionEntry(uri, finding));
+  }
+  for (const [uri, comments] of commentsByUri) {
+    for (const comment of comments) contentEntries.add(commentAttentionEntry(uri, comment));
+  }
+  for (const entry of fixEntries) contentEntries.add(fixAttentionEntry(entry));
+  for (const row of intentRows(intent, null, 0)) {
+    if (!row.hasText) continue;
+    contentEntries.add(intentAttentionEntry(row));
+  }
+  const sortedContentEntries = [...contentEntries].sort();
+  return {
+    signature: [...handEntries, ...sortedContentEntries].join(ATTENTION_ENTRY_SEPARATOR),
+    handEntries,
+    contentEntries: sortedContentEntries,
+  };
+}
+
+export function decideVisionsAttention(attention: VisionsAttentionState, acknowledgedSignature: string) {
+  const acknowledgedEntries = new Set(acknowledgedSignature.split(ATTENTION_ENTRY_SEPARATOR));
+  if (attention.handEntries.some((entry) => !acknowledgedEntries.has(entry))) return VISIONS_ATTENTION_HAND;
+  if (attention.contentEntries.some((entry) => !acknowledgedEntries.has(entry))) return VISIONS_ATTENTION_UNSEEN;
   return null;
 }
 

@@ -464,15 +464,140 @@ test('the rendered changelog is capped, however long the tab is left open', asyn
   assert.equal(rows[0].line, MAX_RENDERED_FIXES + 4);
 });
 
-test('a raised hand outranks unseen arrivals, and stands even while the panel is open', async () => {
-  const { decideVisionsAttention, VISIONS_ATTENTION_HAND, VISIONS_ATTENTION_UNSEEN } = await importCore();
-
-  assert.equal(decideVisionsAttention({ unseen: false, handCount: 0 }), null);
-  assert.equal(decideVisionsAttention({ unseen: true, handCount: 0 }), VISIONS_ATTENTION_UNSEEN);
-  assert.equal(decideVisionsAttention({ unseen: false, handCount: 1 }), VISIONS_ATTENTION_HAND);
-  assert.equal(
-    decideVisionsAttention({ unseen: true, handCount: 2 }), VISIONS_ATTENTION_HAND,
-    'the rarest thing the lane produces must not look like the noisiest',
+test('visions attention only lights for unacknowledged rendered content, with hands taking priority', async () => {
+  const { decideVisionsAttention, visionsAttentionState, VISIONS_ATTENTION_HAND, VISIONS_ATTENTION_UNSEEN } = await importCore();
+  const uri = 'file:///tmp/plan.md';
+  const nothingPending = visionsAttentionState(new Map(), new Map(), new Map());
+  const raisedHand = visionsAttentionState(new Map(), new Map(), new Map([[uri, 'Need a decision']]));
+  const acknowledgedHand = raisedHand.signature;
+  const handWithFinding = visionsAttentionState(
+    new Map([[uri, [finding(2, 1, 'heading-skip', 'Skipped heading')]]]),
+    new Map(),
+    new Map([[uri, 'Need a decision']]),
   );
-  assert.equal(decideVisionsAttention(), null, 'no state is no ask');
+
+  assert.equal(decideVisionsAttention(nothingPending, ''), null);
+  assert.equal(decideVisionsAttention(raisedHand, ''), VISIONS_ATTENTION_HAND);
+  assert.equal(decideVisionsAttention(raisedHand, acknowledgedHand), null);
+  assert.equal(decideVisionsAttention(handWithFinding, acknowledgedHand), VISIONS_ATTENTION_UNSEEN);
+  assert.equal(decideVisionsAttention(handWithFinding, handWithFinding.signature), null);
+});
+
+test('visions attention signatures are stable across identical snapshots and change for rendered content', async () => {
+  const { visionsAttentionState } = await importCore();
+  const uri = 'file:///tmp/plan.md';
+  const original = visionsAttentionState(
+    new Map([[uri, [finding(2, 1, 'heading-skip', 'Skipped heading')]]]),
+    new Map(),
+    new Map(),
+  );
+  const replayed = visionsAttentionState(
+    new Map([[uri, [finding(2, 1, 'heading-skip', 'Skipped heading')]]]),
+    new Map(),
+    new Map(),
+  );
+  const changed = visionsAttentionState(
+    new Map([[uri, [finding(2, 1, 'heading-skip', 'Different finding')]]]),
+    new Map(),
+    new Map(),
+  );
+
+  assert.equal(replayed.signature, original.signature);
+  assert.notEqual(changed.signature, original.signature);
+});
+
+test('a boot before the first snapshot has nothing to acknowledge, so a stored acknowledgement survives it', async () => {
+  const { decideVisionsAttention, visionsAttentionState } = await importCore();
+  const uri = 'file:///tmp/plan.md';
+  const stored = visionsAttentionState(
+    new Map([[uri, [finding(2, 1, 'heading-skip', 'Skipped heading')]]]),
+    new Map(),
+    new Map(),
+  ).signature;
+  const beforeFirstMessage = visionsAttentionState(new Map(), new Map(), new Map());
+
+  assert.equal(beforeFirstMessage.signature, '', 'an empty signature is what visions-panel refuses to store over the stored one');
+  assert.equal(decideVisionsAttention(beforeFirstMessage, stored), null);
+});
+
+test('a reload replaying the same findings against the stored acknowledgement leaves the tab dark', async () => {
+  const { decideVisionsAttention, visionsAttentionState } = await importCore();
+  const uri = 'file:///tmp/plan.md';
+  const documents = () => new Map([[uri, [finding(2, 1, 'heading-skip', 'Skipped heading')]]]);
+  const stored = visionsAttentionState(documents(), new Map(), new Map()).signature;
+  const afterReload = visionsAttentionState(documents(), new Map(), new Map());
+
+  assert.equal(decideVisionsAttention(afterReload, stored), null);
+});
+
+test('the acknowledgement persisted per finding stays short however long the finding text is', async () => {
+  const { visionsAttentionState } = await importCore();
+  const uri = 'file:///tmp/plan.md';
+  const terse = visionsAttentionState(new Map([[uri, [finding(2, 1, 'heading-skip', 'x')]]]), new Map(), new Map());
+  const verbose = visionsAttentionState(
+    new Map([[uri, [finding(2, 1, 'heading-skip', 'x'.repeat(4096))]]]),
+    new Map(),
+    new Map(),
+  );
+
+  assert.equal(verbose.signature.length, terse.signature.length);
+  assert.ok(terse.signature.length < 64, 'the prefs blob holds digests, never the finding text');
+});
+
+test('a fix the operator has not read is unseen content, and the same fix replayed by a snapshot is not', async () => {
+  const { applyFixMessage, applyFixSnapshot, decideVisionsAttention, visionsAttentionState, VISIONS_ATTENTION_UNSEEN } = await importCore();
+  const entries = applyFixMessage([], APPLIED_FIX);
+  const afterFix = visionsAttentionState(new Map(), new Map(), new Map(), entries);
+  const replayed = visionsAttentionState(new Map(), new Map(), new Map(), applyFixSnapshot({
+    fixes: [{ ...APPLIED_FIX.fix, uri: APPLIED_FIX.uri, ts: NOW + 90000 }],
+  }));
+  const secondFix = visionsAttentionState(new Map(), new Map(), new Map(), applyFixMessage(entries, {
+    ...APPLIED_FIX, fix: { ...APPLIED_FIX.fix, line: 9 },
+  }));
+
+  assert.equal(decideVisionsAttention(afterFix, ''), VISIONS_ATTENTION_UNSEEN);
+  assert.equal(decideVisionsAttention(replayed, afterFix.signature), null);
+  assert.equal(decideVisionsAttention(secondFix, afterFix.signature), VISIONS_ATTENTION_UNSEEN);
+});
+
+test('an intent thread changing state is unseen content, and the same threads replayed are not', async () => {
+  const { decideVisionsAttention, emptyIntentState, visionsAttentionState, VISIONS_ATTENTION_UNSEEN } = await importCore();
+  const first = thread('t-11111111', 'story A');
+  const second = thread('t-22222222', 'story B');
+  const noIntent = visionsAttentionState(new Map(), new Map(), new Map(), [], emptyIntentState());
+  const afterIntent = visionsAttentionState(new Map(), new Map(), new Map(), [], { byProject: { [PROJECT]: [first, second] }, unowned: [] });
+  const replayed = visionsAttentionState(new Map(), new Map(), new Map(), [], {
+    byProject: { [PROJECT]: [{ ...first, ts: NOW + 90000 }, second] }, unowned: [],
+  });
+  const promoted = visionsAttentionState(new Map(), new Map(), new Map(), [], { byProject: { [PROJECT]: [second, first] }, unowned: [] });
+
+  assert.equal(noIntent.signature, '');
+  assert.equal(decideVisionsAttention(afterIntent, ''), VISIONS_ATTENTION_UNSEEN);
+  assert.equal(decideVisionsAttention(replayed, afterIntent.signature), null);
+  assert.equal(decideVisionsAttention(promoted, afterIntent.signature), VISIONS_ATTENTION_UNSEEN);
+});
+
+test('the level is decided against the acknowledgement the ack store holds, not a prefs read another tab moved on', async () => {
+  const { decideVisionsAttention, visionsAttentionState, VISIONS_ATTENTION_UNSEEN } = await importCore();
+  const { createAttentionAck } = await import('../public/attention-ack-core.ts');
+  const uri = 'file:///tmp/plan.md';
+  const onScreen = visionsAttentionState(new Map([[uri, [finding(2, 1, 'heading-skip', 'Skipped heading')]]]), new Map(), new Map());
+  const otherTab = visionsAttentionState(new Map([[uri, [finding(3, 1, 'heading-skip', 'Another heading')]]]), new Map(), new Map());
+  const panel = { acknowledged: '', persisted: '' };
+  const attention = createAttentionAck({
+    getAck: () => panel.acknowledged,
+    setAck: (next: string) => {
+      panel.acknowledged = next;
+      panel.persisted = next;
+    },
+    signature: () => onScreen.signature,
+    isLooking: () => true,
+  });
+
+  attention.refresh();
+  panel.persisted = otherTab.signature;
+  attention.refresh();
+
+  assert.equal(decideVisionsAttention(onScreen, panel.acknowledged), null);
+  assert.equal(decideVisionsAttention(onScreen, panel.persisted), VISIONS_ATTENTION_UNSEEN);
 });

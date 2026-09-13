@@ -13,7 +13,7 @@ import { activateFocusView, centerSessionQuietly, deactivateFocusView, focusAdja
 import { initFormFactor, isPhoneLayout, onLayoutChange } from './form-factor.ts';
 import type { HealthSnapshot } from './health-monitor.ts';
 import { applyHealthSnapshot, mountHealthMonitor } from './health-monitor.ts';
-import { applyIngestActivity, applyIngestSnapshot, applyVisionsComments, applyVisionsFindings, applyVisionsFix, applyVisionsHand, applyVisionsIntent, applyVisionsSettings, applyVisionsSnapshot, mountVisionsView, refreshVisionsView, setVisionsActivityCallback, setVisionsProjectNames } from './visions-panel.ts';
+import { acknowledgeVisionsAttention, applyIngestActivity, applyIngestSnapshot, applyVisionsComments, applyVisionsFindings, applyVisionsFix, applyVisionsHand, applyVisionsIntent, applyVisionsSettings, applyVisionsSnapshot, mountVisionsView, refreshVisionsView, setVisionsActivityCallback, setVisionsProjectNames } from './visions-panel.ts';
 import { acknowledgeMillAttention, applyMillReport, mountMillView, refreshMillView, requestMillReport, setMillActivityCallback, setMillRequestSender } from './mill-panel.ts';
 import { applyDeleteHookResult, applyHooksReport, applySaveHookResult, mountHooksView, refreshHooksView, requestHooksReport, setHooksRequestSender } from './hooks-panel.ts';
 import { initNotifications, showDesktopNotification } from './notifications.ts';
@@ -648,7 +648,10 @@ function acknowledgeViewAttention(view: string) {
   if (view === 'prs') acknowledgePrAttention();
   if (view === 'usage') acknowledgeUsageAttention();
   if (view === 'mill') acknowledgeMillAttention();
-  if (view === 'visions') refreshVisionsView();
+  if (view === 'visions') {
+    acknowledgeVisionsAttention();
+    refreshVisionsView();
+  }
 }
 
 interface ActivateViewOptions {
@@ -901,21 +904,6 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     focusNthInRail(Number(e.key));
   }
-});
-
-function isTextEntryContext() {
-  const a = document.activeElement;
-  if (!(a instanceof HTMLElement)) return false;
-  if (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable) return true;
-  return !!a.closest?.('.terminal-wrap');
-}
-
-document.addEventListener('keydown', (e) => {
-  if (e.key !== '?' || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
-  if (isTextEntryContext()) return;
-  if (document.querySelector('.dialog-overlay')) return;
-  e.preventDefault();
-  openSettings('browser-shortcuts');
 });
 
 let _focusDebounce: number | null = null;

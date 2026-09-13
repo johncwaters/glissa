@@ -1,5 +1,7 @@
 import { el, isPanelHidden } from './dom-helpers.ts';
+import { createAttentionAck } from './attention-ack-core.ts';
 import { createSettingsLink } from './settings-link.ts';
+import { getVisionsAttentionAck, setVisionsAttentionAck } from './ui-prefs.ts';
 import {
   INGEST_EMPTY_TEXT,
   VISIONS_EMPTY_TEXT,
@@ -29,20 +31,12 @@ import {
   fixCountText,
   fixLineLabel,
   fixOutcomeText,
-  hasActivity,
-  hasComments,
-  hasFindings,
-  hasFix,
-  hasHand,
-  hasIntentStateChanged,
   intentRows,
   intentStateOfMessage,
   visionsHandText,
   visionsSections,
   sectionCountText,
-  totalCommentCount,
-  totalFindingCount,
-  totalHandCount,
+  visionsAttentionState,
 } from './visions-view-core.ts';
 import type { ActivityEvent, IntentRow, IntentState, VisionsComment, VisionsFinding, VisionsFixEntry, VisionsSection } from './visions-view-core.ts';
 
@@ -68,7 +62,18 @@ let _activityUI: { count: HTMLSpanElement; list: HTMLDivElement; overflow: HTMLP
 let _fixEntries: VisionsFixEntry[] = [];
 let _fixUI: { count: HTMLSpanElement; list: HTMLDivElement } | null = null;
 
-let _unseen = false;
+let _attentionState = visionsAttentionState(_findingsByUri, _commentsByUri, _handsByUri, _fixEntries, _intent);
+let _acknowledgedSignature = getVisionsAttentionAck();
+
+const _attention = createAttentionAck({
+  getAck: () => _acknowledgedSignature,
+  setAck: (next: string) => {
+    _acknowledgedSignature = next;
+    setVisionsAttentionAck(next);
+  },
+  signature: () => _attentionState.signature,
+  isLooking: () => !isPanelHidden(_root),
+});
 
 function buildIntentBlock() {
   const section = el('section', 'visions-intent');
@@ -267,14 +272,10 @@ function renderFixes({ force = false }: { force?: boolean } = {}) {
 }
 
 function refreshActivity() {
+  _attentionState = visionsAttentionState(_findingsByUri, _commentsByUri, _handsByUri, _fixEntries, _intent);
+  if (_attentionState.signature !== '') _attention.refresh();
   if (!_activityCallback) return;
-  _activityCallback(decideVisionsAttention({ unseen: _unseen, handCount: totalHandCount(_handsByUri) }));
-}
-
-function noteArrival(arrived: boolean) {
-  if (!arrived) return;
-  if (!isPanelHidden(_root)) return;
-  _unseen = true;
+  _activityCallback(decideVisionsAttention(_attentionState, _acknowledgedSignature));
 }
 
 export function setVisionsActivityCallback(callback: (level: string | null) => void) {
@@ -301,47 +302,43 @@ export function mountVisionsView(parent: HTMLElement) {
 }
 
 export function refreshVisionsView() {
-  _unseen = false;
-  refreshActivity();
   renderIntent();
   render({ force: true });
   renderFixes({ force: true });
   renderActivity({ force: true });
 }
 
+export function acknowledgeVisionsAttention() {
+  if (_attentionState.signature !== '') _attention.acknowledge();
+  refreshActivity();
+}
+
 export function applyVisionsFix(msg: VisionsMessage) {
   _fixEntries = applyFixMessage(_fixEntries, msg);
-  noteArrival(hasFix(msg));
   renderFixes();
   refreshActivity();
 }
 
 export function applyVisionsFindings(msg: VisionsMessage) {
   _findingsByUri = applyFindingsMessage(_findingsByUri, msg);
-  noteArrival(hasFindings(msg));
   render();
   refreshActivity();
 }
 
 export function applyVisionsComments(msg: VisionsMessage) {
   _commentsByUri = applyCommentsMessage(_commentsByUri, msg);
-  noteArrival(hasComments(msg));
   render();
   refreshActivity();
 }
 
 export function applyVisionsHand(msg: VisionsMessage) {
   _handsByUri = applyHandMessage(_handsByUri, msg);
-  noteArrival(hasHand(msg));
   render();
   refreshActivity();
 }
 
 export function applyVisionsIntent(msg: VisionsMessage) {
-  const next = applyIntentMessage(_intent, msg);
-  const moved = hasIntentStateChanged(_intent, next);
-  _intent = next;
-  noteArrival(moved);
+  _intent = applyIntentMessage(_intent, msg);
   renderIntent();
   refreshActivity();
 }
@@ -349,7 +346,6 @@ export function applyVisionsIntent(msg: VisionsMessage) {
 export function applyIngestActivity(msg: VisionsMessage) {
   _activityEvents = applyActivityMessage(_activityEvents, msg);
   _activityOverflow = activityOverflowCount(msg);
-  noteArrival(hasActivity(msg));
   renderActivity();
   refreshActivity();
 }
@@ -357,7 +353,6 @@ export function applyIngestActivity(msg: VisionsMessage) {
 export function applyIngestSnapshot(msg: VisionsMessage) {
   _activityEvents = applyActivitySnapshot(msg);
   _activityOverflow = 0;
-  noteArrival(_activityEvents.length > 0);
   renderActivity();
   refreshActivity();
 }
@@ -368,7 +363,6 @@ export function applyVisionsSnapshot(msg: VisionsMessage) {
   _handsByUri = applyHandSnapshot(msg);
   _intent = intentStateOfMessage(msg);
   _fixEntries = applyFixSnapshot(msg);
-  noteArrival(totalFindingCount(_findingsByUri) + totalCommentCount(_commentsByUri) + totalHandCount(_handsByUri) > 0);
   renderIntent();
   render();
   renderFixes();
