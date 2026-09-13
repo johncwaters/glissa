@@ -9,7 +9,7 @@ import { firstLine, raceWithAbort } from './ephemeral-session.ts';
 import { createTickLoop } from './lane-runner.ts';
 import type { TickOutcome } from './lane-runner.ts';
 import { normalizeIssues, parseSpikeIssueIds } from './posthog-api.ts';
-import type { PosthogApi } from './posthog-api.ts';
+import type { NormalizedIssue, PosthogApi } from './posthog-api.ts';
 
 
 const OBSERVATION_PINGS: Record<string, { kind: string; dedupe: boolean } | undefined> = {
@@ -41,7 +41,7 @@ interface PosthogMeta {
 
 type IssueChange = PosthogIssueChange & {
   [key: string]: unknown;
-  issue: PosthogIssue;
+  issue: NormalizedIssue;
   projectId: string | number;
   projectName: string;
   url: string;
@@ -92,6 +92,9 @@ type InvestigationActivity = InvestigationProgressFrame | InvestigationFinishedF
 interface IssueSummary {
   issueId: PosthogIssue['issueId'];
   title: PosthogIssue['title'];
+  firstSeen: string | null;
+  lastSeen: string | null;
+  status: string;
   change: string;
   occurrences: PosthogIssue['occurrences'];
   users: PosthogIssue['users'];
@@ -677,6 +680,9 @@ function createPosthogPoller(deps: PosthogPollerDependencies): PosthogPoller {
           return {
             issueId: change.issue.issueId,
             title: change.issue.title,
+            firstSeen: change.issue.firstSeen,
+            lastSeen: change.issue.lastSeen,
+            status: change.issue.status,
             change: change.change,
             occurrences: change.issue.occurrences,
             users: change.issue.users,

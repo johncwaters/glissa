@@ -37,9 +37,9 @@ test('ordered records group into prompt-headed turns without reversing them', as
   assert.equal(turns.length, 3);
   assert.equal(turns[0].head, null);
   assert.equal(turns[0].rows[0].record.kind, 'thinking');
-  assert.equal(turns[1].head?.label, 'Prompt: first prompt');
-  assert.equal(turns[2].head?.label, 'Prompt: second prompt');
-  assert.equal(turns[2].rows[0].label, 'Assistant: second answer');
+  assert.equal(turns[1].head?.text, 'first prompt');
+  assert.equal(turns[2].head?.text, 'second prompt');
+  assert.equal(turns[2].rows[0].text, 'second answer');
 });
 
 test('a session boundary and a typed command each head a turn of their own', async () => {
@@ -52,13 +52,13 @@ test('a session boundary and a typed command each head a turn of their own', asy
     record({ kind: 'session', vendor: 'claude', transcriptPath: '/trace.jsonl', reason: 'resumed' }),
   ];
   const turns = await turnsOf(records);
-  assert.deepEqual(turns.map((turn) => turn.head?.label ?? null), [
-    'Session: claude vendor-session',
-    'Prompt: first prompt',
-    'Expansion: /review',
-    'Session: claude vendor-session',
+  assert.deepEqual(turns.map((turn) => [turn.head?.tag ?? null, turn.head?.text ?? null]), [
+    ['SESSION', 'claude vendor-session'],
+    ['PROMPT', 'first prompt'],
+    ['EXPANSION', '/review'],
+    ['SESSION', 'claude vendor-session'],
   ]);
-  assert.deepEqual(turns[2].rows.map((row) => row.label), ['Assistant: review answer']);
+  assert.deepEqual(turns[2].rows.map((row) => [row.tag, row.text]), [['ASSISTANT', 'review answer']]);
 });
 
 test('a skill expansion stays inside its turn because it carries a tool use id', async () => {
@@ -70,7 +70,11 @@ test('a skill expansion stays inside its turn because it carries a tool use id',
   ];
   const turns = await turnsOf(records);
   assert.equal(turns.length, 1);
-  assert.deepEqual(turns[0].rows.map((row) => row.label), ['Skill: release', 'Expansion: release', 'Expansion: context']);
+  assert.deepEqual(turns[0].rows.map((row) => [row.tag, row.text]), [
+    ['TOOL', 'Skill: release'],
+    ['EXPANSION', 'release'],
+    ['EXPANSION', 'context'],
+  ]);
 });
 
 test('a later page appends to the open turn and starts new ones without regrouping', async () => {
@@ -94,8 +98,9 @@ test('a later page appends to the open turn and starts new ones without regroupi
     { turnIndex: 0, isNewTurn: false, rows: 1 },
     { turnIndex: 1, isNewTurn: true, rows: 1 },
   ]);
-  assert.equal(appends[1].head?.label, 'Prompt: second prompt');
-  assert.equal(appends[0].rows[0].label, 'Bash result: 2 bytes');
+  assert.equal(appends.some((append) => Object.hasOwn(append, 'startedAt')), false);
+  assert.equal(appends[1].head?.text, 'second prompt');
+  assert.equal(appends[0].rows[0].text, 'Bash result: 2 bytes');
   assert.equal(grouping.turns[0].rows.length, 2);
 });
 
@@ -108,32 +113,46 @@ test('tool rows share detail fields, resolve results to calls and carry markers'
     record({ kind: 'tool_result', toolUseId: 'bash-1', content: 'ok', isError: true, truncated: true }),
   ];
   const rows = (await turnsOf(records))[0].rows;
-  assert.equal(rows[0].label.startsWith('Bash: '), true);
-  assert.equal(rows[0].label.endsWith('...'), true);
-  assert.equal(rows[0].label.includes('second line'), false);
-  assert.equal(rows[1].label, 'Bash result: 2 bytes, error, truncated');
+  assert.equal(rows[0].text.startsWith('Bash: '), true);
+  assert.equal(rows[0].text.endsWith('...'), true);
+  assert.equal(rows[0].text.includes('second line'), false);
+  assert.equal(rows[1].text, 'Bash result: 2 bytes');
+  assert.deepEqual(rows[1].badges, ['error', 'truncated', '0ms']);
   assert.equal(traceRecordBody(rows[0].record), JSON.stringify({ command }, null, 2));
 });
 
-test('thinking, assistant, notice and subagent rows have concise labels', async () => {
+test('thinking, assistant, notice and subagent rows carry concise text', async () => {
   const records = [
     record({ kind: 'thinking', text: 'reasoning\nmore' }),
-    record({ kind: 'assistant', text: 'answer\nmore', agentId: 'a1', agentType: 'general-purpose' }),
+    record({ kind: 'assistant', text: 'answer\nmore', agentType: 'general-purpose' }),
     record({ kind: 'notice', text: 'skipped bytes' }),
   ];
   const rows = (await turnsOf(records))[0].rows;
-  assert.equal(rows[0].label, 'Thinking: reasoning');
-  assert.equal(rows[1].label, '[general-purpose] Assistant: answer');
-  assert.equal(rows[2].label, 'Notice: skipped bytes');
-  assert.equal(rows[2].isMuted, true);
+  assert.deepEqual(rows.map((row) => [row.tag, row.text]), [
+    ['THINKING', 'reasoning'],
+    ['ASSISTANT', '[general-purpose] answer'],
+    ['NOTICE', 'skipped bytes'],
+  ]);
+  assert.equal(rows[2].tone, 'muted');
 });
 
-test('a truncated prompt row label ends with a truncation marker', async () => {
+test('concurrent subagents of one type carry distinct id suffixes', async () => {
+  const records = [
+    record({ kind: 'assistant', text: 'first answer', agentId: 'agent-4f2c1a', agentType: 'general-purpose' }),
+    record({ kind: 'assistant', text: 'second answer', agentId: 'agent-9d8e7b', agentType: 'general-purpose' }),
+  ];
+  const rows = (await turnsOf(records))[0].rows;
+  assert.equal(rows[0].text, '[general-purpose 4f2c1a] first answer');
+  assert.equal(rows[1].text, '[general-purpose 9d8e7b] second answer');
+});
+
+test('a truncated prompt row carries a truncation badge', async () => {
   const rows = (await turnsOf([record({ kind: 'prompt', text: 'prompt', truncated: true })]))[0].head;
-  assert.equal(rows?.label.endsWith(', truncated'), true);
+  assert.equal(rows?.text, 'prompt');
+  assert.deepEqual(rows?.badges, ['truncated']);
 });
 
-test('a truncated tool call row keeps its detail field ahead of the truncation marker', async () => {
+test('a truncated tool call row keeps its detail field and carries a badge', async () => {
   const records = [
     record({ kind: 'prompt', text: 'write it' }),
     record({
@@ -145,12 +164,54 @@ test('a truncated tool call row keeps its detail field ahead of the truncation m
     }),
   ];
   const rows = (await turnsOf(records))[0].rows;
-  assert.equal(rows[0].label, 'Write: /repo/src/big.ts, truncated');
+  assert.equal(rows[0].text, 'Write: /repo/src/big.ts');
+  assert.deepEqual(rows[0].badges, ['truncated']);
 });
 
-test('a truncated raw row label ends with a truncation marker', async () => {
+test('a truncated raw row keeps its text and carries a badge', async () => {
   const rows = (await turnsOf([record({ kind: 'raw', line: 'not json', truncated: true })]))[0].rows;
-  assert.equal(rows[0].label, 'Raw: not json, truncated');
+  assert.deepEqual([rows[0].tag, rows[0].text], ['RAW', 'not json']);
+  assert.deepEqual(rows[0].badges, ['truncated']);
+});
+
+test('trace row parts name every kind and derive error and muted tones', async () => {
+  const { traceRowParts } = await importCore();
+  const toolCall = record({ kind: 'tool_call', toolUseId: 'bash-1', name: 'Bash', input: { command: 'npm test' } });
+  if (toolCall.kind !== 'tool_call') assert.fail('expected a tool call');
+  const toolCalls = new Map([['bash-1', toolCall]]);
+  const records = [
+    record({ kind: 'prompt', text: 'prompt' }),
+    record({ kind: 'thinking', text: 'thinking' }),
+    record({ kind: 'assistant', text: 'answer' }),
+    toolCall,
+    record({ kind: 'tool_result', toolUseId: 'bash-1', content: 'ok', isError: false, truncated: false }),
+    record({ kind: 'session', vendor: 'claude', transcriptPath: '/trace.jsonl' }),
+    record({ kind: 'notice', text: 'notice' }),
+    record({ kind: 'raw', line: 'raw' }),
+    record({ kind: 'expansion', text: 'context' }),
+  ];
+
+  assert.deepEqual(records.map((traceRecord) => traceRowParts(traceRecord, toolCalls).tag), [
+    'PROMPT',
+    'THINKING',
+    'ASSISTANT',
+    'TOOL',
+    'RESULT',
+    'SESSION',
+    'NOTICE',
+    'RAW',
+    'EXPANSION',
+  ]);
+  assert.equal(traceRowParts(records[0], toolCalls).text, 'prompt');
+  assert.equal(traceRowParts(records[6], toolCalls).tone, 'muted');
+  const failedResult = record({ kind: 'tool_result', toolUseId: 'bash-1', content: 'no', isError: true, truncated: false });
+  assert.deepEqual(traceRowParts(failedResult, toolCalls), {
+    kind: 'tool_result',
+    tag: 'RESULT',
+    text: 'Bash result: 2 bytes',
+    tone: 'error',
+    badges: ['error', '0ms'],
+  });
 });
 
 test('selector rules honor a valid preselection, preserve selection and fall back only once the panel is shown', async () => {
@@ -249,8 +310,8 @@ test('an earlier page prepends its turns and merges the turn split across the pa
     record({ kind: 'tool_call', toolUseId: 'bash-1', name: 'Bash', input: { command: 'npm test' } }),
   ]);
 
-  assert.deepEqual(grouping.turns.map((turn) => turn.head?.label ?? null), ['Prompt: earlier prompt', 'Prompt: resident prompt']);
-  assert.deepEqual(grouping.turns[0].rows.map((row) => row.label), ['Bash: npm test', 'Assistant: tail of the earlier turn']);
+  assert.deepEqual(grouping.turns.map((turn) => turn.head?.text ?? null), ['earlier prompt', 'resident prompt']);
+  assert.deepEqual(grouping.turns[0].rows.map((row) => row.text), ['Bash: npm test', 'tail of the earlier turn']);
   assert.equal(grouping.toolCallByUseId.has('bash-1'), true);
 });
 
@@ -271,20 +332,98 @@ test('prepending preserves resident turn objects and reports only newly built tu
   assert.equal(grouping.turns[1], residentTurn);
 });
 
+test('a boundary turn split lowers the resident base and still merges in place', async () => {
+  const { appendTraceRecords, createTraceGrouping, prependTraceRecords } = await importCore();
+  const grouping = createTraceGrouping();
+  appendTraceRecords(grouping, [record({ kind: 'assistant', text: 'resident answer', ts: 5000 })]);
+
+  const prepend = prependTraceRecords(grouping, [record({ kind: 'prompt', text: 'earlier prompt', ts: 1000 })]);
+
+  assert.equal(grouping.turns[0].startedAt, 1000);
+  assert.equal(prepend.mergedHead?.text, 'earlier prompt');
+  assert.equal(prepend.needsRerender, false);
+});
+
+test('turn durations measure from the turn start to its latest row', async () => {
+  const { appendTraceRecords, createTraceGrouping, traceTurnDurationMs } = await importCore();
+  const grouping = createTraceGrouping();
+  appendTraceRecords(grouping, [
+    record({ kind: 'prompt', text: 'prompt', ts: 1000 }),
+    record({ kind: 'assistant', text: 'answer', ts: 2500 }),
+    record({ kind: 'thinking', text: 'late', ts: 6000 }),
+  ]);
+  assert.equal(grouping.turns[0].startedAt, 1000);
+  assert.equal(traceTurnDurationMs(grouping.turns[0]), 5000);
+});
+
+test('turn metrics format counts bytes and elapsed time', async () => {
+  const { appendTraceRecords, createTraceGrouping, formatTurnMetrics } = await importCore();
+  const grouping = createTraceGrouping();
+  appendTraceRecords(grouping, [
+    record({ kind: 'prompt', text: 'prompt', ts: 1000 }),
+    ...Array.from({ length: 5 }, (_, toolNumber) => record({
+      kind: 'tool_call',
+      toolUseId: `tool-${toolNumber}`,
+      name: 'Bash',
+      input: {},
+      ts: 2000 + toolNumber,
+    })),
+    record({ kind: 'tool_result', toolUseId: 'tool-0', content: 'x'.repeat(12698), isError: true, truncated: false, ts: 3000 }),
+    ...Array.from({ length: 7 }, (_, rowNumber) => record({
+      kind: 'assistant',
+      text: `answer ${rowNumber}`,
+      ts: rowNumber === 6 ? 93000 : 4000 + rowNumber,
+    })),
+  ]);
+  assert.equal(formatTurnMetrics(grouping.turns[0]), '14 rows, 5 tools, 1 error, 12.4 KB, 1:32');
+});
+
+test('turn metrics accumulate through append and prepend merge and reduce on trim', async () => {
+  const { appendTraceRecords, createTraceGrouping, prependTraceRecords, trimTraceGrouping } = await importCore();
+  const grouping = createTraceGrouping();
+  appendTraceRecords(grouping, [
+    record({ kind: 'assistant', text: 'resident answer', ts: 3000 }),
+    record({ kind: 'tool_result', toolUseId: 'bash-1', content: 'okay', isError: true, truncated: false, ts: 4000 }),
+  ]);
+  assert.deepEqual(grouping.turns[0].metrics, { rowCount: 2, toolCallCount: 0, errorCount: 1, resultBytes: 4 });
+
+  prependTraceRecords(grouping, [
+    record({ kind: 'prompt', text: 'earlier prompt', ts: 1000 }),
+    record({ kind: 'tool_call', toolUseId: 'bash-1', name: 'Bash', input: {}, ts: 2000 }),
+  ]);
+  assert.deepEqual(grouping.turns[0].metrics, { rowCount: 4, toolCallCount: 1, errorCount: 1, resultBytes: 4 });
+
+  assert.deepEqual(trimTraceGrouping(grouping, 2), { droppedTurnCount: 0, droppedRowCount: 2 });
+  assert.deepEqual(grouping.turns[0].metrics, { rowCount: 2, toolCallCount: 0, errorCount: 1, resultBytes: 4 });
+});
+
 test('a page beginning with a tool result is relabeled when its Bash call arrives earlier', async () => {
   const { appendTraceRecords, createTraceGrouping, prependTraceRecords } = await importCore();
   const grouping = createTraceGrouping();
   appendTraceRecords(grouping, [
-    record({ kind: 'tool_result', toolUseId: 'bash-1', content: 'ok', isError: false, truncated: false }),
+    record({ kind: 'tool_result', toolUseId: 'bash-1', content: 'ok', isError: false, truncated: false, ts: 1142 }),
   ]);
 
-  assert.equal(grouping.turns[0].rows[0].label, 'Tool result: 2 bytes');
+  assert.equal(grouping.turns[0].rows[0].text, 'Tool result: 2 bytes');
+  assert.deepEqual(grouping.turns[0].rows[0].badges, []);
   const prepend = prependTraceRecords(grouping, [
-    record({ kind: 'tool_call', toolUseId: 'bash-1', name: 'Bash', input: { command: 'npm test' } }),
+    record({ kind: 'tool_call', toolUseId: 'bash-1', name: 'Bash', input: { command: 'npm test' }, ts: 1000 }),
   ]);
   assert.equal(prepend.needsRerender, true);
-  assert.equal(grouping.turns[0].rows[1].label, 'Bash result: 2 bytes');
+  assert.equal(grouping.turns[0].rows[1].text, 'Bash result: 2 bytes');
+  assert.deepEqual(grouping.turns[0].rows[1].badges, ['142ms']);
   assert.equal(grouping.unresolvedToolUseCounts.size, 0);
+});
+
+test('tool latency uses seconds above one second and ignores negative deltas', async () => {
+  const { traceRowParts } = await importCore();
+  const toolCall = record({ kind: 'tool_call', toolUseId: 'bash-1', name: 'Bash', input: {}, ts: 1000 });
+  if (toolCall.kind !== 'tool_call') assert.fail('expected a tool call');
+  const toolCalls = new Map([['bash-1', toolCall]]);
+  const slowResult = record({ kind: 'tool_result', toolUseId: 'bash-1', content: 'ok', isError: false, truncated: false, ts: 2249 });
+  const earlyResult = record({ kind: 'tool_result', toolUseId: 'bash-1', content: 'ok', isError: false, truncated: false, ts: 999 });
+  assert.deepEqual(traceRowParts(slowResult, toolCalls).badges, ['1.2s']);
+  assert.deepEqual(traceRowParts(earlyResult, toolCalls).badges, []);
 });
 
 test('a tool result stays relabelable when its call arrives two pages later', async () => {
@@ -302,10 +441,10 @@ test('a tool result stays relabelable when its call arrives two pages later', as
     record({ kind: 'tool_call', toolUseId: 'bash-1', name: 'Bash', input: { command: 'npm test' } }),
   ]);
   assert.equal(secondPrepend.needsRerender, true);
-  assert.deepEqual(grouping.turns[0].rows.map((row) => row.label), [
+  assert.deepEqual(grouping.turns[0].rows.map((row) => row.text), [
     'Bash: npm test',
     'Bash result: 2 bytes',
-    'Assistant: resident answer',
+    'resident answer',
   ]);
 });
 
@@ -329,12 +468,12 @@ test('an expansion is relabeled when its call arrives on an earlier page', async
     record({ kind: 'expansion', toolUseId: 'bash-1', text: 'expanded command' }),
   ]);
 
-  assert.equal(grouping.turns[0].rows[0].label, 'Expansion: expansion');
+  assert.deepEqual([grouping.turns[0].rows[0].tag, grouping.turns[0].rows[0].text], ['EXPANSION', 'expansion']);
   const prepend = prependTraceRecords(grouping, [
     record({ kind: 'tool_call', toolUseId: 'bash-1', name: 'Bash', input: { command: 'npm test' } }),
   ]);
   assert.equal(prepend.needsRerender, true);
-  assert.equal(grouping.turns[0].rows[1].label, 'Expansion: npm test');
+  assert.deepEqual([grouping.turns[0].rows[1].tag, grouping.turns[0].rows[1].text], ['EXPANSION', 'npm test']);
 });
 
 test('the resident window drops its oldest turns once the row ceiling is passed', async () => {
@@ -350,12 +489,12 @@ test('the resident window drops its oldest turns once the row ceiling is passed'
 
   assert.deepEqual(trimTraceGrouping(grouping, 12), { droppedTurnCount: 0, droppedRowCount: 0 });
   assert.deepEqual(trimTraceGrouping(grouping, 7), { droppedTurnCount: 2, droppedRowCount: 0 });
-  assert.deepEqual(grouping.turns.map((turn) => turn.head?.label ?? null), ['Prompt: prompt 2', 'Prompt: prompt 3']);
+  assert.deepEqual(grouping.turns.map((turn) => turn.head?.text ?? null), ['prompt 2', 'prompt 3']);
   assert.equal(grouping.toolCallByUseId.has('bash-0'), false);
   assert.equal(grouping.toolCallByUseId.has('bash-3'), true);
   assert.deepEqual(trimTraceGrouping(grouping, 1), { droppedTurnCount: 1, droppedRowCount: 2 });
   assert.equal(grouping.turns.length, 1);
-  assert.equal(grouping.turns[0].head?.label, 'Prompt: prompt 3');
+  assert.equal(grouping.turns[0].head?.text, 'prompt 3');
   assert.equal(grouping.turns[0].rows.length, 0);
   assert.equal(grouping.turns[0].hasTrimmedRows, true);
 });
@@ -397,10 +536,10 @@ test('a surviving row keeps its pending id when a second row referencing it is t
   ]);
   assert.equal(prepend.needsRerender, true);
   assert.equal(grouping.unresolvedToolUseCounts.size, 0);
-  assert.deepEqual(grouping.turns[0].rows.map((row) => row.label), ['Skill: code-review']);
-  assert.deepEqual(grouping.turns[1].rows.map((row) => row.label), [
+  assert.deepEqual(grouping.turns[0].rows.map((row) => row.text), ['Skill: code-review']);
+  assert.deepEqual(grouping.turns[1].rows.map((row) => row.text), [
     'Skill result: 2 bytes',
-    'Assistant: skill answer',
+    'skill answer',
   ]);
 });
 
@@ -413,12 +552,12 @@ test('a single oversized turn keeps its heading and newest rows within the ceili
   ]);
 
   assert.deepEqual(trimTraceGrouping(grouping, 5), { droppedTurnCount: 0, droppedRowCount: 4 });
-  assert.equal(grouping.turns[0].head?.label, 'Prompt: long turn');
-  assert.deepEqual(grouping.turns[0].rows.map((row) => row.label), [
-    'Assistant: answer 4',
-    'Assistant: answer 5',
-    'Assistant: answer 6',
-    'Assistant: answer 7',
+  assert.equal(grouping.turns[0].head?.text, 'long turn');
+  assert.deepEqual(grouping.turns[0].rows.map((row) => row.text), [
+    'answer 4',
+    'answer 5',
+    'answer 6',
+    'answer 7',
   ]);
   assert.equal(grouping.turns[0].hasTrimmedRows, true);
   assert.equal(traceResidentRowCount(grouping), 5);
@@ -431,6 +570,39 @@ test('the view rebuilds only for a changed selection or a stale render', async (
   assert.equal(shouldRebuildTraceView({ ...settled, hasSelectionChanged: true }), true);
   assert.equal(shouldRebuildTraceView({ ...settled, isRenderedTraceStale: true }), true);
   assert.equal(shouldRebuildTraceView({ ...settled, hasRenderedOnce: false }), true);
+});
+
+test('trace kind filters toggle without mutating their input', async () => {
+  const { isKindHidden, toggleHiddenKind } = await importCore();
+  const hiddenKinds = ['thinking'];
+  const kindsWithToolResults = toggleHiddenKind(hiddenKinds, 'tool_result');
+  assert.deepEqual(hiddenKinds, ['thinking']);
+  assert.deepEqual(kindsWithToolResults, ['thinking', 'tool_result']);
+  assert.equal(isKindHidden(kindsWithToolResults, 'tool_result'), true);
+  assert.deepEqual(toggleHiddenKind(kindsWithToolResults, 'thinking'), ['tool_result']);
+  assert.equal(isKindHidden([], 'raw'), false);
+});
+
+test('a session start reads only from a resident window that still holds the first row', async () => {
+  const { appendTraceRecords, createTraceGrouping, traceSessionStartedAtMs } = await importCore();
+  const grouping = createTraceGrouping();
+  appendTraceRecords(grouping, [record({ kind: 'prompt', text: 'first prompt', ts: 1000 })]);
+  const firstTurn = grouping.turns[0];
+
+  assert.equal(traceSessionStartedAtMs(0, false, firstTurn), 1000);
+  assert.equal(traceSessionStartedAtMs(4096, false, firstTurn), null);
+  assert.equal(traceSessionStartedAtMs(0, true, firstTurn), null);
+  assert.equal(traceSessionStartedAtMs(0, false, undefined), null);
+  assert.equal(traceSessionStartedAtMs(0, false, { ...firstTurn, startedAt: null }), null);
+});
+
+test('the panel marks shown filters pressed and repaints the header once the earliest rows go', () => {
+  const source = fs.readFileSync(new URL('../public/trace-panel.ts', import.meta.url), 'utf8');
+  const filtersSource = source.slice(source.indexOf('function buildTraceFilters'), source.indexOf('function buildHeader'));
+  const trimSource = source.slice(source.indexOf('function dropOldestRows'), source.indexOf('function showAppendedRecords'));
+
+  assert.match(filtersSource, /String\(!isKindHidden\(hiddenTraceKinds, filter\.kind\)\)/);
+  assert.ok(trimSource.indexOf('selectedTrace.hasDroppedEarliestRows = true;') < trimSource.indexOf('renderHeader();'));
 });
 
 test('the panel requests changed selections before rendering and drains queued replies', () => {
@@ -451,7 +623,8 @@ test('the rendered prepend path builds one page in place and preserves scroll po
   const showPrependSource = source.slice(source.indexOf('function showPrependedRecords'), source.indexOf('export function mountTraceView'));
 
   assert.match(prependSource, /turnsElement\.prepend\(newTurnsFragment\)/);
-  assert.match(prependSource, /turnRowsElements\.unshift\(\.\.\.newRowsElements\)/);
+  assert.match(prependSource, /turnSections\.unshift\(\.\.\.newSections\)/);
+  assert.match(prependSource, /paintTurnRowOffsets\(firstResidentRowsElement, firstResidentTurn\)/);
   assert.match(showPrependSource, /previousScrollTop \+ scrollElement\.scrollHeight - previousScrollHeight/);
   assert.match(showPrependSource, /prepend\.needsRerender/);
   assert.ok(showPrependSource.indexOf('renderPanel();') < showPrependSource.indexOf('previousScrollTop + scrollElement.scrollHeight'));
@@ -496,12 +669,12 @@ test('a command-name tag left unclosed resolves without backtracking', async () 
   assert.ok(Date.now() - startedAt < 200);
   assert.equal(turns.length, 1);
   assert.equal(turns[0].head, null);
-  assert.equal(turns[0].rows[0].label, 'Expansion: context');
+  assert.deepEqual([turns[0].rows[0].tag, turns[0].rows[0].text], ['EXPANSION', 'context']);
 });
 
 test('a command name is read only from a single-line tag', async () => {
   const withLineBreak = await turnsOf([record({ kind: 'expansion', text: '<command-name>\n/review\n</command-name>' })]);
   assert.equal(withLineBreak[0].head, null);
   const padded = await turnsOf([record({ kind: 'expansion', text: '<command-name>  /review  </command-name>' })]);
-  assert.equal(padded[0].head?.label, 'Expansion: /review');
+  assert.deepEqual([padded[0].head?.tag, padded[0].head?.text], ['EXPANSION', '/review']);
 });

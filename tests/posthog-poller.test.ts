@@ -164,6 +164,8 @@ function issueRow(over: Record<string, unknown> = {}) {
     id: 'iss-1',
     name: 'TypeError: boom',
     status: 'active',
+    first_seen: '2026-08-01T00:00:00Z',
+    last_seen: '2026-08-09T00:00:00Z',
     aggregations: { occurrences: 120, users: 8 },
     ...over,
   };
@@ -543,7 +545,8 @@ test('onTickComplete emits the dashboard broadcast payload', async () => {
   const summary = lastTick(summaries);
   assert.equal(summary.type, 'posthog-status');
   assert.equal(summary.ts, 1000);
-  assert.equal(summary.intervalMinutes, 15, 'the dashboard needs the interval to judge staleness');
+  assert.equal(summary.intervalMinutes, 15, 'every completed tick carries a finite interval, which is what the dashboard keys its load phase off');
+  assert.equal(Object.hasOwn(summaries.at(-1) ?? {}, 'configured'), false, 'the poller leaves the configured field to the lane wrapper that stamps it');
   assert.equal(summary.projects.length, 1);
   const project = tickProject(summaries);
   assert.equal(project.projectId, 1);
@@ -553,6 +556,9 @@ test('onTickComplete emits the dashboard broadcast payload', async () => {
   assert.deepEqual(project.issues, [{
     issueId: 'iss-1',
     title: 'TypeError: boom',
+    firstSeen: '2026-08-01T00:00:00Z',
+    lastSeen: '2026-08-09T00:00:00Z',
+    status: 'active',
     change: 'new',
     occurrences: 120,
     users: 8,

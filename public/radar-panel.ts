@@ -19,28 +19,29 @@ import {
   hostsDiffer,
   investigationRows,
   investigationViewOf,
+  issueLastSeenAtMs,
+  issueStatusLabel,
   issueSummaryText,
   retainKnownInvestigationIds,
   needsActionPrRows,
+  occurrenceDelta,
+  occurrenceHistoryValues,
   opsRows,
   partitionRadarProjects,
   radarAttentionSignature,
   radarDisplayName,
+  radarLoadPhase,
   radarPlaceholder,
   severityFor as severity,
   shortHost,
   sortIssuesByAttention,
   sparklinePoints,
+  sparklineWindowTitle,
   summarizeIssues,
   verdictLabel,
 } from './radar-core.ts';
-import type { InvestigationActivityFrame, InvestigationFinishedFrame, RadarHealthFeed, RadarIssue, RadarOpsRow, RadarProject, RadarProjectAlert, RadarSnapshot, RadarUpdateFeed } from './radar-core.ts';
+import type { InvestigationActivityFrame, InvestigationFinishedFrame, RadarHealthFeed, RadarIssue, RadarLoadPhase, RadarOpsRow, RadarProject, RadarProjectAlert, RadarSnapshot, RadarUpdateFeed } from './radar-core.ts';
 import type { PrStatusSnapshot } from './pr-view-core.ts';
-
-interface RadarSnapshotWithClock extends RadarSnapshot {
-  ts?: number;
-  intervalMinutes?: unknown;
-}
 
 type RadarProjectEntry = RadarProjectAlert & { project: RadarProject };
 
@@ -57,7 +58,7 @@ interface InvestigationRow {
   at: number;
 }
 
-let _latest: RadarSnapshotWithClock | null = null;
+let _latest: RadarSnapshot | null = null;
 let _health: RadarHealthFeed | null = null;
 
 let _healthKey = '';
@@ -66,6 +67,7 @@ let _prs: PrStatusSnapshot | null = null;
 let _root: HTMLDivElement | null = null;
 let _activityCallback: ((unseen: boolean) => void) | null = null;
 let _navigateToPrs: (() => void) | null = null;
+let _openTrace: ((sessionId: string) => void) | null = null;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const _attention = createAttentionAck({
   getAck: getRadarAttentionAck,
@@ -92,19 +94,64 @@ const CHANGE_LABEL: Record<string, string> = {
   quiet: 'quiet',
 };
 
+interface IssueColumn {
+  columnId: string;
+  headText: string;
+  cellClass: string;
+  track: string;
+  phoneTrack: string;
+  isMagnitude: boolean;
+  startsActionCluster: boolean;
+}
+
+const ISSUE_COLUMNS: readonly IssueColumn[] = [
+  { columnId: 'stripe', headText: '', cellClass: 'radar-stripe', track: 'auto', phoneTrack: 'auto', isMagnitude: false, startsActionCluster: false },
+  { columnId: 'change', headText: '', cellClass: 'radar-change', track: 'auto', phoneTrack: 'minmax(68px, auto)', isMagnitude: false, startsActionCluster: false },
+  { columnId: 'copy', headText: '', cellClass: 'radar-issue-copy', track: 'minmax(0, 1fr)', phoneTrack: 'minmax(0, 1fr)', isMagnitude: false, startsActionCluster: true },
+  { columnId: 'occurrences', headText: 'Occurrences', cellClass: 'radar-metric', track: 'max-content', phoneTrack: '', isMagnitude: true, startsActionCluster: false },
+  { columnId: 'users', headText: 'Users', cellClass: 'radar-metric', track: 'max-content', phoneTrack: '', isMagnitude: true, startsActionCluster: false },
+  { columnId: 'trend', headText: 'Trend', cellClass: 'radar-issue-trend', track: 'max-content', phoneTrack: '', isMagnitude: true, startsActionCluster: false },
+];
+
+const ISSUE_GRID_TEMPLATE = ISSUE_COLUMNS.map((column) => column.track).join(' ');
+
+const ISSUE_PHONE_GRID_TEMPLATE = ISSUE_COLUMNS.filter((column) => !column.isMagnitude).map((column) => column.phoneTrack).join(' ');
+
+const ISSUE_ACTIONS_START_LINE = ISSUE_COLUMNS.findIndex((column) => column.startsActionCluster) + 1;
+
+function buildIssueGridContainer(className: string) {
+  const container = el('div', className);
+  container.style.setProperty('--radar-issue-grid', ISSUE_GRID_TEMPLATE);
+  container.style.setProperty('--radar-issue-grid-phone', ISSUE_PHONE_GRID_TEMPLATE);
+  container.style.setProperty('--radar-issue-actions-start', String(ISSUE_ACTIONS_START_LINE));
+  return container;
+}
+
+function appendIssueCells(row: HTMLElement, cellFor: (column: IssueColumn) => HTMLElement) {
+  const magnitudes = el('span', 'radar-issue-magnitudes');
+  let hasMagnitudeCell = false;
+  for (const column of ISSUE_COLUMNS) {
+    const cell = cellFor(column);
+    if (!column.isMagnitude) {
+      row.append(cell);
+      continue;
+    }
+    if (!hasMagnitudeCell) {
+      row.append(magnitudes);
+      hasMagnitudeCell = true;
+    }
+    magnitudes.append(cell);
+  }
+}
+
 function formatCount(n: unknown) {
   if (!Number.isFinite(n)) return '0';
   return String(n);
 }
 
-function occurrenceHistoryValues(history: unknown): number[] {
-  if (!Array.isArray(history)) return [];
-  return (history as unknown[])
-    .map((entry) => {
-      if (typeof entry === 'number' && Number.isFinite(entry)) return entry;
-      return Number((entry as { occurrences?: unknown } | null | undefined)?.occurrences);
-    })
-    .filter((value) => Number.isFinite(value));
+function formatElapsed(startedAtMs: number | null | undefined) {
+  if (typeof startedAtMs !== 'number' || !Number.isFinite(startedAtMs) || startedAtMs <= 0) return '';
+  return `elapsed ${formatDuration(Date.now() - startedAtMs)}`;
 }
 
 function issueReportId(issue: { issueId?: unknown } | null | undefined) {
@@ -126,7 +173,7 @@ function patchIssueRowSummary(projectId: unknown, issueId: unknown, issue: Radar
   }
   if (!handle.summary) {
     handle.summary = el('span', 'radar-issue-summary');
-    handle.copy.append(handle.summary);
+    handle.copy.insertBefore(handle.summary, handle.copy.querySelector('.radar-issue-meta'));
   }
   handle.summary.textContent = text;
   return true;
@@ -206,7 +253,7 @@ function createActionCluster() {
     payload: Record<string, unknown>,
     pendingText: string,
     describe: (message: ServerMessage) => string,
-    onOk: ((message: ServerMessage) => void) | null = null,
+    onOk: ((message: ServerMessage, statusElement: HTMLElement) => void) | null = null,
   ) => {
     _hold.begin(token);
     setBusy(true);
@@ -223,8 +270,8 @@ function createActionCluster() {
         settle('error', String(msg.error || 'Request failed'));
         return;
       }
-      if (onOk) onOk(msg);
       settle('ok', describe(msg));
+      if (onOk) onOk(msg, status);
     };
     sendControlRequest(type, payload)
       .then(resolved)
@@ -237,12 +284,19 @@ function createActionCluster() {
 function buildIssueActions(issue: RadarIssue, projectId: unknown, projectLabel: string) {
   const { addButton, request, wrap } = createActionCluster();
 
-  const run = (type: string, payload: Record<string, unknown>, pendingText: string, describe: (message: ServerMessage) => string) => request(
-    `${type}:${issue.issueId}`,
-    type,
-    { projectId, issueId: issue.issueId, ...payload },
+  const requestIssueAction = (
+    requestType: string,
+    requestPayload: Record<string, unknown>,
+    pendingText: string,
+    describe: (message: ServerMessage) => string,
+    onOk: ((message: ServerMessage, statusElement: HTMLElement) => void) | null = null,
+  ) => request(
+    `${requestType}:${issue.issueId}`,
+    requestType,
+    { projectId, issueId: issue.issueId, ...requestPayload },
     pendingText,
     describe,
+    onOk,
   );
 
   if (issue.inFlight) {
@@ -250,19 +304,37 @@ function buildIssueActions(issue: RadarIssue, projectId: unknown, projectLabel: 
   }
   if (!issue.inFlight) {
     addButton('Open session', 'Paste an investigation prompt into the mapped project session', () => {
-      run('posthog-open-session', {}, 'Opening session', (msg) => (
-        msg.pending
-          ? `Starting ${String(msg.sessionName || 'session')}; the prompt lands when it is up`
-          : `Prompt pasted into ${String(msg.sessionName || 'the session')}; press Enter there`
-      ));
+      requestIssueAction(
+        'posthog-open-session',
+        {},
+        'Opening session',
+        (message) => (
+          message.pending
+            ? `Starting ${String(message.sessionName || 'session')}; the prompt lands when it is up`
+            : `Prompt pasted into ${String(message.sessionName || 'the session')}; press Enter there`
+        ),
+        (message, statusElement) => {
+          if (typeof message.sessionId !== 'string' || !_openTrace) return;
+          const sessionId = message.sessionId;
+          const link = el('a', 'radar-open-trace', 'Open trace');
+          link.href = '#trace';
+          link.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!_openTrace) return;
+            _openTrace(sessionId);
+          });
+          statusElement.append(document.createTextNode(' '), link);
+        },
+      );
     });
   }
 
   addButton('Resolve', 'Mark this issue resolved in PostHog', () => {
-    run('posthog-issue-action', { action: 'resolve' }, 'Resolving in PostHog', () => 'Marked resolved');
+    requestIssueAction('posthog-issue-action', { action: 'resolve' }, 'Resolving in PostHog', () => 'Marked resolved');
   });
   addButton('Suppress', 'Suppress this issue in PostHog', () => {
-    run('posthog-issue-action', { action: 'suppress' }, 'Suppressing in PostHog', () => 'Marked suppressed');
+    requestIssueAction('posthog-issue-action', { action: 'suppress' }, 'Suppressing in PostHog', () => 'Marked suppressed');
   });
 
   return wrap;
@@ -310,11 +382,13 @@ function buildIssueRow(issue: RadarIssue, projectId: unknown, projectLabel: stri
     sparkline.setAttribute('viewBox', '0 0 64 16');
     sparkline.setAttribute('width', '64');
     sparkline.setAttribute('height', '16');
-    sparkline.setAttribute('aria-hidden', 'true');
+    sparkline.setAttribute('role', 'img');
     sparkline.setAttribute('focusable', 'false');
+    const windowTitle = document.createElementNS(SVG_NS, 'title');
+    windowTitle.textContent = sparklineWindowTitle(historyValues);
     const line = document.createElementNS(SVG_NS, 'polyline');
     line.setAttribute('points', sparklinePath);
-    sparkline.append(line);
+    sparkline.append(windowTitle, line);
   }
 
   const summaryText = issueSummaryText(issue);
@@ -328,15 +402,28 @@ function buildIssueRow(issue: RadarIssue, projectId: unknown, projectLabel: stri
   }
   _issueRows.set(issueRowKey(projectId, issue.issueId), { copy: titleWrap, summary });
 
-  row.append(stripe, change, titleWrap);
-  if (sparkline) row.append(sparkline);
-  row.append(occurrences, users);
+  const issueMeta = el('span', 'radar-issue-meta');
+  const lastSeenAtMs = issueLastSeenAtMs(issue);
+  if (lastSeenAtMs !== null) {
+    const lastSeenText = el('span', 'radar-issue-seen');
+    lastSeenText.title = new Date(lastSeenAtMs).toLocaleString();
+    _pollTicker.track(lastSeenText, lastSeenAtMs, formatAgo);
+    issueMeta.append(lastSeenText);
+  }
+  const statusLabel = issueStatusLabel(issue);
+  if (statusLabel) issueMeta.append(el('span', 'radar-issue-status', statusLabel));
 
   const issueName = String(issue.title || issue.issueId);
   if (issue.inFlight) {
     const chip = el('span', 'radar-verdict', 'investigating');
     chip.dataset.verdict = 'INVESTIGATING';
-    row.append(chip);
+    issueMeta.append(chip);
+    const startedAtMs = typeof issue.startedAt === 'number' ? issue.startedAt : null;
+    if (startedAtMs !== null && Number.isFinite(startedAtMs) && startedAtMs > 0) {
+      const elapsed = el('span', 'radar-issue-elapsed');
+      _pollTicker.track(elapsed, startedAtMs, formatElapsed);
+      issueMeta.append(elapsed);
+    }
     if (issueReportId(issue)) {
       makeRowOpenable(row, `Watch the investigation of ${issueName}`, () => openInvestigationView(issue, projectId, projectLabel));
     }
@@ -344,11 +431,25 @@ function buildIssueRow(issue: RadarIssue, projectId: unknown, projectLabel: stri
   if (!issue.inFlight && issue.verdict) {
     const chip = el('span', 'radar-verdict', verdictLabel(issue.verdict));
     chip.dataset.verdict = issue.verdict;
-    row.append(chip);
+    issueMeta.append(chip);
     if (issueReportId(issue)) {
       makeRowOpenable(row, `View investigation report for ${issueName}`, () => openIssueReport(issue));
     }
   }
+  if (issueMeta.childElementCount > 0) titleWrap.append(issueMeta);
+
+  const trend = el('span', 'radar-issue-trend');
+  if (sparkline) trend.append(sparkline);
+  const occurrenceChange = occurrenceDelta(issue.history);
+  if (occurrenceChange) {
+    const directionGlyph = occurrenceChange.direction === 'up' ? '+' : occurrenceChange.direction === 'down' ? '-' : '=';
+    const pill = el('span', 'radar-delta', `${directionGlyph}${occurrenceChange.percent}%`);
+    pill.dataset.direction = occurrenceChange.direction;
+    trend.append(pill);
+  }
+
+  const cellByColumnId: Record<string, HTMLElement> = { stripe, change, copy: titleWrap, occurrences, users, trend };
+  appendIssueCells(row, (column) => cellByColumnId[column.columnId]);
   if (issueReportId(issue)) row.append(buildIssueActions(issue, projectId, projectLabel));
   return row;
 }
@@ -373,6 +474,20 @@ function appendProjectLabel(
   if (host) parent.append(el('span', hostClass, host));
 }
 
+function buildIssueColumnHeads() {
+  const columnHeads = buildIssueGridContainer('radar-column-heads');
+  for (const column of ISSUE_COLUMNS) {
+    if (!column.headText) {
+      columnHeads.append(el('span'));
+      continue;
+    }
+    const head = el('span', 'radar-column-head', column.headText);
+    head.dataset.column = column.columnId;
+    columnHeads.append(head);
+  }
+  return columnHeads;
+}
+
 function buildProject(entry: RadarProjectEntry, showHost: boolean) {
   const project = entry.project;
   const wrap = el('div', 'radar-project');
@@ -386,6 +501,7 @@ function buildProject(entry: RadarProjectEntry, showHost: boolean) {
   const summary = el('div', 'radar-project-summary');
   summary.append(summaryStat(counts.active === 1 ? 'active issue' : 'active issues', formatCount(counts.active)));
   summary.append(summaryStat('spiking', formatCount(counts.spiking), counts.spiking > 0 ? 'crit' : null));
+  summary.append(summaryStat('needs you', formatCount(counts.needsHuman), counts.needsHuman > 0 ? 'warn' : null));
   const alertText = alertTextOf(entry);
   if (alertText) {
     const alert = el('span', 'radar-project-alert', alertText);
@@ -395,7 +511,8 @@ function buildProject(entry: RadarProjectEntry, showHost: boolean) {
   wrap.append(summary);
 
   if (issues.length === 0) return wrap;
-  const list = el('div', 'radar-issues');
+  wrap.append(buildIssueColumnHeads());
+  const list = buildIssueGridContainer('radar-issues');
   for (const issue of issues) list.append(buildIssueRow(issue, project.projectId, radarDisplayName(project)));
   wrap.append(list);
   return wrap;
@@ -414,17 +531,43 @@ function buildQuietRow(entry: RadarProjectEntry, showHost: boolean) {
 
 const buildSection = (title: string, hint?: string | null) => buildPanelSection('radar', title, hint);
 
-function buildErrorsSection(projects: RadarProject[]) {
+function buildIssueSkeletonRow() {
+  const row = el('div', 'radar-issue');
+  row.dataset.skeleton = '';
+  appendIssueCells(row, (column) => el('span', column.cellClass));
+  return row;
+}
+
+function buildIssueSkeleton() {
+  const list = buildIssueGridContainer('radar-issues');
+  list.setAttribute('aria-busy', 'true');
+  list.setAttribute('aria-label', 'Loading issues');
+  for (let rowIndex = 0; rowIndex < 5; rowIndex += 1) list.append(buildIssueSkeletonRow());
+  return list;
+}
+
+function buildErrorsSection(projects: RadarProject[], loadPhase: RadarLoadPhase = 'ready') {
   const section = buildSection('Errors');
-  if (projects.length === 0) {
-    section.append(el('p', 'radar-unconfigured', radarPlaceholder(_latest)));
+  if (loadPhase === 'pending') {
+    section.append(buildIssueSkeleton());
+    return section;
+  }
+  if (loadPhase === 'placeholder' || projects.length === 0) {
+    const placeholder = el('p', 'radar-unconfigured', radarPlaceholder(_latest));
+    const link = createSettingsLink('lanes-posthog', 'posthog-enabled', 'PostHog settings');
+    placeholder.append(document.createTextNode(' '), link);
+    section.append(placeholder);
     return section;
   }
   const globalTickEl = el('div', 'radar-global-tick');
-  _pollTicker.track(globalTickEl, _latest?.ts);
+  const intervalMinutes = Number(_latest?.intervalMinutes);
+  _pollTicker.track(globalTickEl, _latest?.ts, (polledAtMs) => {
+    const polled = `polled ${formatAgo(polledAtMs)}`;
+    if (!Number.isFinite(intervalMinutes) || intervalMinutes <= 0) return polled;
+    return `${polled}, every ${intervalMinutes}m`;
+  });
   section.append(globalTickEl);
-  const intervalMinutes = _latest?.intervalMinutes;
-  const intervalMs = Number(intervalMinutes) > 0 ? Number(intervalMinutes) * 60000 : 0;
+  const intervalMs = intervalMinutes > 0 ? intervalMinutes * 60000 : 0;
   const { loud, quiet } = partitionRadarProjects(projects, Date.now(), { intervalMs });
   const showHost = hostsDiffer(projects);
   for (const entry of loud) section.append(buildProject(entry, showHost));
@@ -583,15 +726,9 @@ function render() {
   const investigations = investigationRows(_latest, _archivedLocally);
   const ops = opsRows({ update: _update, health: _health });
   const prs = needsActionPrRows(_prs);
+  const loadPhase = radarLoadPhase(_latest, projects.length);
 
-  if (projects.length === 0 && investigations.length === 0 && ops.length === 0 && prs.length === 0) {
-    const empty = el('p', 'radar-unconfigured', radarPlaceholder(_latest));
-    const link = createSettingsLink('lanes-posthog', 'posthog-enabled', 'PostHog settings');
-    empty.append(document.createTextNode(' '), link);
-    _root.append(empty);
-    return;
-  }
-  _root.append(buildErrorsSection(projects));
+  _root.append(buildErrorsSection(projects, loadPhase));
   if (investigations.length > 0) _root.append(buildInvestigationsSection(investigations));
   if (ops.length > 0) _root.append(buildOpsSection(ops));
   if (prs.length > 0) _root.append(buildPrsSection(prs));
@@ -620,6 +757,10 @@ export function setRadarNavigateToPrs(navigate: () => void) {
   _navigateToPrs = navigate;
 }
 
+export function setRadarTraceOpener(open: ((sessionId: string) => void) | null) {
+  _openTrace = open;
+}
+
 export function mountRadarView(parent: HTMLElement) {
   if (_root) return _root;
   const root = el('div', 'radar-content');
@@ -631,7 +772,7 @@ export function mountRadarView(parent: HTMLElement) {
 }
 
 export function applyPosthogStatus(msg: unknown) {
-  _latest = msg as RadarSnapshotWithClock;
+  _latest = msg as RadarSnapshot;
 
   retainKnownInvestigationIds(_latest, _archivedLocally);
   renderOrDefer();

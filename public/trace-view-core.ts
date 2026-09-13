@@ -1,5 +1,6 @@
 import type { TraceRecord } from '#shared/contracts/trace.ts';
 import { firstDetailLine, toolDetailLine } from '#shared/tool-detail.ts';
+import { formatClockOffset } from './radar-core.ts';
 
 const TRACE_MAX_RESIDENT_ROWS = 5000;
 
@@ -18,14 +19,26 @@ export interface TraceSessionOption {
 
 export interface TraceViewRow {
   record: TraceRecord;
-  label: string;
-  isMuted: boolean;
+  kind: TraceRecord['kind'];
+  tag: string;
+  text: string;
+  tone: 'default' | 'error' | 'muted';
+  badges: string[];
 }
 
 export interface TraceTurn {
   head: TraceViewRow | null;
   rows: TraceViewRow[];
   hasTrimmedRows: boolean;
+  startedAt: number | null;
+  metrics: TraceTurnMetrics;
+}
+
+export interface TraceTurnMetrics {
+  rowCount: number;
+  toolCallCount: number;
+  errorCount: number;
+  resultBytes: number;
 }
 
 export interface TraceGrouping {
@@ -81,37 +94,86 @@ export function traceRecordBody(record: TraceRecord): string {
   ].filter(Boolean).join('\n');
 }
 
-function labelWithoutTruncation(record: TraceRecord, toolCallByUseId: ReadonlyMap<string, ToolCallRecord>): string {
-  if (record.kind === 'prompt') return `Prompt: ${firstDetailLine(record.text)}`;
-  if (record.kind === 'thinking') return `Thinking: ${firstDetailLine(record.text)}`;
-  if (record.kind === 'assistant') return `Assistant: ${firstDetailLine(record.text)}`;
-  if (record.kind === 'notice') return `Notice: ${firstDetailLine(record.text)}`;
-  if (record.kind === 'raw') return `Raw: ${firstDetailLine(record.line)}`;
-  if (record.kind === 'session') return `Session: ${record.vendor} ${record.vendorSessionId}`;
-  if (record.kind === 'expansion') return `Expansion: ${expansionName(record, toolCallByUseId)}`;
-  if (record.kind === 'tool_call') {
-    const detail = toolDetailLine(record.name, record.input);
-    return detail ? `${record.name}: ${detail}` : record.name;
-  }
-  const toolName = toolCallByUseId.get(record.toolUseId)?.name ?? 'Tool';
-  const errorMarker = record.isError ? ', error' : '';
-  return `${toolName} result: ${byteCount(record.content)} bytes${errorMarker}`;
+const TRACE_TAG_BY_KIND: Record<TraceRecord['kind'], string> = {
+  prompt: 'PROMPT',
+  expansion: 'EXPANSION',
+  thinking: 'THINKING',
+  assistant: 'ASSISTANT',
+  tool_call: 'TOOL',
+  tool_result: 'RESULT',
+  session: 'SESSION',
+  notice: 'NOTICE',
+  raw: 'RAW',
+};
+
+export const TRACE_FILTERABLE_KINDS: readonly { kind: TraceRecord['kind']; label: string }[] = [
+  { kind: 'thinking', label: 'Thinking' },
+  { kind: 'tool_result', label: 'Tool result' },
+  { kind: 'raw', label: 'Raw' },
+];
+
+interface TraceLabelParts {
+  prefix: string;
+  text: string;
 }
 
-function baseTraceRecordLabel(record: TraceRecord, toolCallByUseId: ReadonlyMap<string, ToolCallRecord>): string {
-  const label = labelWithoutTruncation(record, toolCallByUseId);
-  if (record.truncated !== true) return label;
-  return `${label}, truncated`;
+function traceLabelParts(record: TraceRecord, toolCallByUseId: ReadonlyMap<string, ToolCallRecord>): TraceLabelParts {
+  if (record.kind === 'prompt') return { prefix: 'Prompt: ', text: firstDetailLine(record.text) };
+  if (record.kind === 'thinking') return { prefix: 'Thinking: ', text: firstDetailLine(record.text) };
+  if (record.kind === 'assistant') return { prefix: 'Assistant: ', text: firstDetailLine(record.text) };
+  if (record.kind === 'notice') return { prefix: 'Notice: ', text: firstDetailLine(record.text) };
+  if (record.kind === 'raw') return { prefix: 'Raw: ', text: firstDetailLine(record.line) };
+  if (record.kind === 'session') return { prefix: 'Session: ', text: `${record.vendor} ${record.vendorSessionId}` };
+  if (record.kind === 'expansion') return { prefix: 'Expansion: ', text: expansionName(record, toolCallByUseId) };
+  if (record.kind === 'tool_call') {
+    const detail = toolDetailLine(record.name, record.input);
+    if (!detail) return { prefix: '', text: record.name };
+    return { prefix: `${record.name}: `, text: detail };
+  }
+  const toolName = toolCallByUseId.get(record.toolUseId)?.name ?? 'Tool';
+  return { prefix: `${toolName} result: `, text: `${byteCount(record.content)} bytes` };
+}
+
+function traceAgentPrefix(record: TraceRecord): string {
+  if (!record.agentType) return '';
+  const agentIdSuffix = record.agentId ? ` ${record.agentId.slice(-6)}` : '';
+  return `[${record.agentType}${agentIdSuffix}] `;
+}
+
+export function traceRowParts(record: TraceRecord, toolCallByUseId: ReadonlyMap<string, ToolCallRecord>): Omit<TraceViewRow, 'record'> {
+  const labelParts = traceLabelParts(record, toolCallByUseId);
+  const agentPrefix = traceAgentPrefix(record);
+  const renderedText = record.kind === 'tool_call' || record.kind === 'tool_result'
+    ? `${labelParts.prefix}${labelParts.text}`
+    : labelParts.text;
+  const badges: string[] = [];
+  let tone: TraceViewRow['tone'] = record.kind === 'notice' ? 'muted' : 'default';
+  if (record.kind === 'tool_result' && record.isError) {
+    tone = 'error';
+    badges.push('error');
+  }
+  if (record.truncated === true) {
+    if (tone !== 'error') tone = 'muted';
+    badges.push('truncated');
+  }
+  if (record.kind === 'tool_result') {
+    const toolCall = toolCallByUseId.get(record.toolUseId);
+    const latencyMs = toolCall ? record.ts - toolCall.ts : Number.NaN;
+    if (Number.isFinite(latencyMs) && latencyMs >= 0) {
+      badges.push(latencyMs > 1000 ? `${(latencyMs / 1000).toFixed(1)}s` : `${Math.round(latencyMs)}ms`);
+    }
+  }
+  return {
+    kind: record.kind,
+    tag: TRACE_TAG_BY_KIND[record.kind],
+    text: `${agentPrefix}${renderedText}`,
+    tone,
+    badges,
+  };
 }
 
 function traceViewRow(record: TraceRecord, toolCallByUseId: ReadonlyMap<string, ToolCallRecord>): TraceViewRow {
-  const baseLabel = baseTraceRecordLabel(record, toolCallByUseId);
-  const agentType = record.agentType ?? null;
-  return {
-    record,
-    label: agentType ? `[${agentType}] ${baseLabel}` : baseLabel,
-    isMuted: record.kind === 'notice',
-  };
+  return { record, ...traceRowParts(record, toolCallByUseId) };
 }
 
 function referencedToolUseId(record: TraceRecord): string | null {
@@ -154,6 +216,35 @@ export function createTraceGrouping(): TraceGrouping {
   return { turns: [], toolCallByUseId: new Map<string, ToolCallRecord>(), unresolvedToolUseCounts: new Map<string, number>() };
 }
 
+export function traceTurnDurationMs(turn: TraceTurn): number {
+  if (turn.startedAt === null) return 0;
+  let finishedAtMs = turn.head?.record.ts ?? turn.startedAt;
+  for (const row of turn.rows) finishedAtMs = Math.max(finishedAtMs, row.record.ts);
+  return Math.max(0, finishedAtMs - turn.startedAt);
+}
+
+export function formatTurnMetrics(turn: TraceTurn): string {
+  const { rowCount, toolCallCount, errorCount, resultBytes } = turn.metrics;
+  const rows = `${rowCount} ${rowCount === 1 ? 'row' : 'rows'}`;
+  const tools = `${toolCallCount} ${toolCallCount === 1 ? 'tool' : 'tools'}`;
+  const errors = `${errorCount} ${errorCount === 1 ? 'error' : 'errors'}`;
+  const bytes = resultBytes < 1024 ? `${resultBytes} B` : `${(resultBytes / 1024).toFixed(1)} KB`;
+  const durationText = formatClockOffset(traceTurnDurationMs(turn));
+  return `${rows}, ${tools}, ${errors}, ${bytes}, ${durationText}`;
+}
+
+function emptyTraceTurnMetrics(): TraceTurnMetrics {
+  return { rowCount: 0, toolCallCount: 0, errorCount: 0, resultBytes: 0 };
+}
+
+function updateTraceTurnMetrics(turn: TraceTurn, row: TraceViewRow, direction: 1 | -1): void {
+  turn.metrics.rowCount += direction;
+  if (row.record.kind === 'tool_call') turn.metrics.toolCallCount += direction;
+  if (row.record.kind !== 'tool_result') return;
+  turn.metrics.resultBytes += byteCount(row.record.content) * direction;
+  if (row.record.isError) turn.metrics.errorCount += direction;
+}
+
 export function appendTraceRecords(grouping: TraceGrouping, records: readonly TraceRecord[]): TraceTurnAppend[] {
   for (const record of records) {
     if (record.kind === 'tool_call') grouping.toolCallByUseId.set(record.toolUseId, record);
@@ -166,17 +257,19 @@ export function appendTraceRecords(grouping: TraceGrouping, records: readonly Tr
     if (unresolvedToolUseIdValue) retainUnresolvedToolUseId(grouping.unresolvedToolUseCounts, unresolvedToolUseIdValue);
     const row = traceViewRow(record, grouping.toolCallByUseId);
     if (startsTurn(record)) {
-      currentTurn = { head: row, rows: [], hasTrimmedRows: false };
+      currentTurn = { head: row, rows: [], hasTrimmedRows: false, startedAt: record.ts, metrics: emptyTraceTurnMetrics() };
+      updateTraceTurnMetrics(currentTurn, row, 1);
       grouping.turns.push(currentTurn);
       appends.push({ turnIndex: grouping.turns.length - 1, isNewTurn: true, head: row, rows: [] });
       continue;
     }
     if (!currentTurn) {
-      currentTurn = { head: null, rows: [], hasTrimmedRows: false };
+      currentTurn = { head: null, rows: [], hasTrimmedRows: false, startedAt: record.ts, metrics: emptyTraceTurnMetrics() };
       grouping.turns.push(currentTurn);
       appends.push({ turnIndex: grouping.turns.length - 1, isNewTurn: true, head: null, rows: [] });
     }
     currentTurn.rows.push(row);
+    updateTraceTurnMetrics(currentTurn, row, 1);
     const turnIndex = grouping.turns.length - 1;
     const openAppend = appends[appends.length - 1];
     if (openAppend && openAppend.turnIndex === turnIndex) {
@@ -220,8 +313,19 @@ export function prependTraceRecords(grouping: TraceGrouping, records: readonly T
   const mergedRows = isBoundaryTurnSplit ? lastEarlierTurn.rows : [];
   if (isBoundaryTurnSplit) {
     earlier.turns.pop();
+    const earlierStartedAt = lastEarlierTurn.startedAt;
+    const residentStartedAt = firstResidentTurn.startedAt;
+    if (earlierStartedAt !== null && (residentStartedAt === null || earlierStartedAt < residentStartedAt)) {
+      firstResidentTurn.startedAt = lastEarlierTurn.startedAt;
+    }
     firstResidentTurn.head = mergedHead;
     firstResidentTurn.rows = [...mergedRows, ...firstResidentTurn.rows];
+    firstResidentTurn.metrics = {
+      rowCount: lastEarlierTurn.metrics.rowCount + firstResidentTurn.metrics.rowCount,
+      toolCallCount: lastEarlierTurn.metrics.toolCallCount + firstResidentTurn.metrics.toolCallCount,
+      errorCount: lastEarlierTurn.metrics.errorCount + firstResidentTurn.metrics.errorCount,
+      resultBytes: lastEarlierTurn.metrics.resultBytes + firstResidentTurn.metrics.resultBytes,
+    };
   }
   grouping.turns = [...earlier.turns, ...grouping.turns];
   relabelRowsOfToolUseIds(grouping, newlyResolvedToolUseIds);
@@ -263,7 +367,9 @@ function dropOldestRowsOfFirstTurn(grouping: TraceGrouping, excessRowCount: numb
   if (!oldestTurn) return 0;
   const droppedRowCount = Math.min(excessRowCount, oldestTurn.rows.length);
   if (droppedRowCount <= 0) return 0;
-  forgetRowToolCalls(grouping, oldestTurn.rows.slice(0, droppedRowCount));
+  const droppedRows = oldestTurn.rows.slice(0, droppedRowCount);
+  forgetRowToolCalls(grouping, droppedRows);
+  for (const row of droppedRows) updateTraceTurnMetrics(oldestTurn, row, -1);
   oldestTurn.rows = oldestTurn.rows.slice(droppedRowCount);
   oldestTurn.hasTrimmedRows = true;
   return droppedRowCount;
@@ -387,6 +493,24 @@ export interface TraceRebuildInputs {
 
 export function shouldRebuildTraceView(inputs: TraceRebuildInputs): boolean {
   return inputs.hasSelectionChanged || inputs.isRenderedTraceStale || !inputs.hasRenderedOnce;
+}
+
+export function traceSessionStartedAtMs(
+  firstOffset: number,
+  hasDroppedEarliestRows: boolean,
+  firstTurn: TraceTurn | null | undefined,
+): number | null {
+  if (firstOffset !== 0 || hasDroppedEarliestRows) return null;
+  return firstTurn?.startedAt ?? null;
+}
+
+export function toggleHiddenKind(hidden: readonly string[], kind: string): string[] {
+  if (isKindHidden(hidden, kind)) return hidden.filter((hiddenKind) => hiddenKind !== kind);
+  return [...hidden, kind];
+}
+
+export function isKindHidden(hidden: readonly string[], kind: string): boolean {
+  return hidden.includes(kind);
 }
 
 export function traceEmptyState(session: TraceSessionOption | null): string {

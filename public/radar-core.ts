@@ -79,12 +79,16 @@ export interface RadarInvestigation {
 
 export interface RadarSnapshot {
   type?: string;
+  ts?: number;
   projects?: RadarProject[];
   investigations?: unknown[];
   configured?: boolean;
   reason?: unknown;
   intervalMs?: unknown;
+  intervalMinutes?: unknown;
 }
+
+export type RadarLoadPhase = 'pending' | 'placeholder' | 'ready';
 
 export interface RadarUpdateFeed {
   updateAvailable?: unknown;
@@ -245,12 +249,16 @@ export function verdictLabel(verdict: unknown) {
   return VERDICT_LABEL[key] || String(verdict ?? '').toLowerCase();
 }
 
-export function formatTrailOffset(startedAt: number | null, at: number) {
-  if (startedAt == null) return '';
-  const totalSeconds = Math.max(0, Math.round((at - startedAt) / 1000));
+export function formatClockOffset(elapsedMs: number) {
+  const totalSeconds = Math.max(0, Math.round(elapsedMs / 1000));
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = String(totalSeconds % 60).padStart(2, '0');
-  return `+${minutes}:${seconds}`;
+  return `${minutes}:${seconds}`;
+}
+
+export function formatTrailOffset(startedAt: number | null, at: number) {
+  if (startedAt == null) return '';
+  return `+${formatClockOffset(at - startedAt)}`;
 }
 
 export function trailContentKey(view: InvestigationView) {
@@ -272,13 +280,51 @@ export function radarPlaceholder(status: RadarSnapshot | null | undefined) {
   return lanePlaceholder(status, { label: 'PostHog monitoring', tab: 'PostHog' });
 }
 
+function isCompletedTickSnapshot(snapshot: RadarSnapshot) {
+  return numberOr(snapshot.intervalMinutes, null) !== null;
+}
+
+export function radarLoadPhase(
+  snapshot: RadarSnapshot | null | undefined,
+  projectCount: number,
+): RadarLoadPhase {
+  if (snapshot == null) return 'placeholder';
+  if (snapshot.configured === false) return 'placeholder';
+  if (projectCount > 0) return 'ready';
+  if (isCompletedTickSnapshot(snapshot)) return 'placeholder';
+  return 'pending';
+}
+
 export function severityFor(change: string | undefined) {
   return CHANGE_SEVERITY[change ?? ''] || 'dim';
+}
+
+export function issueLastSeenAtMs(issue: RadarIssue | null | undefined): number | null {
+  if (typeof issue?.lastSeen !== 'string') return null;
+  const lastSeenAtMs = Date.parse(issue.lastSeen);
+  if (!Number.isFinite(lastSeenAtMs) || lastSeenAtMs <= 0) return null;
+  return lastSeenAtMs;
+}
+
+export function issueStatusLabel(issue: RadarIssue | null | undefined): string {
+  const status = textOr(issue?.status, '').trim().toLowerCase();
+  if (!status || status === 'active') return '';
+  return status;
 }
 
 function finiteNumbers(values: unknown): number[] {
   if (!Array.isArray(values)) return [];
   return (values as unknown[]).map((value) => Number(value)).filter((value) => Number.isFinite(value));
+}
+
+export function occurrenceHistoryValues(history: unknown): number[] {
+  if (!Array.isArray(history)) return [];
+  return (history as unknown[])
+    .map((entry) => {
+      if (typeof entry === 'number') return entry;
+      return Number((entry as { occurrences?: unknown } | null | undefined)?.occurrences);
+    })
+    .filter((value) => Number.isFinite(value));
 }
 
 export function sparklinePoints(values: unknown, width = 64, height = 16) {
@@ -294,6 +340,25 @@ export function sparklinePoints(values: unknown, width = 64, height = 16) {
     const y = span === 0 ? yMid : height - ((value - min) / span) * height;
     return `${Number(x.toFixed(2))},${Number(y.toFixed(2))}`;
   }).join(' ');
+}
+
+export function occurrenceDelta(history: unknown): { direction: 'up' | 'down' | 'flat'; percent: number } | null {
+  const occurrenceValues = occurrenceHistoryValues(history);
+  if (occurrenceValues.length < 4) return null;
+  const midpoint = Math.floor(occurrenceValues.length / 2);
+  const earlierTotal = occurrenceValues.slice(0, midpoint).reduce((sum, value) => sum + value, 0);
+  if (earlierTotal === 0) return null;
+  const laterTotal = occurrenceValues.slice(-midpoint).reduce((sum, value) => sum + value, 0);
+  const percent = Math.round(Math.abs(laterTotal - earlierTotal) / Math.abs(earlierTotal) * 100);
+  if (laterTotal > earlierTotal) return { direction: 'up', percent };
+  if (laterTotal < earlierTotal) return { direction: 'down', percent };
+  return { direction: 'flat', percent };
+}
+
+export function sparklineWindowTitle(occurrenceValues: number[]): string {
+  const finiteValues = occurrenceValues.filter((value) => Number.isFinite(value));
+  if (finiteValues.length === 0) return '0 polls, 0 to 0 occurrences';
+  return `${finiteValues.length} polls, ${Math.min(...finiteValues)} to ${Math.max(...finiteValues)} occurrences`;
 }
 
 export function summarizeIssues(issues: unknown) {

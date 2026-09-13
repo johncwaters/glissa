@@ -6,6 +6,7 @@ import {
   applyInvestigationActivity,
   applyInvestigationFinished,
   findIssueInSnapshot,
+  formatClockOffset,
   formatTrailOffset,
   healthAnomalyRows,
   finishedViewOf,
@@ -15,11 +16,16 @@ import {
   latestTrailLabel,
   hostsDiffer,
   investigationRows,
+  issueLastSeenAtMs,
+  issueStatusLabel,
   needsActionPrRows,
+  occurrenceDelta,
+  occurrenceHistoryValues,
   opsRows,
   partitionRadarProjects,
   radarAttentionSignature,
   radarDisplayName,
+  radarLoadPhase,
   radarPlaceholder,
   retainKnownInvestigationIds,
   severityFor,
@@ -27,6 +33,7 @@ import {
   shortSha,
   sortIssuesByAttention,
   sparklinePoints,
+  sparklineWindowTitle,
   summarizeIssues,
   trailContentKey,
   trailStatusText,
@@ -60,6 +67,36 @@ test('radarPlaceholder: reports a disabled lane without a reason', () => {
 test('radarPlaceholder: reports configured or legacy statuses as waiting for first poll', () => {
   assert.equal(radarPlaceholder({ configured: true }), 'PostHog monitoring is on. Waiting for the first poll.');
   assert.equal(radarPlaceholder({}), 'PostHog monitoring is on. Waiting for the first poll.');
+});
+
+test('radarLoadPhase: distinguishes pending, placeholder and ready snapshots', () => {
+  const completedTickSummary = {
+    type: 'posthog-status',
+    ts: 1700000000000,
+    intervalMinutes: 15,
+    projects: [],
+    investigations: [],
+  };
+  const emptyLaneStatus = { type: 'posthog-status', ts: 1700000000000, configured: true, reason: null, projects: [] };
+  const cases: { snapshot: Parameters<typeof radarLoadPhase>[0]; projectCount: number; expectedPhase: string }[] = [
+    { snapshot: { ...completedTickSummary, configured: true }, projectCount: 0, expectedPhase: 'placeholder' },
+    { snapshot: { ...completedTickSummary, configured: true }, projectCount: 2, expectedPhase: 'ready' },
+    { snapshot: emptyLaneStatus, projectCount: 0, expectedPhase: 'pending' },
+    { snapshot: { ...emptyLaneStatus, configured: false }, projectCount: 0, expectedPhase: 'placeholder' },
+    { snapshot: null, projectCount: 0, expectedPhase: 'placeholder' },
+    { snapshot: null, projectCount: 2, expectedPhase: 'placeholder' },
+    { snapshot: { configured: true }, projectCount: 0, expectedPhase: 'pending' },
+    { snapshot: {}, projectCount: 0, expectedPhase: 'pending' },
+    { snapshot: { configured: false }, projectCount: 0, expectedPhase: 'placeholder' },
+    { snapshot: { configured: false }, projectCount: 2, expectedPhase: 'placeholder' },
+    { snapshot: { configured: true }, projectCount: 1, expectedPhase: 'ready' },
+    { snapshot: {}, projectCount: 1, expectedPhase: 'ready' },
+    { snapshot: { intervalMinutes: 15 }, projectCount: 0, expectedPhase: 'placeholder' },
+    { snapshot: { intervalMinutes: 15 }, projectCount: 2, expectedPhase: 'ready' },
+  ];
+  for (const { snapshot, projectCount, expectedPhase } of cases) {
+    assert.equal(radarLoadPhase(snapshot, projectCount), expectedPhase);
+  }
 });
 
 test('sortIssuesByAttention: orders spiking, regressed, worsened, new, quiet', () => {
@@ -131,6 +168,24 @@ test('severityFor: crit for spiking and regressed, warn for worsened and new, di
   assert.equal(severityFor('quiet'), 'dim');
   assert.equal(severityFor('sideways'), 'dim');
   assert.equal(severityFor(undefined), 'dim');
+});
+
+test('issueLastSeenAtMs: parses positive ISO timestamps and rejects unusable values', () => {
+  assert.equal(issueLastSeenAtMs({ lastSeen: '2026-08-09T00:00:00Z' }), Date.parse('2026-08-09T00:00:00Z'));
+  assert.equal(issueLastSeenAtMs({ lastSeen: '1970-01-01T00:00:00Z' }), null);
+  assert.equal(issueLastSeenAtMs({ lastSeen: 'not-a-date' }), null);
+  assert.equal(issueLastSeenAtMs({ lastSeen: 123 }), null);
+  assert.equal(issueLastSeenAtMs({}), null);
+  assert.equal(issueLastSeenAtMs(null), null);
+});
+
+test('issueStatusLabel: hides active or absent states and normalizes other states', () => {
+  assert.equal(issueStatusLabel({ status: 'active' }), '');
+  assert.equal(issueStatusLabel({ status: ' ACTIVE ' }), '');
+  assert.equal(issueStatusLabel({ status: 'Resolved' }), 'resolved');
+  assert.equal(issueStatusLabel({ status: 'SUPPRESSED' }), 'suppressed');
+  assert.equal(issueStatusLabel({}), '');
+  assert.equal(issueStatusLabel(null), '');
 });
 
 test('summarizeIssues: counts active issues, spiking changes and NEEDS_HUMAN verdicts', () => {
@@ -258,6 +313,47 @@ test('sparklinePoints: requires at least two finite values', () => {
 
 test('sparklinePoints: two points span the full width', () => {
   assert.equal(sparklinePoints([1, 3], 64, 16), '0,16 64,0');
+});
+
+test('occurrenceDelta: compares the sums of the two halves', () => {
+  assert.deepEqual(occurrenceDelta([1, 1, 2, 2]), { direction: 'up', percent: 100 });
+  assert.deepEqual(occurrenceDelta([4, 4, 2, 2]), { direction: 'down', percent: 50 });
+  assert.deepEqual(occurrenceDelta([3, 3, 3, 3]), { direction: 'flat', percent: 0 });
+});
+
+test('occurrenceDelta: keeps odd-length flat histories flat', () => {
+  assert.deepEqual(occurrenceDelta([3, 3, 3, 3, 3]), { direction: 'flat', percent: 0 });
+  assert.deepEqual(occurrenceDelta([3, 3, 3, 3, 3, 3, 3]), { direction: 'flat', percent: 0 });
+});
+
+test('occurrenceDelta: compares equal-sized windows around the center of odd-length decreasing histories', () => {
+  assert.deepEqual(occurrenceDelta([5, 5, 4, 4, 4]), { direction: 'down', percent: 20 });
+  assert.deepEqual(occurrenceDelta([5, 5, 5, 4, 4, 4, 4]), { direction: 'down', percent: 20 });
+});
+
+test('occurrenceDelta: reads occurrence history rows and filters malformed entries', () => {
+  const history = [
+    { occurrences: 2 },
+    { occurrences: 'bad' },
+    { occurrences: 2 },
+    { occurrences: 3 },
+    null,
+    { occurrences: 5 },
+  ];
+  assert.deepEqual(occurrenceHistoryValues(history), [2, 2, 3, 5]);
+  assert.deepEqual(occurrenceDelta(history), { direction: 'up', percent: 100 });
+});
+
+test('occurrenceDelta: needs four points and a nonzero earlier half', () => {
+  assert.equal(occurrenceDelta([1, 2, 3]), null);
+  assert.equal(occurrenceDelta([0, 0, 3, 4]), null);
+  assert.equal(occurrenceDelta(null), null);
+});
+
+test('sparklineWindowTitle: summarizes the finite poll window', () => {
+  assert.equal(sparklineWindowTitle([4, 12, 190]), '3 polls, 4 to 190 occurrences');
+  assert.equal(sparklineWindowTitle([12, Number.NaN, 4]), '2 polls, 4 to 12 occurrences');
+  assert.equal(sparklineWindowTitle([]), '0 polls, 0 to 0 occurrences');
 });
 
 test('healthAnomalyRows: only live anomalies produce rows', () => {
@@ -677,6 +773,15 @@ test('formatTrailOffset counts from the start in +m:ss and is empty without a st
   assert.equal(formatTrailOffset(1000, 725000), '+12:04');
   assert.equal(formatTrailOffset(1000, 500), '+0:00', 'a step stamped before the start never reads negative');
   assert.equal(formatTrailOffset(null, 6000), '');
+});
+
+test('formatClockOffset renders an elapsed span as bare m:ss for callers that add no sign', () => {
+  assert.equal(formatClockOffset(0), '0:00');
+  assert.equal(formatClockOffset(5000), '0:05');
+  assert.equal(formatClockOffset(60000), '1:00');
+  assert.equal(formatClockOffset(129000), '2:09');
+  assert.equal(formatClockOffset(724000), '12:04');
+  assert.equal(formatClockOffset(-500), '0:00');
 });
 
 test('trailContentKey changes when the last step changes and holds steady otherwise', () => {

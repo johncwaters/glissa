@@ -1,10 +1,13 @@
 import type { TraceRecord } from '#shared/contracts/trace.ts';
-import { buildPanelSection, el, isPanelHidden, writeClipboardText } from './dom-helpers.ts';
+import { buildPanelSection, el, isPanelHidden, query, writeClipboardText } from './dom-helpers.ts';
+import { formatTrailOffset } from './radar-core.ts';
 import {
   appendTraceRecords,
   createTraceGrouping,
   earlierTraceRequest,
+  formatTurnMetrics,
   hasEarlierTracePages,
+  isKindHidden,
   nextTraceRequest,
   prependTraceRecords,
   resolveTraceSessionId,
@@ -14,8 +17,12 @@ import {
   traceReplyOutcome,
   traceResidentRowCount,
   traceSessionOptions,
+  traceSessionStartedAtMs,
+  TRACE_FILTERABLE_KINDS,
+  toggleHiddenKind,
   trimTraceGrouping,
 } from './trace-view-core.ts';
+import { getTraceHiddenKinds, setTraceHiddenKinds } from './ui-prefs.ts';
 import type {
   TraceGrouping,
   TracePrepend,
@@ -56,14 +63,16 @@ interface TraceReply {
 interface TurnSection {
   section: HTMLElement;
   rowsElement: HTMLElement;
+  metricsElement: HTMLElement;
 }
 
 let rootElement: HTMLDivElement | null = null;
 let headerElement: HTMLElement | null = null;
 let turnsElement: HTMLElement | null = null;
 let loadEarlierControlElement: HTMLElement | null = null;
-let turnRowsElements: HTMLElement[] = [];
+let turnSections: TurnSection[] = [];
 let isRenderedTraceStale = false;
+let hiddenTraceKinds = getTraceHiddenKinds();
 
 let sendRequest: ((message: Record<string, unknown>) => boolean) | null = null;
 let navigateToTrace: (() => void) | null = null;
@@ -184,6 +193,44 @@ function buildSessionSelector(): HTMLLabelElement {
   return field;
 }
 
+function applyHiddenKindToRow(rowElement: HTMLElement): void {
+  rowElement.toggleAttribute('data-hidden', isKindHidden(hiddenTraceKinds, rowElement.dataset.kind ?? ''));
+}
+
+function applyHiddenKindsToTurns(): void {
+  if (!turnsElement) return;
+  for (const rowElement of turnsElement.querySelectorAll<HTMLElement>('.trace-row')) applyHiddenKindToRow(rowElement);
+}
+
+function setRenderedRowsExpanded(isExpanded: boolean): void {
+  if (!turnsElement) return;
+  for (const details of turnsElement.querySelectorAll<HTMLDetailsElement>('details')) details.open = isExpanded;
+}
+
+function buildTraceFilters(): HTMLElement {
+  const filters = el('div', 'trace-filters');
+  for (const filter of TRACE_FILTERABLE_KINDS) {
+    const button = el('button', 'trace-filter', filter.label);
+    button.type = 'button';
+    const syncPressedState = () => { button.setAttribute('aria-pressed', String(!isKindHidden(hiddenTraceKinds, filter.kind))); };
+    syncPressedState();
+    button.addEventListener('click', () => {
+      hiddenTraceKinds = toggleHiddenKind(hiddenTraceKinds, filter.kind);
+      setTraceHiddenKinds(hiddenTraceKinds);
+      syncPressedState();
+      applyHiddenKindsToTurns();
+    });
+    filters.append(button);
+  }
+  for (const [label, isExpanded] of [['Expand all', true], ['Collapse all', false]] as const) {
+    const button = el('button', 'trace-expand-control', label);
+    button.type = 'button';
+    button.addEventListener('click', () => { setRenderedRowsExpanded(isExpanded); });
+    filters.append(button);
+  }
+  return filters;
+}
+
 function buildHeader(): HTMLElement {
   const section = buildPanelSection('trace', 'Session trace', 'Bodies load from the local trace file only when requested.');
   const controls = el('div', 'trace-controls');
@@ -192,7 +239,11 @@ function buildHeader(): HTMLElement {
   const path = el('code', 'trace-path', pathValue);
   path.title = pathValue;
   controls.append(path);
-  section.append(controls);
+  const sessionStartedAtMs = selectedTrace
+    ? traceSessionStartedAtMs(selectedTrace.firstOffset, selectedTrace.hasDroppedEarliestRows, selectedTrace.grouping.turns[0])
+    : null;
+  if (sessionStartedAtMs !== null) controls.append(el('span', 'trace-session-start', `Started ${new Date(sessionStartedAtMs).toLocaleString()}`));
+  section.append(controls, buildTraceFilters());
   return section;
 }
 
@@ -226,10 +277,22 @@ function buildLoadEarlierControl(): HTMLElement {
   return wrap;
 }
 
-function buildExpandableRow(row: TraceViewRow, className = ''): HTMLDetailsElement {
+function buildExpandableRow(row: TraceViewRow, turnStartedAtMs: number | null, className = ''): HTMLDetailsElement {
   const details = el('details', `trace-row${className ? ` ${className}` : ''}`);
-  if (row.isMuted) details.dataset.tone = 'muted';
-  const summary = el('summary', 'trace-row-summary', row.label);
+  details.dataset.kind = row.kind;
+  details.dataset.tone = row.tone;
+  applyHiddenKindToRow(details);
+  const summary = el('summary', 'trace-row-summary');
+  summary.append(
+    el('span', 'trace-offset', formatTrailOffset(turnStartedAtMs, row.record.ts)),
+    el('span', 'trace-kind', row.tag),
+    el('span', 'trace-row-label', row.text),
+  );
+  for (const badge of row.badges) {
+    const badgeElement = el('span', 'trace-badge', badge);
+    badgeElement.dataset.badge = badge;
+    summary.append(badgeElement);
+  }
   const body = el('div', 'trace-row-body');
   details.append(summary, body);
   let hasBody = false;
@@ -242,15 +305,45 @@ function buildExpandableRow(row: TraceViewRow, className = ''): HTMLDetailsEleme
   return details;
 }
 
+function buildTurnMetrics(turn: TraceTurn): HTMLElement {
+  return el('span', 'trace-turn-metrics', formatTurnMetrics(turn));
+}
+
+function paintTurnMetrics(turn: TraceTurn | null | undefined, metricsElement: HTMLElement | undefined): void {
+  if (!turn || !metricsElement) return;
+  metricsElement.textContent = formatTurnMetrics(turn);
+}
+
+function paintTurnRowOffsets(rowsElement: HTMLElement, turn: TraceTurn): void {
+  const rowElements = rowsElement.children;
+  const paintableRowCount = Math.min(turn.rows.length, rowElements.length);
+  for (let rowIndex = 0; rowIndex < paintableRowCount; rowIndex += 1) {
+    const offsetElement = rowElements[rowIndex]?.querySelector('.trace-offset');
+    if (!offsetElement) continue;
+    offsetElement.textContent = formatTrailOffset(turn.startedAt, turn.rows[rowIndex].record.ts);
+  }
+}
+
+function buildTurnHead(turn: TraceTurn, head: TraceViewRow, metricsElement: HTMLElement): HTMLDetailsElement {
+  const turnHeadElement = buildExpandableRow(head, turn.startedAt, 'trace-turn-head');
+  query(turnHeadElement, '.trace-row-summary').append(metricsElement);
+  return turnHeadElement;
+}
+
 function buildTurnSection(turn: TraceTurn): TurnSection {
   const section = el('section', 'trace-turn');
-  if (turn.head) section.append(buildExpandableRow(turn.head, 'trace-turn-head'));
-  if (!turn.head) section.append(el('h2', 'trace-leading-title', 'Before first prompt'));
+  const metricsElement = buildTurnMetrics(turn);
+  if (turn.head) section.append(buildTurnHead(turn, turn.head, metricsElement));
+  if (!turn.head) {
+    const heading = el('h2', 'trace-leading-title');
+    heading.append(el('span', 'trace-leading-label', 'Before first prompt'), metricsElement);
+    section.append(heading);
+  }
   const rowsElement = el('div', 'trace-rows');
-  for (const row of turn.rows) rowsElement.append(buildExpandableRow(row));
+  for (const row of turn.rows) rowsElement.append(buildExpandableRow(row, turn.startedAt));
   if (turn.hasTrimmedRows) section.append(el('p', 'trace-trimmed', 'Earlier rows trimmed'));
   section.append(rowsElement);
-  return { section, rowsElement };
+  return { section, rowsElement, metricsElement };
 }
 
 function emptyStateText(session: TraceSessionOption | null): string {
@@ -266,7 +359,7 @@ function buildPanelContent(): void {
   content.append(headerElement);
   turnsElement = null;
   loadEarlierControlElement = null;
-  turnRowsElements = [];
+  turnSections = [];
   const session = selectedSession();
   const turns = selectedTrace?.grouping.turns ?? [];
   if (!session || turns.length === 0) {
@@ -282,10 +375,11 @@ function buildPanelContent(): void {
   const list = el('div', 'trace-turns');
   for (const turn of turns) {
     const built = buildTurnSection(turn);
-    turnRowsElements.push(built.rowsElement);
+    turnSections.push(built);
     list.append(built.section);
   }
   turnsElement = list;
+  applyHiddenKindsToTurns();
   content.append(list);
   rootElement.replaceChildren(content);
   isRenderedTraceStale = false;
@@ -309,15 +403,18 @@ function renderHeader(): void {
 
 function applyTurnAppend(append: TraceTurnAppend): void {
   if (!turnsElement) return;
+  const turn = selectedTrace?.grouping.turns[append.turnIndex];
+  if (!turn) return;
   if (append.isNewTurn) {
-    const built = buildTurnSection({ head: append.head, rows: append.rows, hasTrimmedRows: false });
-    turnRowsElements.push(built.rowsElement);
+    const built = buildTurnSection(turn);
+    turnSections.push(built);
     turnsElement.append(built.section);
     return;
   }
-  const rowsElement = turnRowsElements[append.turnIndex];
-  if (!rowsElement) return;
-  for (const row of append.rows) rowsElement.append(buildExpandableRow(row));
+  const appendedSection = turnSections[append.turnIndex];
+  if (!appendedSection) return;
+  for (const row of append.rows) appendedSection.rowsElement.append(buildExpandableRow(row, turn.startedAt));
+  paintTurnMetrics(turn, appendedSection.metricsElement);
 }
 
 function markTurnRowsTrimmed(rowsElement: HTMLElement): void {
@@ -346,16 +443,19 @@ function dropOldestRows(): void {
     syncLoadEarlierControl();
     return;
   }
+  const hasJustDroppedEarliestRows = !selectedTrace.hasDroppedEarliestRows;
   selectedTrace.hasDroppedEarliestRows = true;
-  turnRowsElements = turnRowsElements.slice(trim.droppedTurnCount);
+  turnSections = turnSections.slice(trim.droppedTurnCount);
   if (turnsElement) {
     for (let removedCount = 0; removedCount < trim.droppedTurnCount; removedCount += 1) turnsElement.firstElementChild?.remove();
   }
-  const oldestRowsElement = turnRowsElements[0];
-  if (oldestRowsElement && trim.droppedRowCount > 0) {
-    for (let removedCount = 0; removedCount < trim.droppedRowCount; removedCount += 1) oldestRowsElement.firstElementChild?.remove();
-    markTurnRowsTrimmed(oldestRowsElement);
+  const oldestSection = turnSections[0];
+  if (oldestSection && trim.droppedRowCount > 0) {
+    for (let removedCount = 0; removedCount < trim.droppedRowCount; removedCount += 1) oldestSection.rowsElement.firstElementChild?.remove();
+    markTurnRowsTrimmed(oldestSection.rowsElement);
+    paintTurnMetrics(selectedTrace.grouping.turns[0], oldestSection.metricsElement);
   }
+  if (hasJustDroppedEarliestRows) renderHeader();
   syncLoadEarlierControl();
 }
 
@@ -400,26 +500,33 @@ function requestQueuedRefresh(): void {
 
 function applyPrependToRenderedTurns(prepend: TracePrepend): void {
   if (!turnsElement) return;
-  const firstResidentRowsElement = turnRowsElements[0];
-  if (prepend.mergedHead && firstResidentRowsElement?.parentElement) {
-    firstResidentRowsElement.parentElement.querySelector('.trace-leading-title')?.remove();
-    firstResidentRowsElement.parentElement.insertBefore(
-      buildExpandableRow(prepend.mergedHead, 'trace-turn-head'),
-      firstResidentRowsElement,
-    );
+  const firstResidentSection = turnSections[0] ?? null;
+  const firstResidentSectionElement = firstResidentSection?.rowsElement.parentElement ?? null;
+  const firstResidentTurn = selectedTrace?.grouping.turns[prepend.newTurns.length] ?? null;
+  if ((prepend.mergedHead || prepend.mergedRows.length > 0) && firstResidentSection && firstResidentSectionElement && firstResidentTurn) {
+    const firstResidentRowsElement = firstResidentSection.rowsElement;
+    if (prepend.mergedHead) {
+      firstResidentSectionElement.querySelector('.trace-leading-title')?.remove();
+      const metricsElement = buildTurnMetrics(firstResidentTurn);
+      const head = buildTurnHead(firstResidentTurn, prepend.mergedHead, metricsElement);
+      firstResidentSectionElement.insertBefore(head, firstResidentRowsElement);
+      firstResidentSection.metricsElement = metricsElement;
+    }
+    if (!prepend.mergedHead) paintTurnMetrics(firstResidentTurn, firstResidentSection.metricsElement);
     const mergedRowsFragment = document.createDocumentFragment();
-    for (const row of prepend.mergedRows) mergedRowsFragment.append(buildExpandableRow(row));
+    for (const row of prepend.mergedRows) mergedRowsFragment.append(buildExpandableRow(row, firstResidentTurn.startedAt));
     firstResidentRowsElement.prepend(mergedRowsFragment);
+    paintTurnRowOffsets(firstResidentRowsElement, firstResidentTurn);
   }
   const newTurnsFragment = document.createDocumentFragment();
-  const newRowsElements: HTMLElement[] = [];
+  const newSections: TurnSection[] = [];
   for (const turn of prepend.newTurns) {
     const built = buildTurnSection(turn);
-    newRowsElements.push(built.rowsElement);
+    newSections.push(built);
     newTurnsFragment.append(built.section);
   }
   turnsElement.prepend(newTurnsFragment);
-  turnRowsElements.unshift(...newRowsElements);
+  turnSections.unshift(...newSections);
 }
 
 function showPrependedRecords(records: readonly TraceRecord[]): void {
@@ -432,6 +539,7 @@ function showPrependedRecords(records: readonly TraceRecord[]): void {
   if (canPrependInPlace) applyPrependToRenderedTurns(prepend);
   dropOldestRows();
   if (!canPrependInPlace) renderPanel();
+  if (canPrependInPlace) renderHeader();
   if (scrollElement) scrollElement.scrollTop = previousScrollTop + scrollElement.scrollHeight - previousScrollHeight;
 }
 

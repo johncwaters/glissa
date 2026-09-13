@@ -12,6 +12,7 @@ export interface UiPrefs {
   lastFocusedSessionId: string | null;
   railWidth: number | null;
   keptProjects: string[];
+  traceHiddenKinds: string[];
   dismissedUpdate: string | null;
   radarAttentionAck: string;
   prsAttentionAck: string;
@@ -36,6 +37,7 @@ const PREFS: { [Key in keyof UiPrefs]: (value: unknown) => UiPrefs[Key] } = {
   lastFocusedSessionId: asNullableString,
   railWidth: asNullableNumber,
   keptProjects: asStringList,
+  traceHiddenKinds: asStringList,
   dismissedUpdate: asNullableString,
   radarAttentionAck: asString(''),
   prsAttentionAck: asString(''),
@@ -85,6 +87,9 @@ export const setRailWidth = (px: number | null) => write('railWidth', px);
 
 export const getKeptProjects = () => read('keptProjects');
 export const setKeptProjects = (paths: string[]) => write('keptProjects', paths);
+
+export const getTraceHiddenKinds = () => read('traceHiddenKinds');
+export const setTraceHiddenKinds = (kinds: string[]) => write('traceHiddenKinds', kinds);
 
 export const getDismissedUpdate = () => read('dismissedUpdate');
 export const setDismissedUpdate = (key: string | null) => write('dismissedUpdate', key);
