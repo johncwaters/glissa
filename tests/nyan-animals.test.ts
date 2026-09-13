@@ -35,8 +35,9 @@ test('pickAnimalIndex: an absent or out-of-range prevIndex allows every index', 
   }
 });
 
-test('every roster sprite/trail class has a matching unicorn-theme CSS rule', () => {
+test('every roster sprite/trail class has a matching flying-animals CSS rule', () => {
   const css = fs.readFileSync(path.join(import.meta.dirname, '..', 'public', 'style.css'), 'utf8');
+  assert.equal(css.includes(':root[data-theme="unicorn"] .nyan-'), false);
   for (const animal of ANIMALS) {
     assert.ok(css.includes(`.nyan-sprite.${animal.sprite}`), `missing sprite rule for ${animal.sprite}`);
     assert.ok(css.includes(`.nyan-trail.${animal.trail}`), `missing trail rule for ${animal.trail}`);

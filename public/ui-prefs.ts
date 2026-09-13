@@ -7,6 +7,7 @@ export interface UiPrefs {
   soundEnabled: boolean;
   soundId: string;
   themeId: string;
+  flyingAnimalsEnabled: boolean;
   notificationsEnabled: boolean;
   activeView: string;
   lastFocusedSessionId: string | null;
@@ -31,6 +32,7 @@ const PREFS: { [Key in keyof UiPrefs]: (value: unknown) => UiPrefs[Key] } = {
   soundEnabled: asBoolean(true),
   soundId: asString('coins'),
   themeId: asString('phyrexian'),
+  flyingAnimalsEnabled: asBoolean(false),
   notificationsEnabled: asBoolean(true),
   activeView: asString('focus'),
   lastFocusedSessionId: asNullableString,
@@ -76,6 +78,9 @@ export const setNotificationsEnabled = (enabled: boolean) => write('notification
 
 export const getThemeId = () => read('themeId');
 export const setThemeId = (id: string) => write('themeId', id);
+
+export const isFlyingAnimalsEnabled = () => read('flyingAnimalsEnabled');
+export const setFlyingAnimalsEnabled = (enabled: boolean) => write('flyingAnimalsEnabled', enabled);
 
 export const getActiveView = () => read('activeView');
 export const setActiveView = (view: string) => write('activeView', view);

@@ -25,11 +25,14 @@ import {
 } from './settings-view-core.ts';
 import type { SettingsPayload, SettingsProject, SettingsValues } from './settings-view-core.ts';
 import { SHORTCUT_GROUPS } from './shortcuts.ts';
+import { applyFlyingAnimals } from './flying-animals.ts';
 import { applyTheme, getThemeList } from './theme.ts';
 import {
+  isFlyingAnimalsEnabled,
   getSoundId,
   getThemeId,
   isNotificationsEnabled,
+  setFlyingAnimalsEnabled,
   setNotificationsEnabled,
   setSoundId,
   setThemeId,
@@ -112,6 +115,7 @@ let restartServer = () => {};
 function browserPreferences() {
   return {
     themeId: getThemeId(),
+    flyingAnimalsEnabled: isFlyingAnimalsEnabled(),
     soundId: getSoundId(),
     notificationsEnabled: isNotificationsEnabled(),
   };
@@ -220,6 +224,11 @@ function applyBrowserPreference(setting: SettingsSetting, value: unknown) {
   if (setting.path === 'pref:themeId') {
     setThemeId(value as string);
     applyTheme(value as string);
+    return;
+  }
+  if (setting.path === 'pref:flyingAnimalsEnabled') {
+    setFlyingAnimalsEnabled(value as boolean);
+    applyFlyingAnimals(value as boolean);
     return;
   }
   if (setting.path === 'pref:soundId') {

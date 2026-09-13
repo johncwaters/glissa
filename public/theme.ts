@@ -1,5 +1,4 @@
 import { playNyanJingle } from './alert-sound.ts';
-import { startNyanCat, stopNyanCat } from './nyan-cat.ts';
 
 const BASE_STATE_COLORS = {
   '--state-running':      '#22c55e',
@@ -278,14 +277,9 @@ export function applyTheme(themeId: string) {
     root.style.setProperty(prop, value);
   }
 
-  if (themeId === 'unicorn') {
-    startNyanCat();
-    if (prev !== null && prev !== 'unicorn') {
-      playNyanJingle();
-    }
-    return;
-  }
-  stopNyanCat();
+  if (themeId !== 'unicorn') return;
+  if (prev === null || prev === 'unicorn') return;
+  playNyanJingle();
 }
 
 export function getTerminalTheme(): Record<string, string> {

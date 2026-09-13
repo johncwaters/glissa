@@ -83,6 +83,15 @@ export const SETTINGS_MAP = Object.freeze([
         defaultValue: 'phyrexian',
       },
       {
+        id: 'flying-animals',
+        path: 'pref:flyingAnimalsEnabled',
+        title: 'Flying animals',
+        description: 'Show animated animals flying across the dashboard.',
+        control: 'toggle',
+        keywords: ['animation', 'motion'],
+        defaultValue: false,
+      },
+      {
         id: 'alert-sound',
         path: 'pref:soundId',
         title: 'Alert sound',

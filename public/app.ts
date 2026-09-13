@@ -36,15 +36,17 @@ import { activateSettingsSection, applySettingsBroadcast, applySettingsProjectRe
 import { forgetReviewSession, mergeSelectedSession, mountReviewSidebar, notifyWorktreeChanged, refreshReviewSidebar, resolveSelectedSession, resyncSelectedSession, setReviewBranchSync } from './sidebar/review-sidebar.ts';
 import { decideReloadOnBuild } from './server-build-core.ts';
 import { createSettingsLink } from './settings-link.ts';
+import { applyFlyingAnimals } from './flying-animals.ts';
 import { applyTheme } from './theme.ts';
 import { applyTraceChanged, applyTraceConnectionState, applyTraceError, applyTraceResponse, mountTraceView, refreshTraceView, setTraceNavigate, setTraceRequestSender, setTraceSessions } from './trace-panel.ts';
-import { getActiveView as getSavedActiveView, getDismissedUpdate, getThemeId, isSoundEnabled, setActiveView, setDismissedUpdate, setSoundEnabled } from './ui-prefs.ts';
+import { getActiveView as getSavedActiveView, getDismissedUpdate, getThemeId, isFlyingAnimalsEnabled, isSoundEnabled, setActiveView, setDismissedUpdate, setSoundEnabled } from './ui-prefs.ts';
 import { getActiveView, uiState } from './ui-state-core.ts';
 import { updateBannerMode } from './updates-view-core.ts';
 import type { UpdateStatusView } from './updates-view-core.ts';
 import { acknowledgeUsageAttention, applyPlanLimits, applyUsageReport, applyUsageSessions, mountUsageView, refreshUsageView, requestUsageReport, setUsageActivityCallback, setUsageRequestSender } from './usage-panel.ts';
 
 applyTheme(getThemeId());
+applyFlyingAnimals(isFlyingAnimalsEnabled());
 
 initFormFactor();
 
